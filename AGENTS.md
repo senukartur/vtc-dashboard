@@ -1,0 +1,70 @@
+# Agent Instructions
+
+## Start here
+
+Read [CONCEPT.MD](CONCEPT.MD) before planning or implementing changes. It is the authoritative project idea, approved product baseline, architecture direction, and set of acceptance scenarios. Use the [MVP backlog](docs/planning/mvp-trello-backlog.md) for card scope, dependencies, ownership, and delivery gates, and the [Trello index](docs/planning/trello-card-index.md) for task links.
+
+Explicit user instructions take precedence over repository guidance. Resolve routine implementation choices within the authorized scope without repeatedly asking for permission. Ask about unresolved product decisions or actions outside that scope; do not invent business limits or treat unverified capabilities as facts.
+
+## Documentation and current state
+
+- Write all documentation and explanatory code comments intended for Git in English. Continue conversation in the user's preferred language. The product supports Russian and English; proper names and localized catalog labels may retain their original language.
+- The repository currently contains planning documentation only. There is no application, installed dependency baseline, test command, CI workflow, deployment, or automated review integration to claim as implemented. Inspect actual files and update this statement as implementation lands.
+- Keep approved behavior in CONCEPT.MD, execution scope in the backlog, and verified technical decisions in implementation contracts/ADRs. The approval record preserves earlier requirements links; do not create competing copies of the requirements.
+
+## Public repository and confidential information
+
+This repository is **public**. Treat committed files, reachable history, PR descriptions/comments, review annotations, attachments, CI logs, and uploaded artifacts as publicly readable.
+
+Never commit, paste into a PR, or include in public tool/CI output:
+
+- Passwords, API/personal telemetry tokens, webhook signing secrets, cookies, sessions, authorization headers, database connection strings containing credentials, private keys, certificates with private material, or active invitation/reset/leadership-transfer codes and links.
+- Actual membership applications, private email/Discord details, driver identity mappings, private reports or decline reasons, screenshots from authenticated sections, production telemetry, raw webhook messages, database dumps, uploads, or private support conversations.
+- Hosting account identifiers, account-specific billing/tariff details, balances, internal hostnames/IPs, database/user names, remote paths, account inventory, private control-panel captures, or infrastructure access information.
+
+Public product requirements, an owner-approved project budget, intended technology major versions, public provider documentation, and established non-sensitive project references may be documented. Prefer an abstract capability or target over details copied from a signed-in account. Browser or hosting access for research is not permission to publish what it exposes.
+
+Use synthetic fixtures with fictional identities, example.invalid addresses, and nonfunctional placeholders. Remove indirect identifiers and secret-bearing URL parameters as well as obvious names/tokens; do not assume a raw real payload is safe because its password was removed. Verify licensing/provenance before redistributing extracted game data or assets.
+
+Keep secrets in the deployment platform's secret store or ignored local environment files. Commit only reviewed example configuration containing placeholders. Use private ignored storage outside public artifacts for authorized diagnostics; retaining a private copy must itself be necessary for the task.
+
+The [.gitignore](.gitignore) provides accidental-add protection, not secret detection or removal of already tracked content. Before committing/pushing, inspect the exact staged files/diff for private values and accidental generated data. Check affected history when a task concerns previously published information. Keep diagnostic output limited to file names and finding categories; do not print the secret while reporting it.
+
+If confidential material was already published, report the affected location without repeating its value. Removing a file or changing the branch tip does not guarantee removal from old commits, PR references, clones, or caches. Exposed credentials need revocation/rotation through an authorized owner workflow. Coordinate actual history cleanup; do not claim complete erasure from a text scan or rewrite someone else's work. Never force-push main; a necessary rewrite of an owned PR branch within the authorized task must use an exact force-with-lease guard.
+
+## Product invariants
+
+- One VTC, ETS2/ATS, responsive UI, RU/EN, no legacy data import. Own telemetry and reviewed manual reports are MVP sources; full Trucky/VTCBase adapters and visas/reputation/points/Web Push are deferred.
+- Roles are additive and separate from per-game qualifications. Exactly one director; deputies have equivalent administration except protected director-account changes and leadership transfer. No role may approve its own manual report.
+- Transfer leadership only through the serving director's verified-email flow, atomically, using a one-time ten-minute code bound to the successor. Protect the director's email/login channel against administrative bypass.
+- Preserve one canonical trip and immutable source evidence. Replays, revisions, merges, and corrections must not duplicate trip counts, distance, progress, or notifications.
+- Telemetry uses actual start for qualification/progress assignment and actual completion for analytics periods. Undated manual reports use staff-confirmation time for those decisions. Late telemetry that changes a confirmed result requires staff review.
+- Accepted event trips with confirmed participation may carry the event-prescribed load outside ordinary qualification limits and count toward progress. Attendance is voluntary; private decline reasons and report evidence must stay permission-filtered.
+- Keep report screenshots for at least one year after the latest decision and throughout review. Retain structured history after image expiry. Never silently shorten this policy to fit hosting limits.
+- Numeric qualification limits, promotion thresholds, and the company reporting timezone are administrator-owned launch configuration. Production values must not be inferred from fixtures.
+
+## Architecture and implementation boundaries
+
+- MySQL is selected; Node.js 24 / MySQL 8.0 is the working compatibility baseline. React/TypeScript, shadcn/ui, Fastify, Drizzle/mysql2, and the auth/mail adapters remain subject to the documented verification gates. Do not reintroduce PostgreSQL or a competing backend without an owner decision.
+- Use the modular-monolith boundaries, server-side permissions, versioned contracts, canonical catalog IDs, normalized units, explicit UTC handling, and source provenance described in the concept.
+- Keep display labels separate from identity. DLC/build changes, translated names, missing fields, and ambiguous catalog/provider mappings must not silently alter rule outcomes.
+- Commit domain changes and outbox events together; use durable idempotent jobs and bounded retries. Verify MySQL concurrency behavior and account for implicit DDL commits during migration/recovery design.
+- Do not modify the telemetry repository, legacy sites, hosting settings, live databases, DNS, accounts, or paid services merely because credentials/browser access are available. A read-only inspection remains read-only; changes require task authorization. Prepare concrete, reviewable changes before requesting any genuinely missing approval.
+
+## Branches, collaboration, and review
+
+- Inspect repository status before edits and preserve unrelated user changes. Work on a scoped branch and use PRs for main. A request to create a PR does not itself authorize merging or deploying it.
+- Preserve stable VTC identifiers and link the card, PR, and relevant verification evidence. Product approval, implementation acceptance, review, merge, and production validation are distinct states.
+- Follow the backlog's Definition of Ready/Done. Do not move a card to Done while its required review/merge/integration evidence is missing. Keep mock-only UI and prepared-but-unapplied infrastructure visibly incomplete.
+- Delegate only when authorized by the user or applicable task instructions. If multiple agents are authorized, use separate branches/worktrees and bounded card ownership. Coordinate shared contracts, root tooling/lockfiles, app composition, and the migration journal through their owner.
+- Obtain independent review appropriate to risk for authentication, permissions, migrations, qualifications, reconciliation, and deployment. Do not describe self-review as independent review or claim an unconfigured reviewer/check has run.
+- Prefer small additive contracts and migrations. Feature owners own their module/schema files; a migration owner serializes final migration generation and integration.
+
+## Verification and delivery
+
+- Choose meaningful checks by the changed behavior. For documentation-only work, verify links/anchors, scenario/card identifiers, dependency integrity, staged whitespace, and public-data safety; do not invent application tests.
+- Once implemented, use unit tests, contract fixtures, real target-compatible MySQL integration tests, and selected Playwright journeys as required by the cards. Cover concurrency, authorization, idempotency, historical timing, and recovery with actual failure cases.
+- Do not substitute SQLite/MariaDB for MySQL integration tests, use production identities/data in fixtures, or send real mail/webhooks from tests without explicit authorized test endpoints.
+- CI, automated review, secret scanning/push protection, and deployments are tracked implementation work. Review their actual configuration/status before claiming enforcement. A local privacy scan is not a guarantee that every secret is detected.
+- Production targets approximately USD 35/year. Verify runtime maintenance, jobs/SSE support, storage, backups, restore, and total cost before deployment. Temporary paid development hosting requires an agreed budget; routine tooling decisions within an approved environment do not require repeated permission.
+- Report what changed, which checks actually passed, the PR/commit, and material pending gates. Do not expose private evidence in that report.
