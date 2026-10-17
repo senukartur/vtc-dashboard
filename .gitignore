@@ -1,0 +1,55 @@
+# Dependencies and generated output; refine when the scaffold lands.
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.vite/
+.turbo/
+playwright-report/
+test-results/
+*.log
+
+# Local configuration. Example files must contain placeholders only.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.*.example
+.npmrc
+
+# Private evidence, diagnostics, data, and local agent state.
+.local/
+.private/
+secrets/
+backups/
+uploads/
+screenshots/
+diagnostics/
+raw-telemetry/
+*.dump
+*.sql.gz
+*.sql.zip
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-*
+
+# Private key material and credential containers.
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# OS/editor state; shared editor configuration can be reviewed separately.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
