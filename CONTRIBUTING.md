@@ -86,6 +86,14 @@ VTC-006's seven scaffold checks are not the full unit/MySQL integration/E2E tool
 
 ## Ownership and branches
 
+### Codex task delivery
+
+The repository-local [deliver skill](.agents/skills/deliver/SKILL.md) adapts the telemetry project's delivery workflow for Codex. Invoke it with `$deliver VTC-023`, `$deliver VTC-023 --review-plan`, or `$deliver <task description>`. It plans one scoped task, implements in a separate worktree, verifies the candidate, obtains independent subagent review, and opens a draft PR. `--review-plan` pauses for approval before implementation. The skill is manual-only, preserving the original invocation policy; it does not activate for ordinary editing requests.
+
+Delivery state stays under ignored `.local/deliver/`; the workflow preserves unrelated changes and carries missing checks into the draft PR. It uses the current pnpm/Docker/MySQL baseline and inspects actual CI configuration rather than assuming automation exists. Creating a draft does not authorize Trello writes, marking ready, merging or deployment. See the skill for resume behavior, role boundaries and bounded fix/review rounds. Codex's repository discovery and invocation format follow the [official skills documentation](https://learn.chatgpt.com/docs/build-skills).
+
+### Module ownership
+
 Use one VTC card and scoped branch per change; preserve unrelated work. Read prerequisites and integration gates in the [backlog](docs/planning/mvp-trello-backlog.md). VTC-006 owns root tooling/lockfile and app composition; feature owners use their module directories and public facades. The migration owner alone generates/orders the Drizzle journal under VTC-007. Coordinate changes to generated contracts, capabilities, root dependencies and shared composition rather than independently regenerating them on parallel branches.
 
 Keep secrets, real reports, extracted game data and host inventory out of Git and PR logs. Inspect the exact staged diff. Relevant checks, independent review, updated English docs and merge are separate completion requirements; a prepared PR does not authorize deployment or mark a feature Done.
