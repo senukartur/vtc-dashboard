@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/test
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /deploy/test
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+# Root pnpm 12 hosted lockfile updating remains unverified; weekly manual coverage
+# and the dated removal condition are documented in docs/development/review.md.

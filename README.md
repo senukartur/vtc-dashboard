@@ -34,4 +34,4 @@ The selected database is MySQL. Develop/test with maintained MySQL 8.4 LTS and N
 
 ## Code review
 
-[Claude advisory review](docs/development/review.md) follows the telemetry repository's automatic PR and owner `@claude` workflow. Authentication, hosted verification and merge are separate setup gates; AI comments do not replace CI or the independent review required by VTC-010.
+[Native GitHub Copilot review](docs/development/review.md) is selected and available. Inspect its latest-head comments before merge, require green **Required CI** and resolved conversations, and retain independent review appropriate to risk. The former Claude workflow is removed; AI comments do not replace CI or independent review.
