@@ -25,6 +25,60 @@ pnpm test:local failure-reporting
 
 `unit` and `contracts` are also valid focus names. The launcher uses a fresh random Compose project and private `.local/testing/<run>/stack.env` (mode 0600 on POSIX). It removes only that project's containers/network/volume in `finally`, propagates failure and handles interruption. Once cleanup starts, additional SIGINT/SIGTERM signals are not forwarded to the cleanup child. Cleanup runs in its own detached process group/session on POSIX, so terminal-generated signals sent to the launcher's foreground group cannot reach it directly. Cleanup stdin is ignored; its stdout/stderr are piped through the launcher instead of inheriting terminal handles. The launcher continues awaiting cleanup and never unreferences it; helper windows are hidden on Windows. Compose receives a five-second container-stop timeout, and the cleanup command has a separate fifteen-second deadline. Expiry closes the owned output readers and terminates only the owned cleanup group on POSIX, or the owned child on Windows, then retains configuration for explicit recovery. This is a bounded fallback, not proof that the Docker daemon completed cleanup. Successful cleanup deletes that run's private `stack.env`; failed or timed-out cleanup retains it and prints a fixed failure category plus the exact owned-project recovery command. Reports/screenshots/traces and private allocation configuration are ignored under `.local/testing/`; they must never be committed or uploaded blindly. Abrupt host/engine termination can interrupt cleanup; the printed project name identifies the owned stack for explicit recovery. Do not clean by a wildcard or remove development volumes. Retained private stack configuration can be removed after explicit recovery confirms that owned stack is gone.
 
+## Runner ownership profiles
+
+The test Dockerfile's `runner-ownership` stage isolates account setup from dependency/browser installation. Its default user is `node`, including when the requested non-root GID already belongs to another base-image group. The final `runner` stage inherits this setup and still ends with `USER node`. These focused checks exercise the actual image setup; the complete isolated suite remains a separate check.
+
+From the repository root with a POSIX shell and Docker Linux containers, run:
+
+```sh
+set -eu
+profile_tag="vtc-ownership-$(date +%s)-$$"
+trap 'docker image rm "$profile_tag" >/dev/null 2>&1 || true' EXIT
+for profile in 1000:1000 1001:20 1001:100; do
+  runner_uid=${profile%:*}
+  runner_gid=${profile#*:}
+  if [ "$profile" = 1000:1000 ]; then
+    docker build --target runner-ownership -f deploy/test/Dockerfile -t "$profile_tag" .
+  else
+    docker build --target runner-ownership -f deploy/test/Dockerfile \
+      --build-arg RUNNER_UID="$runner_uid" --build-arg RUNNER_GID="$runner_gid" \
+      -t "$profile_tag" .
+  fi
+  docker run --rm --network none --read-only \
+    --tmpfs "/probe:uid=$runner_uid,gid=$runner_gid,mode=0700" \
+    "$profile_tag" node -e '
+      const assert = require("node:assert/strict");
+      const fs = require("node:fs");
+      const uid = Number(process.argv[1]), gid = Number(process.argv[2]);
+      assert.equal(process.getuid(), uid); assert.equal(process.getgid(), gid);
+      assert(uid > 0 && gid > 0);
+      const directory = fs.statSync("/probe");
+      assert.equal(directory.uid, uid); assert.equal(directory.gid, gid);
+      assert.equal(directory.mode & 0o777, 0o700);
+      if ([20, 100].includes(gid)) {
+        const groups = fs.readFileSync("/etc/group", "utf8").split("\n");
+        assert(groups.filter(line => line.split(":")[2] === String(gid)).length >= 2);
+      }
+      fs.writeFileSync("/probe/synthetic", "synthetic", { mode: 0o600 });
+      const file = fs.statSync("/probe/synthetic");
+      assert.equal(file.uid, uid); assert.equal(file.gid, gid);
+      assert.equal(file.mode & 0o777, 0o600);
+      console.log("OWNERSHIP_PROFILE_WRITE_PASS");
+    ' "$runner_uid" "$runner_gid"
+done
+for profile in 0:1000 1000:0; do
+  if docker build --target runner-ownership -f deploy/test/Dockerfile \
+    --build-arg RUNNER_UID="${profile%:*}" --build-arg RUNNER_GID="${profile#*:}" \
+    -t "$profile_tag" .; then
+    echo "ROOT_PROFILE_WAS_ACCEPTED" >&2
+    exit 1
+  fi
+done
+```
+
+Every successful profile must report `OWNERSHIP_PROFILE_WRITE_PASS`; both root profiles must fail at the positive-ID guard, rather than at an unrelated build/download step. UID 1001 with GIDs 20 and 100 exercises groups already present in the pinned Debian image; the probe also verifies that each shared GID has multiple group entries. Each write probe uses a fresh mode-0700 Linux tmpfs with matching ownership, no network and a read-only image. It does not mount a development directory or volume, change broad permissions, or run the suite as root. The default profile builds without ID overrides. The unique local image tag is removed on exit; normal Docker build cache may remain.
+
 ## Lanes and configuration
 
 | Command | Actual evidence |
