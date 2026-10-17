@@ -33,14 +33,14 @@ This is the recommended responsibility split, not deployed components. Use one H
 - Build React/transpile TypeScript and run tests in CI. Produce a versioned Linux-compatible application artifact and, for staging, a pinned container image using that output. Do not upload Windows `node_modules`. Verify native dependencies against the actual target ABI/libc when needed.
 - Implement one protected GitHub Actions deployment path in VTC-011 after VTC-009 CI succeeds. A main-branch release deploys its exact reviewed revision; manual deployment of another reviewed, CI-passed revision is available for focused testing. Verify checksum/image digest and SSH host key. Secrets stay out of public Git, artifacts and untrusted PR jobs.
 - Serialize migrations/deployments, retain a compatible prior release, verify database-backed readiness and release identity, and recover from an injected failed deployment. MySQL DDL is not transactionally reversible: switching app images does not roll back schema/data.
-- Prove database/evidence survival across redeploy and VM reboot, and an isolated restore from a consistent export. Name the independent backup destination/cost before pilot data is retained. VM snapshots are an additional safety mechanism, not application-consistency proof.
+- Prove database/synthetic-file survival across redeploy and VM reboot, and an isolated restore from a consistent export. Early VTC-011 acceptance uses isolated synthetic infrastructure probes, not the later jobs/notifications/evidence feature implementations. Name the independent backup destination/cost before pilot data is retained. VM snapshots are an additional safety mechanism, not application-consistency proof.
 - Docker Compose belongs to staging/local tooling. The application keeps a normal single HTTP entry and standalone job CLI; Docker, root/systemd or a specific VPS provider must not become application requirements for Hostland.
 
 ## Jobs and notifications
 
 Preserve the owner-approved MVP model: a bounded CLI runner invoked once per minute independently of HTTP requests, MySQL leases/idempotency against overlaps/crashes, and notification history polled every 30 seconds while visible. Pause polling while hidden/offline and refresh on return without overlapping requests or duplicate toasts. SSE remains an optional later optimization.
 
-Approximately 90 seconds is the accepted healthy/no-backlog notification target, not an observed or guaranteed maximum. It assumes preceding processing and generated notifications fit the same invocation; additional cron stages/cold starts/failures add delay and must be measured in VTC-011/021/036/037. Preserve the telemetry contract's stale-live-alert suppression even when delivery is delayed.
+Approximately 90 seconds is the accepted healthy/no-backlog notification target, not an observed or guaranteed maximum. It assumes preceding processing and generated notifications fit the same invocation; additional cron stages/cold starts/failures add delay. VTC-011 uses synthetic database/cron/HTTPS probes only; real leases, recipient/session authorization and domain notification/backlog latency are proven later in VTC-021/036/037 on that staging environment and together in VTC-040. Preserve the telemetry contract's stale-live-alert suppression even when delivery is delayed.
 
 ## Final Hostland stage
 
@@ -54,7 +54,7 @@ Export/import only the newly created system data and evidence selected for cutov
 
 - [x] Owner separated development/testing from final hosting and approved up to USD 20/month for staging.
 - [x] Owner database family and notification timing decisions recorded.
-- [ ] VTC-004 development deployment recommendation independently reviewed and merged; no hosted execution required by this planning card.
+- VTC-004 research deliverables are documented in the [backlog](../planning/mvp-trello-backlog.md#vtc-004); [PR #4](https://github.com/senukartur/vtc-dashboard/pull/4) and [Trello](https://trello.com/c/OZ84Rfk4) record final independent review/merge and card completion. Hosted execution is not required by this planning card.
 - [ ] VTC-005/006/008/009 deliver tested runtime/configuration, reproducible local setup and CI.
-- [ ] VTC-011 provisions staging on the separate account within budget and records actual deployment/persistence/jobs/recovery evidence.
+- [ ] VTC-011 provisions staging within budget and records actual deployment/persistence/recovery and synthetic cron/poll evidence; later feature cards provide actual jobs/notification integration evidence.
 - [ ] VTC-040 completes integrated testing; VTC-041 proves Hostland compatibility, annual cost, transfer and restore before final cutover; VTC-042 records final release acceptance.

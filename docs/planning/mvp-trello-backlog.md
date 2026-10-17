@@ -76,7 +76,7 @@ If host discovery changes this choice, update the architecture ADR and all affec
 - Pin real MySQL test instances to the tested local/CI/staging version/configuration. Compare and test actual Hostland patch/settings differences in VTC-041; unknown production versions do not block these tests. SQLite, MariaDB, and PostgreSQL are not substitute integration-test engines. Use the same Node.js major line and add actual production patch compatibility evidence before cutover.
 - Use reviewed, serialized migrations and rehearsed backup/restore. MySQL DDL may implicitly commit: rolling back an application transaction is not a schema rollback strategy. Prefer additive migrations and documented forward repair; validate recovery after a partially applied migration.
 
-The relevant implementation details are tracked in VTC-004–009, VTC-011, VTC-013, VTC-019, VTC-021, VTC-023, VTC-026, and VTC-041. Card IDs, ownership boundaries, and dependencies remain stable.
+The relevant implementation details are tracked in VTC-004–009, VTC-011, VTC-013, VTC-019, VTC-021, VTC-023, VTC-026, and VTC-041. Card IDs and ownership boundaries remain stable; the staging-first dependency change is recorded explicitly in the graph below.
 
 ## 2. How to use these cards in Trello
 
@@ -278,16 +278,16 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Select a quick, reproducible development/testing deployment on a separate account within USD 20/month; preserve final Hostland portability at approximately USD 35/year without requiring production-account access now.
 
-**Research status (2026-10-17):** [Provider/cost comparison](../research/development-hosting.md) and [development-first proposal](../decisions/hosting.md) are prepared; review/merge remain pending. The separate USD 20/month testing ceiling is owner-approved. DigitalOcean is the recommendation, not a provisioned environment; VTC-011 provides actual hosted evidence. Hostland-specific proof moves to VTC-041 and is not a VTC-004 completion prerequisite.
+**Research delivery (2026-10-17):** [Provider/cost comparison](../research/development-hosting.md) and [development-first deployment direction](../decisions/hosting.md) document the six research deliverables below. [PR #4](https://github.com/senukartur/vtc-dashboard/pull/4) and Trello record final independent review, merge and card completion. The separate USD 20/month testing ceiling is owner-approved. DigitalOcean is the recommendation, not a provisioned environment; VTC-011 provides synthetic infrastructure proof before later feature integration. Hostland-specific proof belongs to VTC-041 and is not a VTC-004 completion prerequisite.
 
 **Scope and acceptance checklist**
 
-- [ ] Record the separate owner-operated staging account, approved USD 20/month testing ceiling and approximately USD 35/year final Hostland budget; keep account-specific evidence private.
-- [ ] Compare current DigitalOcean, AWS Lightsail and Railway options using primary price/limit sources, including persistence, scheduler behavior and ongoing administration.
-- [ ] Recommend a concrete starting configuration and all-in cost worksheet including tax/domain/backup allowance; distinguish a recommendation from provisioning or measured capacity.
-- [ ] Define the rapid reviewed-CI-revision deployment, HTTPS, persistent MySQL/files, protected SSH delivery, migration serialization, app rollback and isolated restore approach for VTC-011.
-- [ ] Preserve maintained Node.js 24/MySQL 8.4, bounded minute jobs, 30-second visible-site polling and portable application/storage boundaries; document approximately 90 seconds as a healthy-operation target, not a hard bound.
-- [ ] Assign actual staging execution proof to VTC-011 and Hostland availability/maintenance/Passenger/cost/transfer proof to VTC-041 after VTC-040; do not require Hostland access to complete development architecture.
+- [x] Record the separate owner-operated staging account, approved USD 20/month testing ceiling and approximately USD 35/year final Hostland budget; keep account-specific evidence private.
+- [x] Compare current DigitalOcean, AWS Lightsail and Railway options using primary price/limit sources, including persistence, scheduler behavior and ongoing administration.
+- [x] Recommend a concrete starting configuration and all-in cost worksheet including tax/domain/backup allowance; distinguish a recommendation from provisioning or measured capacity.
+- [x] Define the rapid reviewed-CI-revision deployment, HTTPS, persistent MySQL/files, protected SSH delivery, migration serialization, app rollback and isolated restore approach for VTC-011.
+- [x] Preserve maintained Node.js 24/MySQL 8.4, bounded minute jobs, 30-second visible-site polling and portable application/storage boundaries; document approximately 90 seconds as a healthy-operation target, not a hard bound.
+- [x] Assign actual staging execution proof to VTC-011 and Hostland availability/maintenance/Passenger/cost/transfer proof to VTC-041 after VTC-040; do not require Hostland access to complete development architecture.
 
 **Validation:** Review the provider comparison, budget arithmetic, release/recovery design and dependency split. VTC-004 can close after plan review/merge; actual remote deployment remains VTC-011 and final Hostland compatibility remains VTC-041. No local script, selector or plan is represented as hosted proof.
 
@@ -432,11 +432,11 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - [ ] Provision the recommended separate staging VM after verifying actual checkout cost within USD 20/month; deploy HTTPS, maintained Node.js 24/MySQL 8.4, private networking and persistent database/evidence storage with separate test credentials. Record actual runtime/settings without requiring Hostland access; no PostgreSQL substitute.
 - [ ] Deploy only the exact reviewed revision that passed CI through one protected GitHub Actions/SSH path with pinned host key and scoped access; support automatic main releases and manual reviewed-revision redeployment without competing triggers.
 - [ ] Implement serialized migrations, readiness/release checks, failed-deploy recovery, database/file export and isolated restore; prove persistence across app/container recreation and server reboot.
-- [ ] Prove minute jobs without web visits, overlapping-job safety, 30-second notification polling and measured delivery/backlog behavior; document patching, resource use, independent backup destination/cost and authorized teardown. Use synthetic data until pilot access/storage/recovery is approved; account for sleep/expiry if another provider is selected.
+- [ ] Use explicitly synthetic infrastructure probes to demonstrate minute cron without web visits, small database heartbeat reads over HTTPS every 30 seconds, response timing and scheduler/resource behavior; document patching, independent backup destination/cost and authorized teardown. Actual job leases, notification authorization and domain delivery/backlog tests belong to VTC-021/036/037/040, not early staging acceptance; account for sleep/expiry if another provider is selected.
 
-**Validation:** Publish a small change from its exact successful CI revision, reject a failed build, exercise HTTPS/private evidence and actual MySQL/cron, and verify persistence plus isolated restore after restart/failed deployment. Record hosted evidence and actual monthly cost; a local preview or prepared Compose file is not a remote deployment.
+**Validation:** Publish a small change from its exact successful CI revision, reject a failed build, exercise HTTPS/operator-only synthetic files and actual MySQL/cron, and verify persistence plus isolated restore after restart/failed deployment. Use synthetic heartbeat/poll probes without implementing VTC-021/036/037; they prove infrastructure, not domain leases, permissions or end-to-end notification latency. Record hosted evidence and actual monthly cost; a local preview or prepared Compose file is not a remote deployment.
 
-**Boundaries / integration gates:** Separate account and up to USD 20/month are approved. Prepare reviewable setup/deployment before creating resources; verify the full total against the ceiling. No production Hostland access, Passenger test or production cutover is required here. A single persistent staging environment is the default; paid per-PR environments and bigger plans need a concrete cost decision.
+**Boundaries / integration gates:** Separate account and up to USD 20/month are approved. Prepare reviewable setup/deployment before creating resources; verify the full total against the ceiling. No production Hostland access, Passenger test or later feature implementation is required to complete early staging. VTC-021/036/037/040 later use this environment for real job/notification/permission evidence. A single persistent staging environment is the default; paid per-PR environments and bigger plans need a concrete cost decision. Use synthetic data until pilot access/storage/recovery is approved.
 
 <a id="vtc-012"></a>
 
@@ -647,7 +647,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Validation:** Crash/restart between commit and processing, run two consumers, and verify no lost work or duplicated business effect.
 
-**Boundaries / integration gates:** Requires persistent execution or a compatible scheduler on the chosen host; sleeping development hosting cannot guarantee timely reminders.
+**Boundaries / integration gates:** Requires persistent execution or a compatible scheduler on the chosen host; sleeping development hosting cannot guarantee timely reminders. VTC-011 is the integration gate for hosted lease/crash/scheduler evidence; local/CI implementation can start earlier. Its synthetic probes do not prove this job subsystem, and VTC-011 does not depend on this card.
 
 <a id="vtc-022"></a>
 
@@ -959,7 +959,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Validation:** Test two workers, polling catch-up/session revocation, delayed trip events, cancelled/rescheduled events, preference changes, and missed reminder windows. Measure the approved approximately 90-second healthy-operation target, including any chained cron stages; do not claim a guaranteed maximum.
 
-**Boundaries / integration gates:** No Web Push or closed-browser delivery in MVP. Do not send obsolete reminders after a long outage.
+**Boundaries / integration gates:** No Web Push or closed-browser delivery in MVP. Do not send obsolete reminders after a long outage. Use VTC-011 staging for hosted notification authorization, real job/backlog and end-to-end latency evidence; its synthetic infrastructure probes do not prove these behaviors or require this feature to exist first.
 
 <a id="vtc-037"></a>
 
@@ -980,7 +980,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Validation:** Verify open-site delivery, reconnect, multiple tabs, delayed history, unread state, and RU/EN against VTC-036.
 
-**Boundaries / integration gates:** Integration gates: VTC-035 and VTC-036.
+**Boundaries / integration gates:** Integration gates: VTC-035 and VTC-036; VTC-011 provides the environment for hosted polling/session/latency evidence. Early staging acceptance uses synthetic probes and does not depend on this UI.
 
 <a id="vtc-038"></a>
 
