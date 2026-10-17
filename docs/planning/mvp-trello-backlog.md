@@ -160,7 +160,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 | [VTC-016: Build the public landing and application experience](#vtc-016) | Frontend | VTC-012 |
 | [VTC-017: Build login, invitation, recovery, and account settings screens](#vtc-017) | Frontend | VTC-012 |
 | [VTC-018: Link Steam and resolve TruckersMP identities](#vtc-018) | Backend | VTC-013 |
-| [VTC-019: Implement versioned catalogs, imports, and identity normalization](#vtc-019) | Backend | VTC-002, VTC-007, VTC-008 |
+| [VTC-019: Implement versioned catalogs, imports, and identity normalization](#vtc-019) | Backend | VTC-002, VTC-007, VTC-008, VTC-021 |
 | [VTC-020: Build catalog administration and localized selectors](#vtc-020) | Frontend | VTC-012 |
 | [VTC-021: Implement durable jobs and transactional domain events](#vtc-021) | Backend | VTC-005, VTC-007, VTC-008 |
 | [VTC-022: Implement canonical trip records and source adapter boundaries](#vtc-022) | Backend | VTC-003, VTC-007, VTC-019, VTC-021 |
@@ -302,6 +302,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - **Primary ownership:** docs/architecture/, docs/contracts/dashboard/, docs/decisions/stack.md
 
 **Goal:** Freeze enough interfaces for independent frontend and backend work.
+
+**Proposed delivery (2026-10-17):** [Architecture and ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [compatibility evidence](../research/stack-compatibility.md). The isolated probe pins and exercises the core Node/Fastify/Drizzle/auth/React combination without a live database; real MySQL, session/invitation transactions, root tooling and deployment remain implementation gates. Review/merge is required before VTC-005 is Done. The frozen telemetry contract is unchanged. Asynchronous catalog import now explicitly depends on VTC-021's durable jobs rather than an undeclared worker.
 
 **Scope and acceptance checklist**
 
@@ -584,7 +586,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 ### [VTC-019] Implement versioned catalogs, imports, and identity normalization
 
 - **Track:** Backend
-- **Depends on:** VTC-002, VTC-007, VTC-008
+- **Depends on:** VTC-002, VTC-007, VTC-008, VTC-021
 - **Primary ownership:** apps/api/src/modules/catalogs/, packages/db/schema/catalogs/, scripts/catalogs/
 
 **Goal:** Serve local game catalogs and resolve provider entities independently of display language.

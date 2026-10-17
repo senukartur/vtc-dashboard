@@ -1,0 +1,21 @@
+{
+  "name": "vtc-005-compatibility-probe",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.22.0" },
+  "scripts": { "check": "node check.mjs" },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "1.7.10",
+    "@tanstack/react-query": "5.104.3",
+    "better-auth": "1.7.10",
+    "drizzle-kit": "0.31.11",
+    "drizzle-orm": "0.45.4",
+    "fastify": "5.12.7",
+    "mysql2": "3.24.6",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "zod": "4.6.7"
+  }
+}
