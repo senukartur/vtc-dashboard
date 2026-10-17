@@ -95,6 +95,7 @@ jobs:
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         with:
           script: |
             const result = JSON.parse(process.env.REVIEW_RESULT);
@@ -102,7 +103,12 @@ jobs:
               core.setFailed('Claude returned no review summary.');
               return;
             }
-            const body = `## Advisory review (head ${context.sha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
+            const headSha = process.env.REVIEW_HEAD_SHA || '';
+            if (!/^[0-9a-f]{40}$/i.test(headSha)) {
+              core.setFailed('No valid pull request head SHA was provided.');
+              return;
+            }
+            const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -144,6 +150,9 @@ jobs:
             --json isCrossRepository,state \
             --jq '(.isCrossRepository == false) and (.state == "OPEN")')
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          head_sha=$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+            --json headRefOid --jq '.headRefOid')
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: steps.target.outputs.eligible == 'true'
         with:
@@ -184,6 +193,7 @@ jobs:
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
           PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          REVIEW_HEAD_SHA: ${{ steps.target.outputs.head_sha }}
         with:
           script: |
             const result = JSON.parse(process.env.REVIEW_RESULT);
@@ -191,7 +201,12 @@ jobs:
               core.setFailed('Claude returned no review summary.');
               return;
             }
-            const body = `## Advisory review (head ${context.sha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
+            const headSha = process.env.REVIEW_HEAD_SHA || '';
+            if (!/^[0-9a-f]{40}$/i.test(headSha)) {
+              core.setFailed('No valid pull request head SHA was provided.');
+              return;
+            }
+            const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
