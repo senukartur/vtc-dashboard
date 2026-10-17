@@ -586,6 +586,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Import reviewed datasets for both base games and all official DLCs at the pinned launch baseline, with per-pack contribution/coverage evidence, provenance, game build, DLC/map scope, localized labels, aliases, external mappings, and publication status. Missing local packs remain coverage gaps, not exclusions from the approved scope.
+- [ ] Resolve the Louisiana, Illinois and South Dakota source gaps transferred from VTC-002; record permitted-use evidence and validate their catalog contributions before production publication or launch.
 - [ ] Provide search/filter APIs and draft-diff-publish workflow with transactional publication and audit records.
 - [ ] Preserve retired entities and historical versions; separate canonical identity from version-specific attributes.
 - [ ] Resolve known source IDs first; handle name-only matching using game/region/locale context and surface unknown/ambiguous entities for review.
@@ -1073,6 +1074,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 - [ ] Run a small authorized ETS2/ATS pilot covering offline uploads, manual reviews, qualification failures, and a convoy reminder.
 - [ ] Check reported totals against original trips and resolve all launch-blocking defects.
+- [ ] Verify all-official-DLC catalog coverage at the actual launch baseline, including closure of the Louisiana, Illinois and South Dakota source gaps assigned to VTC-019; the VTC-002 archive audit alone is not release evidence.
 - [ ] Publish English maintainer documentation and user-facing RU/EN guidance for joining, tokens, reports, qualifications, and participation.
 - [ ] Record actual hosting/storage/email usage against the annual budget and rehearse account bootstrap/support procedures.
 - [ ] Confirm the release checklist, deploy the verified revision, and preserve rollback/backup evidence.
