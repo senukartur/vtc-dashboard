@@ -31,3 +31,7 @@ Run `docker compose exec app pnpm check`, `pnpm db:check`, `pnpm smoke:local` or
 - [VTC-005 architecture](docs/architecture/README.md): [stack/version direction](docs/decisions/stack.md), module/data/adapter ownership and [browser API v1](docs/contracts/dashboard/README.md), with [route inventory](docs/contracts/dashboard/routes.md), fictional UI fixtures and [bounded compatibility evidence](docs/research/stack-compatibility.md). [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and its [review correction record](docs/architecture/review-vtc-005.md) track adoption; real application/MySQL/session/deployment integration remains separate work.
 
 The selected database is MySQL. Develop/test with maintained MySQL 8.4 LTS and Node.js 24. Final Hostland availability, maintenance, transfer and approximately USD 35/year cost are VTC-041 release gates after integrated testing; account-specific evidence is not published here.
+
+## Code review
+
+[Claude advisory review](docs/development/review.md) follows the telemetry repository's automatic PR and owner `@claude` workflow. Authentication, hosted verification and merge are separate setup gates; AI comments do not replace CI or the independent review required by VTC-010.
