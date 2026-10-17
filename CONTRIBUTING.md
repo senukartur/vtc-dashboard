@@ -86,7 +86,7 @@ Generated browser files are committed so frontend/backend owners consume one rev
 
 Body and response validation do not coerce types; query, path and header validators decode string wire values using their declared schema types. Unexpected 5xx errors emit only a fixed event/code and the server-generated request ID, without exception text, input or headers. Full observability remains VTC-039. The built server caches fingerprinted JS/CSS assets; HTML, APIs, health, missing files and unversioned assets remain `no-store`.
 
-VTC-006's eleven scaffold checks are not the full unit/MySQL integration/E2E tooling of VTC-008, GitHub CI of VTC-009 or review enforcement of VTC-010. The synthetic stalled-MySQL protocol fixture tests deadlines and recovery, not real MySQL transactions. No native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
+VTC-006's twelve scaffold checks are not the full unit/MySQL integration/E2E tooling of VTC-008, GitHub CI of VTC-009 or review enforcement of VTC-010. The synthetic stalled-MySQL protocol fixture tests deadlines, recovery and process exit with a half-open peer, not real MySQL transactions. No native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
 
 ## Ownership and branches
 

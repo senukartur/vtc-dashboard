@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import type { AddressInfo, Server, Socket } from "node:net";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { createDatabase, expectedMysqlVersion, requiredSqlModes } from "@vtc/db";
 import { createApp } from "../../apps/api/src/app.ts";
 
@@ -39,12 +41,13 @@ async function bounded<T>(work: Promise<T>, milliseconds = 2500): Promise<T> {
   }
 }
 
-async function fixture(initialPhase: Phase) {
+async function fixture(initialPhase: Phase, halfOpen = false) {
   let phase = initialPhase;
   let sessions = 0;
   const sockets = new Set<Socket>();
   const server = mysql.createServer();
   server.on("connection", (connection: FixtureConnection) => {
+    connection.stream.allowHalfOpen = halfOpen;
     sockets.add(connection.stream);
     connection.stream.once("close", () => sockets.delete(connection.stream));
     connection.on("error", () => {});
@@ -111,6 +114,7 @@ async function fixture(initialPhase: Phase) {
   });
   return {
     database,
+    port: (server._server.address() as AddressInfo).port,
     setPhase(value: Phase) {
       phase = value;
     },
@@ -145,6 +149,42 @@ test("readiness bounds stalled MySQL handshakes and both query phases, then reco
     } finally {
       await stub.close();
       await app.close();
+    }
+  }
+});
+
+test("timed-out probes exit without retaining sockets when the MySQL peer remains half-open", async () => {
+  for (const phase of ["session", "select"] as const) {
+    const stub = await fixture(phase, true);
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { createDatabase } from '@vtc/db';
+const database = createDatabase({ host: '127.0.0.1', port: Number(process.env.FIXTURE_PORT),
+  database: 'synthetic_database', user: 'synthetic_user', password: 'NONFUNCTIONAL_EXAMPLE_ONLY' });
+try { await database.check(); process.exitCode = 2; }
+catch { process.exitCode = 0; }
+finally { await database.close(); }`,
+      ],
+      {
+        cwd: fileURLToPath(new URL("../../", import.meta.url)),
+        env: { ...process.env, FIXTURE_PORT: String(stub.port) },
+        stdio: "ignore",
+      },
+    );
+    const exited = new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", resolve);
+    });
+    try {
+      await stub.waitForSessions(1);
+      assert.equal(await bounded(exited), 0, phase);
+    } finally {
+      if (child.exitCode === null) child.kill();
+      await exited;
+      await stub.close();
     }
   }
 });

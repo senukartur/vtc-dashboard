@@ -1,4 +1,19 @@
-import { createPool, type PoolOptions, type RowDataPacket } from "mysql2/promise";
+import {
+  createPool,
+  type PoolConnection,
+  type PoolOptions,
+  type RowDataPacket,
+} from "mysql2/promise";
+
+function discardConnection(connection: PoolConnection): void {
+  // mysql2 3.24.6 destroy() only calls stream.end(); force-close a half-open peer too.
+  // The pinned driver's stream exists at runtime but is absent from its promise types.
+  const driver = connection.connection as typeof connection.connection & {
+    stream: { destroy(): void };
+  };
+  connection.destroy();
+  driver.stream.destroy();
+}
 
 export const expectedMysqlVersion = "8.4.11";
 export const requiredSqlModes = [
@@ -64,7 +79,7 @@ export function createDatabase(settings: DatabaseSettings) {
       } finally {
         // A query timeout does not cancel the wire operation; never reuse that socket.
         if (reusable) connection.release();
-        else connection.destroy();
+        else discardConnection(connection);
       }
     },
     close: () => pool.end(),
