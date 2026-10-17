@@ -410,7 +410,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Make reviews and merge protection explicit for humans and coding agents.
 
-**Scoped implementation:** The owner selected the existing native GitHub Copilot reviewer; the former advisory Claude workflow is removed. [Review policy, desired main rules, ownership/template and weekly dependency checks with a dated pnpm exception](../development/review.md) describe the prepared VTC-010 scope. VTC-006/009 dependencies and the acceptance criteria below remain in place. Applied-rule/readback, controlled seeded-defect/blocked-merge, hosted dependency acceptance, final review/CI and merge evidence remain pending; prepared configuration alone does not satisfy them.
+**Scoped implementation:** The owner selected the existing native GitHub Copilot reviewer; the former advisory Claude workflow is removed. [Review policy, applied main rules, ownership/template and weekly dependency checks with a dated pnpm exception](../development/review.md) record VTC-010 evidence. Initial governance CI passed; the main rule was applied/read back and CODEOWNERS returned no errors. On 2026-10-18, the controlled synthetic fixture produced an actionable Copilot finding and failed required CI; it was observed blocked with all threads resolved, then closed unmerged without a merge attempt. Hosted dependency acceptance, final-head review/CI, merge and post-merge CI remain pending. VTC-006/009 dependencies and the acceptance criteria below remain in place; earlier-head evidence does not accept a changed final candidate.
 
 **Scope and acceptance checklist**
 
