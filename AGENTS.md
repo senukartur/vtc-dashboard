@@ -13,6 +13,12 @@ Explicit user instructions take precedence over repository guidance. Resolve rou
 - Advisory Claude review is configured separately; read docs/development/review.md for invocation, measured evidence and remaining VTC-010 gates. Advisory comments are not CI, independent implementation acceptance or merge protection.
 - Keep approved behavior in CONCEPT.MD, execution scope in the backlog, and verified technical decisions in implementation contracts/ADRs. The approval record preserves earlier requirements links; do not create competing copies of the requirements.
 
+## Project engineering skills
+
+Use the [project skill registry](docs/development/agent-skills.md) to select the smallest relevant set before planning, implementing, verifying or reviewing frontend/backend/database work. Codex uses `.agents/skills/`; Claude uses `.claude/skills/` entrypoints pointing to the same canonical instructions. Read selected `SKILL.md` bodies, not only descriptions. The registry distinguishes frontend-patterns, react-patterns, react-performance, react-testing, frontend-design-direction, backend-patterns and mysql-patterns. These supplement the concept, contracts and card scope; they do not install tooling or establish implementation evidence.
+
+For authorized subagents, include selected skill names, reasons, instruction version and readable absolute paths or full bodies in the assignment. Require children to apply/report relevant skills and request missing inputs; do not assume loaded skills are inherited. In `$deliver`/`/deliver`, use the pinned bundle specified by the registry/shared workflow, including when the task worktree predates the skills. Preserve role tool limits and delegation authorization rules.
+
 ## Public repository and confidential information
 
 This repository is **public**. Treat committed files, reachable history, PR descriptions/comments, review annotations, attachments, CI logs, and uploaded artifacts as publicly readable.

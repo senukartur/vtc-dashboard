@@ -1,0 +1,4 @@
+interface:
+  display_name: "React Patterns"
+  short_description: "Build VTC React components and hooks"
+  default_prompt: "Use $react-patterns for the assigned VTCDashboard task."

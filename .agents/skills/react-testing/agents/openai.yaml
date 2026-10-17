@@ -1,0 +1,4 @@
+interface:
+  display_name: "React Testing"
+  short_description: "Test VTC React behavior and browser journeys"
+  default_prompt: "Use $react-testing for the assigned VTCDashboard task."

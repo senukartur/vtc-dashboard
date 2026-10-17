@@ -1,0 +1,4 @@
+interface:
+  display_name: "React Performance"
+  short_description: "Measure and improve VTC React performance"
+  default_prompt: "Use $react-performance for the assigned VTCDashboard task."
