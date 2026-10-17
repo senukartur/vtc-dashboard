@@ -118,7 +118,7 @@ jobs:
             --model claude-sonnet-5-5
             --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["path","line","body"],"additionalProperties":false}},"required":["summary","findings"],"additionalProperties":false}'
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
-            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Grep(./.git/**),Glob(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
@@ -310,7 +310,7 @@ jobs:
             --model claude-sonnet-5-5
             --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["path","line","body"],"additionalProperties":false}},"required":["summary","findings"],"additionalProperties":false}'
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
-            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
+            --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Grep(./.git/**),Glob(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
