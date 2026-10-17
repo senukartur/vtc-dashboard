@@ -93,3 +93,9 @@ VTC-006's twelve scaffold checks are not the full unit/MySQL integration/E2E too
 Use one VTC card and scoped branch per change; preserve unrelated work. Read prerequisites and integration gates in the [backlog](docs/planning/mvp-trello-backlog.md). VTC-006 owns root tooling/lockfile and app composition; feature owners use their module directories and public facades. The migration owner alone generates/orders the Drizzle journal under VTC-007. Coordinate changes to generated contracts, capabilities, root dependencies and shared composition rather than independently regenerating them on parallel branches.
 
 Keep secrets, real reports, extracted game data and host inventory out of Git and PR logs. Inspect the exact staged diff. Relevant checks, independent review, updated English docs and merge are separate completion requirements; a prepared PR does not authorize deployment or mark a feature Done.
+
+## Agent task delivery
+
+Repository-local manual delivery entrypoints are available for [Codex](.agents/skills/deliver/SKILL.md) and [Claude Code](.claude/skills/deliver/SKILL.md). Follow the relevant entrypoint for invocation and host setup; the [shared workflow](.agents/skills/deliver/references/workflow.md) owns execution, trust, recovery, budgets and publication rules, with [shared role instructions](.agents/skills/deliver/references/roles.md).
+
+For first use in Claude Code, start a new session in a checkout containing the native definitions in `.claude/agents/`. Tool enforcement differs by host and is described in the entrypoints; these files do not create a security sandbox.
