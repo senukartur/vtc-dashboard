@@ -13,6 +13,8 @@ VTC-001 requirements were approved on 2026-10-16: root [CONCEPT.MD](../../CONCEP
 
 Descriptions preserve scope, ownership, validation, and integration gates. The 102 start-prerequisite relationships use direct card links in Depends on and reverse Unblocks references. Other card references, including UI integration gates, are also linked. These links describe dependencies; they do not automatically block moves or mark prerequisites complete.
 
+VTC-002 research update (2026-10-17): the [source investigation](../research/catalogs.md), [observed DLC inventory](../research/dlc-coverage-2026-10-17.md) and [owner-approved hand-off](../research/catalog-source-follow-up.md) are delivered for review in [PR #2](https://github.com/senukartur/vtc-dashboard/pull/2). Three unavailable ATS source checks remain mandatory VTC-019/VTC-042 launch gates. See the PR and Trello for current review/merge state; discovery completion is not a complete production catalog. The two added source-gap/release checks extend the original imported acceptance checklists.
+
 Card creation is not implementation progress. No assignees, deadlines, paid automation, or implementation completion were inferred from the import.
 
 ## MVP cards
