@@ -106,8 +106,12 @@ Use one VTC card and scoped branch per change; preserve unrelated work. Read pre
 
 Keep secrets, real reports, extracted game data and host inventory out of Git and PR logs. Inspect the exact staged diff. Relevant checks, independent review, updated English docs and merge are separate completion requirements; a prepared PR does not authorize deployment or mark a feature Done.
 
+Follow the [review and dependency guide](docs/development/review.md). [CODEOWNERS](.github/CODEOWNERS) routes ownership; the [PR template](.github/pull_request_template.md) captures exact-head validation, independent review, Copilot findings and delivery gates. Before merge inspect the latest-head Copilot comments, resolve findings/conversations and require green **Required CI**. Critical changes need review independent of their author; zero mandatory GitHub approval votes do not waive that gate. Rule JSON must be applied and read back before claiming enforcement. Weekly dependency checks include the documented temporary manual pnpm exception; bot PRs receive normal review and checks.
+
 ## Agent task delivery
 
 Repository-local manual delivery entrypoints are available for [Codex](.agents/skills/deliver/SKILL.md) and [Claude Code](.claude/skills/deliver/SKILL.md). Follow the relevant entrypoint for invocation and host setup; the [shared workflow](.agents/skills/deliver/references/workflow.md) owns execution, trust, recovery, budgets and publication rules, with [shared role instructions](.agents/skills/deliver/references/roles.md).
+
+The explicit human standing completion scope in [AGENTS.md](AGENTS.md#branches-collaboration-and-review) permits one card at a time through verified review/fixes, normal merge and Trello Done. It does not grant paid setup, deployment, production changes or skipped gates. Without that explicit human authority, the delivery workflow ends at a draft PR.
 
 For first use in Claude Code, start a new session in a checkout containing the native definitions in `.claude/agents/`. Tool enforcement differs by host and is described in the entrypoints; these files do not create a security sandbox.

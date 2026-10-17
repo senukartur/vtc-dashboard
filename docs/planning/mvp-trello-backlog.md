@@ -410,7 +410,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Make reviews and merge protection explicit for humans and coding agents.
 
-**Scoped implementation:** The owner requested the telemetry repository's Claude review setup. [Advisory review configuration and verification gates](../development/review.md) cover that subset; VTC-006/009 dependencies and the remaining VTC-010 acceptance criteria stay in place. Configuration alone does not establish hosted review, seeded-defect detection or enforced merge protection.
+**Scoped implementation:** The owner selected the existing native GitHub Copilot reviewer; the former advisory Claude workflow is removed. [Review policy, desired main rules, ownership/template and weekly dependency checks with a dated pnpm exception](../development/review.md) describe the prepared VTC-010 scope. VTC-006/009 dependencies and the acceptance criteria below remain in place. Applied-rule/readback, controlled seeded-defect/blocked-merge, hosted dependency acceptance, final review/CI and merge evidence remain pending; prepared configuration alone does not satisfy them.
 
 **Scope and acceptance checklist**
 

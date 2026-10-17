@@ -1,6 +1,6 @@
 # VTC-009 pull request CI
 
-[VTC-009](https://trello.com/c/tgxPEMmP) adds [CI](../../.github/workflows/ci.yml) for every opened, synchronized or reopened pull request, including drafts, and pushes to `main`. There are no path filters. Stable job names are **Quality suite** and **Required CI**. VTC-010 owns configuring repository rules to require the latter and proving merge prevention; a workflow does not configure those rules.
+[VTC-009](https://trello.com/c/tgxPEMmP) adds [CI](../../.github/workflows/ci.yml) for every opened, synchronized or reopened pull request, including drafts, and pushes to `main`. There are no path filters. Stable job names are **Quality suite** and **Required CI**. VTC-010 supplies the desired [main ruleset](../../.github/rulesets/main.json) and [application/acceptance procedure](review.md#main-rules-and-application) for requiring the latter. The file alone does not configure hosted rules or prove merge prevention.
 
 ## Execution and trust
 
@@ -12,7 +12,7 @@ The token has only `contents: read`; checkout does not persist credentials. Proj
 
 The test image adjusts its unprivileged `node` account to the launcher's POSIX UID/GID at build time. Windows uses 1000:1000. An existing non-root GID may be reused: the image's `node` group can share that numeric GID with a base-image group. Newly created output mounts are therefore writable on Linux hosts whose user is not UID 1000. Root UID/GID are rejected. Build arguments affect only the disposable image. The [ownership profile checks](testing.md#runner-ownership-profiles) build the actual Dockerfile's small `runner-ownership` stage and exercise unprivileged writes on disposable Linux filesystems.
 
-**Required CI** runs with `always()` after **Quality suite** and uses the tested `requiredCi` evaluator. Only explicit `success` passes; failure, cancellation, skipped, absent and unknown results fail. Critical jobs have no `continue-on-error`. A workflow that never starts produces no successful check; VTC-010 must enforce the stable name. Administrators who can change the workflow retain the usual repository trust boundary.
+**Required CI** runs with `always()` after **Quality suite** and uses the tested `requiredCi` evaluator. Only explicit `success` passes; failure, cancellation, skipped, absent and unknown results fail. Critical jobs have no `continue-on-error`. A workflow that never starts produces no successful check. VTC-010's desired rule binds that stable name to GitHub Actions app `15368`, with an up-to-date base and no bypass actors; actual application/readback and a controlled blocked-merge observation remain pending. Administrators who can change the workflow retain the usual repository trust boundary.
 
 ## Safe diagnostics
 
