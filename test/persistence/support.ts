@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dedicatedConnection, migrationFolder, settingsFromEnvironment } from "@vtc/db";
+import {
+  createDatabase,
+  dedicatedConnection,
+  migrationFolder,
+  settingsFromEnvironment,
+} from "@vtc/db";
 import type { Connection, RowDataPacket } from "mysql2/promise";
+import { guardedAllocation } from "../support/environment.ts";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const fixtureRoot = join(root, "test/fixtures/persistence");
@@ -17,15 +23,35 @@ export function guardedSettings() {
   ) {
     throw new Error("SYNTHETIC_DATABASE_AND_RESET_ACK_REQUIRED");
   }
+  guardedAllocation();
   return settings;
 }
 
 export async function testConnection(): Promise<Connection> {
   const settings = guardedSettings();
+  const baseline = createDatabase(settings);
+  try {
+    if (!(await baseline.check())) throw new Error("TEST_DATABASE_BASELINE_MISMATCH");
+  } finally {
+    await baseline.close();
+  }
   const connection = await dedicatedConnection(settings);
-  const [rows] = await connection.query<RowDataPacket[]>("SELECT DATABASE() AS name");
-  assert.equal(rows[0]?.name, settings.database);
-  return connection;
+  try {
+    const [rows] = await connection.query<RowDataPacket[]>(
+      "SELECT DATABASE() AS name, IS_USED_LOCK(?) AS owner",
+      [`vtc008:${settings.database}`],
+    );
+    assert.equal(rows[0]?.name, settings.database);
+    assert.equal(
+      Number(rows[0]?.owner),
+      guardedAllocation().ownerConnectionId,
+      "launcher must hold this allocation's suite ownership lock",
+    );
+    return connection;
+  } catch (error) {
+    await connection.end();
+    throw error;
+  }
 }
 
 export async function reset(connection: Connection) {

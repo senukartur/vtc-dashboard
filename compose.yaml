@@ -100,6 +100,10 @@ services:
         - action: rebuild
           path: ./tsconfig.test.json
         - action: rebuild
+          path: ./vitest.config.ts
+        - action: rebuild
+          path: ./playwright.config.ts
+        - action: rebuild
           path: ./Dockerfile
         - action: rebuild
           path: ./.dockerignore

@@ -1,0 +1,44 @@
+services:
+  db:
+    image: mysql:8.4.11@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --transaction-isolation=REPEATABLE-READ
+      - --sql-mode=ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+    environment:
+      MYSQL_ROOT_PASSWORD: ${VTC_TEST_ROOT_PASSWORD:?Private launcher configuration required}
+      MYSQL_ROOT_HOST: "%"
+    networks: [isolated]
+    volumes: [test-data:/var/lib/mysql]
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, --silent]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 20s
+  runner:
+    build:
+      context: ../..
+      dockerfile: deploy/test/Dockerfile
+    init: true
+    shm_size: 256mb
+    environment:
+      NODE_ENV: test
+      TZ: UTC
+      VTC_TEST_RUN: ${VTC_TEST_RUN:?Private launcher configuration required}
+      VTC_TEST_ROOT_PASSWORD: ${VTC_TEST_ROOT_PASSWORD:?Private launcher configuration required}
+      VTC_TEST_LAUNCH: isolated-compose
+      VTC_TEST_FOCUS: ${VTC_TEST_FOCUS:-all}
+    networks: [isolated]
+    volumes:
+      - ${VTC_TEST_OUTPUT:?Private launcher configuration required}:/workspace/.local/testing
+    depends_on:
+      db:
+        condition: service_healthy
+networks:
+  isolated:
+    internal: true
+volumes:
+  test-data:

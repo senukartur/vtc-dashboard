@@ -66,3 +66,7 @@ VTC-007 now implements the [persistence substrate](persistence.md) separately fr
 - [Official MySQL downloads](https://dev.mysql.com/downloads/mysql/8.4.html) and [8.4 release notes](https://dev.mysql.com/doc/relnotes/mysql/8.4/en/): distinguish released downloadable artifacts from advance documentation.
 - [Fastify validation/serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/) and [Ajv schema dialects](https://ajv.js.org/guide/schema-language): use explicit draft-2020-12 compilation and test the response boundary.
 - [Official npm registry](https://registry.npmjs.org/) and [pnpm settings](https://pnpm.io/settings): exact versions/peer constraints and explicit build policy. Resolved versions/integrities are in the root lockfile.
+
+## VTC-008 test tooling addition
+
+The [testing guide](testing.md) documents Vitest 5.0.5, Playwright 1.64.1/Chromium, direct root Vite/Ajv dependencies and the isolated Docker command. The Node 24.22.0 / pnpm 12.14.0 / TypeScript 5.9.3 / MySQL 8.4.11 baseline is unchanged. Existing scaffold, persistence and recovery suites stay separately reported; synthetic concurrency probes and the built-app bilingual desktop/mobile smoke add infrastructure evidence without implementing domain workflows. The delivery PR records exact-candidate verification and independent review; CI/staging/review enforcement remain separate pending cards.

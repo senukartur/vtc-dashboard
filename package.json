@@ -24,21 +24,33 @@
     "db:check": "pnpm --filter @vtc/api db:check",
     "db:generate": "pnpm --filter @vtc/db generate && biome format --write packages/db/migrations/meta",
     "db:migrate": "pnpm build:packages && pnpm --filter @vtc/db migrate",
-    "db:test": "pnpm build:packages && node --env-file-if-exists=.env --import tsx --test test/persistence/persistence.test.ts",
-    "db:recovery": "pnpm build:packages && node --env-file-if-exists=.env --import tsx --test test/persistence/recovery.test.ts",
+    "db:test": "pnpm build:packages && node --import tsx scripts/test-lanes.ts persistence",
+    "db:recovery": "pnpm build:packages && node --import tsx scripts/test-lanes.ts recovery",
     "smoke:local": "node scripts/smoke-local.mjs",
     "test:scaffold": "pnpm build:packages && node --import tsx --test test/scaffold/*.test.ts",
-    "check": "pnpm contracts:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:scaffold"
+    "check": "pnpm contracts:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:scaffold",
+    "test:unit": "node --import tsx scripts/test-lanes.ts unit",
+    "test:contracts": "node --import tsx scripts/test-lanes.ts contracts",
+    "test:integration": "node --import tsx scripts/test-lanes.ts integration",
+    "test:e2e": "node --import tsx scripts/test-lanes.ts e2e",
+    "test:failure-reporting": "node --import tsx scripts/test-lanes.ts failure-reporting",
+    "test:all": "node --import tsx scripts/test-lanes.ts all",
+    "test:local": "node scripts/test-local.mjs"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
     "@vtc/contracts": "workspace:*",
     "@vtc/db": "workspace:*",
-    "@biomejs/biome": "2.5.15",
-    "@types/node": "24.19.2",
-    "openapi-typescript": "7.13.0",
-    "tsx": "4.23.15",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "drizzle-orm": "0.45.4",
     "mysql2": "3.24.6",
-    "typescript": "5.9.3"
+    "openapi-typescript": "7.13.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
   }
 }

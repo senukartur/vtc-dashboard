@@ -80,6 +80,8 @@ An optional production image is `docker build --target production -t vtc-dashboa
 | `pnpm lint` / `pnpm typecheck` | Lint and strict TypeScript checks |
 | `pnpm test:scaffold` | Node test runner: HTTP/config/schema-bridge checks, including all reviewed structural browser examples |
 | `pnpm check` | Generated-file, format, lint, type and scaffold checks |
+| `pnpm test:local` | Owned isolated Docker stack: check/build, Vitest unit/contract/real-MySQL lanes, separate persistence/recovery, desktop/mobile Playwright and failure-reporting proof; see [testing](docs/development/testing.md) |
+| `pnpm test:unit` / `pnpm test:contracts` | Native database-independent Vitest lanes after `pnpm build:packages`; Docker remains the network-isolated path |
 | `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |
 | `pnpm db:generate` | Sole migration integrator generates/reviews Drizzle SQL/journal and formats metadata |
 | `pnpm db:migrate` | Build packages and run explicit dedicated, locked migrations; never reset/seed |
@@ -93,7 +95,7 @@ Generated browser files are committed so frontend/backend owners consume one rev
 
 Body and response validation do not coerce types; query, path and header validators decode string wire values using their declared schema types. Unexpected 5xx errors emit only a fixed event/code and the server-generated request ID, without exception text, input or headers. Full observability remains VTC-039. The built server caches fingerprinted JS/CSS assets; HTML, APIs, health, missing files and unversioned assets remain `no-store`.
 
-VTC-006's twelve scaffold checks are not the full unit/MySQL integration/E2E tooling of VTC-008, GitHub CI of VTC-009 or review enforcement of VTC-010. The synthetic stalled-MySQL protocol fixture tests deadlines, recovery and process exit with a half-open peer, not real MySQL transactions. No native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
+The existing Node scaffold checks are separate from [VTC-008 test tooling](docs/development/testing.md), GitHub CI of VTC-009 and review enforcement of VTC-010. The synthetic stalled-MySQL protocol fixture tests deadlines, recovery and process exit with a half-open peer, not real MySQL transactions. No native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
 
 VTC-007 adds narrow real MySQL transaction/value/audit/migration checks separately from `pnpm check`. Its [persistence guide](docs/development/persistence.md) documents the synthetic database name and reset acknowledgment, production artifact migration command, sticky partial-DDL state and remaining integration gates. Never run the destructive fixture commands against real data.
 

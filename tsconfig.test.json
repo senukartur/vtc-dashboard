@@ -1,5 +1,15 @@
 {
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "noEmit": true, "allowImportingTsExtensions": true },
-  "include": ["test/scaffold/**/*.ts", "test/persistence/**/*.ts", "apps/api/src/**/*.ts"]
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2023", "DOM"]
+  },
+  "include": [
+    "test/**/*.ts",
+    "scripts/test-lanes.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "apps/api/src/**/*.ts"
+  ]
 }
