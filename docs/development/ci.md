@@ -1,6 +1,6 @@
 # VTC-009 pull request CI
 
-[VTC-009](https://trello.com/c/tgxPEMmP) adds [CI](../../.github/workflows/ci.yml) for every opened, synchronized or reopened pull request, including drafts, and pushes to `main`. There are no path filters. Stable job names are **Quality suite** and **Required CI**. VTC-010's [main ruleset](../../.github/rulesets/main.json) was applied on 2026-10-17 and read back with effective branch rules; the [review guide](review.md#evidence-and-remaining-gates) records the observed blocked failing PR and separate pending delivery gates. The file itself does not apply hosted settings.
+[VTC-009](https://trello.com/c/tgxPEMmP) adds [CI](../../.github/workflows/ci.yml) for every opened, synchronized, reopened or ready-for-review pull request, including drafts, and pushes to `main`. There are no path filters. Stable job names are **Quality suite** and **Required CI**. VTC-010's [main ruleset](../../.github/rulesets/main.json) was applied on 2026-10-17 and read back with effective branch rules; the [review guide](review.md#evidence-and-remaining-gates) records the observed blocked failing PR and separate pending delivery gates. The file itself does not apply hosted settings.
 
 ## Execution and trust
 

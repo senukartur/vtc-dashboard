@@ -119,7 +119,6 @@ jobs:
             --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["path","line","body"],"additionalProperties":false}},"required":["summary","findings"],"additionalProperties":false}'
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
-          allowed_non_write_users: '*'
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
@@ -212,6 +211,15 @@ jobs:
               ? `\n\n${omittedFindings} inline finding(s) omitted because their locations were not present in the current PR diff.`
               : '';
             const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${safePublicText(result.summary).slice(0, 60000)}${omissionNote}`;
+            const latest = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (latest.data.head.sha !== headSha) {
+              core.setFailed('PR head changed before Claude review publication; no summary was published.');
+              return;
+            }
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -303,7 +311,6 @@ jobs:
             --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"findings":{"type":"array","maxItems":20,"items":{"type":"object","properties":{"path":{"type":"string"},"line":{"type":"integer","minimum":1},"body":{"type":"string"}},"required":["path","line","body"],"additionalProperties":false}},"required":["summary","findings"],"additionalProperties":false}'
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
-            allowed_non_write_users: '*'
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
@@ -396,6 +403,15 @@ jobs:
               ? `\n\n${omittedFindings} inline finding(s) omitted because their locations were not present in the current PR diff.`
               : '';
             const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${safePublicText(result.summary).slice(0, 60000)}${omissionNote}`;
+            const latest = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (latest.data.head.sha !== headSha) {
+              core.setFailed('PR head changed before Claude review publication; no summary was published.');
+              return;
+            }
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
