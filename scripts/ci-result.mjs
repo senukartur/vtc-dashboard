@@ -30,12 +30,7 @@ export function safeEvent(value) {
     (value.status === "success") !== (value.exitCode === 0)
   )
     return undefined;
-  return {
-    stage: value.stage,
-    status: value.status,
-    exitCode: value.exitCode,
-    durationMs: value.durationMs,
-  };
+  return value;
 }
 export function eventLine(stage, exitCode, durationMs) {
   const event = safeEvent({
