@@ -57,9 +57,13 @@ for (const signal of ["SIGINT", "SIGTERM"])
   });
 async function docker(tail, timeout) {
   return new Promise((accept, reject) => {
+    const ownProcessGroup = cleaning;
     const child = spawn("docker", [...args, ...tail], {
       cwd: root,
-      stdio: "inherit",
+      stdio: ownProcessGroup ? ["ignore", "pipe", "pipe"] : "inherit",
+      // Await cleanup in a separate POSIX session so terminal signals cannot reach it directly.
+      detached: ownProcessGroup,
+      windowsHide: true,
       env: {
         ...process.env,
         // Explicit env-file plus these values prevent shell interpolation overriding the allocation.
@@ -69,6 +73,10 @@ async function docker(tail, timeout) {
         VTC_TEST_ROOT_PASSWORD: undefined,
       },
     });
+    if (ownProcessGroup) {
+      child.stdout.pipe(process.stdout, { end: false });
+      child.stderr.pipe(process.stderr, { end: false });
+    }
     active = child;
     let expired = false;
     const timer =
@@ -76,7 +84,16 @@ async function docker(tail, timeout) {
         ? undefined
         : setTimeout(() => {
             expired = true;
-            child.kill("SIGKILL");
+            // A descendant retaining a pipe must not keep cleanup waiting after its deadline.
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            try {
+              if (ownProcessGroup && process.platform !== "win32" && child.pid)
+                process.kill(-child.pid, "SIGKILL");
+              else child.kill("SIGKILL");
+            } catch {
+              child.kill("SIGKILL");
+            }
           }, timeout);
     child.once("error", (error) => {
       clearTimeout(timer);

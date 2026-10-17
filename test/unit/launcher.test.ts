@@ -45,12 +45,15 @@ async function launcher(
     release: () => Promise<void>;
     configuration: () => string;
   }) => Promise<void>,
+  ownProcessGroup = false,
 ) {
   await mkdir(resolve(root, ".local/testing"), { recursive: true });
   const directory = await mkdtemp(resolve(root, ".local/testing/fake-docker-"));
   await writeFile(join(directory, "docker"), fakeDocker, { mode: 0o755 });
   const child = spawn(process.execPath, ["scripts/test-local.mjs", "unit"], {
     cwd: root,
+    detached: ownProcessGroup,
+    windowsHide: true,
     env: {
       ...safeChildEnvironment(),
       PATH: `${directory}${delimiter}${process.env.PATH ?? ""}`,
@@ -83,7 +86,15 @@ async function launcher(
     });
   } finally {
     await writeFile(join(directory, "release"), "synthetic");
-    if (child.exitCode === null) child.kill("SIGKILL");
+    if (child.exitCode === null) {
+      if (ownProcessGroup && child.pid) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      } else child.kill("SIGKILL");
+    }
     await bounded(exit, "fake-launcher-exit");
     const run = output.match(/Owned isolated test project: vtc008-([a-f0-9]{16})/)?.[1];
     if (run) await rm(resolve(root, ".local/testing", run), { recursive: true });
@@ -91,25 +102,37 @@ async function launcher(
   }
 }
 
-test.skipIf(process.platform === "win32")(
-  "repeated signals during cleanup cannot kill the owned compose-down child",
-  async () => {
-    await launcher("signals", async ({ child, output, exit, release, configuration }) => {
-      await until(async () => output().includes("FAKE_UP_READY"));
-      child.kill("SIGINT");
-      await until(async () => output().includes("FAKE_CLEANUP_STARTED"));
-      child.kill("SIGINT");
-      await until(async () => output().includes("Cleanup already running"));
-      child.kill("SIGTERM");
-      await until(async () => output().split("Cleanup already running").length === 3);
-      await release();
-      expect(await bounded(exit, "signal-launcher-exit")).toBe(130);
-      expect(output()).toContain("FAKE_CLEANUP_COMPLETE");
-      expect(output()).not.toContain("FAKE_CLEANUP_SIGNAL_FORWARDED");
-      await expect(access(configuration())).rejects.toMatchObject({ code: "ENOENT" });
-    });
-  },
-);
+for (const target of ["PID", "process group"] as const)
+  test.skipIf(process.platform === "win32")(
+    `repeated ${target} signals during cleanup cannot kill the owned compose-down child`,
+    async () => {
+      await launcher(
+        "signals",
+        async ({ child, output, exit, release, configuration }) => {
+          const signal = (value: NodeJS.Signals) => {
+            if (target === "process group") {
+              if (!child.pid) throw new Error("OWNED_LAUNCHER_PID_MISSING");
+              // This group was created by this helper; never signal the test runner's group.
+              process.kill(-child.pid, value);
+            } else child.kill(value);
+          };
+          await until(async () => output().includes("FAKE_UP_READY"));
+          signal("SIGINT");
+          await until(async () => output().includes("FAKE_CLEANUP_STARTED"));
+          signal("SIGINT");
+          await until(async () => output().includes("Cleanup already running"));
+          signal("SIGTERM");
+          await until(async () => output().split("Cleanup already running").length === 3);
+          await release();
+          expect(await bounded(exit, "signal-launcher-exit")).toBe(130);
+          expect(output()).toContain("FAKE_CLEANUP_COMPLETE");
+          expect(output()).not.toContain("FAKE_CLEANUP_SIGNAL_FORWARDED");
+          await expect(access(configuration())).rejects.toMatchObject({ code: "ENOENT" });
+        },
+        target === "process group",
+      );
+    },
+  );
 
 test.skipIf(process.platform === "win32")(
   "failed compose-down retains private configuration and prints a bounded recovery instruction",
