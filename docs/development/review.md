@@ -16,7 +16,7 @@ Claude posts advisory comments. A successful workflow means the reviewer ran; it
 
 PR conversation comments use the workflow on the default branch, so `@claude` in the conversation works only after this workflow is merged to `main`. Automatic PR events and review-line comments use the PR merge ref and can exercise the workflow before merge. Reopen an existing non-draft PR after merge to request its initial automatic review, or use an owner mention.
 
-Automatic reviews cancel earlier automatic reviews of the same PR. Mention reviews queue separately. Ordinary comments cannot cancel a review because concurrency is scoped to each eligible job. Both jobs have a 20-minute timeout.
+Automatic reviews cancel earlier automatic reviews of the same PR. Mention reviews use a separate concurrency group with at most one running and one pending job per PR; a newer mention replaces an already pending mention, while the running job continues. This uses GitHub's [default single-pending concurrency behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency). Ordinary comments cannot cancel a review because concurrency is scoped to each eligible job. Both jobs have a 20-minute timeout.
 
 ## Authentication and usage costs
 
@@ -35,7 +35,7 @@ The workflow uses the job's short-lived `GITHUB_TOKEN`; no Claude GitHub App ins
 
 ## Permissions and public-data handling
 
-Each job has `contents: read`, `pull-requests: write`, and `issues: write`. These scopes allow comments and review operations but no code push; the prompt prohibits approval and change requests. The allowed tools cover file reading, PR views/diffs/comments and inline findings. This is a constrained reviewer, not a proof against prompt injection. It does not install project dependencies or run application code/tests.
+Each job has `contents: read`, `pull-requests: write`, and `issues: write`. These scopes allow comments and review operations but no code push; the prompt prohibits approval and change requests. The explicit allowed tools cover file reading, PR views/diffs/comments and inline findings. In mention mode, the [pinned action also adds default tools and enables local edits](https://github.com/anthropics/claude-code-action/blob/756cc22e19660d20e8cc9496b4f242475a7f7790/src/modes/tag/index.ts), including progress-comment and CI-inspection tools and git operations. Both jobs therefore explicitly deny file-edit tools, git commands/the action's push wrapper and MCP file commits/deletions with `--disallowedTools`; the action's own setup still checks out the PR and prepares git authentication. This is a constrained reviewer, not a proof against prompt injection. The reviewer is instructed not to install project dependencies or run application code/tests.
 
 The owner-only mention job checks that the target is an open, same-repository PR before checkout or Claude authentication. This closes telemetry's documented fork-conversation exception, which is unsuitable for this public repository. Fork automatic/review-line events are also excluded. No `pull_request_target`, extra non-write actors or bot allowlist is enabled.
 
@@ -45,7 +45,9 @@ Full model output is disabled even during debug reruns: this is a public reposit
 
 ## Verification and remaining gates
 
-Prepared in [PR #7](https://github.com/senukartur/vtc-dashboard/pull/7). On 2026-10-17, actionlint 1.7.12, local documentation links and staged whitespace checks passed; staged changes were inspected with a targeted privacy scan. GitHub accepted the workflow and [skipped both jobs for the draft PR](https://github.com/senukartur/vtc-dashboard/actions/runs/39046116323), as intended. This is draft-trigger evidence only: no authenticated Claude review, seeded-defect finding, fork/non-owner hosted test, conversation mention or enforced merge gate is claimed.
+Prepared in [PR #7](https://github.com/senukartur/vtc-dashboard/pull/7). On 2026-10-17, actionlint 1.7.12, local documentation links and staged whitespace checks passed; staged changes were inspected with a targeted privacy scan. GitHub accepted the workflow and [skipped both jobs for the draft PR](https://github.com/senukartur/vtc-dashboard/actions/runs/39046116323), as intended.
+
+After the owner provisioned the authentication secret, marking the PR ready triggered a [successful automatic review](https://github.com/senukartur/vtc-dashboard/actions/runs/39047321260) of commit `e414f2fc20bfb43e1b00650155f33177684033ab`. Claude posted [a summary and two inline findings](https://github.com/senukartur/vtc-dashboard/pull/7#issuecomment-6236220562). The follow-up corrects the concurrency documentation and adds explicit edit/git tool denials after confirming mention-mode defaults in the pinned action source. That successful run predates these fixes; it is not a clean review or hosted verification of the added denials. No seeded-defect finding, fork/non-owner hosted test, conversation mention or enforced merge gate is claimed.
 
 - Validate workflow syntax/expressions with actionlint and inspect the exact staged diff for whitespace and public-data safety.
 - After authentication is configured, open/mark ready a same-repository PR and verify actual advisory output. Before merge, an owner review-line mention can test on-demand behavior; after merge, verify a PR conversation mention as well.
