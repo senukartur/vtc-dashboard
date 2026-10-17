@@ -14,7 +14,13 @@ export const stages = [
   "cleanup",
 ];
 export function requiredCi(results) {
-  return results?.quality === "success" ? 0 : 1;
+  if (results?.quality !== "success" || results?.deployment !== "success") return 1;
+  if (results.event === "pull_request") return results.artifact === "skipped" ? 0 : 1;
+  return results.event === "push" &&
+    results.ref === "refs/heads/main" &&
+    results.artifact === "success"
+    ? 0
+    : 1;
 }
 export function safeEvent(value) {
   if (

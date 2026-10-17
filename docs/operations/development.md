@@ -1,0 +1,81 @@
+# Development deployment and recovery
+
+[VTC-011](https://trello.com/c/3k7ZhMWX) and its linked PRs record the current provisioning, exact deployed revision and acceptance evidence. Prepared configuration, local tests, merged configuration and actual hosted acceptance are separate milestones. Use synthetic data until later authentication, evidence, retention and sustained-backup gates pass. Hostland compatibility remains VTC-041.
+
+## Provisioning worksheet
+
+Review this package independently before provisioning. Keep the completed worksheet, account inventory, DNS names, SSH targets/host keys, access settings and actual storage paths in private owner records. Only placeholders and fixed safe results belong in Git/CI.
+
+| Item | Reviewable target and required readback |
+| --- | --- |
+| Budget | Separate owner-operated account; actual recurring total including tax, domain, VM backup and independent-copy costs no more than USD 20/month |
+| Initial measured trial | Basic Regular 1 CPU / 1 GiB / 25 GiB: public USD 6/month plus 20% weekly backup (USD 1.20), USD 7.20 before tax/extras; verify actual checkout |
+| Fallback | If actual OOM, sustained swapping, latency or recovery peaks fail acceptance, review 2 GiB / 1 CPU at public USD 12 + USD 2.40 backups before tax/extras, within the ceiling; export first and prefer RAM/CPU-only resize preserving disk |
+| Runtime | Supported Ubuntu LTS with Python 3.11+, maintained updates, Docker Engine/Compose, CA certificates/sudo; images retain Node 24.22.0 / pnpm 12.14.0 / MySQL 8.4.11 |
+| DNS/TLS | Owner-controlled subdomain resolves to the new VM; public TCP 80/443 only at proxy; independently verify ACME HTTPS |
+| Access | Separate root/operator channel; deploy key restricted to fixed receiver, exact sudo entry, no Docker group/forwarding/PTY; independently compare host-key fingerprint through provider console before storing known_hosts |
+| Firewall | Restrict SSH according to reviewed operator/CI access policy; app, SQL and probe have no published ports; preserve independent console recovery |
+| Memory | Review bounded 1 GiB host swap for short peaks, root-only swapfile permissions and disk capacity; measure swap/OOM behavior rather than treating swap as capacity proof |
+| Recovery copy | Verify available private owner-local encrypted storage at zero incremental cost for the initial synthetic trial, with key stored independently; no paid storage add-on assumed |
+
+Public sources: [Droplet pricing](https://www.digitalocean.com/pricing/droplets), [backup pricing](https://docs.digitalocean.com/products/backups/details/pricing/). Trial credit does not reduce recurring cost. Disk growth is not trivially reversible. A local container cap does not prove that a 1 GiB VM works.
+
+## Install and enable the single path
+
+1. Review the exact merged source and actual checkout total. Install maintained Docker/Compose and operator prerequisites on the approved new VM. Apply reviewed updates/firewall/swap and verify console recovery. No script creates or purchases a provider resource.
+2. Run `sudo sh deploy/development/install.sh` from the reviewed checkout. It refuses an existing installation and creates root-owned `/opt/vtc-development`, random private credentials and the restricted deploy account. Keep receiver, Compose, private files and code root-owned and unwritable by deploy. Private configuration is mode 0600 in a 0700 directory, except the dedicated bootstrap directory/file, which grant only pinned MySQL gid 999 the read/traverse access needed inside its read-only mount. The enclosing host private directory stays root-only. Never run this on another development or production server.
+3. Privately replace the `example.invalid` DNS/TLS placeholders in `private/proxy.env`. On an existing volume, editing bootstrap credentials does not change stored MySQL users. Never delete a volume to repair credentials.
+4. Install the public deploy key using `authorized_keys.example` into a root-owned, mode 0644 authorized_keys file in the root-owned deploy home/.ssh; install `sshd.example`. Validate `sshd -t` and the exact sudo entry with `visudo`, with a second operator session before reload. Test arbitrary shell commands, forwarding, malformed/oversized/interrupted uploads are rejected. SQL/root/probe credentials never enter GitHub.
+5. Configure GitHub environment `development` with **main-only** branch policy and read back that restriction. Store only `DEVELOPMENT_SSH_TARGET`, `DEVELOPMENT_SSH_KEY`, `DEVELOPMENT_KNOWN_HOSTS` as environment secrets. Pin the host key after independent console comparison; keyscan alone is insufficient. Keep the real hostname out of environment URLs, PRs and CI output.
+6. Keep repository variable `DEVELOPMENT_DEPLOY_ENABLED` absent/false until the reviewed setup and actual costs/access are ready. Set it to `true` only during separately authorized provisioning. The new workflow must be merged onto main before its first workflow_run/dispatch. CI/review gates still apply to the bootstrap PR.
+
+The workflow accepts only CI completion and manual dispatch. Both execute control code from main, use the same validator, and require canonical repository/workflow, successful completed main-push CI, full merged-main SHA, exact run/attempt and one unexpired artifact. Automatic candidates must still equal current main. Manual dispatch itself must use main and identifies a historical merged SHA; it cannot rebuild or consume PR artifacts. Missing/expired artifacts fail closed. Main Required CI includes quality, deployment rehearsal and artifact publication. PR publication is deliberately inapplicable; unknown/skipped main outcomes fail.
+
+CI builds the production image with immutable revision metadata and uploads only `image.tar` and closed `release.json` for seven days. Strict zip layout, expansion bounds, lengths, hash and revision/run/attempt bind the archive. It contains no environment, backups, uploads or diagnostics. Eligibility and archive validation precede SSH-secret use. Strict pinned host-key SSH uses one receiver protocol; callers cannot supply paths, environment, Compose or shell. Public logs contain fixed result categories/revisions, never commands, target, raw SQL, expanded configuration or child errors.
+
+The receiver also compares the loaded image ID with the manifest ID supplied by the validated transport. Root control code is installed from the reviewed source, independently of the image artifact. Later changes to root control/configuration require a reviewed operator update that preserves private configuration/state and records its source revision; CI never overwrites its own forced-command policy.
+
+## Runtime, releases and failure recovery
+
+Only the proxy exposes ports and it has no evidence mount. App/probe run non-root with read-only roots, dropped capabilities, bounded logs/resources and no Docker socket. SQL is on an internal network. The separate authenticated probe adds no domain API/authentication. Only root/operator can inspect Docker; deploy is not in its group.
+
+Trial caps are MySQL 512 MiB, app 192 MiB, probe 64 MiB and proxy 64 MiB; short migration replaces stopped app/probe and minute heartbeat uses 64 MiB transiently. MySQL uses 128 MiB buffer pool, bounded temporary tables, 24 connections, performance schema, and dedicated-server auto tuning off. Durability (flush-on-commit and sync-binlog), strict SQL, UTC and exact baseline remain enabled. Headroom is limited and must be measured. Current lazy connections are five readiness slots, one probe, heartbeat and migrator each; future UnitOfWork/jobs/replicas require renewed capacity/grant review.
+
+Runtime can read the schema but has no DDL/global/cross-schema or migration-ledger writes. Future table DML grants belong to their schema owners; the scaffold has no runtime domain commands. Migrator has schema DDL/DML, exporter reads the two schemas, probe reads only its synthetic heartbeat and heartbeat writer changes only that table. Root/bootstrap credentials stay private. Operations SQL is separate from the production Drizzle journal.
+
+One host flock serializes release, migration, export/restore and cron. The receiver validates bounded upload/hash/tar members and disk space, loads the image, enables maintenance, stops writers, exports consistent pre-migration state, runs the packaged explicit migrator, starts app/probe and checks database readiness plus trusted HTTPS/revision through authenticated operator readiness. The operator readiness proxy can verify the candidate while public app traffic remains in maintenance. Current/previous metadata is promoted before that maintenance fence opens. GitHub concurrency never cancels an active release; an independent high-water mark prevents lower automatic run IDs after manual rollback too. Historical redeploy is explicit. No automatic image pruning removes current/previous or export-required images; review disk before retaining further releases.
+
+Before migration, durable `state/recovery-required` intent fences even an uncatchable receiver death. Only complete promotion or verified zero-migration recovery clears it. Upload timeout applies only to receipt, and is cancelled before release. Caught migration interruptions stop the fixed migrator and SQL server; marker state blocks ordinary export/cron/seed/release. Migration failure preserves maintenance and sticky `applying` ledger. Disconnect alone does not prove server DDL stopped. Never clear a marker or replay blindly. Failed readiness can restore the previous image only when the CLI proved **zero** newly applied migrations; verify that recovery. New/uncertain schema work requires forward repair or a tested consistent restore. Image rollback does not undo DDL.
+
+## Export and isolated restore
+
+```sh
+sudo python3 /opt/vtc-development/operations.py export
+sudo python3 /opt/vtc-development/operations.py restore EXPORT_ID
+```
+
+Export holds the same lock, maintains a write fence over app/probe and cron, dumps both InnoDB schemas in one consistent snapshot, archives evidence while stopped, and writes a revision/length/hash manifest. This includes migration history and synthetic references. Failure keeps maintenance. Success restarts/verifies the app. Provider snapshots supplement this coherence proof.
+
+For the initial fictional reference proof, run root operator `python3 /opt/vtc-development/operations.py seed-synthetic` after the first accepted release. It fences writers, writes one fixed fictional evidence sentinel and its content hash into the separate operations schema, then resumes/verifies. Export and isolated restore compare that SQL reference to the evidence inventory. It creates no application identity, report, upload endpoint or domain migration.
+
+Restore validates the full manifest and evidence archive **before** touching SQL. It fences/stops active writers and active MySQL to avoid assuming two databases fit in 1 GiB, then creates fresh private MySQL/evidence volumes. It imports SQL, checks the exact baseline and clean immutable migration replay, and compares file content/length inventory and synthetic SQL references. It leaves isolated volumes stopped for private inspection. Active volumes remain untouched; only a clean active state is resumed and verified afterward. Recovery-required state stays fenced for an explicit reviewed repair/cutover. Tar ordering/metadata is not used as content identity. Preserve independently recoverable image/configuration/tools as well as the export.
+
+Stream a selected export tar into private owner-local storage and encrypt there with pinned Node and `recovery-copy.mjs`: `key KEY_FILE` creates a 32-byte key; `seal ENCRYPTED_FILE KEY_FILE` reads stdin; `open ENCRYPTED_FILE KEY_FILE RESTORED_TAR` authenticates/decrypts. AES-256-GCM, exclusive outputs and authenticated publication protect the copy. Store the key separately; never print/commit it or use public CI artifacts for copies. Verify independent-copy checksums and perform isolated restore from that decrypted copy. Verify destination ownership/access/free space and zero incremental cost before claiming it exists.
+
+This initial manual synthetic exercise is not ongoing data protection. Before pilot/real data, approve sustained cadence, retention, independent destination ownership/capacity and scheduled restore proof consistent with the one-year/latest-decision and under-review screenshot policy.
+
+## Patching and authorized teardown
+
+Use an owner-approved maintenance window, disable new deployment triggers, wait for the active operations lock, and verify an independent export/restore and console recovery before host updates. Record OS/Docker/security-patch readbacks privately. App/Node/MySQL/Caddy upgrades require a reviewed pin/baseline change with relevant CI, exact-target migration/readiness and failure/restore checks; never substitute a floating tag or silently relax the MySQL patch check. After a required reboot, verify the same accepted image, persistent SQL/evidence, HTTPS, container restarts/OOM state and the bounded synthetic observation again. Follow the [persistence recovery runbook](../development/persistence.md) for dirty-ledger diagnosis; a successful image restart does not repair DDL.
+
+Teardown needs explicit owner authorization for the identified development resources. Disable `DEVELOPMENT_DEPLOY_ENABLED`, remove acceptance cron, and wait for active release/operations to finish. Create and independently restore the final encrypted export, retain its image/configuration/key and required history, and record safe revision/evidence links before stopping services. Delete only the approved VM/backup/DNS/firewall resources through the operator's private inventory, then verify the actual recurring charges and access are removed. Revoke the dedicated deploy key/secrets when no longer needed. Stopping containers is not proof of provider teardown or billing cancellation. Never delete another environment, unrelated DNS/account resources, or retained evidence merely as cleanup; real-data retention requirements still apply if this environment is later approved for pilot data.
+
+## Verification and hosted acceptance
+
+`node deploy/development/test.mjs` builds this checkout's production image and a separate operator test runner, allocates random labelled resources and cleans only that allocation. The test runner alone mounts a Docker socket; app/probe never do. Cases cover real MySQL grants, DB outage/recovery, clean/dirty migration replay, SQL/files, recreation, fenced export/isolated restore/checksums, damaged archives, cross-process locking, operator auth, private/encoded paths and disposable trusted-CA HTTPS. Raw diagnostics stay in ignored private `.local/development/` files and are never uploaded. Hosted TLS uses normal ACME verification.
+
+Hosted proof additionally requires the exact successful-CI revision, rejected ineligible release, historical manual redeploy after two eligible versions exist, serialization/failure recovery, MySQL/files after app recreation and **actual VM reboot**, isolated restore from the independent encrypted copy and private-file denial. Publish safe categories/revision/run links only. Docker restart does not prove VM reboot.
+
+Install root `cron.example` for the acceptance window. It advances SQL without HTTP visitors. With private `OPERATOR_BASE_URL`/`OPERATOR_TOKEN`, `observe.mjs OUTPUT_FILE` performs 21 sequential trusted HTTPS reads every 30 seconds over ten minutes; it records only numeric intervals, availability, freshness/advancement and durations. Measure actual RAM, deploy/migration/restore peaks, disk, swap, OOM/restarts and recovery on the 1 GiB host, then stop probes/remove synthetic cron. These cases do not prove domain leases, jobs, notifications/backlog, browser sessions or a 90-second SLA. `pnpm jobs` remains `not_configured`.
+
+Two phases share finite card fix/review budgets: independently review code/settings/provisioning, merge disabled preparation with CI/Copilot gates, then separately authorize/apply the reviewed setup and independently review hosted evidence/exact deployed source. Keep the card open until required hosted/recovery evidence passes. A second code PR is necessary only for source fixes; keep actual status/evidence on the live card and linked PRs.

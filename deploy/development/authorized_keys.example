@@ -1,0 +1,2 @@
+# Replace only the public key through the root operator; never grant Docker-group membership.
+restrict,command="/opt/vtc-development/receive.sh" ssh-ed25519 NONFUNCTIONAL_PLACEHOLDER

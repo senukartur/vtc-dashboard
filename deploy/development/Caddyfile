@@ -1,0 +1,27 @@
+{
+  admin off
+  email {$TLS_EMAIL}
+  log {
+    output discard
+  }
+}
+{$STAGING_DOMAIN} {
+  @maintenance file /maintenance/enabled
+  @private path /evidence* /uploads* /private* /.env* /.git* /backups* /secrets*
+  route {
+    handle /_operations/* {
+      uri strip_prefix /_operations
+      reverse_proxy probe:3001
+    }
+    handle @maintenance {
+      header Cache-Control "no-store"
+      respond "MAINTENANCE" 503
+    }
+    handle @private {
+      respond "NOT_FOUND" 404
+    }
+    handle {
+      reverse_proxy app:3000
+    }
+  }
+}
