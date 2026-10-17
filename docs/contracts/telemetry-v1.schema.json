@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/vtc-dashboard/contracts/telemetry-v1.schema.json",
-  "title": "VTC-003 candidate telemetry ingestion request v1.0",
+  "title": "VTC-003 telemetry ingestion request v1.0",
   "description": "Structural request schema only. Authorization, UTF-8 byte/depth/decimal ranges, identity conflicts, source truth and durable acknowledgement require contract semantic/integration checks.",
   "type": "object",
   "additionalProperties": false,
@@ -690,105 +690,6 @@
         }
       ]
     },
-    "money": {
-      "oneOf": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "available",
-            "value"
-          ],
-          "properties": {
-            "available": {
-              "const": true
-            },
-            "value": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "raw",
-                "sdkType",
-                "currency"
-              ],
-              "properties": {
-                "raw": {
-                  "type": "string",
-                  "pattern": "^-?(0|[1-9][0-9]{0,19})$",
-                  "description": "Canonical exact SDK integer text; semantic signed/unsigned 64-bit bounds also apply; -0 is forbidden."
-                },
-                "sdkType": {
-                  "enum": [
-                    "s64",
-                    "u64"
-                  ]
-                },
-                "currency": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "status"
-                      ],
-                      "properties": {
-                        "status": {
-                          "const": "unknown"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "status",
-                        "code",
-                        "source"
-                      ],
-                      "properties": {
-                        "status": {
-                          "const": "sdk-documented"
-                        },
-                        "code": {
-                          "type": "string",
-                          "maxLength": 16,
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-                        },
-                        "source": {
-                          "type": "string",
-                          "maxLength": 256,
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "available",
-            "reason"
-          ],
-          "properties": {
-            "available": {
-              "const": false
-            },
-            "reason": {
-              "enum": [
-                "not-observed",
-                "not-supported",
-                "invalid"
-              ]
-            }
-          }
-        }
-      ]
-    },
     "time": {
       "type": "object",
       "additionalProperties": false,
@@ -1159,7 +1060,60 @@
             "ambiguous": {
               "type": "boolean"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "unknown"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "method": {
+                    "const": "none"
+                  },
+                  "confidence": {
+                    "const": "none"
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "method": {
+                    "enum": [
+                      "module-scan",
+                      "process-scan"
+                    ]
+                  },
+                  "confidence": {
+                    "enum": [
+                      "strong",
+                      "weak"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "const": "single-player"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "confidence": {
+                    "const": "weak"
+                  }
+                }
+              }
+            }
+          ]
         },
         "job": {
           "type": "object",
@@ -1245,13 +1199,13 @@
           "$ref": "#/$defs/damage"
         },
         "expectedIncome": {
-          "$ref": "#/$defs/money"
+          "$ref": "#/$defs/unsignedMoney"
         },
         "revenue": {
-          "$ref": "#/$defs/money"
+          "$ref": "#/$defs/signedMoney"
         },
         "penalty": {
-          "$ref": "#/$defs/money"
+          "$ref": "#/$defs/signedMoney"
         },
         "evidence": {
           "type": "object",
@@ -1399,6 +1353,198 @@
                   "gap"
                 ]
               }
+            }
+          }
+        }
+      ]
+    },
+    "unsignedMoney": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "value"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "raw",
+                "sdkType",
+                "currency"
+              ],
+              "properties": {
+                "raw": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,19})$",
+                  "description": "Canonical exact u64 SDK integer text; semantic validator additionally enforces the precise 64-bit range."
+                },
+                "sdkType": {
+                  "const": "u64"
+                },
+                "currency": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "unknown"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "code",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "sdk-documented"
+                        },
+                        "code": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                        },
+                        "source": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "enum": [
+                "not-observed",
+                "not-supported",
+                "invalid"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "signedMoney": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "value"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "raw",
+                "sdkType",
+                "currency"
+              ],
+              "properties": {
+                "raw": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]{0,18}|-[1-9][0-9]{0,18})$",
+                  "description": "Canonical exact s64 SDK integer text; semantic validator additionally enforces the precise 64-bit range."
+                },
+                "sdkType": {
+                  "const": "s64"
+                },
+                "currency": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "unknown"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "code",
+                        "source"
+                      ],
+                      "properties": {
+                        "status": {
+                          "const": "sdk-documented"
+                        },
+                        "code": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                        },
+                        "source": {
+                          "type": "string",
+                          "maxLength": 256,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "enum": [
+                "not-observed",
+                "not-supported",
+                "invalid"
+              ]
             }
           }
         }

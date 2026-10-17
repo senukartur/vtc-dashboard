@@ -86,7 +86,7 @@
       }
     },
     "gameMode": {
-      "mode": "single-player",
+      "mode": "unknown",
       "method": "none",
       "confidence": "none",
       "ambiguous": false
@@ -196,7 +196,7 @@
       "available": true,
       "value": {
         "raw": "10000",
-        "sdkType": "s64",
+        "sdkType": "u64",
         "currency": {
           "status": "unknown"
         }

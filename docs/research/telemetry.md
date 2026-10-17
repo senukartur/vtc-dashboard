@@ -1,6 +1,6 @@
 # VTC-003: telemetry integration discovery
 
-**Observed:** 2026-10-17. **Status:** researched contract candidate; maintainer agreement, independent review and merge remain pending. No client/server integration has been implemented here.
+**Observed:** 2026-10-17. **Status:** research complete; v1.0 implementation baseline adopted under the owner's conditional agreement authorization. [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) tracks final independent review and merge. No client/server integration has been implemented here.
 
 The [VTC-003 card](https://trello.com/c/lQrxZ13N) owns this investigation and the [HTTP contract](../contracts/telemetry-v1.md). The dashboard's [approved concept](../../CONCEPT.MD) remains authoritative for company decisions. The owner additionally requires automatic initial upload of **all retained local game trips**, followed by ongoing synchronization. An opt-in selection of old trips is not the agreed MVP behavior.
 
@@ -67,12 +67,14 @@ Primary code references at the frozen SHA: [protocol-v1.ts](https://github.com/s
 | [ET-104](https://trello.com/c/yx35yY15) | Dashboard implementation cards | This repository owns dashboard UI/API; no second website |
 | ET-101–104 history restore | VTC-110 (Later) | Initial client-to-server history upload is MVP; server-to-client restoration is still later work |
 
-These are proposed cross-project responsibility mappings. No external card was edited, messaged or accepted on the maintainer's behalf.
+These are the dashboard's agreed coordination boundaries. No external card was edited, messaged or accepted on another maintainer's behalf; implementation hand-off still belongs to VTC-024.
 
 ## Evidence limits and closure
 
 This research reads committed source and board requirements. It does not run the telemetry project's tests, claim its reported tests as ours, capture real driver data, establish anti-cheat/Steam-play proof, or demonstrate an uploader that does not yet exist.
 
-VTC-003 needs maintainer/owner agreement on the concrete contract and acceptance vectors, independent review and a merged dashboard PR before Done. VTC-023 must prove durability/concurrency against real MySQL; VTC-024 must prove both games, online/offline initial history synchronization, revoked credentials and partial data with the actual desktop client. The [acceptance matrix](../contracts/telemetry-v1-acceptance.md) separates specification checks from implementation evidence.
+The [contract agreement record](../contracts/telemetry-v1.md#agreement-record-2026-10-17) records the owner's authorization to adopt the reviewed/corrected v1.0 baseline. VTC-003 still requires final independent review and a merged dashboard PR before Done. VTC-023 must prove durability/concurrency against real MySQL; VTC-024 must prove both games, online/offline initial history synchronization, revoked credentials and partial data with the actual desktop client. The [acceptance matrix](../contracts/telemetry-v1-acceptance.md) separates specification checks from implementation evidence.
 
-Local specification validation used JSON Schema draft 2020-12 with `jsonschema` 4.26.0 in ignored research-only tooling: all six original synthetic request examples passed; 26 negative mutations were rejected (forged ownership/acceptance, unsupported versions, unsafe revision, wrong units, missing availability, lifecycle inconsistencies, extra process fields and bounds). These probes validate schema structure, not authentication, source truth, concurrency, retries or any running application. The isolated validator/tool dependencies are not application tooling and are not added to the repository dependency baseline.
+Local specification validation used JSON Schema draft 2020-12 with `jsonschema` 4.26.0 in ignored research-only tooling. The initial six examples and 26 negative probes passed structural checks, but independent source review identified field-specific money and game-mode inconsistencies. After correction, all six examples and 36 negative probes pass; additional positive probes preserve exact unsigned/signed 64-bit boundary strings and valid known/unknown game-mode combinations. These probes validate schema structure, not authentication, source truth, concurrency, retries or any running application. The isolated validator/tool dependencies are not application tooling and are not added to the repository dependency baseline.
+
+Independent review found three actionable P2 issues: expected income must preserve native `u64` while revenue/penalty remain `s64`; game-mode evidence must obey native known/unknown confidence rules; a full queue must pause new materialization while already frozen uploads keep draining. Schema, fictional fixtures, contract wording and the acceptance matrix were corrected accordingly. The final reviewed head and delivery evidence are recorded in PR #3 rather than claiming that these specification corrections implement the future uploader.
