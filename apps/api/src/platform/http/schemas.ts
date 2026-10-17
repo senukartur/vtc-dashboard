@@ -3,10 +3,10 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { FastifyInstance } from "fastify";
 
-export function createSchemaValidator(): Ajv2020 {
+export function createSchemaValidator(coerceTypes: false | "array" = false): Ajv2020 {
   const ajv = new Ajv2020({
     strict: true,
-    coerceTypes: false,
+    coerceTypes,
     useDefaults: false,
     removeAdditional: false,
     allErrors: false,
@@ -20,7 +20,10 @@ export function createSchemaValidator(): Ajv2020 {
 
 export function installSchemaCompilers(app: FastifyInstance): void {
   const ajv = createSchemaValidator();
-  app.setValidatorCompiler(({ schema }) => ajv.compile(schema));
+  const parameters = createSchemaValidator("array");
+  app.setValidatorCompiler(({ schema, httpPart }) =>
+    (httpPart === "body" ? ajv : parameters).compile(schema),
+  );
   app.setSerializerCompiler(({ schema }) => {
     const validate = ajv.compile(schema);
     return (data) => {
