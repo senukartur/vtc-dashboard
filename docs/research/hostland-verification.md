@@ -1,6 +1,6 @@
 # Isolated Hostland verification plan
 
-**Status:** prepared, not executed. **Owner:** VTC-004; later deployment/recovery owners VTC-011/041. Read the [findings](hosting.md), [proposed decision](../decisions/hosting.md) and [unsent provider questions](hostland-provider-questions.md).
+**Status:** deferred, prepared and not executed. **Owner:** VTC-041 after VTC-040 integrated testing. Originating VTC-004 research is retained; Hostland access/proof is not required to complete development architecture or staging. VTC-011 proves the [separate development environment](development-hosting.md), not Passenger. Read the [findings](hosting.md), [revised decision](../decisions/hosting.md) and [unsent provider questions](hostland-provider-questions.md).
 
 ## Scope before execution
 
@@ -47,6 +47,6 @@ Use a small explicit pool, set session UTC for the actual tests, and measure app
 
 ## Acceptance and cleanup
 
-Publish an aggregate report identifying the tested artifact revision and pass/fail/not-run per check, with actual account details retained privately. Update the capability matrix and budget conclusion only after evidence exists. If the host fails maintenance/cost/runtime requirements, keep production approval blocked and ask for a concrete provider/hosting decision before stack-dependent implementation.
+Publish an aggregate report identifying the tested artifact revision and pass/fail/not-run per check, with actual account details retained privately. Update the capability matrix and annual budget conclusion only after evidence exists. If Hostland fails maintenance/cost/runtime requirements, keep final cutover blocked and obtain a concrete hosting/version decision. This does not retroactively block independent architecture/staging work or substitute for its tests.
 
 Disable/remove only the specifically approved temporary jobs/resources after retaining necessary private evidence. Verify exact targets and authorization before deletion; no broad account reset, bulk file deletion, restore-overwrite or cleanup of unrelated user resources is part of this plan. If deletion authorization is absent, hand off the named test resources for the owner to remove rather than removing anything else.

@@ -1,6 +1,6 @@
-# VTC-004: Hostland feasibility investigation
+# Hostland production findings retained for VTC-041
 
-**Observed:** 2026-10-17. **Status:** documentation and read-only account inspection completed; production approval is blocked by the verification gates below. This is not a deployed application or a completed VTC-004. **Card:** [VTC-004](https://trello.com/c/OZ84Rfk4).
+**Observed:** 2026-10-17. **Status:** documentation/read-only findings retained; no hosted proof. **Origin:** [VTC-004](https://trello.com/c/OZ84Rfk4). **Execution owner:** VTC-041, after VTC-040 testing. The owner's later clarification supersedes the initial early-Hostland gate: development uses a separate account up to USD 20/month, with [its own deployment plan](development-hosting.md). The gates below block final production cutover only, not VTC-004 plan completion, architecture or staging.
 
 The owner-selected target is Node.js 24 and maintained MySQL 8.4 LTS, conditional on availability at the same approximately USD 35/year budget. The owner approved that version direction on 2026-10-17 after the MySQL 8.0 lifecycle finding; actual account availability/cost and version pins remain unverified. This supersedes the earlier 8.0 working baseline, not any existing site's database. No existing site/database, subscription, DNS, runtime, credentials or cron configuration was changed during inspection. No support message was sent.
 
@@ -50,9 +50,9 @@ The rendered public hosting page showed these annual-payment offers on the obser
 | GREEN | RUB 2,364 | Fits only if the applicable conversion is at least 67.54 RUB/USD, before all other costs |
 | RED | RUB 3,372 | Requires at least 96.34 RUB/USD before other costs |
 
-No live exchange rate or all-in USD price is claimed. Current-account annual renewal, domain renewal, tax/payment conversion, backup storage, email and any runtime/database/site add-ons still require a private total. Avoid selecting a more expensive plan from a marketing price alone. The production choice remains unapproved until that total is within the owner's budget. New paid development/hosting services are not authorized.
+No live exchange rate or all-in USD price is claimed. Current-account annual renewal, domain renewal, tax/payment conversion, backup storage, email and any runtime/database/site add-ons still require a private total in VTC-041. Avoid selecting a more expensive plan from a marketing price alone. The final production cutover remains unapproved until that total is within the annual budget. A separate USD 20/month development/testing ceiling is now approved; it is not part of this production worksheet.
 
-For development, prefer the existing computer and standard public-repository CI, with an actual local instance of the approved MySQL release and Node.js 24. This adds no hosted subscription and avoids free-tier database expiry/file loss. It is a selected **development approach**, not an implemented environment: VTC-006/008/009 provide reproducible startup and test tooling. A hosted preview, if later requested, needs a separate budget/expiry/persistence decision; no external free service is represented as durable production infrastructure.
+For current development, use local Node/MySQL plus CI and a separate hosted staging account within the newly approved USD 20/month ceiling. The [development comparison](development-hosting.md) and [revised deployment direction](../decisions/hosting.md) supersede the initial local-only hosting recommendation. VTC-011 implements and tests the staging plan; passing it does not prove Hostland compatibility.
 
 ## Evidence storage and backups
 
@@ -64,14 +64,14 @@ The public feature page describes seven snapshots over fourteen days, while the 
 
 | Gate | Evidence needed | Owner |
 | --- | --- | --- |
-| HOST-01 | Owner approved MySQL 8.4 at the same budget; availability, maintenance and cost on target remain unverified | Project owner + provider; VTC-004/005 |
-| HOST-02 | Patched Node.js 24 and a credible update mechanism; actual Fastify/Passenger execution | Provider + isolated proof; VTC-004 |
-| HOST-03 | Private all-in annual cost and capacity, including retained screenshots/backups | Project owner; VTC-004/039/041 |
-| HOST-04 | Isolated runtime/database/cron/TLS/storage/outbound proof | Authorized account operator; VTC-004 |
-| HOST-05 | Owner approved cron/polling and approximate healthy 90-second latency; execution/load/latency proof still required | VTC-004/021/036/037 |
-| HOST-06 | Target-compatible CI artifact, SSH deployment and rollback/restore rehearsal | VTC-009/011/041 |
+| HOST-01 | Owner approved MySQL 8.4 at the annual production budget; actual availability, maintenance and cost remain unverified | Project owner + provider; VTC-041 |
+| HOST-02 | Patched Node.js 24/update mechanism; actual Fastify/Passenger execution | Provider + isolated proof; VTC-041 |
+| HOST-03 | Private all-in annual production cost/capacity, including retained screenshots/backups | VTC-039/041 |
+| HOST-04 | Isolated Hostland runtime/database/cron/TLS/storage/outbound proof | Authorized production account operator; VTC-041 |
+| HOST-05 | Owner-approved cron/polling and approximate healthy 90-second target: prove on staging first, then on Hostland | VTC-011/021/036/037, final proof VTC-041 |
+| HOST-06 | Hostland-compatible artifact, SSH deployment and rollback/restore/transfer rehearsal | VTC-041, reusing VTC-009/011 tooling |
 
-Provider questions are [prepared and unsent](hostland-provider-questions.md). The proof plan is prepared, not run. Do not close VTC-004 or freeze a production-compatible VTC-005 stack while its required host evidence remains missing. Continuing independent contract/domain planning is possible; it must not misrepresent a selected, verified production platform.
+Provider questions are [prepared and unsent](hostland-provider-questions.md); the [proof plan](hostland-verification.md) is not run. VTC-041 owns them after integrated testing. VTC-004 can deliver its reviewed staging plan and VTC-005 can finalize locally/CI-tested development contracts without Hostland access. Keep the final production compatibility claim unverified until those later checks pass.
 
 ## Primary sources
 

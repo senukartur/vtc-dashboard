@@ -1,6 +1,6 @@
 # Hostland questions awaiting provider confirmation
 
-**Status:** prepared, unsent. This public draft contains no account identifiers, private tariff, hostnames or credentials. The owner can submit it privately to support; no provider communication is authorized or performed by preparing this file.
+**Status:** deferred to VTC-041 after VTC-040 testing; prepared, unsent. Hostland is the final destination, not the current development environment. This public draft contains no account identifiers, private tariff, hostnames or credentials. An authorized production-account operator can submit it privately when that stage begins; no provider communication is authorized or performed by preparing this file. Lack of an answer does not block development architecture or staging.
 
 We are evaluating a small Node.js/TypeScript application on an existing shared-hosting account, with approximately 10–30 members and a project budget near USD 35/year. We need to keep existing websites and databases unchanged while testing a separate application and empty database.
 

@@ -39,9 +39,9 @@ Start with the root [CONCEPT.MD](../../CONCEPT.MD) for the project idea, authori
 
 The owner-approved production budget is **approximately USD 35 per year**. The intended provider is **Hostland (https://www.hostland.ru/)**. Verify the full deployment/renewal cost and included database, backups, file storage, domain, and taxes privately. This public repository records the project budget and compatibility requirements, not account-specific tariffs, billing, identifiers, or inventory. Public advertised offers are not evidence of an existing account's terms.
 
-Development may use a different, convenient host before a later transfer. Its budget is a separate pending decision; use free/local options by default until paid development spending is explicitly agreed.
+The owner clarified the deployment sequence on 2026-10-17: **development/testing comes first on a separate account, with an approved ceiling of USD 20/month**. Hostland is the final production destination after integrated testing. VTC-004 plans staging, VTC-011 implements it, VTC-040 validates cross-module behavior, and VTC-041 verifies/transfers to Hostland. The annual production budget does not constrain staging to the production account or tariff.
 
-Hostland publicly documents Node.js on shared hosting, so do not classify this provider as PHP-only. The project targets Node.js 24 and MySQL 8.4; verify actual supported patches, maintenance, process limits, and SSE behavior privately before deployment. **VTC-004 is an early compatibility gate, not a final deployment afterthought.** A transfer must be rehearsed; changing only environment variables is not a proven migration strategy.
+Develop with maintained Node.js 24 and real MySQL 8.4, pinning/test-checking local/CI/staging configuration. Hostland publicly documents Node.js, but its actual patches, Passenger behavior, process limits, cron, persistence and full cost remain **VTC-041 final-cutover gates**. They do not block architecture or staging. Keep provider-neutral boundaries now and rehearse the eventual MySQL/file transfer; changing environment variables alone is not proof of portability.
 
 Free development hosting can sleep, expire databases, or discard local files. Those limits may delay webhooks and reminders. Such an environment is not proof of production reliability. Render's free-service documentation is a research reference, not a selected hosting plan.
 
@@ -55,9 +55,9 @@ Free development hosting can sleep, expire databases, or discard local files. Th
 - **Decision:** use MySQL directly from the first schema and migration. Do not introduce a PostgreSQL development environment or plan a later dialect conversion. A separately priced database/VDS is not part of the approved budget.
 - If persistent workers or SSE are unsupported, evaluate bounded cron-driven jobs and authenticated notification polling. Record timing/latency trade-offs and update the contracts and affected cards before adopting either change.
 
-VTC-004 remains open: actual runtime/database patches and maintenance, a host deployment test, background-task/SSE support, and full cost compatibility require verification. The temporary development budget also remains unanswered. Read-only account access does not authorize changing settings, applications, databases, or subscriptions. Keep verification evidence private and publish only a sanitized compatibility conclusion.
+**Historical scope note:** The initial proposal made Hostland execution an early gate. The owner's development-first clarification supersedes that dependency: the production checks remain required, now in VTC-041 after VTC-040. Read-only research did not change hosting settings. Keep actual account evidence private and publish sanitized results only.
 
-**2026-10-17 update:** [VTC-004 findings](../research/hosting.md) identify MySQL 8.0 EOL and Hostland's public MySQL 8.4 offer, plus the need for a patched Node.js 24 execution/update proof. The owner approved maintained MySQL 8.4 LTS at the same approximately USD 35/year budget, superseding the earlier 8.0 target; actual account availability/cost remain open. This dated decision supersedes the preliminary version direction above. The [deployment direction](../decisions/hosting.md) proposes one Passenger application, CI artifacts/SSH delivery, owner-approved minute cron jobs and 30-second visible-site notification polling (approximately 90 seconds under healthy conditions). The [isolated proof](../research/hostland-verification.md) is prepared, not executed; [provider questions](../research/hostland-provider-questions.md) are unsent. Local development/standard public CI is the no-new-subscription recommendation; no hosted development spending is approved. All 8.4 implementation criteria below are conditional on passing those availability/cost gates.
+**Current decision (2026-10-17):** [Development hosting research](../research/development-hosting.md) compares DigitalOcean, AWS Lightsail and Railway and recommends one USD 12/month bundled DigitalOcean VM, subject to the all-in USD 20/month ceiling. The [deployment direction](../decisions/hosting.md) separates staging from final Hostland transfer. Use MySQL 8.4 LTS/Node.js 24 now, preserving the owner-approved minute cron and 30-second visible-site polling (approximately 90 seconds under healthy conditions). [Hostland findings](../research/hosting.md), [isolated proof plan](../research/hostland-verification.md) and [unsent questions](../research/hostland-provider-questions.md) are retained for VTC-041. No account, server, workflow or hosted proof has been created by this plan.
 
 ### Proposed stack, subject to VTC-004 and VTC-005
 
@@ -73,7 +73,7 @@ If host discovery changes this choice, update the architecture ADR and all affec
 - Use utf8mb4 for localized text. External IDs, source event keys, token hashes, and other opaque identities need explicit exact comparison semantics; do not let case/accent-insensitive label collation merge distinct IDs. Normalize display-name aliases separately with game/locale context.
 - Store timestamps with documented UTC and fractional-second conventions; use lossless handling for large external IDs and exact decimal quantities. Pin SQL modes, isolation level, connection timezone, and a small bounded pool appropriate to shared hosting.
 - Implement durable jobs through MySQL tables, transactional claims/leases, and idempotent effects. Test MySQL 8.4 locking behavior, including a candidate FOR UPDATE SKIP LOCKED claim strategy, on the selected server. Persistent workers versus bounded cron execution remains a hosting decision; neither requires Redis.
-- Pin real MySQL test instances to the verified production version/configuration, or document and test a deliberate patch difference. SQLite, MariaDB, and PostgreSQL are not substitute integration-test engines. Use the same Node.js major line and check the actual production patch in compatibility CI.
+- Pin real MySQL test instances to the tested local/CI/staging version/configuration. Compare and test actual Hostland patch/settings differences in VTC-041; unknown production versions do not block these tests. SQLite, MariaDB, and PostgreSQL are not substitute integration-test engines. Use the same Node.js major line and add actual production patch compatibility evidence before cutover.
 - Use reviewed, serialized migrations and rehearsed backup/restore. MySQL DDL may implicitly commit: rolling back an application transaction is not a schema rollback strategy. Prefer additive migrations and documented forward repair; validate recovery after a partially applied migration.
 
 The relevant implementation details are tracked in VTC-004–009, VTC-011, VTC-013, VTC-019, VTC-021, VTC-023, VTC-026, and VTC-041. Card IDs, ownership boundaries, and dependencies remain stable.
@@ -145,7 +145,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 | [VTC-001: Confirm MVP policies, permissions, and acceptance scenarios](#vtc-001) | Discovery | None |
 | [VTC-002: Investigate and prototype versioned game catalogs](#vtc-002) | Discovery | None |
 | [VTC-003: Agree the versioned telemetry ingestion contract](#vtc-003) | Discovery | None |
-| [VTC-004: Verify the existing host and select a portable deployment approach](#vtc-004) | Discovery | None |
+| [VTC-004: Select a rapid testing deployment and plan the final Hostland transfer](#vtc-004) | Discovery | None |
 | [VTC-005: Define architecture, module ownership, and API contracts](#vtc-005) | Architecture | VTC-001, VTC-002, VTC-003, VTC-004 |
 | [VTC-006: Bootstrap the repository and local development environment](#vtc-006) | Foundation | VTC-005 |
 | [VTC-007: Create database, migration, and audit foundations](#vtc-007) | Foundation | VTC-006 |
@@ -182,7 +182,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 | [VTC-038: Build member administration and source connection settings](#vtc-038) | Frontend | VTC-012 |
 | [VTC-039: Harden security, observability, retention, and recovery](#vtc-039) | Operations | VTC-011, VTC-029, VTC-036 |
 | [VTC-040: Complete cross-module E2E and failure regression coverage](#vtc-040) | Quality | VTC-016, VTC-017, VTC-024, VTC-030, VTC-031, VTC-033, VTC-035, VTC-037, VTC-038 |
-| [VTC-041: Configure production deployment, backups, and host transfer rehearsal](#vtc-041) | Delivery | VTC-004, VTC-010, VTC-011, VTC-039 |
+| [VTC-041: Configure production deployment, backups, and host transfer rehearsal](#vtc-041) | Delivery | VTC-004, VTC-010, VTC-011, VTC-039, VTC-040 |
 | [VTC-042: Run the VTC pilot and complete the MVP release](#vtc-042) | Release | VTC-040, VTC-041 |
 
 ## 5. MVP card descriptions
@@ -270,28 +270,28 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 <a id="vtc-004"></a>
 
-### [VTC-004] Verify the existing host and select a portable deployment approach
+### [VTC-004] Select a rapid testing deployment and plan the final Hostland transfer
 
 - **Track:** Discovery
 - **Depends on:** None
 - **Primary ownership:** docs/research/hosting.md, docs/decisions/hosting.md
 
-**Goal:** Determine whether the proposed stack can run within approximately $35 per year on the current hosting.
+**Goal:** Select a quick, reproducible development/testing deployment on a separate account within USD 20/month; preserve final Hostland portability at approximately USD 35/year without requiring production-account access now.
 
-**Research status (2026-10-17):** [Public evidence/read-only findings](../research/hosting.md), [proposed decision](../decisions/hosting.md), [isolated test plan](../research/hostland-verification.md), and [unsent provider questions](../research/hostland-provider-questions.md). Production approval is blocked until maintained database/runtime availability, actual application/database/cron behavior and full annual cost are verified. The owner approved MySQL 8.4 LTS at the same budget following the 8.0 EOL finding; account availability remains unknown. No acceptance item is completed by a panel selector or an unexecuted plan.
+**Research status (2026-10-17):** [Provider/cost comparison](../research/development-hosting.md) and [development-first proposal](../decisions/hosting.md) are prepared; review/merge remain pending. The separate USD 20/month testing ceiling is owner-approved. DigitalOcean is the recommendation, not a provisioned environment; VTC-011 provides actual hosted evidence. Hostland-specific proof moves to VTC-041 and is not a VTC-004 completion prerequisite.
 
 **Scope and acceptance checklist**
 
-- [ ] Verify full annual/renewal cost and included services against the owner-approved approximately USD 35/year budget; keep account-specific terms and raw evidence outside the public repository.
-- [ ] Prove compatibility with a new MySQL 8.4 database and Node.js 24 using authorized account access; keep actual version/inventory evidence private and preserve existing websites/databases.
-- [ ] Verify the exact MySQL server version, InnoDB, SQL modes, collations, connection limits, database size/backup limits, and migration privileges; confirm Node.js actual runtime, security patch/update policy for both products, and an upgrade path if the offered release line lacks appropriate maintenance.
-- [ ] Verify Hostland's documented Node.js deployment on the actual account, including Fastify/server.js compatibility, Passenger process behavior, build artifacts, persistent storage, SSH/deployment access, TLS, cron, SSE/proxy limits, and outbound email API access.
-- [ ] If persistent workers/SSE are unsupported, specify bounded cron jobs/authenticated polling and their latency; if the selected MySQL/Node.js combination cannot run reliably within budget, record a concrete blocker and seek a hosting decision before implementation.
-- [ ] Select a temporary development environment separately; record any spending approval, expiry/sleep limits, backup/export procedure, and a reproducible launch method without assuming Docker is supported.
+- [ ] Record the separate owner-operated staging account, approved USD 20/month testing ceiling and approximately USD 35/year final Hostland budget; keep account-specific evidence private.
+- [ ] Compare current DigitalOcean, AWS Lightsail and Railway options using primary price/limit sources, including persistence, scheduler behavior and ongoing administration.
+- [ ] Recommend a concrete starting configuration and all-in cost worksheet including tax/domain/backup allowance; distinguish a recommendation from provisioning or measured capacity.
+- [ ] Define the rapid reviewed-CI-revision deployment, HTTPS, persistent MySQL/files, protected SSH delivery, migration serialization, app rollback and isolated restore approach for VTC-011.
+- [ ] Preserve maintained Node.js 24/MySQL 8.4, bounded minute jobs, 30-second visible-site polling and portable application/storage boundaries; document approximately 90 seconds as a healthy-operation target, not a hard bound.
+- [ ] Assign actual staging execution proof to VTC-011 and Hostland availability/maintenance/Passenger/cost/transfer proof to VTC-041 after VTC-040; do not require Hostland access to complete development architecture.
 
-**Validation:** Produce a provider capability matrix and, when access is available, a minimal runtime/database/background-task proof. If details remain unknown, mark the production decision blocked and avoid claiming compatibility.
+**Validation:** Review the provider comparison, budget arithmetic, release/recovery design and dependency split. VTC-004 can close after plan review/merge; actual remote deployment remains VTC-011 and final Hostland compatibility remains VTC-041. No local script, selector or plan is represented as hosted proof.
 
-**Boundaries / integration gates:** The previous $15–25/month production proposal is superseded. A paid development service requires an explicit budget decision; no hosting purchase is authorized by this card.
+**Boundaries / integration gates:** The owner approved up to USD 20/month for staging, separately from production. This planning card creates no account/resource and performs no hosting change. VTC-005 consumes the portable staging direction after review/merge; VTC-041 retains all final compatibility/cost/recovery gates.
 
 <a id="vtc-005"></a>
 
@@ -305,7 +305,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions after the host proof.
+- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions using local/CI evidence. Hostland-specific execution is deferred to VTC-041 and does not block this architecture.
 - [ ] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
 - [ ] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
 - [ ] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
@@ -389,7 +389,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Add lint/format/type/build checks, unit tests, real-MySQL integration/contract tests, and a small Playwright smoke suite against MySQL.
-- [ ] Pin Node.js 24 and the verified MySQL 8.4 image version/digest, configure database readiness and target SQL settings, and apply migrations before tests. Check the actual host Node.js patch as well if the primary CI patch differs; document intentional differences instead of using floating latest tags.
+- [ ] Pin tested Node.js 24 and MySQL 8.4 image versions/digests, configure readiness and explicit SQL settings, and apply migrations before tests. Align local/CI/staging now; VTC-041 adds actual Hostland patch/settings comparisons and deliberate-difference tests before cutover. Do not wait for production access or use floating latest tags.
 - [ ] Use clean dependencies, isolated databases, stable check names, timeouts, cancellation of obsolete runs, and failure artifacts.
 - [ ] Run untrusted PR code without deployment credentials; give workflow tokens minimum permissions and pin action revisions.
 - [ ] Keep a required aggregate result from silently passing skipped or failed critical jobs; publish diagnostic reports without secrets.
@@ -429,14 +429,14 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Deploy the chosen temporary environment with HTTPS, MySQL 8.4 and Node.js 24 compatible with the production target, persistent database/blob storage or explicitly disposable fixtures, and separate test credentials. A free PostgreSQL service is not a substitute for the selected database.
-- [ ] Deploy only the exact revision that passed CI; use native Git integration or one deployment workflow, not competing triggers.
-- [ ] Document database migrations, health checks, logs, export/restore, and redeployment from a clean environment.
-- [ ] Document free-tier sleep/expiry effects on webhook delivery, SSE, and reminders; avoid uploading real user data into disposable environments.
+- [ ] Provision the recommended separate staging VM after verifying actual checkout cost within USD 20/month; deploy HTTPS, maintained Node.js 24/MySQL 8.4, private networking and persistent database/evidence storage with separate test credentials. Record actual runtime/settings without requiring Hostland access; no PostgreSQL substitute.
+- [ ] Deploy only the exact reviewed revision that passed CI through one protected GitHub Actions/SSH path with pinned host key and scoped access; support automatic main releases and manual reviewed-revision redeployment without competing triggers.
+- [ ] Implement serialized migrations, readiness/release checks, failed-deploy recovery, database/file export and isolated restore; prove persistence across app/container recreation and server reboot.
+- [ ] Prove minute jobs without web visits, overlapping-job safety, 30-second notification polling and measured delivery/backlog behavior; document patching, resource use, independent backup destination/cost and authorized teardown. Use synthetic data until pilot access/storage/recovery is approved; account for sleep/expiry if another provider is selected.
 
-**Validation:** Publish a small change after successful CI, reject a failed build, and verify data retention or documented reset behavior after restart.
+**Validation:** Publish a small change from its exact successful CI revision, reject a failed build, exercise HTTPS/private evidence and actual MySQL/cron, and verify persistence plus isolated restore after restart/failed deployment. Record hosted evidence and actual monthly cost; a local preview or prepared Compose file is not a remote deployment.
 
-**Boundaries / integration gates:** Until a development budget is approved, use a suitable free option or local preview. Local preview does not count as a completed remote-deployment card.
+**Boundaries / integration gates:** Separate account and up to USD 20/month are approved. Prepare reviewable setup/deployment before creating resources; verify the full total against the ceiling. No production Hostland access, Passenger test or production cutover is required here. A single persistent staging environment is the default; paid per-PR environments and bigger plans need a concrete cost decision.
 
 <a id="vtc-012"></a>
 
@@ -1041,32 +1041,32 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - [ ] Cover public/private events, RSVP, reminders, notification reconnect, and unauthorized access attempts.
 - [ ] Run desktop and representative mobile E2E; keep a fast required PR subset and a broader scheduled/pre-release suite.
 
-**Validation:** Use real local API/database with controlled external adapters, plus separate real-client telemetry evidence. Persist traces on failure and prohibit arbitrary retries that hide deterministic failures.
+**Validation:** Use real local API/database with controlled external adapters, plus separate real-client telemetry evidence. Verify the release candidate on VTC-011 staging before the VTC-041 Hostland transfer. Persist traces on failure and prohibit arbitrary retries that hide deterministic failures.
 
-**Boundaries / integration gates:** Quality owner reviews assertions; feature owners fix their modules. These tests extend, not replace, VTC-008 and per-card tests.
+**Boundaries / integration gates:** Quality owner reviews assertions; feature owners fix their modules. These tests extend, not replace, VTC-008 and per-card tests. VTC-011 is the integration gate for hosted release-candidate evidence; local/CI regression can start earlier. Hostland-specific smoke is later VTC-041/042 work.
 
 <a id="vtc-041"></a>
 
 ### [VTC-041] Configure production deployment, backups, and host transfer rehearsal
 
 - **Track:** Delivery
-- **Depends on:** VTC-004, VTC-010, VTC-011, VTC-039
+- **Depends on:** VTC-004, VTC-010, VTC-011, VTC-039, VTC-040
 - **Primary ownership:** deploy/production/, .github/workflows/deploy-production.yml, docs/operations/production.md
 
-**Goal:** Deploy reproducibly to a verified production host within the agreed annual budget.
+**Goal:** After VTC-040 integrated testing, verify Hostland and perform the final production transfer within approximately USD 35/year.
 
 **Scope and acceptance checklist**
 
-- [ ] Reconfirm provider compatibility and full annual/renewal cost; if incompatible or over budget, obtain a decision instead of assuming transfer is possible.
-- [ ] Configure TLS/domain, secrets, a new MySQL 8.4 database with least-privilege application access, Node.js 24, persistent evidence storage, mail sender, and the supported background/SSE execution model. Verify actual runtime/database patches and maintenance policy against VTC-004 before release.
+- [ ] Obtain authorized production access after VTC-040; verify Hostland maintained MySQL 8.4/patched Node.js 24 availability, full annual/renewal cost, quotas and update policy using the retained VTC-004 research. If incompatible or over budget, obtain a decision before cutover.
+- [ ] Prove Fastify/server.js/Passenger startup and restart, actual database engine/settings/privileges/limits, SSH delivery, TLS, private persistent evidence, minute cron, authenticated polling and outbound test integrations on isolated authorized targets; then configure production secrets/mail/database with least privilege. Docker staging success is not Hostland compatibility proof; SSE is optional.
 - [ ] Deploy only a CI-verified revision/artifact, serialize migrations/deployments, run readiness/smoke checks, and document code/database rollback limitations.
 - [ ] Rehearse clean installation and transfer of the new system's MySQL database and blobs using compatible dump/restore tools and target privileges. Take a consistent InnoDB snapshot without concurrent DDL, coordinate it with evidence files, and verify restored counts, constraints, migrations, and file references.
 - [ ] Configure automated backups with documented retention and an independent recoverable copy within budget; verify restore and partial-migration recovery. An application artifact rollback must not be described as automatically reversing MySQL DDL.
 - [ ] Document dev versus production environment ownership and teardown of temporary paid resources after successful cutover.
 
-**Validation:** Run a failed-deploy recovery and restore drill on the target-compatible environment. Prove reminders, token ingestion, and persistent files work after restart.
+**Validation:** After integrated staging tests pass, run the isolated Hostland proof, target failed-deploy recovery and database/file restore drill. Compare actual runtime/SQL settings with staging/CI and test differences. Prove reminders, token ingestion and private evidence survive restart before final transfer; VTC-042 records final production acceptance.
 
-**Boundaries / integration gates:** No import from the old websites. Moving newly created pilot data is an infrastructure transfer, not legacy migration. Production credentials/host access are external prerequisites.
+**Boundaries / integration gates:** This is the final hosting stage, not an architecture/staging prerequisite. No import from the old websites. Moving newly created pilot data is an infrastructure transfer, not legacy migration. Production credentials/authorized host access are prerequisites here only; coordinate write pause, consistent exports, job recovery and staging teardown after verified cutover.
 
 <a id="vtc-042"></a>
 
@@ -1262,8 +1262,8 @@ No unanswered item below authorizes an implementation agent to invent a producti
 
 | Decision | Responsible card | Needed before |
 | --- | --- | --- |
-| Private verification of Hostland MySQL 8.4 / Node.js 24 maintenance, execution limits, and full annual cost; publish only a sanitized compatibility conclusion | VTC-004 | Stack ADR VTC-005 and production provisioning |
-| Temporary development spending limit; free/local until agreed | VTC-004 | Paid development services in VTC-011 |
+| Final private Hostland MySQL 8.4 / Node.js 24 maintenance, Passenger/cron/storage/recovery and full annual cost; publish a sanitized conclusion | VTC-041 after VTC-040 | Final cutover, not architecture or staging |
+| Staging ceiling approved at USD 20/month on a separate account; verify actual provider/tax/domain/backup total before provisioning | VTC-004, VTC-011 | Staging creation, not Hostland access |
 | VTC-001 concept/requirements PR review and merge; product policies including director-email confirmation/protection are approved | VTC-001 | Documentation delivery completion |
 | Production qualification limits and numeric promotion thresholds: configured by the director before launch; initial restriction types and correction behavior are confirmed in product policies | VTC-028, VTC-031, VTC-042 | Production configuration and launch |
 | Upload format/size limits and storage implementation; manual-report fields, source-specific timing, editing, and at least one-year screenshot retention are confirmed in product policies | VTC-025, VTC-039 | Upload implementation and production capacity validation |
