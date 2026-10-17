@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Design Direction"
+  short_description: "Design and verify responsive VTC interfaces"
+  default_prompt: "Use $frontend-design-direction for the assigned VTCDashboard task."

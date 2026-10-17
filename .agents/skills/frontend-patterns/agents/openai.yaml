@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Patterns"
+  short_description: "Structure accessible VTC frontend workflows"
+  default_prompt: "Use $frontend-patterns for the assigned VTCDashboard task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Patterns"
+  short_description: "Build transactional VTC Fastify workflows"
+  default_prompt: "Use $backend-patterns for the assigned VTCDashboard task."

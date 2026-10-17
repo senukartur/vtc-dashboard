@@ -2,6 +2,8 @@
 
 Read [AGENTS.md](AGENTS.md), [CONCEPT.MD](CONCEPT.MD) and the [architecture](docs/architecture/README.md) first. Documentation and explanatory comments are English; the product supports Russian and English.
 
+Project-local engineering skills are available to Codex, Claude Code and authorized subagents; see the [skill registry and handoff rules](docs/development/agent-skills.md).
+
 ## Local development with Docker
 
 Docker Compose is the owner's preferred local environment. Use Docker Desktop with **Linux containers**, or Docker Engine with Compose **2.32+**. Windows Docker Desktop requires its working Linux/WSL backend. The application and real MySQL run in containers; host-installed MySQL is not required.

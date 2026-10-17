@@ -12,4 +12,6 @@ Require the absolute disposable verification checkout, base/candidate SHA, plan'
 
 Run the behavior-appropriate baseline and plan checks once. Application/scaffold work needs `pnpm check` and `pnpm build`; database behavior additionally needs actual target-compatible MySQL tests. Use this candidate's source/environment, not another worktree's running container. Documentation/skill prompts need metadata, references/anchors, identifiers, whitespace and public-data checks without application builds. No missing CI/script/tool is a pass.
 
+Read and apply selected engineering skills supplied from the pinned bundle, especially react-testing for browser/component checks and mysql-patterns for database verification. Use the [registry](../../docs/development/agent-skills.md) to request missing applicable bodies/references. Do not assume inherited skills or load a different version from the candidate checkout. Report applied skills; they do not authorize fixes, installations or checks outside the assignment.
+
 Return the shared Verifier table and status precedence, with sanitized failure excerpts, durations, missing/flaky/CI-only checks and remaining acceptance gates. Do not install, fix, stage, commit, weaken tests, launch games, call production endpoints, perform external writes or delegate. Expected ignored check output is allowed.

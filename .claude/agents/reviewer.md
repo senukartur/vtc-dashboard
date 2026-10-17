@@ -12,4 +12,6 @@ Require normalized requirements/criteria with provenance, separately sourced tru
 
 Cover the shared review areas affected by this task, including permissions/privacy, historical timing, canonical-trip idempotency, source/catalog identity, MySQL concurrency/recovery, ownership and accurate verification claims. Skill changes need discovery/tool compatibility, complete role inputs, authority, resume/budget and exact-candidate coverage checks.
 
+Read and apply selected engineering skills from the pinned bundle when assessing affected code/tests/design. Use the [registry](../../docs/development/agent-skills.md) to request missing relevant bodies/references from the orchestrator, without assuming inherited context or a newer checkout version. Report applied skills. Skill verification steps are review criteria, not permission to run shell tools/tests or modify sources.
+
 Return the shared Reviewer report with supported findings ordered by severity, examined areas and limitations. Blocker/major findings require `CHANGES REQUESTED`; do not invent findings. No shell tools, install, build, tests, edits, Git state changes, public comments or delegation. A clean review does not establish owner approval, CI, merge or deployment.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "MySQL Patterns"
+  short_description: "Design and verify VTC MySQL data operations"
+  default_prompt: "Use $mysql-patterns for the assigned VTCDashboard task."

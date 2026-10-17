@@ -12,6 +12,10 @@ Do not push, open/edit PRs, dispatch CI, merge, deploy, change infrastructure, w
 
 Only the implementer edits/commits task sources, using the assigned absolute worktree for every operation. Architect/reviewer inspect supplied artifacts, without shell, installs, builds or tests; request additional files/diffs through the orchestrator. The verifier runs checks only in its separate disposable candidate checkout. Documented generators may change tracked files there, which must be reported as generated-file drift, never committed/reset by the verifier. Unexpected mutations are `INVALID`. The orchestrator checks candidate/provenance and original content hashes; Git status does not prove isolation from ignored files, stash, other checkouts or external systems.
 
+### Engineering skill selection
+
+Every role applies the **Selected skills** supplied by the orchestrator, using the [project registry](../../../../docs/development/agent-skills.md) and canonical bodies from the pinned bundle. Require names, reasons, instruction version and readable absolute paths or full bodies; an explicit empty selection is valid for unrelated work. Read applicable bodies before work. Request missing bodies/references or another relevant skill from that same bundle instead of relying on inherited context or newer checkout files. Product/contract context still comes from the assigned base/candidate snapshot. Report applied skills and missing inputs with the role result. Skills never grant tools or extra scope: architects/reviewers recommend checks without executing them, implementers edit, and verifiers run assigned checks.
+
 ## Architect
 
 Inputs: normalized requirements and acceptance criteria with provenance, dependencies/current-state evidence, trusted owner decisions, versioned source snapshot/file inventory and verified base ref/SHA.
