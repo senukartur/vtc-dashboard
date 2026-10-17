@@ -1,6 +1,6 @@
 # VTC Dashboard — Project Concept
 
-**Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
+**Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. VTC-006 supplies the repository/application scaffold; domain feature implementation is separate work.
 
 **Version:** 1.4 — includes the owner-confirmed catalog/history-upload decisions, MySQL 8.4 direction, cron/polling timing and development-first deployment with a separate USD 20/month testing ceiling, all of 2026-10-17. Hostland is the final destination after integrated testing; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
 
@@ -47,6 +47,8 @@ Members inspect personal/company totals, driver profiles, and trip history; sign
 ## Working stack and architecture
 
 The frontend direction is TypeScript, React, Vite, shadcn/ui, Tailwind, TanStack Query, React Hook Form/Zod, i18next, and Recharts. The backend direction is Node.js 24 LTS, TypeScript, and Fastify, with MySQL 8.4, Drizzle/mysql2, and Better Auth's MySQL adapter. MySQL is owner-selected; library versions, adapter compatibility, runtime patches, and the deployment model must be finalized through VTC-004/VTC-005.
+
+The owner selected Docker for local development during VTC-006. The [workspace instructions](CONTRIBUTING.md) run the application and real MySQL through Compose with source synchronization; [root toolchain evidence](docs/development/workspace.md) records exact versions and remaining checks. Production keeps the normal Node entry and independent jobs CLI; this local choice does not require Docker on Hostland.
 
 Use a modular monolith with explicit identity/admissions, catalog, telemetry/source, trip/reconciliation, qualification, event, notification, and analytics modules. Keep business rules out of React components. Start with one deployable service where the host supports it, database-backed durable jobs/outbox, and replaceable source, email, and evidence-storage adapters.
 

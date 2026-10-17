@@ -23,7 +23,7 @@ flowchart TD
 
 The diagram describes responsibilities, not separate deployments. Expensive projections and mail retry outside HTTP through durable jobs. Permission checks and authoritative acceptance decisions never depend on a stale browser cache or a queue's eventual projection.
 
-## Proposed repository layout
+## Repository layout
 
 ```text
 apps/api/src/
@@ -45,7 +45,7 @@ test/                       # unit/integration/contract/E2E support and journeys
 deploy/                     # separate staging and final-host launch adapters
 ```
 
-These are future ownership paths; VTC-006 creates the scaffold. Avoid importing server/database code into the web bundle. Routes validate and invoke commands; React does not implement qualification or access policy. Share transport schemas and pure value types, not repositories or service singletons. Each module exports an explicit public facade; only composition imports implementation factories.
+VTC-006 creates these scaffold/ownership paths; feature modules, schema/migrations and deployment implementations remain their owning cards' work. [CONTRIBUTING.md](../../CONTRIBUTING.md) describes the local Docker workflow and portable builds. Avoid importing server/database code into the web bundle. Routes validate and invoke commands; React does not implement qualification or access policy. Share transport schemas and pure value types, not repositories or service singletons. Each module exports an explicit public facade; only composition imports implementation factories.
 
 ## Request and command flow
 

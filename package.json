@@ -1,0 +1,38 @@
+{
+  "name": "vtc-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@12.14.0",
+  "engines": {
+    "node": "24.22.0",
+    "pnpm": "12.14.0"
+  },
+  "scripts": {
+    "dev": "pnpm contracts:generate && pnpm build:packages && pnpm -r --parallel --stream dev",
+    "build:packages": "pnpm -r --filter @vtc/contracts --filter @vtc/db build",
+    "build": "pnpm contracts:generate && pnpm build:packages && pnpm --filter @vtc/api build && pnpm --filter @vtc/web build",
+    "start": "node --env-file-if-exists=.env apps/api/dist/server.js",
+    "jobs": "node --env-file-if-exists=.env apps/api/dist/jobs.js",
+    "typecheck": "pnpm build:packages && pnpm -r typecheck && tsc -p tsconfig.test.json",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "contracts:generate": "node scripts/generate-contracts.mjs",
+    "contracts:check": "node scripts/generate-contracts.mjs --check",
+    "dev:setup": "node scripts/setup-local.mjs",
+    "db:check": "pnpm --filter @vtc/api db:check",
+    "smoke:local": "node scripts/smoke-local.mjs",
+    "test:scaffold": "pnpm build:packages && node --import tsx --test test/scaffold/*.test.ts",
+    "check": "pnpm contracts:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:scaffold"
+  },
+  "devDependencies": {
+    "@vtc/contracts": "workspace:*",
+    "@vtc/db": "workspace:*",
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.19.2",
+    "openapi-typescript": "7.13.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

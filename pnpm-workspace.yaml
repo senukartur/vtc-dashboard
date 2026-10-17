@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - packages/*
+
+engineStrict: true
+strictPeerDependencies: true
+autoInstallPeers: false
+savePrefix: ''
+includeWorkspaceRoot: false
+allowBuilds:
+  esbuild: true
+minimumReleaseAgeStrict: true
+
+minimumReleaseAgeExclude:
+  - react-i18next@17.0.21

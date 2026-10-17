@@ -12,17 +12,19 @@ Start development on the separately budgeted staging design from [VTC-004](hosti
 
 | Layer | Selected development baseline | Evidence / remaining gate |
 | --- | --- | --- |
-| Runtime | Node.js **24.22.0**, maintained 24.x line | Official archive SHA-256 checked; isolated Windows runtime probe. Linux/CI and later Hostland execution are not proved |
+| Runtime | Node.js **24.22.0**, maintained 24.x line | Official archive SHA-256 checked; VTC-005 Windows probe and VTC-006 Linux development/production container checks. CI and Hostland execution remain unproved |
 | API | Fastify **5.12.7** | Injected request/response smoke; actual TLS/proxy/session behavior later |
-| Database access | drizzle-orm **0.45.4**, drizzle-kit **0.31.11**, mysql2 **3.24.6** | MySQL SQL generation and adapter imports; **no live DB**. Use `provider:"mysql"`, Drizzle `mode:"default"`, and explicit auth schema mapping |
+| Database access | drizzle-orm **0.45.4**, drizzle-kit **0.31.11**, mysql2 **3.24.6** | VTC-005 SQL generation/adapter imports; VTC-006 verifies mysql2 readiness on real MySQL 8.4.11. Drizzle schema/transaction/migration and auth mapping evidence remains VTC-007/008/013; use MySQL dialect, `mode:"default"` and explicit auth schema |
 | Auth | better-auth **1.7.10**, @better-auth/drizzle-adapter **1.7.10** | Matching adapter initialized and disabled HTTP signup rejected; real sign-in, owned auth-schema writes and invitation atomicity remain VTC-013/015 |
-| Web | React/react-dom **19.3.1**, Vite **8.3.4**, TypeScript **7.0.2** | React rendering, small Vite bundle and TS CLI start; not application typechecking or a browser journey |
+| Web | React/react-dom **19.3.1**, Vite **8.3.4**; root TypeScript **5.9.3** under VTC-006 | VTC-005 probed only the TS 7.0.2 CLI; VTC-006 uses 5.9.3 to satisfy openapi-typescript 7.13.0's declared `^5.x` peer, with strict root type/build checks. See the workspace evidence below |
 | Queries / forms | @tanstack/react-query **5.104.3**, Zod **4.6.7** | Runtime probe. React Hook Form/resolver integration is VTC-006/012 |
-| Web composition | react-router-dom **7.18.4**, Tailwind **4.3.3**, Recharts **3.10.1**, i18next **26.4.7**, react-i18next **17.0.21**, react-hook-form **7.90.0**, @hookform/resolvers **5.9.2**, @vitejs/plugin-react **6.1.2** | Observed official registry peer/version metadata, not installed app integration. Pin/test these in the root VTC-006 setup; update via a reviewed compatibility change if needed |
+| Web composition | react-router-dom **7.18.4**, Tailwind **4.3.3**, Recharts **3.10.1**, i18next **26.4.7**, react-i18next **17.0.21**, react-hook-form **7.90.0**, @hookform/resolvers **5.9.2**, @vitejs/plugin-react **6.1.2** | VTC-006 installs/typechecks/builds router, Tailwind, i18next and the React plugin in the scaffold. Recharts/Hook Form/resolvers remain metadata candidates for VTC-012; the root lockfile is authoritative for installed packages |
 | UI primitives | Project-owned shadcn/ui components | VTC-012 imports/reviews chosen components and accessibility/RU–EN layouts; no new UI toolkit or mock UI is claimed |
-| Root tooling / tests | pnpm **12.14.0** candidate; Vitest **5.0.5**, Playwright **1.64.1** candidates | Registry/runtime requirements reviewed; actual root lockfile/toolchain and test configuration remain VTC-006/008/009 |
+| Root tooling / tests | pnpm **12.14.0**; Vitest **5.0.5**, Playwright **1.64.1** candidates | VTC-006 supplies the root lockfile, Biome, strict TypeScript and seven narrow Node scaffold tests. Full test tooling/CI remains VTC-008/009 |
 
 The [isolated probe](../../spikes/architecture/README.md) has its own npm lockfile; it is **not** the root application dependency baseline. VTC-006 owns root package-manager installation, lockfile, scripts, strict TypeScript configuration, React/Vite plugin integration and contract generation. Keep dependency updates deliberate; no floating `latest` tag in implemented CI/deployment. The [compatibility record](../research/stack-compatibility.md) distinguishes measured checks from metadata and deferred tests.
+
+The [VTC-006 workspace baseline](../development/workspace.md) records the actual root lockfile, Docker-first local workflow, generated contract/compiler bridge and scaffold verification. It supersedes candidate-only tooling choices where explicitly stated; the isolated research record remains unchanged. Drizzle schema/migrations, Better Auth, full form/chart/shadcn integration, CI and hosted proof remain their owning implementation cards.
 
 ## Auth integration and atomic creation
 
