@@ -34,4 +34,4 @@ The selected database is MySQL. Develop/test with maintained MySQL 8.4 LTS and N
 
 ## Code review
 
-[Native GitHub Copilot review](docs/development/review.md) is selected and available. Inspect its latest-head comments before merge, require green **Required CI** and resolved conversations, and retain independent review appropriate to risk. The former Claude workflow is removed; AI comments do not replace CI or independent review.
+[Native GitHub Copilot review](docs/development/review.md) is selected and available. An advisory Claude Sonnet 5.5 workflow is also configured as a supplementary review path. Inspect latest-head review comments before merge, require green **Required CI** and resolved conversations, and retain independent review appropriate to risk. AI comments do not replace CI or independent review.
