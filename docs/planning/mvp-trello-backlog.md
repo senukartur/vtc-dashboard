@@ -228,19 +228,20 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - **Track:** Discovery
 - **Depends on:** None
 - **Primary ownership:** docs/research/catalogs.md, spikes/catalogs/
+- **Research status:** [Source investigation](../research/catalogs.md), [full observed DLC audit](../research/dlc-coverage-2026-10-17.md) and [owner-approved hand-off](../research/catalog-source-follow-up.md) prepared for review on 2026-10-17. Research criteria are satisfied; review/merge evidence still gates Done. The owner approved transferring the three unavailable ATS source checks to VTC-019 without relaxing all-official-DLC launch coverage. This is not completed production catalog delivery.
 
 **Goal:** Prove a reproducible source of game identifiers, cities, companies, cargo, and trailer classifications for both games.
 
 **Scope and acceptance checklist**
 
-- [ ] Compare Trucky city endpoints with SCS game/DLC definition extraction; document access conditions, provenance, update effort, and redistribution constraints.
-- [ ] Produce a small representative ETS2/ATS dataset including RU/EN names, city-region relationships, cargo ADR/body types, and trailer body/chain types.
-- [ ] Record the exact game builds, DLC coverage, missing identifiers/translations, and how to detect added/renamed/retired entries.
-- [ ] Recommend an MVP coverage boundary and a repeatable update process; do not label an incomplete sample as a complete current catalog.
+- [x] Compare Trucky city endpoints with SCS game/DLC definition extraction; document access conditions, provenance, update effort, and redistribution constraints.
+- [x] Produce a small representative ETS2/ATS dataset including RU/EN names, city-region relationships, cargo ADR/body types, and trailer body/chain types.
+- [x] Record the exact game builds, DLC coverage, missing identifiers/translations, and how to detect added/renamed/retired entries.
+- [x] Document the approved base-game/all-official-DLC launch target for both games and a repeatable update process, with project-maintained RU/EN labels and visible English fallback for missing Russian translations; do not label an incomplete sample as a complete current catalog.
 
-**Validation:** Show equivalent localized names resolving to one entity, a missing translation, a newly introduced entity, and cargo unit mass versus actual trip mass.
+**Validation:** Fourteen offline experiment checks pass, covering localized identity, missing translations, candidate additions/changes, mass separation and incomplete/failed DLC source protection. An ignored representative real-field sample for both games validates city-region references, hazardous cargo/body/unit mass and trailer body/chain compatibility; public examples are synthetic rather than extracted game data. The audit records all 169 observed public Steam DLC entries and 180 local archive inspections. See the linked evidence for exact source/coverage limits.
 
-**Boundaries / integration gates:** An extraction experiment may require access to installed game/DLC files. Document that prerequisite; do not purchase DLC or redistribute game assets.
+**Boundaries / integration gates:** The owner approved finishing discovery with Louisiana/Illinois/South Dakota source gaps assigned to VTC-019 and still mandatory before launch. Permitted-use verification, active registry/include/overlay handling and complete production labels/imports remain named downstream gates. Technical maintainer prepares updates; director/deputy publishes. Do not purchase DLC or redistribute game assets. Independent review and merged PR evidence remain required before Done.
 
 <a id="vtc-003"></a>
 
@@ -584,7 +585,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Import the selected datasets with provenance, game build, DLC/map scope, localized labels, aliases, external mappings, and publication status.
+- [ ] Import reviewed datasets for both base games and all official DLCs at the pinned launch baseline, with per-pack contribution/coverage evidence, provenance, game build, DLC/map scope, localized labels, aliases, external mappings, and publication status. Missing local packs remain coverage gaps, not exclusions from the approved scope.
 - [ ] Provide search/filter APIs and draft-diff-publish workflow with transactional publication and audit records.
 - [ ] Preserve retired entities and historical versions; separate canonical identity from version-specific attributes.
 - [ ] Resolve known source IDs first; handle name-only matching using game/region/locale context and surface unknown/ambiguous entities for review.
@@ -593,6 +594,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Validation:** Test RU/EN aliases, identical city names in different regions/maps, missing translations, DLC additions, retirement, failed import, and publication during concurrent reads.
 
 **Boundaries / integration gates:** Actual shipment mass must never be inferred from cargo unit mass; provider coordinates are not assumed to be geographic latitude/longitude.
+
+**VTC-002 hand-off:** Resolve the unavailable Louisiana, Illinois and South Dakota sources before launch; retain all official DLCs in scope. Refresh the [observed inventory](../research/dlc-coverage-2026-10-17.md) for the actual launch baseline, validate active registry/include/overlay behavior, record permitted metadata use/attribution, and prepare reviewed English labels plus the Russian translation queue. The technical maintainer prepares updates; director/deputy publishes. See [source questions and acceptance gates](../research/catalog-source-follow-up.md). Discovery's archive audit is not production catalog completeness.
 
 <a id="vtc-020"></a>
 
@@ -606,7 +609,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Build searchable game/region-aware selectors that submit IDs and display RU/EN with explicit fallback.
+- [ ] Build searchable game/region-aware selectors that submit IDs and display project-reviewed RU/EN labels; visibly fall back to the English label when Russian is missing, without changing identity or creating a matching alias.
 - [ ] Show import status, added/changed/retired entries, mapping exceptions, and publication confirmation.
 - [ ] Support staff resolution of missing/ambiguous entities without silently creating trusted catalog data from user input.
 - [ ] Keep editing of catalog facts separate from qualification permissions.
@@ -614,6 +617,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Validation:** Verify a language switch preserves selected IDs and that a retired historical value remains readable; integrate against VTC-019.
 
 **Boundaries / integration gates:** Integration gate: VTC-019. Consumers coordinate selector changes rather than editing shared components independently.
+
+**Catalog publication policy:** The Director or Deputy Director reviews/publishes a maintainer-prepared revision. This is not a new application role. Missing Russian labels visibly use reviewed English names; source tokens remain diagnostics rather than finished English labels.
 
 <a id="vtc-021"></a>
 
@@ -1076,6 +1081,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Boundaries / integration gates:** Release requires all MVP cards complete, including early research decisions and UI integration gates; transitive dependencies alone are not the whole release checklist.
 
+**Catalog release gate:** VTC-019 must resolve the three ATS source gaps recorded by VTC-002 and demonstrate coverage for all official DLCs at the actual launch baseline, along with permitted-use evidence, validated source mappings and readable English labels. VTC-002 discovery completion does not satisfy this production gate.
+
 ## 6. Deferred cards — Later
 
 These are not MVP launch requirements. Refine scope, current provider contracts, dependencies, and acceptance evidence before moving them to Ready.
@@ -1250,7 +1257,7 @@ No unanswered item below authorizes an implementation agent to invent a producti
 | VTC-001 concept/requirements PR review and merge; product policies including director-email confirmation/protection are approved | VTC-001 | Documentation delivery completion |
 | Production qualification limits and numeric promotion thresholds: configured by the director before launch; initial restriction types and correction behavior are confirmed in product policies | VTC-028, VTC-031, VTC-042 | Production configuration and launch |
 | Upload format/size limits and storage implementation; manual-report fields, source-specific timing, editing, and at least one-year screenshot retention are confirmed in product policies | VTC-025, VTC-039 | Upload implementation and production capacity validation |
-| Supported game builds, base/DLC coverage, initial mod exclusions, and catalog update owner | VTC-002 | VTC-019 |
+| Refresh the launch release inventory and close Louisiana/Illinois/South Dakota source gaps; prove all-official-DLC production coverage, permitted use and active-source validation. VTC-002 discovery hand-off and maintainer/director-deputy update ownership are approved | VTC-019, VTC-020, VTC-042 | Production import/publication and launch |
 | Reliable telemetry fields, actual timestamps, partial recordings, and ownership on account switch | VTC-003 | VTC-023, VTC-024 |
 | Steam ownership verification and external IDs absent from provider messages; director/deputy-only audited replacement with telemetry-token revocation is agreed | VTC-003, VTC-018 | VTC-023; later VTC-101/102 |
 | Production reporting timezone value: configured by the director before launch; common company reporting boundaries and user-local event display are agreed | VTC-032, VTC-038, VTC-042 | Production configuration and launch |

@@ -9,7 +9,7 @@ Explicit user instructions take precedence over repository guidance. Resolve rou
 ## Documentation and current state
 
 - Write all documentation and explanatory code comments intended for Git in English. Continue conversation in the user's preferred language. The product supports Russian and English; proper names and localized catalog labels may retain their original language.
-- The repository currently contains planning documentation only. There is no application, installed dependency baseline, test command, CI workflow, deployment, or automated review integration to claim as implemented. Inspect actual files and update this statement as implementation lands.
+- The repository currently contains planning documentation and an isolated VTC-002 catalog research spike. Its offline checks are documented in spikes/catalogs/README.md. There is no application, installed dependency baseline, application test command, CI workflow, deployment, or automated review integration to claim as implemented. Inspect actual files and update this statement as implementation lands.
 - Keep approved behavior in CONCEPT.MD, execution scope in the backlog, and verified technical decisions in implementation contracts/ADRs. The approval record preserves earlier requirements links; do not create competing copies of the requirements.
 
 ## Public repository and confidential information

@@ -2,7 +2,7 @@
 
 **Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
-**Version:** 1.0.
+**Version:** 1.1 — includes the owner-confirmed VTC-002 catalog coverage/localization decisions of 2026-10-17; VTC-001 approval remains recorded as v1.0.
 
 **Updated:** 2026-10-17.
 
@@ -81,9 +81,17 @@ This diagram describes responsibilities, not deployed components. Redis, microse
 
 Maintain local, versioned catalogs for ETS2/ATS cities, regions, cargo, and trailer classifications. Investigate reliable data/API/extraction sources in VTC-002 before promising complete coverage.
 
+The owner confirmed the MVP launch target on 2026-10-17: cover the base games and **all official DLCs for both ETS2 and ATS**, rather than only the packs used by the current members. Pin the launch build/release inventory and verify every pack's catalog contribution; record packs that add no relevant entities as checked/non-contributing. A partially tested installation or sample is not evidence of this complete coverage. New DLCs after that baseline enter the versioned update workflow.
+
+The owner approved handing the unavailable Louisiana, Illinois and South Dakota ATS source checks from VTC-002 discovery to VTC-019, with their resolution still mandatory before launch. Record explicit coverage gaps rather than blocking unrelated architecture work or claiming the research sample is a complete production catalog.
+
 Canonical identity is independent of RU/EN labels. Prefer provider/game IDs and scoped mappings; name-only aliases need game, locale, region/map context and an ambiguity path. Changing language must not alter selected IDs or rule outcomes. Distinguish cargo unit mass from actual shipment mass.
 
+Maintain project-reviewed RU/EN labels separately from canonical/source IDs. The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly and keep untranslated entries in a translation queue. An unreadable source token is a diagnostic value, not a completed English label. Fallback display does not establish a trusted name-matching alias or change qualification results.
+
 Track game build, DLC/map coverage, provenance, publication version, and additions/changes/retirements. Preserve historical entities and rule references after DLC updates. Use an explicit import/diff/review/publish workflow; arbitrary mod support is later work.
+
+The project's technical maintainer prepares updates; the Director or Deputy Director reviews and publishes them. Maintenance is an operational responsibility, not an additional dashboard role. The [VTC-002 source hand-off](docs/research/catalog-source-follow-up.md) records the measured coverage and remaining source/import/release gates.
 
 ### Data, jobs, and application boundaries
 
