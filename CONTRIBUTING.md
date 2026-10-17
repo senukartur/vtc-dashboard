@@ -86,11 +86,13 @@ VTC-006's seven scaffold checks are not the full unit/MySQL integration/E2E tool
 
 ## Ownership and branches
 
-### Codex task delivery
+### Task delivery with Codex or Claude Code
 
 The repository-local [deliver skill](.agents/skills/deliver/SKILL.md) adapts the telemetry project's delivery workflow for Codex. Invoke it with `$deliver VTC-023`, `$deliver VTC-023 --review-plan`, or `$deliver <task description>`. It plans one scoped task, implements in a separate worktree, verifies the candidate, obtains independent subagent review, and opens a draft PR. `--review-plan` pauses for approval before implementation. The skill is manual-only, preserving the original invocation policy; it does not activate for ordinary editing requests.
 
 Delivery state stays under ignored `.local/deliver/`; the workflow preserves unrelated changes and carries missing checks into the draft PR. It uses the current pnpm/Docker/MySQL baseline and inspects actual CI configuration rather than assuming automation exists. Creating a draft does not authorize Trello writes, marking ready, merging or deployment. See the skill for resume behavior, role boundaries and bounded fix/review rounds. Codex's repository discovery and invocation format follow the [official skills documentation](https://learn.chatgpt.com/docs/build-skills).
+
+Claude Code has its own [deliver entrypoint](.claude/skills/deliver/SKILL.md): use `/deliver VTC-023`, `/deliver VTC-023 --review-plan`, or `/deliver <task description>`. It is also manual-only and uses the project agents in `.claude/agents/`. Both entrypoints read one [shared workflow](.agents/skills/deliver/references/workflow.md) and [role instructions](.agents/skills/deliver/references/roles.md), so verification, resume, ownership and publication rules stay consistent. Claude's entrypoint selects the native `Agent` tool and `claude/` branches; Codex uses its subagent tools and `codex/` branches. Neither entrypoint requires the other host's runtime. Keep these shared references with both entrypoints when moving them. Start a new Claude Code session in that checkout for the first use so the newly created agent directory is loaded. See Claude Code's official [skills](https://code.claude.com/docs/en/skills) and [subagent](https://code.claude.com/docs/en/sub-agents) references for host metadata.
 
 ### Module ownership
 

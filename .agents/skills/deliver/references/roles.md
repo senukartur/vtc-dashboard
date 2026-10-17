@@ -1,6 +1,6 @@
 # Delivery role instructions
 
-The orchestrator sends each role its section below plus the shared instructions and concrete task inputs. These are prompt instructions for available Codex subagent tools, not Claude agent definitions or an assertion of enforced tool restrictions.
+The orchestrator sends each role its section below plus the shared instructions and concrete task inputs. These are shared prompt instructions for Codex and Claude Code. Host entrypoints and native agent definitions select tools; shell-level limits here are instructions, not enforced read-only permissions.
 
 ## Shared instructions
 
@@ -26,7 +26,7 @@ Return an English plan:
 Scope: OK | NEEDS OWNER DECISION | BLOCKED - reason
 Task ID / brief / acceptance criteria:
 Dependencies and evidence:
-Base SHA / proposed codex branch / PR title:
+Base SHA / proposed scoped branch using the host prefix / PR title:
 Change type: application/tooling | documentation/skill instructions
 Owned files / shared files and coordination:
 Design and affected invariants:
