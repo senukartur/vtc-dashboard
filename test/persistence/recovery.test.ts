@@ -55,3 +55,48 @@ test("separate disposable partial-DDL and consistent-baseline recovery rehearsal
     await connection.end();
   }
 });
+
+test("real MySQL migration timeout rejects promptly and preserves dirty state despite server disconnect lag", {
+  timeout: 15000,
+}, async () => {
+  const settings = guardedSettings();
+  const connection = await testConnection();
+  try {
+    await reset(connection);
+    const folder = join(fixtureRoot, "slow");
+    const started = Date.now();
+    await assert.rejects(
+      runMigrations(settings, { folder, statementTimeoutMs: 100 }),
+      hasCode("PROTOCOL_SEQUENCE_TIMEOUT"),
+    );
+    assert.ok(
+      Date.now() - started < 1500,
+      "local rejection must not await queued cleanup or server SLEEP",
+    );
+    const [history] = await connection.query<RowDataPacket[]>(
+      "SELECT state, applied_at FROM _vtc_migrations",
+    );
+    assert.equal(history[0]?.state, "applying");
+    assert.equal(history[0]?.applied_at, null);
+    const [tables] = await connection.query<RowDataPacket[]>(
+      "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'synthetic_recovery_kept'",
+    );
+    assert.equal(tables[0]?.ENGINE, "InnoDB");
+    // The server may finish SLEEP before noticing disconnect/releasing the named lock.
+    // A cooperating retry waits within its bound, then stops on the preserved dirty state.
+    await assert.rejects(
+      runMigrations(settings, { folder, lockTimeoutSeconds: 3 }),
+      /MIGRATION_RECOVERY_REQUIRED/,
+    );
+    const [unchanged] = await connection.query<RowDataPacket[]>(
+      "SELECT state, applied_at FROM _vtc_migrations",
+    );
+    assert.equal(unchanged[0]?.state, "applying");
+    assert.equal(unchanged[0]?.applied_at, null);
+    await reset(connection);
+    assert.equal(await runMigrations(settings), 1);
+    assert.equal(await runMigrations(settings), 0);
+  } finally {
+    await connection.end();
+  }
+});

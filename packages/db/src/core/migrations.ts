@@ -46,7 +46,6 @@ export async function runMigrations(
   }
   const connection = await dedicatedConnection(settings);
   const lockName = migrationLockName(settings.database);
-  let locked = false;
   try {
     const [lock] = await connection.query<RowDataPacket[]>({
       sql: "SELECT GET_LOCK(?, ?) AS acquired",
@@ -54,7 +53,6 @@ export async function runMigrations(
       timeout: (seconds + 2) * 1000,
     });
     if (String(lock[0]?.acquired) !== "1") throw new Error("MIGRATION_LOCK_UNAVAILABLE");
-    locked = true;
     const [baseline] = await connection.query<RowDataPacket[]>({
       sql: "SELECT VERSION() AS version, @@default_storage_engine AS engine, @@character_set_database AS charsetName, @@collation_database AS collationName, @@session.sql_mode AS sqlMode, @@session.time_zone AS timezone, @@session.transaction_isolation AS isolationLevel",
       timeout: 1000,
@@ -112,16 +110,10 @@ export async function runMigrations(
     }
     return count;
   } finally {
-    try {
-      if (locked)
-        await connection.query({
-          sql: "SELECT RELEASE_LOCK(?)",
-          values: [lockName],
-          timeout: 1000,
-        });
-    } finally {
-      // Disconnect also releases a named lock if a failed query prevented RELEASE_LOCK.
-      discard(connection);
-    }
+    // This single-purpose connection owns the lock for its entire lifetime. Never queue
+    // RELEASE_LOCK after a timed-out command: mysql2 can leave that command active and
+    // a queued cleanup query's own timer will not start. Force-close locally instead;
+    // MySQL releases the lock when it processes the disconnect (possibly after DDL ends).
+    discard(connection);
   }
 }

@@ -1,5 +1,5 @@
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
-import { createPool } from "mysql2/promise";
+import { createPool, type PoolConnection } from "mysql2/promise";
 import type { DatabaseSettings } from "../index.js";
 import { connectionOptions, discard, initializeSession } from "./session.js";
 
@@ -15,6 +15,22 @@ export interface UnitOfWork {
 
 export const transactionConnectionLimit = 5;
 
+async function controlQuery(connection: PoolConnection, sql: string): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // mysql2 starts its query timer only when the command reaches the wire. Bound the
+    // wall clock too: cleanup may be queued behind a command that never completed.
+    await Promise.race([
+      connection.query({ sql, timeout: 1000 }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("TRANSACTION_CONTROL_TIMEOUT")), 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createUnitOfWork(settings: DatabaseSettings): UnitOfWork {
   const pool = createPool({
     ...connectionOptions(settings),
@@ -28,13 +44,13 @@ export function createUnitOfWork(settings: DatabaseSettings): UnitOfWork {
       if (!state?.active) throw new Error("INACTIVE_OR_FOREIGN_TRANSACTION");
       return state.client;
     },
-    async run(command) {
+    async run<T>(command: (tx: TxContext) => Promise<T>): Promise<T> {
       const connection = await pool.getConnection();
       let reusable = false;
       const tx = Object.freeze({}) as TxContext;
       try {
         await initializeSession(connection);
-        await connection.query({ sql: "START TRANSACTION", timeout: 1000 });
+        await controlQuery(connection, "START TRANSACTION");
         const assertActive = () => {
           if (!contexts.get(tx)?.active) throw new Error("INACTIVE_OR_FOREIGN_TRANSACTION");
         };
@@ -59,20 +75,26 @@ export function createUnitOfWork(settings: DatabaseSettings): UnitOfWork {
           },
         });
         contexts.set(tx, { active: true, client });
+        let result: T;
         try {
-          const result = await command(tx);
-          const state = contexts.get(tx);
-          if (state) state.active = false;
-          await connection.query({ sql: "COMMIT", timeout: 1000 });
-          reusable = true;
-          return result;
+          result = await command(tx);
         } catch (error) {
           const state = contexts.get(tx);
           if (state) state.active = false;
-          await connection.query({ sql: "ROLLBACK", timeout: 1000 });
-          // Destroy on every failure, including driver query timeouts and broken streams.
+          try {
+            await controlQuery(connection, "ROLLBACK");
+          } catch {
+            // Preserve the command failure; finally discards even a queued/stalled rollback.
+          }
           throw error;
         }
+        const state = contexts.get(tx);
+        if (state) state.active = false;
+        // A lost COMMIT response is uncertain. Never queue rollback behind that command;
+        // the outer finally immediately discards its connection on any commit failure.
+        await controlQuery(connection, "COMMIT");
+        reusable = true;
+        return result;
       } finally {
         contexts.delete(tx);
         if (reusable) connection.release();

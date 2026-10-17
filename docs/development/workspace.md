@@ -58,7 +58,7 @@ The advisory recommendation to accept arbitrary newer MySQL 8.4 patches is not a
 
 ## Persistence follow-up
 
-VTC-007 now implements the [persistence substrate](persistence.md) separately from these historical scaffold observations: exact values, same-connection DML/audit transactions, a bounded transaction pool and explicit serialized migrations with dirty-state recovery. Its real MySQL suites remain separate from the twelve scaffold checks. Broader feature concurrency/permissions, authentication, outbox/jobs, CI and final-host recovery remain their named cards' gates.
+VTC-007 now implements the [persistence substrate](persistence.md) separately from these historical scaffold observations: exact values, same-connection DML/audit transactions, a bounded transaction pool and explicit serialized migrations with dirty-state recovery. Its real MySQL suites remain separate from the VTC-006 checks. Six additional database-independent protocol regressions bring `pnpm test:scaffold` to eighteen tests: they verify bounded cleanup and natural shutdown after stalled transaction control/migration operations with half-open peers. Transaction control uses an independent wall-clock deadline; the dedicated migrator disconnects without queued lock-cleanup SQL. A separate real MySQL slow-statement rehearsal preserves dirty state after timeout and permits server-side disconnect/lock-release lag. Broader feature concurrency/permissions, authentication, outbox/jobs, CI and final-host recovery remain their named cards' gates.
 
 ## Primary references
 
