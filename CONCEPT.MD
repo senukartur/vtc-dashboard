@@ -2,7 +2,7 @@
 
 **Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
-**Version:** 1.2 — includes the owner-confirmed VTC-002 catalog decisions and VTC-003 automatic initial-history upload requirement of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
+**Version:** 1.4 — includes the owner-confirmed catalog/history-upload decisions, MySQL 8.4 direction, cron/polling timing and development-first deployment with a separate USD 20/month testing ceiling, all of 2026-10-17. Hostland is the final destination after integrated testing; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
 
 **Updated:** 2026-10-17.
 
@@ -39,13 +39,13 @@ Members inspect personal/company totals, driver profiles, and trip history; sign
 - Steam is a linked identity rather than the primary login method; basic TruckersMP integration is included.
 - MVP trip sources are personal-token telemetry and manually submitted reports. Telemetry uploads must be durable and retry-safe; there is no requirement to store per-second telemetry on the server.
 - Keep one canonical trip with preserved source evidence, language-independent catalog IDs, and extensible source/rule boundaries. Source retries or reconciliation must not multiply statistics or qualification progress.
-- Production hosting targets approximately USD 35/year on the existing Hostland plan. MySQL is selected; the compatibility baseline is MySQL 8.0 and Node.js 24. Exact host capability and maintenance verification belongs to VTC-004.
+- Development/testing uses a separate owner-operated account with a ceiling of USD 20/month. Use Node.js 24 / MySQL 8.4 LTS; VTC-004 plans the environment and VTC-011 implements it. Hostland is the final destination after integrated testing, targeting approximately USD 35/year; its actual runtime/database availability, maintenance and cost are verified in VTC-041. This supersedes the earlier 8.0 target; a failed final-host condition requires a new decision, not a silent database downgrade.
 - Start with new data: there is no migration of accounts or trips from either existing website.
 - Full Trucky/VTCBase adapters, automatic cross-provider matching calibration, visas, reputation formulas, spendable points, Web Push, custom role authoring, and advanced disciplinary automation are later work. Reputation and points are separate from qualifications and access roles.
 
 ## Working stack and architecture
 
-The frontend direction is TypeScript, React, Vite, shadcn/ui, Tailwind, TanStack Query, React Hook Form/Zod, i18next, and Recharts. The backend direction is Node.js 24 LTS, TypeScript, and Fastify, with MySQL 8.0, Drizzle/mysql2, and Better Auth's MySQL adapter. MySQL is owner-selected; library versions, adapter compatibility, runtime patches, and the deployment model must be finalized through VTC-004/VTC-005.
+The frontend direction is TypeScript, React, Vite, shadcn/ui, Tailwind, TanStack Query, React Hook Form/Zod, i18next, and Recharts. The backend direction is Node.js 24 LTS, TypeScript, and Fastify, with MySQL 8.4, Drizzle/mysql2, and Better Auth's MySQL adapter. MySQL is owner-selected; library versions, adapter compatibility, runtime patches, and the deployment model must be finalized through VTC-004/VTC-005.
 
 Use a modular monolith with explicit identity/admissions, catalog, telemetry/source, trip/reconciliation, qualification, event, notification, and analytics modules. Keep business rules out of React components. Start with one deployable service where the host supports it, database-backed durable jobs/outbox, and replaceable source, email, and evidence-storage adapters.
 
@@ -60,7 +60,7 @@ flowchart LR
   Rules --> DB["MySQL: facts, history, outbox and jobs"]
   API --> DB
   DB --> Jobs["Host-compatible job runner"]
-  Jobs --> Updates["Notification history and SSE or approved polling"]
+  Jobs --> Updates["Notification history and authenticated polling"]
   Updates --> Web
 ```
 
@@ -99,9 +99,9 @@ The project's technical maintainer prepares updates; the Director or Deputy Dire
 
 - Use InnoDB transactions, foreign/unique keys, utf8mb4 text, explicit exact comparison for opaque IDs/hashes, UTC persistence, normalized metric units, and lossless ID/decimal handling.
 - Commit domain changes and outbox events together. Claim jobs through transactional leases, bounded batches/retries, and idempotent effects; test the selected MySQL locking behavior with concurrent consumers.
-- Shared-host process lifetime is an early gate. Persistent workers/SSE remain candidates until verified. If necessary, explicitly approve bounded cron processing/authenticated polling and document the changed latency.
+- The owner approved the MVP notification model on 2026-10-17: bounded cron work once per minute and authenticated polling every 30 seconds while the site is visible, paused while hidden/offline with immediate refresh on return. Approximately 90 seconds is an accepted healthy/no-backlog delivery target, not a guaranteed maximum; chained jobs, cold starts and failures can add delay. Verify actual host behavior and suppress stale live alerts under the telemetry contract. SSE is an optional later optimization, not a launch prerequisite.
 - Keep MySQL migrations serialized and reviewed. DDL may implicitly commit; use compatible additive changes, forward repair, and rehearsed backup/restore rather than claiming transactional schema rollback.
-- Match the verified Node.js/MySQL family, version/configuration, timezone, and SQL modes across local development, CI, temporary hosting, and production. Never plan a later PostgreSQL-to-MySQL conversion.
+- Pin/test compatible Node.js/MySQL patches, UTC, SQL modes and collations across local development, CI and staging now. At VTC-041 compare the actual Hostland configuration and test any differences before transfer; unknown production patches do not block development. Never plan a later PostgreSQL-to-MySQL conversion.
 - Enforce permissions on the server and filter notification/evidence recipients; UI hiding alone does not authorize access. Audit privileged changes without exposing passwords, invitation/reset/transfer secrets, or telemetry tokens.
 - Transactional email is behind an adapter; Resend is a research candidate. Verify current quotas, sender requirements, and costs in VTC-014. Routine trip notifications remain in-app.
 - Store screenshots behind authorized evidence access through a portable blob adapter with validated file types/limits. Verify storage capacity while preserving the approved minimum one-year retention.
@@ -110,11 +110,11 @@ The project's technical maintainer prepares updates; the Director or Deputy Dire
 
 ### Delivery and hosting
 
-Production targets approximately USD 35/year, with Hostland as the intended provider and MySQL 8.0 / Node.js 24 as the compatibility baseline. These are public project constraints, not disclosure of a hosting account's tariff, billing, inventory, or deployed runtime. The [backlog's public-safe hosting summary](docs/planning/mvp-trello-backlog.md#hostland-preliminary-findings-2026-10-16) records the remaining checks; keep account-specific verification evidence private.
+Deploy early to a separate development/testing account with an owner-approved ceiling of **USD 20/month**. The [provider comparison](docs/research/development-hosting.md) recommends one small DigitalOcean VM; AWS Lightsail and Railway are alternatives with documented trade-offs. VTC-004 delivers the plan, VTC-005/006/008/009 establish locally/CI-tested Node.js 24 and MySQL 8.4, and VTC-011 delivers a persistent HTTPS staging deployment. No provider purchase, account setup, workflow or hosted proof has been performed by the planning work.
 
-VTC-004 must verify actual patches/maintenance, Fastify startup under the provider's Node.js/Passenger setup, SSH/deployment access, TLS, persistent files, database privileges/limits, jobs/cron, and long-lived notification behavior. Do not assume Docker is available. Build in GitHub Actions and deploy a compatible artifact over SSH as a candidate workflow, then prove it on the account.
+**Hostland is the final production destination after VTC-040 integrated testing**, targeting approximately USD 35/year. Production account access, maintained MySQL 8.4 availability, patched Node.js 24, Fastify/Passenger startup, cron, TLS, persistence, privileges, capacity, recovery and full annual cost are **VTC-041 cutover gates**. Retain the [Hostland findings](docs/research/hosting.md), but do not make access to that account a prerequisite for architecture, implementation or staging. Failure of the final compatibility/budget condition requires an owner decision before cutover, not a claim that a VPS test proves shared-host compatibility.
 
-Temporary development hosting may differ, but its spending limit is not approved. Use local/free options until a budget is agreed, document sleep/expiry/file-persistence limits, and keep Node.js/MySQL compatible with the target. Rehearse transfer of newly created system data and evidence; no legacy-site import is included.
+Keep the [deployment direction](docs/decisions/hosting.md) portable: build/test in GitHub Actions, deploy an immutable reviewed artifact/image over SSH, keep a normal Node entry and independent bounded job CLI, private persistent evidence, serialized migrations and tested MySQL/file exports. Docker Compose can simplify staging; Docker availability on Hostland is not assumed. Rehearse transfer of newly created system data and evidence in VTC-041; no legacy-site import is included. VTC-042 retains final production smoke/pilot and release acceptance after transfer.
 
 Production deployment must use a CI-verified revision, serialize migrations/deployments, run readiness/smoke checks, maintain recoverable database/evidence backups, and pass a restore/failed-deploy rehearsal. Measure actual capacity and annual costs before launch.
 
@@ -397,7 +397,7 @@ No product-policy question remains open in VTC-001. These follow-ups have named 
 | Configure actual per-game qualification limits, promotion trip/distance thresholds, and company reporting timezone | VTC-028, VTC-031, VTC-032, VTC-038, VTC-042 | Production launch |
 | Verify game/DLC catalog sources, coverage, identifiers, trailer/ADR mappings, and update workflow | VTC-002, VTC-019 | Catalog-dependent implementation |
 | Verify telemetry fields, timestamps, missing-data behavior, and Steam ownership/provider mappings | VTC-003, VTC-018, VTC-024 | Real ingestion/identity integration |
-| Verify Hostland runtime/database versions, security maintenance, execution model, and annual cost | VTC-004, VTC-041 | Deployment choice and launch |
+| Plan rapid staging within USD 20/month; implement it on a separate account; verify Hostland runtime, annual cost and transfer after integrated testing | VTC-004, VTC-011, VTC-040, VTC-041 | Staging delivery, then final cutover/launch; Hostland access does not block architecture |
 | Implement uploads, choose tested file limits/formats, and verify capacity for one-year evidence retention | VTC-025, VTC-039, VTC-041 | Production uploads |
 | Implement and test director-code expiry, attempt/rate limits, replay/concurrency handling, and protected account changes | VTC-013, VTC-014, VTC-038, VTC-039 | Leadership transfer availability |
 | Review and merge the concept/requirements PR and link evidence to Trello | VTC-001 | Documentation delivery completion |
