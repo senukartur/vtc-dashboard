@@ -1,0 +1,70 @@
+# VTC-008 test tooling
+
+[VTC-008](https://trello.com/c/x9ItpOEL) supplies reusable test infrastructure and a real built-app smoke journey. Feature owners still own domain tests. Read [CONTRIBUTING.md](../../CONTRIBUTING.md), the [persistence contract](persistence.md), [fixture provenance](../../test/fixtures/README.md) and the applicable [concept scenarios](../../CONCEPT.MD#acceptance-scenarios-for-the-confirmed-decisions).
+
+## Run locally
+
+Use Node **24.22.0**, pnpm **12.14.0** and Docker Linux containers. The authoritative path creates its own stack, checks/builds this checkout, and runs every lane:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm test:local
+```
+
+No development `.env`, running app, published port or existing volume is used. Downloads occur during the image build. At runtime, the runner and real MySQL **8.4.11** are attached only to an explicit `internal: true` network; there are no external networks, host aliases, Docker sockets or published ports. The image uses the repository's pinned Node digest, installs Chromium and its OS dependencies at build time, and runs tests as `node`. Container and browser dependencies are separate from host dependencies. On native Linux, the output bind directory must be writable by container UID 1000; apply your normal local ownership policy before running if your host UID differs.
+
+Optional focused invocation still performs check/build before its chosen lane:
+
+```sh
+pnpm test:local integration
+pnpm test:local persistence
+pnpm test:local recovery
+pnpm test:local e2e
+pnpm test:local failure-reporting
+```
+
+`unit` and `contracts` are also valid focus names. The launcher uses a fresh random Compose project and private `.local/testing/<run>/stack.env` (mode 0600 on POSIX). It removes only that project's containers/network/volume in `finally`, propagates failure and handles interruption. Reports/screenshots/traces and private allocation configuration are ignored under `.local/testing/`; they must never be committed or uploaded blindly. Abrupt host/engine termination can interrupt cleanup; the printed project name identifies the owned stack for explicit recovery. Do not clean by a wildcard or remove development volumes. Private stack configuration can be removed after that owned stack is gone.
+
+## Lanes and configuration
+
+| Command | Actual evidence |
+| --- | --- |
+| `pnpm check` | Generated contracts, formatting/lint/types and the existing Node scaffold checks, including all reviewed browser structural fixtures |
+| `pnpm test:unit` | Vitest: deterministic helpers, local doubles, retry boundaries and endpoint/environment guards; database independent |
+| `pnpm test:contracts` | Vitest/Ajv 2020-12: all six canonical frozen telemetry examples and negative structural mutations |
+| `pnpm test:integration` | Vitest with real MySQL: unique-key races, durable synthetic leases/reconnect/reclaim, actual deadlock/retry, rollback/audit and ownership/grant denial |
+| `pnpm db:test` | Existing Node persistence lane, separately allocated: twelve reported tests including empty/replay/prior migration, sentinel/history, exact values and transaction boundaries |
+| `pnpm db:recovery` | Existing Node lane, separately allocated: two partial-DDL/timeout recovery rehearsals |
+| `pnpm test:e2e` | Playwright: one real built SPA/Fastify/MySQL smoke flow on desktop and mobile Chromium |
+| `pnpm test:failure-reporting` | Runs excluded deliberate assertions in each new runner and checks assertion identity plus exit 1; proves aggregate child failure propagation |
+| `pnpm test:all` | Sequential allocation-isolation proof, six lanes, then deliberate failure-reporting proof; fails closed when a child fails |
+
+`test:unit` and `test:contracts` can run natively after `pnpm build:packages`. Database/browser/aggregate commands require launcher-generated configuration from the isolated stack. They deliberately cannot read a development `.env` or default to a developer database. They are used inside `test:local`; invoking them from an ordinary shell without an allocation fails closed. Native unit/contract execution does **not** provide Docker's network boundary. Vitest's fetch guard catches accidental fetch calls, but raw sockets and other clients need OS/container isolation. Future tests must run through the authoritative Docker path when real service isolation matters.
+
+Vitest **5.0.5** requires Node `^22.12.0 || ^24.0.0 || >=26.0.0` and Vite `^6.4.0 || ^7.0.0 || ^8.0.0`; the root directly declares Vite **8.3.4**. Playwright **1.64.1** requires Node >=20. Registry publication dates checked on 2026-10-17 were October 15 and October 14 respectively; frozen installation passes the existing strict peer/release-age policy without new exclusions. TypeScript stays **5.9.3**. Ajv **8.20.0** and ajv-formats **3.0.1** are direct root imports. The telemetry runner disables only Ajv's `strictTypes` schema-authoring warning because the frozen schema refines existing objects in conditional branches without repeating their type; type coercion/default insertion/removal remain disabled. The schema itself is unchanged.
+
+## Database ownership and safety
+
+The provisioner alone receives the disposable server's admin credential. Before mutation it verifies the canonical actual version, engine, SQL modes, charset/collation, isolation and UTC through the existing readiness adapter. Each lane gets a new `vtc_test_<run>_<lane>` schema and random user granted only that schema; grant underscores are escaped so they are not MySQL wildcards. No global user/admin grant reaches a test or app child. The launcher holds a distinct suite `GET_LOCK` for the lifetime of the child; migration locks retain their separate production behavior. Allocation files bind run/lane/credentials and owner connection ID; destructive support checks the explicit acknowledgment, test mode, allocation, actual schema, baseline and matching suite-lock owner before resetting fixed fixture tables.
+
+The aggregate creates two simultaneous allocations with distinct sentinel values, proves each credential cannot read the other's real table, and rejects reuse of an occupied allocation without changing its sentinel. Integration also verifies immediate suite-lock contention and denial of global database/user access. Every invocation starts with a fresh MySQL volume; lanes have no shared mutable schema. Production migration SQL/journal/snapshot are unchanged. Empty/prior migration and dirty-DDL recovery remain separate Node lanes instead of duplicating that suite in Vitest.
+
+These are accident guards for cooperating test code, not a sandbox against a developer who forges configuration or rewrites the harness. A synthetic database name alone is never evidence that deletion is safe. The real runtime network boundary and schema grants provide independent containment. The runner starts each child with a small environment allowlist; provider/mail credentials and the disposable admin password are excluded. Browser contexts block unexpected origins and service workers; no HTTP responses are mocked. Real mail/identity/provider clients are absent from these tests.
+
+## Add tests
+
+- Add database-independent cases to `test/unit/`, structural telemetry cases to `test/contracts/`, real database cases to `test/integration/`, and browser journeys to `test/e2e/`. New files must not enable concurrent file/test execution against one allocation; use explicit helper connections within a race.
+- Use `clock()` (`nowUtc`, validated `set`, integer-millisecond `advance`) and independently instantiated `idGenerator()`/fresh builders from `test/support/builders.ts`. Application UUIDv4 generation does not alter provider UUID contracts. Canonical telemetry JSON is read afresh on every builder call.
+- Use `barrier`, `deferred`, `bounded`, `until` and `connections` from `test/support/concurrency.ts`. Bound waits and release gates in `finally`. Connection teardown destroys pending sockets; a rejected timeout alone cannot cancel SQL. The test-only transaction helper retries only actual callback deadlocks after rollback, at most three attempts by default; COMMIT is outside the retry catch. This is not production retry policy.
+- `MailFake` captures reference-only inputs and deterministic receipts. `BlobFake` copies streamed bytes, checks checksum/length and exposes private read/remove. `IdentityFake` captures the supplied transaction reference and a nonfunctional synthetic credential. `ProviderFake` preserves known/unavailable/ambiguous states. All support one-shot failures and reset. They are test-only architectural sketches, not installed production interfaces, actual password hashing/auth atomicity, provider verification, file authorization/retention or delivery proof.
+- Playwright creates a fresh context per case, explicitly sets locale/timezone, uses role/label queries and waits for conditions/actual requests. The server helper applies migrations and starts built Fastify plus built SPA; readiness reaches the actual fresh database. `reuseExistingServer: false` rejects an occupied local port. The smoke checks RU/EN text/document language, a real retry request, unknown route/Home, usable focus and horizontal overflow at 1280×800 and 390×844. Mobile Chromium emulation is not native-device or Safari evidence.
+
+Probes under `test/probes/` are excluded from ordinary suites and enabled only by the failure-reporting wrapper. The wrapper must find the named `VTC008_*_ASSERTION_PROBE`, an assertion diagnostic and exit 1; a config, connection or browser-launch crash cannot count as success. The aggregate probe actually runs the aggregate and verifies propagation of that unit assertion. These expected failed subprocesses make the proof wrapper pass only when failure reporting works.
+
+## Evidence and remaining gates
+
+Implementation feedback and exact-candidate independent verification are recorded in the delivery PR. Synthetic concurrency demonstrations support the future canonical-trip/job/transaction work; they do not implement ingestion, durable workers, domain acceptance, permissions or qualification policy. Structural schema acceptance does not prove telemetry UTF-8 byte/depth/u64 semantics, lifecycle truth, ownership, durable ACK or actual desktop-client integration. Existing browser examples remain structural evidence only.
+
+CI (VTC-009), enforced review (VTC-010), staging (VTC-011), feature workflows/adapters, integrated journeys (VTC-040), and Hostland/capacity/backup/restore (VTC-041) remain pending. Local checks and independent review do not imply merge, Done or deployment.
+
+Primary references: [Vitest setup files](https://vitest.dev/config/setupfiles.html), [Playwright web server](https://playwright.dev/docs/test-webserver), [Playwright Docker guidance](https://playwright.dev/docs/docker), [Compose internal networks](https://docs.docker.com/reference/compose-file/networks/), [Ajv dialects](https://ajv.js.org/guide/schema-language.html), and [MySQL locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html).

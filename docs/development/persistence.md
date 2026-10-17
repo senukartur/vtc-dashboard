@@ -84,23 +84,14 @@ The separate fixture rehearsal below restores an **empty synthetic pre-deploy ba
 
 ## Explicit synthetic verification
 
-Use an isolated real MySQL 8.4.11 database whose name matches `^vtc_test_[a-z0-9_]{1,40}$`, with its own private environment/project/volume. Test scripts require **both** `NODE_ENV=test` and `DB_TEST_RESET_ACK=synthetic-only`, verify the selected schema and reset only fixed audit/journal/synthetic tables. They never drop a database, disable FKs or seed an account. These guards are accident prevention, not permission to use a production database with a misleading name. Test fixtures live only under `test/fixtures/persistence/`; temporary combined migration assets live under ignored `.local/` and are removed after use.
+VTC-008 now supplies the [isolated test launcher](testing.md). Run these destructive fixtures only through its fresh per-lane schema/user, canonical baseline, explicit reset acknowledgment and suite ownership lock. A synthetic name and test mode alone are insufficient; ordinary native commands cannot fall back to a development environment. The provisioner creates/drops only its own allocated schema; fixture reset still drops only fixed tables and never disables FKs. Temporary combined migration assets remain ignored and are removed after use.
 
 ```sh
-docker compose exec -T -e NODE_ENV=test -e DB_TEST_RESET_ACK=synthetic-only app pnpm db:test
-docker compose exec -T -e NODE_ENV=test -e DB_TEST_RESET_ACK=synthetic-only app pnpm db:recovery
+pnpm test:local persistence
+pnpm test:local recovery
 ```
 
-For native PowerShell with the same isolated database configured in private `.env`:
-
-```powershell
-$env:NODE_ENV = 'test'
-$env:DB_TEST_RESET_ACK = 'synthetic-only'
-pnpm db:test
-pnpm db:recovery
-```
-
-Run the commands sequentially against that disposable schema. `db:test` checks empty/replayed and committed-prior-fixture additive migration, sentinel preservation, checksum drift, atomic audit/domain commit/rollback, context lifetime/foreign contexts, multiple/reused/tampered sessions, pool saturation/recovery, actual unique/FK/restrictive deletion, exact case/accent/composed Unicode/trailing-space keys, RU/EN/four-byte labels, bigint/decimal values, invalid precision, UTC in another process timezone, rejected private audit inputs, bounded lock contention/disconnect and concurrent fresh migration without duplicate apply. `db:recovery` separately proves persisted earlier DDL, durable dirty state, refusal to replay, released lock and restored-baseline application/replay. Its bounded real MySQL `SLEEP(2)` migration also verifies prompt local timeout rejection, preservation of the `applying` marker and refusal to replay after the server processes disconnect/lock release.
+The launcher runs `pnpm db:test` and `pnpm db:recovery` internally as separate protected Node lanes. `db:test` checks empty/replayed and committed-prior-fixture additive migration, sentinel preservation, checksum drift, atomic audit/domain commit/rollback, context lifetime/foreign contexts, multiple/reused/tampered sessions, pool saturation/recovery, actual unique/FK/restrictive deletion, exact case/accent/composed Unicode/trailing-space keys, RU/EN/four-byte labels, bigint/decimal values, invalid precision, UTC in another process timezone, rejected private audit inputs, bounded lock contention/disconnect and concurrent fresh migration without duplicate apply. `db:recovery` separately proves persisted earlier DDL, durable dirty state, refusal to replay, released lock and restored-baseline application/replay. Its bounded real MySQL `SLEEP(2)` migration also verifies prompt local timeout rejection, preservation of the `applying` marker and refusal to replay after the server processes disconnect/lock release.
 
 `pnpm check` additionally runs seven database-independent synthetic protocol regressions for stalled/server-error COMMIT, rollback, queued rollback and migration baseline/statement/final-journal operations. They keep peer sockets half-open until after asserting natural child-process exit, bounded rejection, socket disposal and recovered transaction-pool capacity. COMMIT cases verify the distinct outcome class/code and original cause with safe top-level fields; callback failures retain their original error identity. A separate public-surface test verifies that audit append is exposed while the writable table is absent. The timeout tests exposed the original queued-cleanup hang on the initial implementation before correction; they are not substitutes for the guarded real MySQL dirty-state/DDL cases.
 

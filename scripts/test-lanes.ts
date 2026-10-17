@@ -1,0 +1,325 @@
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { createDatabase, dedicatedConnection } from "@vtc/db";
+import { type Connection, createConnection } from "mysql2/promise";
+import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
+
+const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
+const lane = process.argv[2];
+if (!lane || ![...lanes, "all", "failure-reporting"].includes(lane))
+  throw new Error("INVALID_TEST_LANE");
+const cli = (name: string) => resolve(`node_modules/${name}`);
+let active: ReturnType<typeof spawn> | undefined;
+let interrupted = false;
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.once(signal, () => {
+    interrupted = true;
+    active?.kill(signal);
+  });
+
+async function child(args: string[], env: NodeJS.ProcessEnv, capture = false) {
+  let output = "";
+  const code = await new Promise<number>((accept, reject) => {
+    active = spawn(process.execPath, args, {
+      env,
+      stdio: capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    });
+    if (capture)
+      for (const stream of [active.stdout, active.stderr])
+        stream?.on("data", (chunk) => {
+          output = (output + String(chunk)).slice(-200000);
+        });
+    active.once("error", reject);
+    active.once("exit", (status) => accept(status ?? 1));
+  });
+  return { code, output };
+}
+
+async function execute(name: string, probe = false, capture = false) {
+  const env: NodeJS.ProcessEnv = {
+    ...safeChildEnvironment(),
+    VTC_TEST_LANE: name,
+    ...(probe ? { VTC_FAILURE_PROBE: "assertion" } : {}),
+  };
+  const databaseLane = ["integration", "persistence", "recovery", "e2e"].includes(name);
+  let cleanup = async () => {};
+  if (databaseLane) cleanup = await allocate(name, env);
+  try {
+    const args = ["unit", "contracts", "integration"].includes(name)
+      ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts"]
+      : name === "e2e"
+        ? [cli("@playwright/test/cli.js"), "test", "--config", "playwright.config.ts"]
+        : [
+            "--import",
+            "tsx",
+            "--test",
+            `test/persistence/${name === "persistence" ? "persistence" : "recovery"}.test.ts`,
+          ];
+    const result = await child(args, env, capture);
+    if (!capture) console.log(`LANE ${name}: ${result.code === 0 ? "PASS" : "FAIL"}`);
+    return result;
+  } finally {
+    await cleanup();
+  }
+}
+
+async function allocate(name: string, env: NodeJS.ProcessEnv) {
+  const run = process.env.VTC_TEST_RUN;
+  const password = process.env.VTC_TEST_ROOT_PASSWORD;
+  if (
+    process.env.VTC_TEST_LAUNCH !== "isolated-compose" ||
+    !run ||
+    !/^[a-f0-9]{16}$/.test(run) ||
+    !password ||
+    !/^[a-f0-9]{64}$/.test(password)
+  )
+    throw new Error("ISOLATED_TEST_LAUNCH_REQUIRED");
+  const database = `vtc_test_${run}_${name}`;
+  const user = `t_${randomBytes(8).toString("hex")}`;
+  const settings = {
+    host: "db",
+    port: 3306,
+    database,
+    user,
+    password: randomBytes(32).toString("hex"),
+  };
+  // Only this provisioner receives disposable admin credentials. Children receive one schema grant.
+  const admin = await createConnection({
+    host: "db",
+    user: "root",
+    password,
+    connectTimeout: 1000,
+  });
+  let lock: Awaited<ReturnType<typeof dedicatedConnection>> | undefined;
+  const path = resolve(`.local/testing/${run}-${name}.json`);
+  let created = false;
+  let phase = "baseline";
+  try {
+    // Fail closed on baseline drift BEFORE creating/resetting any schema.
+    const baseline = createDatabase({ ...settings, database: "mysql", user: "root", password });
+    try {
+      if (!(await baseline.check())) throw new Error("TEST_DATABASE_BASELINE_MISMATCH");
+    } finally {
+      await baseline.close();
+    }
+    phase = "schema";
+    await admin.query(
+      `CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+    );
+    created = true;
+    phase = "user";
+    await admin.query("CREATE USER ?@'%' IDENTIFIED BY ?", [user, settings.password]);
+    // Escape underscores in the database grant: MySQL otherwise treats them as wildcards.
+    phase = "grant";
+    await admin.query(`GRANT ALL ON \`${database.replaceAll("_", "\\_")}\`.* TO ?@'%'`, [user]);
+    phase = "lock_connection";
+    lock = await dedicatedConnection(settings);
+    phase = "lock_query";
+    const [rows] = await lock.query("SELECT GET_LOCK(?, 0) AS acquired, CONNECTION_ID() AS owner", [
+      `vtc008:${database}`,
+    ]);
+    phase = "lock_assertion";
+    if (Number((rows as { acquired: number }[])[0]?.acquired) !== 1)
+      throw new Error("TEST_SCHEMA_ALREADY_OWNED");
+    phase = "configuration";
+    await mkdir(resolve(".local/testing"), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        run,
+        lane: name,
+        token: randomBytes(16).toString("hex"),
+        ownerConnectionId: Number((rows as { owner: number }[])[0]?.owner),
+        settings,
+      }),
+      { mode: 0o600, flag: "wx" },
+    );
+    Object.assign(env, {
+      MYSQL_HOST: settings.host,
+      MYSQL_PORT: "3306",
+      MYSQL_DATABASE: database,
+      MYSQL_USER: user,
+      MYSQL_PASSWORD: settings.password,
+      DB_TEST_RESET_ACK: "synthetic-only",
+      VTC_TEST_CONFIG: path,
+    });
+  } catch (error) {
+    await lock?.end();
+    if (created) await admin.query(`DROP DATABASE \`${database}\``);
+    await admin.query("DROP USER IF EXISTS ?@'%'", [user]);
+    await admin.end();
+    const category =
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      ["ER_DBACCESS_DENIED_ERROR", "ER_ACCESS_DENIED_ERROR", "ER_PARSE_ERROR"].includes(
+        String(error.code),
+      )
+        ? `_${String(error.code)}`
+        : "";
+    throw new Error(`TEST_DATABASE_ALLOCATION_FAILED_${phase.toUpperCase()}${category}`);
+  }
+  return async () => {
+    try {
+      await lock?.end();
+      await admin.query(`DROP DATABASE \`${database}\``);
+      await admin.query("DROP USER ?@'%'", [user]);
+      await rm(path, { force: true });
+    } finally {
+      await admin.end();
+    }
+  };
+}
+
+async function proveFailures() {
+  for (const name of ["unit", "contracts", "integration", "e2e"]) {
+    const result = await execute(name, true, true);
+    const identity = `VTC008_${name.toUpperCase()}_ASSERTION_PROBE`;
+    if (
+      result.code !== 1 ||
+      !result.output.includes(identity) ||
+      !/AssertionError|expect\(received\)|expected .* to (?:be|equal)/s.test(result.output)
+    )
+      throw new Error(`FAILURE_PROBE_INVALID_${name.toUpperCase()}`);
+    console.log(`PROBE ${identity}: identified assertion, exit 1 (expected)`);
+  }
+  const result = await child(
+    ["--import", "tsx", "scripts/test-lanes.ts", "all", "--assertion-probe"],
+    safeChildEnvironment(),
+    true,
+  );
+  if (
+    result.code !== 1 ||
+    !result.output.includes("VTC008_UNIT_ASSERTION_PROBE") ||
+    !result.output.includes("AGGREGATE child unit failed")
+  )
+    throw new Error("AGGREGATE_FAILURE_PROBE_INVALID");
+  console.log("PROBE aggregate: identified unit assertion propagated, exit 1 (expected)");
+}
+
+async function proveIsolation() {
+  const a: NodeJS.ProcessEnv = {};
+  const b: NodeJS.ProcessEnv = {};
+  const disposeA = await allocate("isolationa", a);
+  let disposeB = async () => {};
+  try {
+    disposeB = await allocate("isolationb", b);
+    const clients: Connection[] = [];
+    try {
+      for (const env of [a, b]) {
+        const allocation = JSON.parse(
+          await readFile(env.VTC_TEST_CONFIG ?? "", "utf8"),
+        ) as Allocation;
+        clients.push(await dedicatedConnection(allocation.settings));
+      }
+      const [left, right] = clients;
+      if (!left || !right) throw new Error("ISOLATION_CONNECTION_MISSING");
+      await left.query("CREATE TABLE synthetic_sentinel (value INT)");
+      await left.query("INSERT INTO synthetic_sentinel VALUES (1)");
+      await right.query("CREATE TABLE synthetic_sentinel (value INT)");
+      await right.query("INSERT INTO synthetic_sentinel VALUES (2)");
+      for (const [client, other] of [
+        [left, b.MYSQL_DATABASE],
+        [right, a.MYSQL_DATABASE],
+      ] as const) {
+        let rejected = false;
+        try {
+          await client.query(`SELECT value FROM \`${other}\`.synthetic_sentinel`);
+        } catch (error) {
+          rejected =
+            !!error &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === "ER_TABLEACCESS_DENIED_ERROR";
+        }
+        if (!rejected) throw new Error("TEST_ALLOCATION_ISOLATION_FAILED");
+      }
+      let collisionRejected = false;
+      try {
+        await allocate("isolationa", {});
+      } catch {
+        collisionRejected = true;
+      }
+      if (!collisionRejected) throw new Error("TEST_ALLOCATION_COLLISION_ACCEPTED");
+      const [rows] = await left.query("SELECT value FROM synthetic_sentinel");
+      if ((rows as { value: number }[])[0]?.value !== 1)
+        throw new Error("TEST_ALLOCATION_SENTINEL_CHANGED");
+      const admin = await createConnection({
+        host: "db",
+        user: "root",
+        password: process.env.VTC_TEST_ROOT_PASSWORD ?? "",
+        connectTimeout: 1000,
+      });
+      try {
+        let refused = false;
+        try {
+          await admin.query("SET GLOBAL time_zone = '+01:00'");
+          try {
+            await allocate("wrongbaseline", {});
+          } catch {
+            refused = true;
+          }
+        } finally {
+          await admin.query("SET GLOBAL time_zone = '+00:00'");
+        }
+        if (!refused) throw new Error("TEST_WRONG_BASELINE_ACCEPTED");
+        const [schemas] = await admin.query(
+          "SELECT COUNT(*) AS count FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?",
+          [`vtc_test_${process.env.VTC_TEST_RUN}_wrongbaseline`],
+        );
+        if (Number((schemas as { count: number }[])[0]?.count) !== 0)
+          throw new Error("TEST_WRONG_BASELINE_MUTATED_SCHEMA");
+        const [baseline] = await left.query(
+          "SELECT VERSION() AS version, @@global.time_zone AS serverUtc, @@session.time_zone AS sessionUtc, @@session.transaction_isolation AS isolationLevel, @@session.sql_mode AS modes, @@collation_database AS collationName",
+        );
+        console.log(`BASELINE ${JSON.stringify(baseline)}`);
+        console.log("SAFETY: actual wrong-server-timezone rejected before schema creation PASS");
+      } finally {
+        await admin.end();
+      }
+      console.log(
+        "ISOLATION: distinct schema sentinels, cross-grant denial and occupied allocation rejection PASS",
+      );
+    } finally {
+      for (const client of clients) {
+        client.destroy();
+        (
+          client as unknown as { connection: { stream: { destroy(): void } } }
+        ).connection.stream.destroy();
+      }
+    }
+  } finally {
+    await disposeB();
+    await disposeA();
+  }
+}
+
+try {
+  if (lane === "failure-reporting") await proveFailures();
+  else if (lane === "all") {
+    if (!process.argv.includes("--assertion-probe")) await proveIsolation();
+    for (const name of lanes) {
+      const result = await execute(
+        name,
+        process.argv.includes("--assertion-probe") && name === "unit",
+      );
+      if (result.code !== 0 || interrupted) {
+        console.log(`AGGREGATE child ${name} failed`);
+        process.exitCode = result.code || 1;
+        break;
+      }
+    }
+    if (!process.exitCode) await proveFailures();
+  } else process.exitCode = (await execute(lane)).code;
+} catch (error) {
+  console.error(
+    error instanceof Error &&
+      /^(?:TEST_|ISOLATED_|FAILURE_PROBE_|AGGREGATE_)[A-Z_]+$/.test(error.message)
+      ? error.message
+      : "TEST_LANE_FAILED: inspect test identity/status; private database diagnostics suppressed",
+  );
+  process.exitCode = 1;
+}
+if (interrupted) process.exitCode = 130;
