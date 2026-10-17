@@ -149,6 +149,15 @@ jobs:
                 return;
               }
             }
+            const containsLikelyPrivateValue = (value) =>
+              /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/i.test(value) ||
+              /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i.test(value) ||
+              /\b(?:password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*["'`]?[^\s"'`,;]{8,}/i.test(value) ||
+              /\b[A-Z0-9._%+-]+@(?!example\.invalid\b)[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value);
+            if (containsLikelyPrivateValue(JSON.stringify(result))) {
+              core.setFailed('Claude output contained likely private material; no PR review was published.');
+              return;
+            }
             const safePublicText = (value) => value
               .replaceAll('@', '@\u200b')
               .replaceAll('](', ']\u200b(')
@@ -294,6 +303,15 @@ jobs:
                 core.setFailed('Claude returned an invalid inline finding.');
                 return;
               }
+            }
+            const containsLikelyPrivateValue = (value) =>
+              /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})\b/i.test(value) ||
+              /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i.test(value) ||
+              /\b(?:password|passwd|secret|token|api[_-]?key|authorization)\s*[:=]\s*["'`]?[^\s"'`,;]{8,}/i.test(value) ||
+              /\b[A-Z0-9._%+-]+@(?!example\.invalid\b)[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value);
+            if (containsLikelyPrivateValue(JSON.stringify(result))) {
+              core.setFailed('Claude output contained likely private material; no PR review was published.');
+              return;
             }
             const safePublicText = (value) => value
               .replaceAll('@', '@\u200b')
