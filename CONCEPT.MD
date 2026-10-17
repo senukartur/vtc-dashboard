@@ -1,10 +1,10 @@
 # VTC Dashboard — Project Concept
 
-**Status:** owner-approved product baseline; documentation under review. Application implementation has not started.
+**Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
 **Version:** 1.0.
 
-**Updated:** 2026-10-16.
+**Updated:** 2026-10-17.
 
 **Planning baseline:** [MVP Trello backlog](docs/planning/mvp-trello-backlog.md).
 

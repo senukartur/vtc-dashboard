@@ -192,7 +192,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - **Track:** Discovery
 - **Depends on:** None
 - **Primary ownership:** CONCEPT.MD, docs/product/, docs/planning/
-- **Status:** Requirements approved by the owner; documentation PR review/merge pending (Trello: Review).
+- **Status:** Requirements approved by the owner; [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the [Trello card](https://trello.com/c/GE2YTTXT/1-vtc-001-confirm-mvp-policies-permissions-and-acceptance-scenarios) track documentation delivery and review/merge evidence.
 
 **Goal:** Turn the agreed plan into explicit rules before implementing business decisions.
 

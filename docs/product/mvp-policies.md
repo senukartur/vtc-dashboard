@@ -1,6 +1,6 @@
 # VTC-001 — Requirements Approval Record
 
-**Status:** product baseline v1.0 approved; documentation PR review/merge pending.
+**Status:** product baseline v1.0 approved; [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the card below track documentation delivery and review/merge evidence.
 
 **Approved:** 2026-10-16.
 
@@ -13,6 +13,6 @@ Start with the concept's [permission matrix](../../CONCEPT.MD#permission-matrix)
 
 All VTC-001 product decisions were confirmed by the owner in the requirements conversation, including the final ten-minute director email code and protection against administrative account takeover. The [acceptance-evidence table](../../CONCEPT.MD#vtc-001-acceptance-evidence) maps the four original card criteria to the consolidated requirements.
 
-Repository review/merge is the remaining documentation-delivery gate. Actual qualification limits, promotion thresholds, and the reporting timezone are configured before launch. Catalog/telemetry/hosting verification and upload limits/capacity have separate owners in the [follow-up table](../../CONCEPT.MD#configuration-and-implementation-follow-up); their investigation is not part of completed VTC-001 product clarification.
+Repository review/merge evidence is required for documentation delivery and is recorded in PR #1 and Trello. Actual qualification limits, promotion thresholds, and the reporting timezone are configured before launch. Catalog/telemetry/hosting verification and upload limits/capacity have separate owners in the [follow-up table](../../CONCEPT.MD#configuration-and-implementation-follow-up); their investigation is not part of completed VTC-001 product clarification.
 
 Use CONCEPT.MD for future product edits. Keep the [implementation backlog](../planning/mvp-trello-backlog.md) and relevant contracts/cards aligned with it.
