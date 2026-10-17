@@ -1,10 +1,13 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createDatabase, dedicatedConnection } from "@vtc/db";
 import { type Connection, createConnection } from "mysql2/promise";
+import { cleanupAllocation, type OwnedAllocation } from "../test/support/allocation-cleanup.ts";
+import { bounded } from "../test/support/concurrency.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
+import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
@@ -37,7 +40,7 @@ async function child(args: string[], env: NodeJS.ProcessEnv, capture = false) {
   return { code, output };
 }
 
-async function execute(name: string, probe = false, capture = false) {
+async function execute(name: string, probe = false, capture = false, guardFailure = false) {
   const env: NodeJS.ProcessEnv = {
     ...safeChildEnvironment(),
     VTC_TEST_LANE: name,
@@ -47,6 +50,12 @@ async function execute(name: string, probe = false, capture = false) {
   let cleanup = async () => {};
   if (databaseLane) cleanup = await allocate(name, env);
   try {
+    if (guardFailure) {
+      const path = env.VTC_TEST_CONFIG ?? "";
+      const allocation = JSON.parse(await readFile(path, "utf8")) as Allocation;
+      allocation.ownerConnectionId += 1;
+      await writeFile(path, JSON.stringify(allocation));
+    }
     const args = ["unit", "contracts", "integration"].includes(name)
       ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts"]
       : name === "e2e"
@@ -94,7 +103,22 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
   });
   let lock: Awaited<ReturnType<typeof dedicatedConnection>> | undefined;
   const path = resolve(`.local/testing/${run}-${name}.json`);
-  let created = false;
+  const owned: OwnedAllocation = { schema: false, user: false, file: false };
+  const cleanup = () =>
+    cleanupAllocation(owned, {
+      lock: async () => {
+        if (lock) destroyTransport(lock);
+      },
+      schema: async () => {
+        await admin.query({ sql: `DROP DATABASE \`${database}\``, timeout: 2000 });
+      },
+      user: async () => {
+        await admin.query({ sql: "DROP USER ?@'%'", values: [user], timeout: 2000 });
+      },
+      file: () => rm(path, { force: true }),
+      admin: () => admin.end(),
+      destroyAdmin: () => destroyTransport(admin),
+    });
   let phase = "baseline";
   try {
     // Fail closed on baseline drift BEFORE creating/resetting any schema.
@@ -108,9 +132,10 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
     await admin.query(
       `CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
     );
-    created = true;
+    owned.schema = true;
     phase = "user";
     await admin.query("CREATE USER ?@'%' IDENTIFIED BY ?", [user, settings.password]);
+    owned.user = true;
     // Escape underscores in the database grant: MySQL otherwise treats them as wildcards.
     phase = "grant";
     await admin.query(`GRANT ALL ON \`${database.replaceAll("_", "\\_")}\`.* TO ?@'%'`, [user]);
@@ -125,17 +150,21 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
       throw new Error("TEST_SCHEMA_ALREADY_OWNED");
     phase = "configuration";
     await mkdir(resolve(".local/testing"), { recursive: true });
-    await writeFile(
-      path,
-      JSON.stringify({
-        run,
-        lane: name,
-        token: randomBytes(16).toString("hex"),
-        ownerConnectionId: Number((rows as { owner: number }[])[0]?.owner),
-        settings,
-      }),
-      { mode: 0o600, flag: "wx" },
-    );
+    const file = await open(path, "wx", 0o600);
+    owned.file = true;
+    try {
+      await file.writeFile(
+        JSON.stringify({
+          run,
+          lane: name,
+          token: randomBytes(16).toString("hex"),
+          ownerConnectionId: Number((rows as { owner: number }[])[0]?.owner),
+          settings,
+        }),
+      );
+    } finally {
+      await bounded(file.close(), "allocation_file_close");
+    }
     Object.assign(env, {
       MYSQL_HOST: settings.host,
       MYSQL_PORT: "3306",
@@ -146,10 +175,7 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
       VTC_TEST_CONFIG: path,
     });
   } catch (error) {
-    await lock?.end();
-    if (created) await admin.query(`DROP DATABASE \`${database}\``);
-    await admin.query("DROP USER IF EXISTS ?@'%'", [user]);
-    await admin.end();
+    const failures = await cleanup();
     const category =
       error &&
       typeof error === "object" &&
@@ -159,40 +185,52 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
       )
         ? `_${String(error.code)}`
         : "";
-    throw new Error(`TEST_DATABASE_ALLOCATION_FAILED_${phase.toUpperCase()}${category}`);
+    throw new Error(
+      `TEST_DATABASE_ALLOCATION_FAILED_${phase.toUpperCase()}${category}${failures.length ? `_CLEANUP_${failures.join("_")}` : ""}`,
+    );
   }
   return async () => {
-    try {
-      await lock?.end();
-      await admin.query(`DROP DATABASE \`${database}\``);
-      await admin.query("DROP USER ?@'%'", [user]);
-      await rm(path, { force: true });
-    } finally {
-      await admin.end();
-    }
+    const failures = await cleanup();
+    if (failures.length) throw new Error(`TEST_ALLOCATION_CLEANUP_FAILED_${failures.join("_")}`);
   };
+}
+
+function destroyTransport(connection: Connection) {
+  try {
+    connection.destroy();
+  } finally {
+    (
+      connection as unknown as { connection: { stream: { destroy(): void } } }
+    ).connection.stream.destroy();
+  }
 }
 
 async function proveFailures() {
   for (const name of ["unit", "contracts", "integration", "e2e"]) {
     const result = await execute(name, true, true);
-    const identity = `VTC008_${name.toUpperCase()}_ASSERTION_PROBE`;
-    if (
-      result.code !== 1 ||
-      !result.output.includes(identity) ||
-      !/AssertionError|expect\(received\)|expected .* to (?:be|equal)/s.test(result.output)
-    )
+    const identity = probeIdentity(name);
+    if (!isDeliberateFailure(name, result))
       throw new Error(`FAILURE_PROBE_INVALID_${name.toUpperCase()}`);
     console.log(`PROBE ${identity}: identified assertion, exit 1 (expected)`);
   }
+  const guarded = await execute("integration", true, true, true);
+  if (
+    guarded.code !== 1 ||
+    !guarded.output.includes(probeIdentity("integration")) ||
+    !guarded.output.includes("launcher must hold this allocation's suite ownership lock") ||
+    isDeliberateFailure("integration", guarded)
+  )
+    throw new Error("FAILURE_PROBE_GUARD_NEGATIVE_INVALID");
+  console.log(
+    "PROBE integration guard assertion: rejected as deliberate-proof evidence (expected)",
+  );
   const result = await child(
     ["--import", "tsx", "scripts/test-lanes.ts", "all", "--assertion-probe"],
     safeChildEnvironment(),
     true,
   );
   if (
-    result.code !== 1 ||
-    !result.output.includes("VTC008_UNIT_ASSERTION_PROBE") ||
+    !isDeliberateFailure("unit", result) ||
     !result.output.includes("AGGREGATE child unit failed")
   )
     throw new Error("AGGREGATE_FAILURE_PROBE_INVALID");
@@ -237,12 +275,15 @@ async function proveIsolation() {
         if (!rejected) throw new Error("TEST_ALLOCATION_ISOLATION_FAILED");
       }
       let collisionRejected = false;
+      const priorConfiguration = await readFile(a.VTC_TEST_CONFIG ?? "", "utf8");
       try {
         await allocate("isolationa", {});
       } catch {
         collisionRejected = true;
       }
       if (!collisionRejected) throw new Error("TEST_ALLOCATION_COLLISION_ACCEPTED");
+      if ((await readFile(a.VTC_TEST_CONFIG ?? "", "utf8")) !== priorConfiguration)
+        throw new Error("TEST_ALLOCATION_COLLISION_CHANGED_FILE");
       const [rows] = await left.query("SELECT value FROM synthetic_sentinel");
       if ((rows as { value: number }[])[0]?.value !== 1)
         throw new Error("TEST_ALLOCATION_SENTINEL_CHANGED");
@@ -291,9 +332,14 @@ async function proveIsolation() {
       }
     }
   } finally {
-    await disposeB();
-    await disposeA();
+    await disposeAllocations([disposeB, disposeA]);
   }
+}
+
+async function disposeAllocations(disposers: (() => Promise<void>)[]) {
+  const cleanup = await Promise.allSettled(disposers.map((dispose) => dispose()));
+  const failure = cleanup.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
 }
 
 try {
