@@ -253,9 +253,11 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Align the dashboard with the existing ets2telemetry application before either side implements uploads.
 
+**Research candidate (2026-10-17):** [Source findings](../research/telemetry.md), [HTTP contract and structural schema](../contracts/telemetry-v1.md), [synthetic examples](../contracts/examples/README.md), and [acceptance matrix](../contracts/telemetry-v1-acceptance.md). The owner requires automatic initial upload of all retained local game trips, followed by ongoing updates; this is distinct from deferred server-to-client restore. Current telemetry main still disables real-game recording and implements no HTTP uploader. Concrete contract agreement, independent review and merge remain pending; proposed transport limits and legacy first-binding behavior are not claimed owner-approved.
+
 **Scope and acceptance checklist**
 
-- [ ] Inspect current telemetry types and Trello work; document existing fields and gaps instead of assuming unavailable data.
+- [x] Inspect current telemetry types and Trello work; document existing fields and gaps instead of assuming unavailable data.
 - [ ] Specify driver token ownership, event/trip IDs, start/completion/cancellation, UTC event time versus receipt time, game version, source IDs, units, locale, and completeness.
 - [ ] Define durable acknowledgement, retryable/permanent errors, payload limits, version compatibility, and delayed/out-of-order event behavior.
 - [ ] Provide sanitized examples and a client/server acceptance checklist; explicitly exclude per-second upload and server-to-client history restore.
@@ -692,6 +694,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - **Primary ownership:** senukartur/ets2telemetry (external repository); docs/integrations/telemetry-verification.md here
 
 **Goal:** Complete the client half of the dashboard integration and prove it against real gameplay.
+
+**VTC-003 hand-off:** Automatically synchronize every retained local game trip on first connection, then new/changed trips, including partial/cancelled/closed records. Prove bounded resumable enumeration, overlap with ongoing recording, stable identities/revisions, immutable owner/identity-epoch binding and queue-pressure recovery. Do not silently reassign old history on token/account change. Use the [candidate contract](../contracts/telemetry-v1.md) once agreed; the current real-game recording gate must be cleared in the telemetry project. This expands initial upload, not VTC-110's later server-to-client restore.
 
 **Scope and acceptance checklist**
 

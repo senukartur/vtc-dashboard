@@ -17,6 +17,8 @@ VTC-002 research update (2026-10-17): the [source investigation](../research/cat
 
 Card creation is not implementation progress. No assignees, deadlines, paid automation, or implementation completion were inferred from the import.
 
+VTC-003 research candidate (2026-10-17): [source findings](../research/telemetry.md), [contract](../contracts/telemetry-v1.md), [examples](../contracts/examples/README.md) and [acceptance matrix](../contracts/telemetry-v1-acceptance.md) cover fields, lifecycle, tokens, initial history upload, revisions and durable retries. The owner requires all retained local game trips to upload automatically on first connection. Agreement/review/merge are pending; no uploader/server is implemented or external ET card modified by this research.
+
 ## MVP cards
 
 | ID | Trello card | Track | Start dependencies |
