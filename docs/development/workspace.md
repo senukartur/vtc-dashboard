@@ -12,7 +12,7 @@
 | `apps/api/src/modules/`, `use-cases/`, `platform/` | Domain ownership, cross-module coordination and infrastructure boundaries |
 | `apps/web/src/app/`, `features/`, `shared/` | React router/providers, future feature UI and localization/styles |
 | `packages/contracts/` | Generated OpenAPI browser types, reference-preserving JSON Schema 2020-12 and shared health DTO |
-| `packages/db/` | Small authenticated readiness pool; no domain/auth schema or migrations yet |
+| `packages/db/` | Authenticated readiness pool; VTC-007 adds separate [audit/value/transaction/migration foundations](persistence.md), with no domain/auth/company schema |
 | `config/runtime.json`, `deploy/local/mysql.cnf` | Common runtime/database target for local, later CI and deployment integration |
 | `compose.yaml`, `Dockerfile` | Docker local app/database with Compose Watch and optional production artifact |
 | `test/scaffold/` | Narrow configuration, HTTP and runtime schema bridge checks |
@@ -55,6 +55,10 @@ The independent reviewer reproduced an unbounded readiness query against a synth
 A further independent half-open-peer probe found that pinned mysql2's public `destroy()` removes a pooled connection but calls only `stream.end()`: a peer that keeps its sending side open can retain a client socket after the probe rejects and pool shutdown resolves. A small pinned-driver adapter also destroys the underlying stream. Its child-process regression checks natural process exit after both query timeouts before forced fixture cleanup, so resolving a promise alone cannot hide a leaked socket. This adapter must be rechecked when upgrading mysql2.
 
 The advisory recommendation to accept arbitrary newer MySQL 8.4 patches is not adopted: the approved baseline pins and checks a verified patch across local/CI/staging. Exact-match failure is deliberate drift detection, including untested provider suffixes. A future upgrade must update the shared target and its compatibility evidence together; VTC-041 owns comparing the final provider before cutover. No broad runtime compatibility with untested MySQL builds is claimed. Readiness deadlines also require revalidation on the chosen staging/final network.
+
+## Persistence follow-up
+
+VTC-007 now implements the [persistence substrate](persistence.md) separately from these historical scaffold observations: exact values, same-connection DML/audit transactions, a bounded transaction pool and explicit serialized migrations with dirty-state recovery. Its real MySQL suites remain separate from the twelve scaffold checks. Broader feature concurrency/permissions, authentication, outbox/jobs, CI and final-host recovery remain their named cards' gates.
 
 ## Primary references
 

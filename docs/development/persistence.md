@@ -1,0 +1,107 @@
+# VTC-007 persistence foundations
+
+[VTC-007](https://trello.com/c/0Fz7jw4v) adds the local Drizzle/mysql2 transaction, value, audit and migration foundations. The production schema contains only `audit_entries` plus the migration runner's operational ledger. Authentication, membership/company tables, canonical trips, permissions, outbox/jobs, CI and deployment remain their owners' work. These primitives do not establish passing domain scenarios or final-host compatibility.
+
+## Runtime and connections
+
+Pins: Node 24.22.0, pnpm 12.14.0, TypeScript 5.9.3, mysql2 3.24.6, drizzle-orm 0.45.4, drizzle-kit 0.31.11 and real MySQL 8.4.11. Strict dependency/peer policies remain enabled. InnoDB, utf8mb4 labels, UTC and the SQL modes in `requiredSqlModes` are required. Every transaction checkout resets session timezone, modes, isolation, autocommit and connection charset, including reused connections. Isolation is `REPEATABLE-READ`; authorization/concurrency owners must still use locking reads and recheck current state.
+
+Connection budget is **5 readiness + 5 transaction + 1 dedicated migrator = 11** for one instance of each factory and one migration invocation. Pools are lazy; the existing API currently instantiates only readiness. Create one shared UnitOfWork per application process, rather than a pool per repository/request. Across processes the bound is `5 * readiness instances + 5 * UnitOfWork instances + concurrent migration invocations`; jobs and replicas must be added to the deployment budget. A named migration lock does not prevent waiting migrators from opening their own one connection. Final-host privileges and capacity remain VTC-041 gates.
+
+Both pools reject immediately at saturation instead of queuing. Connection/handshake timeout is one second. Readiness retains its separate one-second limits for each of its two queries, approximately three seconds overall excluding scheduling. Transaction initialization uses two queries with one-second deadlines, and transaction control queries have one-second deadlines. The command callback and ordinary repository queries have no automatic overall deadline; owners must keep commands short and bound their operations. Failed initialization/transactions discard the connection and force-close its stream through the pinned mysql2 adapter. The existing half-open-readiness child-process regression must remain passing on driver upgrades. Close both factories during application shutdown; do not close the shared pool in a repository.
+
+## Transaction participation
+
+Import `createUnitOfWork`, `TxContext` and `createAudit` from `@vtc/db`. `run(command)` begins DML on one checked-out connection, passes an opaque context, commits after the awaited callback succeeds, and rolls back on failure. Each module owns its repository/schema and gets its Drizzle client through `unit.client(tx)`. Audit uses that same accessor and connection. Foreign, forged and completed contexts are rejected; deferred queries retained past completion also reject at driver execution. Nested autonomous transactions and streaming iterators are unsupported. There is no cross-module generic repository or second-pool participation shortcut.
+
+Await every repository operation inside the callback. Do not launch detached promises, issue DDL/transaction-control SQL through repositories, perform network effects inside the transaction, retain clients/builders, or call an auth API that opens its own connection. These are internal trusted-code boundaries, not a sandbox against a malicious module or DBA. A commit/network failure may have an uncertain outcome; a rollback attempt does not prove that a lost commit failed. Future command owners must use durable idempotency and reviewed bounded whole-command retries, not blind repetition. VTC-013 owns auth-schema participation; VTC-021 owns jobs/outbox and network delivery.
+
+## Values and references
+
+| Storage/helper | Contract |
+| --- | --- |
+| `idColumn` / `applicationId` / `newId` | Server-generated lowercase UUIDv4, exact 36 ASCII bytes in `BINARY(36)`. Organization/company and user references use the identical shape. Do not impose this version rule on external/provider identities. |
+| `opaqueColumn` / `opaqueBytes` / `opaqueUtf8` | `VARBINARY(n)`, explicit byte conversion, 1–512 byte technical maximum. No case folding, trimming, Unicode normalization or PAD SPACE collation. UTF-8 conversion rejects lone surrogates; arbitrary hashes may include zero/non-UTF-8 bytes. Module owners select an appropriate bound. |
+| Localized labels | Separate utf8mb4 text, default `utf8mb4_0900_ai_ci`. Label matching never establishes opaque identity or rule equivalence. |
+| `utcColumn` / `utcDateTime` / `utcIso` | `DATETIME(3)`, explicit offset-bearing ISO input and canonical ISO UTC reads. Offset input is converted once to UTC. Reject invalid calendar values, offset-free times and precision beyond milliseconds. Supported stored years are 1000–9999. No company reporting timezone default is inferred. |
+| `bigintColumn` / `signedBigint` | Signed 64-bit canonical decimal **strings**, including values beyond JS safe integers. mysql2 keeps BIGINT results as strings. External unsigned IDs retain their own contract/byte representation. |
+| `decimalColumn` / `decimal38_18` | Signed technical `DECIMAL(38,18)` envelope: at most 20 integer and 18 fraction digits; strings only, no exponent, no float conversion. Reject excess precision/range before insert. MySQL may pad fractions on reads; never use MySQL's fractional rounding as validation. |
+
+The decimal envelope is storage capacity, not company mass, promotion or reporting policy. This card supplies no business arithmetic implementation. Keep unavailable values distinct from zero, and preserve source/confirmation/acceptance times as separate facts in future module schemas.
+
+Audit retains opaque historical references without premature FKs to nonexistent auth/company/trip tables. Feature owners must coordinate real restrictive FKs and retention/tombstones when those tables exist; never cascade-delete historical audit/trip history to delete an account. Synthetic parent/child tests demonstrate actual unique/FK rejection and restrictive deletion without shipping feature schema.
+
+## Audit contract and exclusions
+
+`createAudit(unit).append(tx, input)` requires an active transaction and generates its own ID. Input has exactly `actorKind`, `actorId`, `operation`, `subjectKind`, `subjectId`, `occurredAt`, `reason` and optional `companyId`. A user actor requires an application ID; system actor requires `actorId: null`. Company scope, when supplied by a module, must also be an application ID. The subject reference and occurrence instant are required.
+
+The code registry in `packages/db/src/schema/audit.ts` is closed and runtime validated: operations `configuration.changed`, `membership.changed`, `report.reviewed`, `leadership.transferred`, `catalog.published`; subjects `company`, `user`, `trip`, `catalog`; reasons `operator_request`, `staff_review`, `initial_setup`, `catalog_update`. Adding a code is a reviewed source/schema contract change; these registered names do not implement or authorize those workflows. The module determines actor authorization, safe attribution time and reason eligibility. There is no user-supplied actor trust or audit-read endpoint.
+
+Unknown fields and unregistered codes fail before insert. No arbitrary JSON, before/after snapshot, free-text reason, email, password, token, reset/invitation/transfer code, raw telemetry, request/header, exception or evidence payload is accepted. Private report/decline details remain in their permission-filtered owners. Indexes support subject/time and actor/time lookups; primary IDs are unique. Only append is exposed: no update/delete primitive. This is application append-only behavior, not administrator-proof immutability. Separate least-privilege runtime/migration grants and production retention/restore proof remain VTC-039/041. Never log raw Drizzle/mysql2 errors: they may contain SQL and bound parameters.
+
+## Migration ownership and commands
+
+One migration integrator generates/orders the journal after coordinating module schema changes. Use `pnpm db:generate`, review **all** SQL and snapshot/journal changes, and run real MySQL tests. The root command formats generated metadata deterministically. `packages/db/drizzle.config.ts` currently includes only the audit schema; the integrator adds future module schemas explicitly. Review InnoDB/charset, indexes, exact comparisons, reference lengths, nullable uniqueness, FKs, MySQL's lack of generic `RETURNING` and implicit DDL commits. The initial SQL explicitly declares engine/charset/collation after generation; regeneration without schema changes must leave the committed assets unchanged.
+
+Never edit an applied/published migration or run `drizzle-kit push`/an auth automigrator. Use additive changes compatible with the currently running app; destructive removal needs its own reviewed rollout and recovery plan. Application startup, install and development setup never migrate, reset or seed.
+
+From the root after installing/building:
+
+```sh
+pnpm db:generate
+pnpm db:migrate
+pnpm db:migrate
+```
+
+For the Docker development environment:
+
+```sh
+docker compose exec app pnpm db:migrate
+```
+
+The runner reads packaged Drizzle SQL and `meta/_journal.json`, opens a **dedicated** mysql2 connection, acquires a database-scoped hashed `GET_LOCK` before journal access/application, and releases/disconnects in `finally`. Default lock wait is five seconds (programmatic maximum 30); the wire deadline is wait plus two seconds. Each migration statement has a 30-second wire deadline (programmatic bounds 100–300000 ms). Case-folded lock names conservatively serialize database-name aliases. The runner verifies the pinned baseline, strict session and ordered journal. It validates the entire recorded prefix by version and SHA-256 checksum, rejects missing/modified history, writes durable `applying` before SQL, then `applied` only after success. This operational `_vtc_migrations` ledger intentionally extends the generated Drizzle assets rather than using the upstream applied-only ledger. Do not mix this runner with the upstream Drizzle migrator.
+
+The lock coordinates participating migrators only. Stop competing deploys, other schema tools and incompatible app traffic operationally; it is not a deployment mutex against arbitrary clients. On a failed/lost connection, server-side work/lock release may lag until MySQL notices the disconnect. Query deadlines do not prove server cancellation. Inspect server state before another operator proceeds.
+
+`packages/db/package.json` ships built JS/declarations, SQL and the runtime journal; generation snapshots/config/TypeScript/test seeds are unnecessary at runtime. A production API deployment created with `pnpm --filter @vtc/api deploy --prod --legacy <output>` or the production Docker target can run, from its artifact root:
+
+```sh
+node node_modules/@vtc/db/dist/migrate-cli.js
+```
+
+For a production container: `docker run --rm --env-file <private-runtime-env> <reviewed-image> node node_modules/@vtc/db/dist/migrate-cli.js`, with the separately approved network/access configuration. This command needs environment configuration only; no global pnpm, workspace, source tree or drizzle-kit. Root `pnpm db:migrate` is a contributor command and rebuilds packages first. The CLI emits fixed event/category fields and an applied count; it does not print credentials or raw driver diagnostics.
+
+## Partial-DDL recovery runbook
+
+1. Stop migration/deploy competitors and incompatible traffic. Preserve the failed revision, SQL/checksums and private operational diagnostics. Protect backups and evidence from public logs/artifacts.
+2. Inspect actual MySQL tables/indexes/constraints and `_vtc_migrations` under authorized private access. An `applying` row is intentionally sticky; an earlier DDL statement may already have committed. A journal checksum pass does not detect arbitrary schema drift.
+3. Restore a tested **consistent** pre-deployment database and related evidence backup, including matching migration history; alternatively prepare and independently review a forward repair against the observed partial schema. Verify every affected statement/constraint/data transformation before any explicit operator journal reconciliation. Never automatically stamp success, delete the dirty marker to replay blindly, rewrite published SQL, or describe DML rollback as DDL rollback.
+4. Verify schema/history agreement, sentinel/domain consistency and the application's compatibility, then run the runner and readiness/smoke checks. Record exact revision and sanitized evidence before resuming traffic. If outcomes are uncertain, preserve state and stop for recovery rather than retrying a non-idempotent command.
+
+The separate fixture rehearsal below restores an **empty synthetic pre-deploy baseline** by dropping its fixed fixture tables/journal, then applies the reviewed production migration. It is deliberately not a general-purpose production restore tool, backup export test or proof of evidence/file restoration. Production backup/restore and forward-repair execution remain VTC-041 gates.
+
+## Explicit synthetic verification
+
+Use an isolated real MySQL 8.4.11 database whose name matches `^vtc_test_[a-z0-9_]{1,40}$`, with its own private environment/project/volume. Test scripts require **both** `NODE_ENV=test` and `DB_TEST_RESET_ACK=synthetic-only`, verify the selected schema and reset only fixed audit/journal/synthetic tables. They never drop a database, disable FKs or seed an account. These guards are accident prevention, not permission to use a production database with a misleading name. Test fixtures live only under `test/fixtures/persistence/`; temporary combined migration assets live under ignored `.local/` and are removed after use.
+
+```sh
+docker compose exec -T -e NODE_ENV=test -e DB_TEST_RESET_ACK=synthetic-only app pnpm db:test
+docker compose exec -T -e NODE_ENV=test -e DB_TEST_RESET_ACK=synthetic-only app pnpm db:recovery
+```
+
+For native PowerShell with the same isolated database configured in private `.env`:
+
+```powershell
+$env:NODE_ENV = 'test'
+$env:DB_TEST_RESET_ACK = 'synthetic-only'
+pnpm db:test
+pnpm db:recovery
+```
+
+Run the commands sequentially against that disposable schema. `db:test` checks empty/replayed and committed-prior-fixture additive migration, sentinel preservation, checksum drift, atomic audit/domain commit/rollback, context lifetime/foreign contexts, multiple/reused/tampered sessions, pool saturation/recovery, actual unique/FK/restrictive deletion, exact case/accent/composed Unicode/trailing-space keys, RU/EN/four-byte labels, bigint/decimal values, invalid precision, UTC in another process timezone, rejected private audit inputs, bounded lock contention/disconnect and concurrent fresh migration without duplicate apply. `db:recovery` separately proves persisted earlier DDL, durable dirty state, refusal to replay, released lock and restored-baseline application/replay.
+
+## Evidence and remaining gates
+
+During implementation on 2026-10-17, native pinned tooling passed strict typechecking/build and the real isolated MySQL persistence and separate recovery suites. Final exact-candidate independent verification/review is recorded in the delivery report/PR. These are narrow persistence checks, not VTC-008's broader test platform or passing E2E scenarios 7, 9, 10, 25, 26, 27, 29, 33, 35, 38, 40 or 41. They support those downstream invariants without implementing their workflows. VTC-009 application CI is not configured; advisory Claude is separate. VTC-011 staging, VTC-013 identity/FKs, VTC-021 outbox/jobs and VTC-041 Hostland privileges/capacity/restore/transfer remain pending. No migration was applied to a live database.
+
+Primary references: [Drizzle mysql2 setup](https://orm.drizzle.team/docs/mysql/get-started-mysql), [MySQL locking functions](https://dev.mysql.com/doc/refman/8.4/en/locking-functions.html), [implicit commits](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html) and [binary strings](https://dev.mysql.com/doc/refman/8.4/en/binary-varbinary.html). Pinned installed source behavior is additionally exercised by the integration checks.

@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1792256308390,
+      "tag": "0000_solid_spencer_smythe",
+      "breakpoints": true
+    }
+  ]
+}

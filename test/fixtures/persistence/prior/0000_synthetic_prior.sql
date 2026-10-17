@@ -1,0 +1,4 @@
+CREATE TABLE synthetic_parent (
+  id INT NOT NULL PRIMARY KEY,
+  label VARCHAR(128) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
