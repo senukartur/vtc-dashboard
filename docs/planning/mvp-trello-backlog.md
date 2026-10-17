@@ -41,13 +41,13 @@ The owner-approved production budget is **approximately USD 35 per year**. The i
 
 Development may use a different, convenient host before a later transfer. Its budget is a separate pending decision; use free/local options by default until paid development spending is explicitly agreed.
 
-Hostland publicly documents Node.js on shared hosting, so do not classify this provider as PHP-only. The project targets Node.js 24 and MySQL 8.0; verify actual supported patches, maintenance, process limits, and SSE behavior privately before deployment. **VTC-004 is an early compatibility gate, not a final deployment afterthought.** A transfer must be rehearsed; changing only environment variables is not a proven migration strategy.
+Hostland publicly documents Node.js on shared hosting, so do not classify this provider as PHP-only. The project targets Node.js 24 and MySQL 8.4; verify actual supported patches, maintenance, process limits, and SSE behavior privately before deployment. **VTC-004 is an early compatibility gate, not a final deployment afterthought.** A transfer must be rehearsed; changing only environment variables is not a proven migration strategy.
 
 Free development hosting can sleep, expire databases, or discard local files. Those limits may delay webhooks and reminders. Such an environment is not proof of production reliability. Render's free-service documentation is a research reference, not a selected hosting plan.
 
 ### Hostland preliminary findings (2026-10-16)
 
-- **Public-safe capability summary:** MySQL is owner-selected, with MySQL 8.0 and Node.js 24 as the target compatibility baseline. Exact supported versions, maintenance, account quotas, existing services, and billing remain private verification inputs for VTC-004. Do not publish control-panel captures or inventory to substantiate them.
+- **Public-safe capability summary at initial inspection:** MySQL was owner-selected, with MySQL 8.0 and Node.js 24 as the preliminary target. The dated update below supersedes that version direction. Exact supported versions, maintenance, account quotas, existing services, and billing remain private verification inputs for VTC-004. Do not publish control-panel captures or inventory to substantiate them.
 - [Shared-hosting specifications](https://www.hostland.ru/hosting) list Node.js, MySQL, SSH access, cron, and SSL. These public features do not confirm the existing account's exact limits or legacy tariff.
 - [Node.js setup documentation](https://www.hostland.ru/ru/docs/manual/avtomaticheskaya-ustanovka-nodejs) describes a server.js entry point, a public directory, Passenger logs, and restart.txt-based restarts. Verify the supported runtime version and Fastify startup behavior with a minimal deployment. Building in GitHub Actions and deploying a compatible artifact over SSH is a candidate workflow, not a verified integration.
 - [PostgreSQL documentation](https://www.hostland.ru/ru/docs/manual/postgresql) describes automatic installation on **VDS**. Shared-hosting specifications list MySQL; PostgreSQL availability on the existing account is **not confirmed**. Do not infer that the VDS PostgreSQL offering is included in the current annual fee.
@@ -57,9 +57,11 @@ Free development hosting can sleep, expire databases, or discard local files. Th
 
 VTC-004 remains open: actual runtime/database patches and maintenance, a host deployment test, background-task/SSE support, and full cost compatibility require verification. The temporary development budget also remains unanswered. Read-only account access does not authorize changing settings, applications, databases, or subscriptions. Keep verification evidence private and publish only a sanitized compatibility conclusion.
 
+**2026-10-17 update:** [VTC-004 findings](../research/hosting.md) identify MySQL 8.0 EOL and Hostland's public MySQL 8.4 offer, plus the need for a patched Node.js 24 execution/update proof. The owner approved maintained MySQL 8.4 LTS at the same approximately USD 35/year budget, superseding the earlier 8.0 target; actual account availability/cost remain open. This dated decision supersedes the preliminary version direction above. The [deployment direction](../decisions/hosting.md) proposes one Passenger application, CI artifacts/SSH delivery, bounded cron jobs and an owner-approved notification fallback if required. The [isolated proof](../research/hostland-verification.md) is prepared, not executed; [provider questions](../research/hostland-provider-questions.md) are unsent. Local development/standard public CI is the no-new-subscription recommendation; no hosted development spending is approved. All 8.4 implementation criteria below are conditional on passing those availability/cost gates.
+
 ### Proposed stack, subject to VTC-004 and VTC-005
 
-React + TypeScript + Vite; shadcn/ui + Tailwind; Recharts; TanStack Query; React Hook Form + Zod; i18next. Backend: **Node.js 24 LTS + Fastify, MySQL 8.0 + Drizzle (mysql2 driver)**, Better Auth with its MySQL Drizzle adapter, a transactional email adapter (Resend candidate), and SSE. MySQL is confirmed by the owner; the remaining library versions and host execution model are finalized in VTC-004/VTC-005.
+React + TypeScript + Vite; shadcn/ui + Tailwind; Recharts; TanStack Query; React Hook Form + Zod; i18next. Backend: **Node.js 24 LTS + Fastify, MySQL 8.4 + Drizzle (mysql2 driver)**, Better Auth with its MySQL Drizzle adapter, a transactional email adapter (Resend candidate), and SSE. MySQL is confirmed by the owner; the remaining library versions and host execution model are finalized in VTC-004/VTC-005.
 
 Use a modular monolith, one deployable application where supported, database-backed durable jobs/outbox, and replaceable email/blob/source adapters. A worker may initially run in-process, but jobs must survive restart and be safe under multiple consumers. No Redis, microservices, or per-second telemetry storage is required for MVP.
 
@@ -70,7 +72,7 @@ If host discovery changes this choice, update the architecture ADR and all affec
 - Use InnoDB, foreign keys, explicit unique constraints, and short transactions for domain changes plus outbox writes. Keep searchable trip facts in typed columns; JSON stores source payloads and versioned rule configuration, not the whole relational model.
 - Use utf8mb4 for localized text. External IDs, source event keys, token hashes, and other opaque identities need explicit exact comparison semantics; do not let case/accent-insensitive label collation merge distinct IDs. Normalize display-name aliases separately with game/locale context.
 - Store timestamps with documented UTC and fractional-second conventions; use lossless handling for large external IDs and exact decimal quantities. Pin SQL modes, isolation level, connection timezone, and a small bounded pool appropriate to shared hosting.
-- Implement durable jobs through MySQL tables, transactional claims/leases, and idempotent effects. Test MySQL 8.0 locking behavior, including a candidate FOR UPDATE SKIP LOCKED claim strategy, on the selected server. Persistent workers versus bounded cron execution remains a hosting decision; neither requires Redis.
+- Implement durable jobs through MySQL tables, transactional claims/leases, and idempotent effects. Test MySQL 8.4 locking behavior, including a candidate FOR UPDATE SKIP LOCKED claim strategy, on the selected server. Persistent workers versus bounded cron execution remains a hosting decision; neither requires Redis.
 - Pin real MySQL test instances to the verified production version/configuration, or document and test a deliberate patch difference. SQLite, MariaDB, and PostgreSQL are not substitute integration-test engines. Use the same Node.js major line and check the actual production patch in compatibility CI.
 - Use reviewed, serialized migrations and rehearsed backup/restore. MySQL DDL may implicitly commit: rolling back an application transaction is not a schema rollback strategy. Prefer additive migrations and documented forward repair; validate recovery after a partially applied migration.
 
@@ -276,10 +278,12 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Determine whether the proposed stack can run within approximately $35 per year on the current hosting.
 
+**Research status (2026-10-17):** [Public evidence/read-only findings](../research/hosting.md), [proposed decision](../decisions/hosting.md), [isolated test plan](../research/hostland-verification.md), and [unsent provider questions](../research/hostland-provider-questions.md). Production approval is blocked until maintained database/runtime availability, actual application/database/cron behavior and full annual cost are verified. The owner approved MySQL 8.4 LTS at the same budget following the 8.0 EOL finding; account availability remains unknown. No acceptance item is completed by a panel selector or an unexecuted plan.
+
 **Scope and acceptance checklist**
 
 - [ ] Verify full annual/renewal cost and included services against the owner-approved approximately USD 35/year budget; keep account-specific terms and raw evidence outside the public repository.
-- [ ] Prove compatibility with a new MySQL 8.0 database and Node.js 24 using authorized account access; keep actual version/inventory evidence private and preserve existing websites/databases.
+- [ ] Prove compatibility with a new MySQL 8.4 database and Node.js 24 using authorized account access; keep actual version/inventory evidence private and preserve existing websites/databases.
 - [ ] Verify the exact MySQL server version, InnoDB, SQL modes, collations, connection limits, database size/backup limits, and migration privileges; confirm Node.js actual runtime, security patch/update policy for both products, and an upgrade path if the offered release line lacks appropriate maintenance.
 - [ ] Verify Hostland's documented Node.js deployment on the actual account, including Fastify/server.js compatibility, Passenger process behavior, build artifacts, persistent storage, SSH/deployment access, TLS, cron, SSE/proxy limits, and outbound email API access.
 - [ ] If persistent workers/SSE are unsupported, specify bounded cron jobs/authenticated polling and their latency; if the selected MySQL/Node.js combination cannot run reliably within budget, record a concrete blocker and seek a hosting decision before implementation.
@@ -301,7 +305,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.0, then pin compatible library/driver versions after the host proof.
+- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions after the host proof.
 - [ ] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
 - [ ] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
 - [ ] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
@@ -325,7 +329,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 - [ ] Set up the chosen runtime/package manager with pinned versions, workspace layout, formatting, linting, and TypeScript checks.
 - [ ] Create API/web entry points, health/readiness routes, validated environment configuration, and an example environment file without secrets.
-- [ ] Document local startup with a real MySQL 8.0 database, fixtures, commands, module ownership, and one-card-per-branch workflow. Pin Node.js 24 and a verified MySQL patch/configuration; expose the same settings to CI and deployment tooling.
+- [ ] Document local startup with a real MySQL 8.4 database, fixtures, commands, module ownership, and one-card-per-branch workflow. Pin Node.js 24 and a verified MySQL patch/configuration; expose the same settings to CI and deployment tooling.
 - [ ] Keep production build/start commands portable; provide an optional container build without making Docker a host requirement.
 
 **Validation:** A clean checkout installs, starts locally, builds, and serves its health endpoint using the documented commands.
@@ -362,7 +366,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Configure Vitest and isolated real MySQL 8.0 integration tests, with deterministic clocks and fixture builders; align patch, SQL modes, collation, timezone, and isolation with the verified target. Do not substitute SQLite/MariaDB for these tests.
+- [ ] Configure Vitest and isolated real MySQL 8.4 integration tests, with deterministic clocks and fixture builders; align patch, SQL modes, collation, timezone, and isolation with the verified target. Do not substitute SQLite/MariaDB for these tests.
 - [ ] Provide concurrent-connection helpers for duplicate ingestion, job leases, deadlock retries, and transaction rollback; include migrations from an empty and prior fixture schema.
 - [ ] Provide telemetry contract fixtures, local mail/blob fakes, and mocked external identity/provider adapters.
 - [ ] Configure Playwright with a fresh test database and one real app smoke flow; document desktop/mobile viewport runs.
@@ -385,7 +389,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Add lint/format/type/build checks, unit tests, real-MySQL integration/contract tests, and a small Playwright smoke suite against MySQL.
-- [ ] Pin Node.js 24 and the verified MySQL 8.0 image version/digest, configure database readiness and target SQL settings, and apply migrations before tests. Check the actual host Node.js patch as well if the primary CI patch differs; document intentional differences instead of using floating latest tags.
+- [ ] Pin Node.js 24 and the verified MySQL 8.4 image version/digest, configure database readiness and target SQL settings, and apply migrations before tests. Check the actual host Node.js patch as well if the primary CI patch differs; document intentional differences instead of using floating latest tags.
 - [ ] Use clean dependencies, isolated databases, stable check names, timeouts, cancellation of obsolete runs, and failure artifacts.
 - [ ] Run untrusted PR code without deployment credentials; give workflow tokens minimum permissions and pin action revisions.
 - [ ] Keep a required aggregate result from silently passing skipped or failed critical jobs; publish diagnostic reports without secrets.
@@ -425,7 +429,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Scope and acceptance checklist**
 
-- [ ] Deploy the chosen temporary environment with HTTPS, MySQL 8.0 and Node.js 24 compatible with the production target, persistent database/blob storage or explicitly disposable fixtures, and separate test credentials. A free PostgreSQL service is not a substitute for the selected database.
+- [ ] Deploy the chosen temporary environment with HTTPS, MySQL 8.4 and Node.js 24 compatible with the production target, persistent database/blob storage or explicitly disposable fixtures, and separate test credentials. A free PostgreSQL service is not a substitute for the selected database.
 - [ ] Deploy only the exact revision that passed CI; use native Git integration or one deployment workflow, not competing triggers.
 - [ ] Document database migrations, health checks, logs, export/restore, and redeployment from a clean environment.
 - [ ] Document free-tier sleep/expiry effects on webhook delivery, SSE, and reminders; avoid uploading real user data into disposable environments.
@@ -1054,7 +1058,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Reconfirm provider compatibility and full annual/renewal cost; if incompatible or over budget, obtain a decision instead of assuming transfer is possible.
-- [ ] Configure TLS/domain, secrets, a new MySQL 8.0 database with least-privilege application access, Node.js 24, persistent evidence storage, mail sender, and the supported background/SSE execution model. Verify actual runtime/database patches and maintenance policy against VTC-004 before release.
+- [ ] Configure TLS/domain, secrets, a new MySQL 8.4 database with least-privilege application access, Node.js 24, persistent evidence storage, mail sender, and the supported background/SSE execution model. Verify actual runtime/database patches and maintenance policy against VTC-004 before release.
 - [ ] Deploy only a CI-verified revision/artifact, serialize migrations/deployments, run readiness/smoke checks, and document code/database rollback limitations.
 - [ ] Rehearse clean installation and transfer of the new system's MySQL database and blobs using compatible dump/restore tools and target privileges. Take a consistent InnoDB snapshot without concurrent DDL, coordinate it with evidence files, and verify restored counts, constraints, migrations, and file references.
 - [ ] Configure automated backups with documented retention and an independent recoverable copy within budget; verify restore and partial-migration recovery. An application artifact rollback must not be described as automatically reversing MySQL DDL.
@@ -1258,7 +1262,7 @@ No unanswered item below authorizes an implementation agent to invent a producti
 
 | Decision | Responsible card | Needed before |
 | --- | --- | --- |
-| Private verification of Hostland MySQL 8.0 / Node.js 24 maintenance, execution limits, and full annual cost; publish only a sanitized compatibility conclusion | VTC-004 | Stack ADR VTC-005 and production provisioning |
+| Private verification of Hostland MySQL 8.4 / Node.js 24 maintenance, execution limits, and full annual cost; publish only a sanitized compatibility conclusion | VTC-004 | Stack ADR VTC-005 and production provisioning |
 | Temporary development spending limit; free/local until agreed | VTC-004 | Paid development services in VTC-011 |
 | VTC-001 concept/requirements PR review and merge; product policies including director-email confirmation/protection are approved | VTC-001 | Documentation delivery completion |
 | Production qualification limits and numeric promotion thresholds: configured by the director before launch; initial restriction types and correction behavior are confirmed in product policies | VTC-028, VTC-031, VTC-042 | Production configuration and launch |
@@ -1299,7 +1303,7 @@ No unanswered item below authorizes an implementation agent to invent a producti
 | Director administration and company integration ownership | VTC-038; later VTC-101/102 |
 | Unit, real-database integration, contract and E2E tests | VTC-008, VTC-009, VTC-040 plus feature-level validation |
 | Code review and merge protection | VTC-010 |
-| MySQL selected from the first schema; target Node.js 24 / MySQL 8.0 and consistent local/CI/production behavior | VTC-004, VTC-005, VTC-006, VTC-007, VTC-008, VTC-009, VTC-011, VTC-041 |
+| MySQL selected from the first schema; target Node.js 24 / MySQL 8.4 and consistent local/CI/production behavior | VTC-004, VTC-005, VTC-006, VTC-007, VTC-008, VTC-009, VTC-011, VTC-041 |
 | Development deployment, target-host compatibility and production deployment | VTC-004, VTC-011, VTC-041 |
 | Approximately $35/year production budget | VTC-004, VTC-041, VTC-042 |
 | Security, logs, backups and release readiness | VTC-039, VTC-040, VTC-041, VTC-042 |

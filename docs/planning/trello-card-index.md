@@ -19,6 +19,8 @@ Card creation is not implementation progress. No assignees, deadlines, paid auto
 
 VTC-003 agreed baseline (2026-10-17): [source findings](../research/telemetry.md), [contract](../contracts/telemetry-v1.md), [examples](../contracts/examples/README.md) and [acceptance matrix](../contracts/telemetry-v1-acceptance.md) cover fields, lifecycle, tokens, initial history upload, revisions and durable retries. The owner requires all retained local game trips to upload automatically on first connection and authorized agreement after review corrections. [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) and Trello record final independent review/merge and delivery status. No uploader/server is implemented or external ET card modified by this research.
 
+VTC-004 investigation (2026-10-17): [findings](../research/hosting.md), [deployment proposal](../decisions/hosting.md), [isolated verification plan](../research/hostland-verification.md) and [unsent provider questions](../research/hostland-provider-questions.md) distinguish documentation/menu evidence from actual hosting proof. The owner approved maintained MySQL 8.4 LTS at the same budget, superseding the earlier 8.0 target. Account availability, runtime/database execution, notification transport and full cost remain open. VTC-004 remains In Progress; this research does not complete its production-compatibility gate.
+
 ## MVP cards
 
 | ID | Trello card | Track | Start dependencies |

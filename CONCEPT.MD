@@ -2,7 +2,7 @@
 
 **Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
-**Version:** 1.2 — includes the owner-confirmed VTC-002 catalog decisions and VTC-003 automatic initial-history upload requirement of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
+**Version:** 1.3 — includes the owner-confirmed VTC-002 catalog decisions, VTC-003 automatic initial-history upload requirement, and VTC-004 MySQL 8.4 target conditional on the same hosting budget, all of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
 
 **Updated:** 2026-10-17.
 
@@ -39,13 +39,13 @@ Members inspect personal/company totals, driver profiles, and trip history; sign
 - Steam is a linked identity rather than the primary login method; basic TruckersMP integration is included.
 - MVP trip sources are personal-token telemetry and manually submitted reports. Telemetry uploads must be durable and retry-safe; there is no requirement to store per-second telemetry on the server.
 - Keep one canonical trip with preserved source evidence, language-independent catalog IDs, and extensible source/rule boundaries. Source retries or reconciliation must not multiply statistics or qualification progress.
-- Production hosting targets approximately USD 35/year on the existing Hostland plan. MySQL is selected; the compatibility baseline is MySQL 8.0 and Node.js 24. Exact host capability and maintenance verification belongs to VTC-004.
+- Production hosting targets approximately USD 35/year on the existing Hostland plan. MySQL is selected; the owner approved maintained MySQL 8.4 LTS and Node.js 24, conditional on availability at the same budget. This supersedes the earlier 8.0 target; if unavailable, seek a new decision. Exact host capability and maintenance verification belongs to VTC-004.
 - Start with new data: there is no migration of accounts or trips from either existing website.
 - Full Trucky/VTCBase adapters, automatic cross-provider matching calibration, visas, reputation formulas, spendable points, Web Push, custom role authoring, and advanced disciplinary automation are later work. Reputation and points are separate from qualifications and access roles.
 
 ## Working stack and architecture
 
-The frontend direction is TypeScript, React, Vite, shadcn/ui, Tailwind, TanStack Query, React Hook Form/Zod, i18next, and Recharts. The backend direction is Node.js 24 LTS, TypeScript, and Fastify, with MySQL 8.0, Drizzle/mysql2, and Better Auth's MySQL adapter. MySQL is owner-selected; library versions, adapter compatibility, runtime patches, and the deployment model must be finalized through VTC-004/VTC-005.
+The frontend direction is TypeScript, React, Vite, shadcn/ui, Tailwind, TanStack Query, React Hook Form/Zod, i18next, and Recharts. The backend direction is Node.js 24 LTS, TypeScript, and Fastify, with MySQL 8.4, Drizzle/mysql2, and Better Auth's MySQL adapter. MySQL is owner-selected; library versions, adapter compatibility, runtime patches, and the deployment model must be finalized through VTC-004/VTC-005.
 
 Use a modular monolith with explicit identity/admissions, catalog, telemetry/source, trip/reconciliation, qualification, event, notification, and analytics modules. Keep business rules out of React components. Start with one deployable service where the host supports it, database-backed durable jobs/outbox, and replaceable source, email, and evidence-storage adapters.
 
@@ -110,7 +110,7 @@ The project's technical maintainer prepares updates; the Director or Deputy Dire
 
 ### Delivery and hosting
 
-Production targets approximately USD 35/year, with Hostland as the intended provider and MySQL 8.0 / Node.js 24 as the compatibility baseline. These are public project constraints, not disclosure of a hosting account's tariff, billing, inventory, or deployed runtime. The [backlog's public-safe hosting summary](docs/planning/mvp-trello-backlog.md#hostland-preliminary-findings-2026-10-16) records the remaining checks; keep account-specific verification evidence private.
+Production targets approximately USD 35/year, with Hostland as the intended provider and maintained MySQL 8.4 LTS / Node.js 24 as the conditional target. The owner approved 8.4 at the same budget on 2026-10-17; actual availability and execution remain unverified. These are public project constraints, not disclosure of a hosting account's tariff, billing, inventory, or deployed runtime. The [hosting findings](docs/research/hosting.md) and [proposed deployment direction](docs/decisions/hosting.md) record the remaining checks; keep account-specific verification evidence private.
 
 VTC-004 must verify actual patches/maintenance, Fastify startup under the provider's Node.js/Passenger setup, SSH/deployment access, TLS, persistent files, database privileges/limits, jobs/cron, and long-lived notification behavior. Do not assume Docker is available. Build in GitHub Actions and deploy a compatible artifact over SSH as a candidate workflow, then prove it on the account.
 

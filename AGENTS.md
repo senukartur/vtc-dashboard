@@ -45,7 +45,7 @@ If confidential material was already published, report the affected location wit
 
 ## Architecture and implementation boundaries
 
-- MySQL is selected; Node.js 24 / MySQL 8.0 is the working compatibility baseline. React/TypeScript, shadcn/ui, Fastify, Drizzle/mysql2, and the auth/mail adapters remain subject to the documented verification gates. Do not reintroduce PostgreSQL or a competing backend without an owner decision.
+- MySQL is selected; Node.js 24 / maintained MySQL 8.4 LTS is the owner-approved target, conditional on the same approximately USD 35/year budget. Account availability/cost and actual compatibility remain VTC-004 gates; do not silently revert to the superseded 8.0 target if the condition fails. React/TypeScript, shadcn/ui, Fastify, Drizzle/mysql2, and the auth/mail adapters remain subject to the documented verification gates. Do not reintroduce PostgreSQL or a competing backend without an owner decision.
 - Use the modular-monolith boundaries, server-side permissions, versioned contracts, canonical catalog IDs, normalized units, explicit UTC handling, and source provenance described in the concept.
 - Keep display labels separate from identity. DLC/build changes, translated names, missing fields, and ambiguous catalog/provider mappings must not silently alter rule outcomes.
 - Commit domain changes and outbox events together; use durable idempotent jobs and bounded retries. Verify MySQL concurrency behavior and account for implicit DDL commits during migration/recovery design.
