@@ -51,5 +51,17 @@ test("shared runtime baseline matches local/container versions and MySQL configu
   assert.ok(mysql.includes(`transaction-isolation=${runtime.mysqlIsolation}`));
   assert.ok(mysql.includes(`collation-server=${runtime.mysqlCollation}`));
   assert.ok(mysql.includes(`sql-mode=${runtime.mysqlSqlMode}`));
+  for (const setting of [
+    `character-set-server=${runtime.mysqlCharset}`,
+    `collation-server=${runtime.mysqlCollation}`,
+    `default-time-zone=${runtime.mysqlTimezone}`,
+    `transaction-isolation=${runtime.mysqlIsolation}`,
+    `sql-mode=${runtime.mysqlSqlMode}`,
+  ])
+    assert.ok(compose.includes(`--${setting}`), setting);
+  assert.ok(
+    !compose.includes("/etc/mysql/conf.d/"),
+    "Do not bind-mount Windows config permissions into mysqld",
+  );
   assert.deepEqual(new Set(runtime.mysqlSqlMode.split(",")), new Set(requiredSqlModes));
 });
