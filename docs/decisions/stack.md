@@ -1,6 +1,6 @@
 # VTC-005: stack and architecture direction
 
-**Date:** 2026-10-17. **Status:** proposed implementation baseline, pending independent review/merge. Product requirements and the two-stage deployment are already approved; this ADR selects the concrete development direction and records implementation gates.
+**Date:** 2026-10-17. **Status:** selected implementation direction; independent review and adoption are recorded in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and VTC-005. Product requirements and the two-stage deployment are already approved; this ADR selects the concrete development direction and records implementation gates.
 
 ## Decision
 
@@ -47,4 +47,4 @@ Published catalog/rule versions and manual/source evidence are immutable. Missin
 - PostgreSQL, Redis, microservices and per-second telemetry persistence are outside the selected MVP architecture. Browser and telemetry APIs have separate authentication/version/error semantics.
 - Full Trucky/VTCBase adapters, Web Push, visas/points and server-to-client telemetry restoration remain deferred. The extensible ports do not mark those integrations implemented.
 
-Remaining runtime/database/auth/serializer/integration gates belong to VTC-006/007/008/009/013/015/018/019/021 and feature cards; actual staging is VTC-011 and final Hostland proof is VTC-041. Independent review/merge is required before this VTC-005 baseline is accepted.
+Remaining runtime/database/auth/serializer/integration gates belong to VTC-006/007/008/009/013/015/018/019/021 and feature cards; actual staging is VTC-011 and final Hostland proof is VTC-041. Specification adoption through VTC-005 review/merge does not complete those gates.

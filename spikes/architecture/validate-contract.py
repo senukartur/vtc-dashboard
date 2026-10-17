@@ -77,6 +77,18 @@ negative.extend([
     ('RolesInput', {'roles': ['dispatcher', 'dispatcher'], 'reason': 'Fictional request'}),
     ('Decimal', '1e6'), ('Decimal', '1.00'), ('Id', 'NOT-A-UUID'),
 ])
+for name, operation_id, missing in [
+    ('TripProposal', 'getTripProposal', 'revisionId'),
+    ('QualificationRuleVersion', 'getQualificationRuleVersion', 'rules'),
+]:
+    value = copy.deepcopy(next(c['response']['data'] for c in fixtures if c['id'] == operation_id + ':success'))
+    del value[missing]
+    negative.append((name, value))
+negative.extend([
+    ('CatalogFieldChange', {'field': 'private_server_path', 'before': None, 'after': 'synthetic-example'}),
+    ('SteamReplacementProof', {**next(c['response']['data'] for c in fixtures if c['id'] == 'getSteamReplacementProof:success'), 'providerNonce': 'NONFUNCTIONAL_EXAMPLE_ONLY'}),
+    ('AssignmentHistory', {**next(c['response']['data']['items'][0] for c in fixtures if c['id'] == 'listMyQualificationAssignments:success'), 'endedAt': '2026-10-17T12:00:00+02:00'}),
+])
 for name, value in negative:
     assert not validator({'$ref': '#/components/schemas/' + name}).is_valid(value), name
 
@@ -112,6 +124,25 @@ assert 'expected_publication_pointer' in operations['publishCatalog']['x-guards'
 assert 'after_event_start' in operations['setEventAttendance']['x-guards']
 assert 'atomic_auth_member_invitation_transaction' in operations['redeemInvitation']['x-guards']
 assert 'do_not_change_active_link' in operations['requestSteamReplacementProof']['x-guards']
+for ident in ('listManualRevisions', 'getManualRevision', 'listTripProposals', 'getTripProposal'):
+    assert 'private_owner_or_staff' in operations[ident]['x-guards']
+    assert 'not_company_trip_visibility' in operations[ident]['x-guards'] or ident == 'getTripProposal'
+assert 'exact_proposal_revision' in operations['decideTripProposal']['x-guards']
+assert 'current_trip_etag' in operations['decideTripProposal']['x-guards']
+for ident in ('listQualificationRuleVersions', 'getQualificationRuleVersion'):
+    assert operations[ident]['x-capability'] == 'company.read'
+    assert 'immutable_published_rules_only' in operations[ident]['x-guards']
+for ident in ('listCatalogChanges', 'listCatalogCoverage', 'listCatalogMappingIssues'):
+    assert operations[ident]['x-capability'] == 'qualifications.manage'
+    assert 'pinned_review_version' in operations[ident]['x-guards']
+    assert any(p.get('name') == 'reviewVersion' and p.get('required') for p in operations[ident]['parameters'])
+assert 'bound_member_and_current_identity_epoch' in operations['replaceSteam']['x-guards']
+assert 'unexpired_single_use_proof' in operations['replaceSteam']['x-guards']
+history = next(c['response']['data'] for c in fixtures if c['id'] == 'getTrip:resubmitted-with-history')
+assert history['manualRevision']['number'] == 2
+assert history['decisions'][0]['reason']
+assert history['decisions'][0]['reviewedRevisionId'] != history['manualRevision']['id']
+assert 'providerNonce' not in visible_properties('SteamReplacementProof')
 coverage = (ROOT / 'docs/contracts/dashboard/ui-coverage.md').read_text(encoding='utf-8')
 for ident in re.findall(r'`([a-z][A-Za-z0-9]+)`', coverage):
     assert ident in operations, ident

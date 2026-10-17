@@ -31,7 +31,7 @@ Members inspect personal/company totals, driver profiles, and trip history; sign
 - [Trello card index](docs/planning/trello-card-index.md) links directly to the imported tasks.
 - [VTC-001 requirements record](docs/product/mvp-policies.md) preserves the earlier document path and points to this approved baseline.
 - The permission matrix, source-specific timing, and acceptance scenarios below are normative product requirements. The working stack and architecture remain subject to VTC-002–005 verification.
-- [VTC-005 architecture proposal](docs/architecture/README.md), [stack ADR](docs/decisions/stack.md) and [browser API](docs/contracts/dashboard/README.md) specify module/transaction/adapter boundaries, wire schemas and fictional UI examples. They are proposed implementation contracts pending review/merge, not new product-policy approvals or implemented services.
+- [VTC-005 architecture](docs/architecture/README.md), [stack ADR](docs/decisions/stack.md) and [browser API](docs/contracts/dashboard/README.md) specify module/transaction/adapter boundaries, wire schemas and fictional UI examples. [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) records independent review and adoption; these contracts are not new product-policy approvals or implemented services.
 
 ## Product scope and constraints
 

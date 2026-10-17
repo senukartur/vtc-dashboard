@@ -23,6 +23,9 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/me/identity` | `getIdentity` | `session` | VTC-018 |
 | `POST /api/v1/me/steam-verifications` | `requestSteamVerification` | `session` | VTC-018 |
 | `POST /api/v1/me/steam-replacement-verifications` | `requestSteamReplacementProof` | `session` | VTC-018 |
+| `GET /api/v1/me/steam-replacement-verifications/{verificationId}` | `getMySteamReplacementProof` | `session` | VTC-018 |
+| `GET /api/v1/admin/members/{memberId}/steam-replacement-verifications` | `listSteamReplacementProofs` | `members.manage` | VTC-018 |
+| `GET /api/v1/admin/members/{memberId}/steam-replacement-verifications/{verificationId}` | `getSteamReplacementProof` | `members.manage` | VTC-018 |
 | `GET /api/v1/members` | `listMembers` | `company.read` | VTC-033 |
 | `GET /api/v1/members/{memberId}` | `getMember` | `company.read` | VTC-033 |
 | `GET /api/v1/admin/members` | `listAdminMembers` | `members.manage` | VTC-038 |
@@ -47,6 +50,10 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/catalog-import-artifacts/{artifactId}` | `getCatalogArtifact` | `qualifications.manage` | VTC-019 |
 | `POST /api/v1/admin/catalog-imports` | `importCatalog` | `qualifications.manage` | VTC-019 |
 | `GET /api/v1/admin/catalog-revisions/{revisionId}` | `getCatalogRevision` | `qualifications.manage` | VTC-019 |
+| `GET /api/v1/admin/catalog-revisions/{revisionId}/review` | `getCatalogReview` | `qualifications.manage` | VTC-019 |
+| `GET /api/v1/admin/catalog-revisions/{revisionId}/diff` | `listCatalogChanges` | `qualifications.manage` | VTC-019 |
+| `GET /api/v1/admin/catalog-revisions/{revisionId}/coverage` | `listCatalogCoverage` | `qualifications.manage` | VTC-019 |
+| `GET /api/v1/admin/catalog-revisions/{revisionId}/mapping-issues` | `listCatalogMappingIssues` | `qualifications.manage` | VTC-019 |
 | `POST /api/v1/admin/catalog-revisions/{revisionId}/publication` | `publishCatalog` | `qualifications.manage` | VTC-019 |
 | `POST /api/v1/admin/catalog-mappings` | `addCatalogMapping` | `qualifications.manage` | VTC-019 |
 | `GET /api/v1/me/telemetry-tokens` | `listTelemetryTokens` | `trips.submit_own` | VTC-023 |
@@ -63,6 +70,10 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `POST /api/v1/manual-trips` | `submitManualTrip` | `trips.submit_own` | VTC-025 |
 | `POST /api/v1/trips/{tripId}/manual-revisions` | `reviseManualTrip` | `trips.submit_own` | VTC-025 |
 | `GET /api/v1/trips/{tripId}/review` | `getTripReview` | `trips.review` | VTC-029 |
+| `GET /api/v1/trips/{tripId}/manual-revisions` | `listManualRevisions` | `session` | VTC-025 |
+| `GET /api/v1/trips/{tripId}/manual-revisions/{revisionId}` | `getManualRevision` | `session` | VTC-025 |
+| `GET /api/v1/trips/{tripId}/proposals` | `listTripProposals` | `session` | VTC-029 |
+| `GET /api/v1/trips/{tripId}/proposals/{proposalId}` | `getTripProposal` | `session` | VTC-029 |
 | `POST /api/v1/trips/{tripId}/decisions` | `decideTrip` | `trips.review` | VTC-029 |
 | `POST /api/v1/trips/{tripId}/correction-requests` | `requestTripCorrection` | `trips.submit_own` | VTC-025 |
 | `POST /api/v1/trips/{tripId}/resolution-proposals` | `proposeTripResolution` | `trips.review` | VTC-029 |
@@ -73,9 +84,14 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/reconciliations/{reconciliationId}` | `getReconciliation` | `trips.review` | VTC-026 |
 | `POST /api/v1/reconciliations/{reconciliationId}/reversals` | `reverseReconciliation` | `trips.review` | VTC-026 |
 | `GET /api/v1/qualification-levels` | `listQualificationLevels` | `company.read` | VTC-028 |
+| `GET /api/v1/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleVersions` | `company.read` | VTC-028 |
+| `GET /api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}` | `getQualificationRuleVersion` | `company.read` | VTC-028 |
 | `GET /api/v1/members/{memberId}/qualification-progress` | `getQualificationProgress` | `company.read` | VTC-028 |
 | `GET /api/v1/me/qualification-progress` | `getMyQualificationProgress` | `trips.submit_own` | VTC-028 |
 | `GET /api/v1/admin/members/{memberId}/qualification-progress` | `getAdminQualificationProgress` | `qualifications.manage` | VTC-028 |
+| `GET /api/v1/me/qualification-assignments` | `listMyQualificationAssignments` | `session` | VTC-028 |
+| `GET /api/v1/trips/{tripId}/qualification-assignments` | `listTripQualificationAssignments` | `trips.review` | VTC-029 |
+| `GET /api/v1/admin/members/{memberId}/qualification-assignments` | `listMemberQualificationAssignments` | `qualifications.manage` | VTC-028 |
 | `PATCH /api/v1/admin/qualification-levels/{levelId}` | `renameQualificationLevel` | `qualifications.manage` | VTC-028 |
 | `POST /api/v1/admin/qualification-levels/{levelId}/rule-versions` | `publishQualificationRules` | `qualifications.manage` | VTC-028 |
 | `POST /api/v1/admin/members/{memberId}/qualification-assignments` | `assignQualification` | `qualifications.manage` | VTC-028 |

@@ -23,7 +23,7 @@ VTC-004 research delivery (2026-10-17): the owner approved **up to USD 20/month*
 
 ## MVP cards
 
-VTC-005 proposed architecture (2026-10-17): [module/data/adapter ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [bounded compatibility evidence](../research/stack-compatibility.md). Core package probes and structural fixtures do not prove real MySQL/auth/session/domain/hosting correctness. VTC-005 remains In Progress pending independent review/merge; VTC-006/007/008/009/013/015 and feature cards retain implementation gates. The existing telemetry v1.0 baseline and 42 approved scenarios remain unchanged.
+VTC-005 specification delivery (2026-10-17): [module/data/adapter ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [bounded compatibility evidence](../research/stack-compatibility.md). [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5), its [review correction record](../architecture/review-vtc-005.md) and Trello record final independent review, merge and card acceptance; the five specification deliverables are supplied. Core package probes and structural fixtures do not prove real MySQL/auth/session/domain/hosting correctness; VTC-006/007/008/009/013/015 and feature cards retain implementation gates. The existing telemetry v1.0 baseline and 42 approved scenarios remain unchanged.
 
 | ID | Trello card | Track | Start dependencies |
 | --- | --- | --- | --- |

@@ -303,15 +303,15 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Freeze enough interfaces for independent frontend and backend work.
 
-**Proposed delivery (2026-10-17):** [Architecture and ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [compatibility evidence](../research/stack-compatibility.md). The isolated probe pins and exercises the core Node/Fastify/Drizzle/auth/React combination without a live database; real MySQL, session/invitation transactions, root tooling and deployment remain implementation gates. Review/merge is required before VTC-005 is Done. The frozen telemetry contract is unchanged. Asynchronous catalog import now explicitly depends on VTC-021's durable jobs rather than an undeclared worker.
+**Specification delivery (2026-10-17):** [Architecture and ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [compatibility evidence](../research/stack-compatibility.md). [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and the [review correction record](../architecture/review-vtc-005.md) track independent review, the five read-contract corrections and final merge/acceptance. The isolated probe pins and exercises the core Node/Fastify/Drizzle/auth/React combination without a live database; real MySQL, session/invitation transactions, root tooling and deployment remain implementation gates. The five specification deliverables below are supplied; VTC-005 is Done only after final-head review/merge. The frozen telemetry contract is unchanged. Asynchronous catalog import now explicitly depends on VTC-021's durable jobs rather than an undeclared worker.
 
 **Scope and acceptance checklist**
 
-- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions using local/CI evidence. Hostland-specific execution is deferred to VTC-041 and does not block this architecture.
-- [ ] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
-- [ ] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
-- [ ] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
-- [ ] Define blob storage, email, catalog source, and trip source interfaces; document schema/migration ownership and compatibility rules.
+- [x] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions using local/CI evidence. Hostland-specific execution is deferred to VTC-041 and does not block this architecture.
+- [x] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
+- [x] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
+- [x] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
+- [x] Define blob storage, email, catalog source, and trip source interfaces; document schema/migration ownership and compatibility rules.
 
 **Validation:** Check each planned UI against a contract example, including loading/empty/error/forbidden cases. Review trip status transitions and the dependency graph.
 

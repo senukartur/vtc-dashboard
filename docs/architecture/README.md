@@ -1,6 +1,6 @@
 # VTC-005 architecture baseline
 
-**Status:** proposed implementation baseline; review/merge tracked by VTC-005. These documents specify future software, not implemented services. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD).
+**Status:** implementation specification; adoption and independent review are tracked in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and VTC-005. The [review correction record](review-vtc-005.md) describes the five read-contract fixes. These documents specify future software, not implemented services. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD).
 
 Read the [stack decision](../decisions/stack.md), [module boundaries](modules.md), [data/transaction rules](data-and-transactions.md), [adapter interfaces](ports.md), and [dashboard contract](../contracts/dashboard/README.md). The existing [telemetry v1.0 contract](../contracts/telemetry-v1.md) is unchanged.
 

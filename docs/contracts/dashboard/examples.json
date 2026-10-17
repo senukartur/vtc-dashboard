@@ -345,6 +345,7 @@
         "data": {
           "steamStatus": "unlinked",
           "steamProfileUrl": null,
+          "pendingReplacementId": null,
           "identityEpoch": 1,
           "truckersMp": {
             "status": "available",
@@ -381,6 +382,85 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "verificationUrl": "https://example.invalid/nonfunctional",
           "expiresAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMySteamReplacementProof:success",
+      "operationId": "getMySteamReplacementProof",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "memberId": "41000000-0000-4000-8000-000000000001",
+          "identityEpoch": 1,
+          "state": "verified",
+          "candidateSteamProfileUrl": "https://example.invalid/fictional-verified-profile",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "expiresAt": "2026-10-17T12:10:00.000Z",
+          "verifiedAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listSteamReplacementProofs:success",
+      "operationId": "listSteamReplacementProofs",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "memberId": "41000000-0000-4000-8000-000000000001",
+              "identityEpoch": 1,
+              "state": "pending",
+              "candidateSteamProfileUrl": null,
+              "createdAt": "2026-10-17T12:00:00.000Z",
+              "expiresAt": "2026-10-17T12:00:00.000Z",
+              "verifiedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listSteamReplacementProofs:empty",
+      "operationId": "listSteamReplacementProofs",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getSteamReplacementProof:success",
+      "operationId": "getSteamReplacementProof",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "memberId": "41000000-0000-4000-8000-000000000001",
+          "identityEpoch": 1,
+          "state": "verified",
+          "candidateSteamProfileUrl": "https://example.invalid/fictional-verified-profile",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "expiresAt": "2026-10-17T12:10:00.000Z",
+          "verifiedAt": "2026-10-17T12:00:00.000Z"
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -981,6 +1061,145 @@
       }
     },
     {
+      "id": "getCatalogReview:success",
+      "operationId": "getCatalogReview",
+      "status": 200,
+      "response": {
+        "data": {
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "comparisonRevisionId": null,
+          "gameBuild": "synthetic-example",
+          "releaseInventoryAsOf": "2026-10-01",
+          "addedEntities": 1,
+          "changedEntities": 1,
+          "retiredEntities": 1,
+          "expectedPacks": 1,
+          "validatedPacks": 1,
+          "missingPacks": 1,
+          "failedPacks": 1,
+          "nonContributingPacks": 1,
+          "mappingIssues": 1,
+          "sourceReviewState": "pending",
+          "provenance": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogChanges:success",
+      "operationId": "listCatalogChanges",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "entityId": "41000000-0000-4000-8000-000000000001",
+              "kind": "city",
+              "changeKind": "added",
+              "fields": [],
+              "reasonCodes": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogChanges:empty",
+      "operationId": "listCatalogChanges",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogCoverage:success",
+      "operationId": "listCatalogCoverage",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "packId": "synthetic-example",
+              "title": "synthetic-example",
+              "state": "validated",
+              "contributionKinds": [],
+              "provenance": [],
+              "reasonCodes": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogCoverage:empty",
+      "operationId": "listCatalogCoverage",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogMappingIssues:success",
+      "operationId": "listCatalogMappingIssues",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "provider": "synthetic-example",
+              "mapNamespace": null,
+              "sourceId": null,
+              "sourceLocale": null,
+              "reasonCode": "synthetic-example",
+              "candidateEntityIds": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogMappingIssues:empty",
+      "operationId": "listCatalogMappingIssues",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
       "id": "publishCatalog:success",
       "operationId": "publishCatalog",
       "status": 200,
@@ -1412,8 +1631,178 @@
           },
           "factRevisionId": "41000000-0000-4000-8000-000000000001",
           "facts": [],
+          "evaluation": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          },
           "canDecide": false,
           "blockedReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listManualRevisions:success",
+      "operationId": "listManualRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "number": 1,
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+                "originCityId": "41000000-0000-4000-8000-000000000011",
+                "destinationCityId": "41000000-0000-4000-8000-000000000012",
+                "cargoId": "41000000-0000-4000-8000-000000000013",
+                "cargoMassKg": "12500.5",
+                "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "41000000-0000-4000-8000-000000000001"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listManualRevisions:empty",
+      "operationId": "listManualRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getManualRevision:success",
+      "operationId": "getManualRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "number": 1,
+          "submittedAt": "2026-10-17T12:00:00.000Z",
+          "fields": {
+            "game": "ets2",
+            "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+            "originCityId": "41000000-0000-4000-8000-000000000011",
+            "destinationCityId": "41000000-0000-4000-8000-000000000012",
+            "cargoId": "41000000-0000-4000-8000-000000000013",
+            "cargoMassKg": "12500.5",
+            "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+            "actualDistanceM": "12500.5",
+            "evidenceIds": [
+              "41000000-0000-4000-8000-000000000001"
+            ],
+            "eventId": null,
+            "comment": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripProposals:success",
+      "operationId": "listTripProposals",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "revisionId": "41000000-0000-4000-8000-000000000001",
+              "tripId": "41000000-0000-4000-8000-000000000001",
+              "kind": "correction_request",
+              "createdAt": "2026-10-17T12:00:00.000Z",
+              "authorId": "41000000-0000-4000-8000-000000000001",
+              "baseTripVersion": 1,
+              "baseFactRevisionId": null,
+              "reason": "synthetic-example",
+              "evidence": [],
+              "changes": null,
+              "state": "pending",
+              "review": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripProposals:empty",
+      "operationId": "listTripProposals",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getTripProposal:success",
+      "operationId": "getTripProposal",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "tripId": "41000000-0000-4000-8000-000000000001",
+          "kind": "resolution",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "authorId": "41000000-0000-4000-8000-000000000001",
+          "baseTripVersion": 1,
+          "baseFactRevisionId": null,
+          "reason": "Fictional supported distance correction",
+          "evidence": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "state": "processing",
+              "contentType": "synthetic-example",
+              "byteLength": 1,
+              "originalName": "synthetic-example"
+            }
+          ],
+          "changes": {
+            "actualDistanceM": "12500.5"
+          },
+          "state": "pending",
+          "review": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -1429,9 +1818,22 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "outcome": "accepted",
           "reasonCodes": [],
+          "reason": null,
           "decidedAt": "2026-10-17T12:00:00.000Z",
           "reviewerId": null,
-          "reviewedRevisionId": null
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -1490,9 +1892,22 @@
           "id": "41000000-0000-4000-8000-000000000001",
           "outcome": "accepted",
           "reasonCodes": [],
+          "reason": null,
           "decidedAt": "2026-10-17T12:00:00.000Z",
           "reviewerId": null,
-          "reviewedRevisionId": null
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -1667,6 +2082,78 @@
       }
     },
     {
+      "id": "listQualificationRuleVersions:success",
+      "operationId": "listQualificationRuleVersions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "publishedAt": "2026-10-17T12:00:00.000Z",
+              "rules": [],
+              "requiredTrips": null,
+              "requiredDistanceM": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listQualificationRuleVersions:empty",
+      "operationId": "listQualificationRuleVersions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getQualificationRuleVersion:success",
+      "operationId": "getQualificationRuleVersion",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "levelId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "publishedAt": "2026-10-17T12:00:00.000Z",
+          "rules": [
+            {
+              "type": "max_mass",
+              "maxKg": "20000"
+            },
+            {
+              "type": "allowed_trailer_types",
+              "entityIds": [
+                "41000000-0000-4000-8000-000000000014"
+              ]
+            },
+            {
+              "type": "allowed_adr_categories",
+              "entityIds": []
+            }
+          ],
+          "requiredTrips": null,
+          "requiredDistanceM": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
       "id": "getQualificationProgress:success",
       "operationId": "getQualificationProgress",
       "status": 200,
@@ -1743,6 +2230,117 @@
           "computedAt": "2026-10-17T12:00:00.000Z",
           "projectionVersion": 1,
           "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMyQualificationAssignments:success",
+      "operationId": "listMyQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMyQualificationAssignments:empty",
+      "operationId": "listMyQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripQualificationAssignments:success",
+      "operationId": "listTripQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripQualificationAssignments:empty",
+      "operationId": "listTripQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMemberQualificationAssignments:success",
+      "operationId": "listMemberQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMemberQualificationAssignments:empty",
+      "operationId": "listMemberQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -2781,6 +3379,87 @@
         },
         "meta": {
           "requestId": "synthetic-request-004"
+        }
+      }
+    },
+    {
+      "id": "getTrip:resubmitted-with-history",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": {
+            "id": "41000000-0000-4000-8000-000000000002",
+            "number": 2,
+            "submittedAt": "2026-10-17T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+              "originCityId": "41000000-0000-4000-8000-000000000011",
+              "destinationCityId": "41000000-0000-4000-8000-000000000012",
+              "cargoId": "41000000-0000-4000-8000-000000000013",
+              "cargoMassKg": "12500.5",
+              "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "41000000-0000-4000-8000-000000000001"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "evidence": [],
+          "decisions": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "outcome": "rejected",
+              "reasonCodes": [
+                "MANUAL_EVIDENCE_MISMATCH"
+              ],
+              "reason": "Fictional screenshot does not support the submitted distance",
+              "decidedAt": "2026-10-17T12:00:00.000Z",
+              "reviewerId": "41000000-0000-4000-8000-000000000003",
+              "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+              "basis": {
+                "factRevisionId": "41000000-0000-4000-8000-000000000001",
+                "qualificationAssignmentId": null,
+                "levelId": null,
+                "ruleVersionId": null,
+                "catalogRevisionId": null,
+                "eventId": null,
+                "attendanceRevisionId": null,
+                "attributionAt": null,
+                "attributionBasis": "actual_start",
+                "reportingAt": null
+              }
+            }
+          ],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
         }
       }
     },
