@@ -21,7 +21,7 @@ jobs:
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository
     concurrency:
-      group: claude-review-auto-${{ github.event.pull_request.number }}
+      group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -43,6 +43,7 @@ jobs:
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+            EXPECTED PR HEAD: ${{ github.event.pull_request.head.sha }}
 
             You are an advisory reviewer for this pull request. Read AGENTS.md and
             CONCEPT.MD first, then the relevant VTC card in
@@ -108,6 +109,15 @@ jobs:
               core.setFailed('No valid pull request head SHA was provided.');
               return;
             }
+            const current = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (current.data.head.sha !== headSha) {
+              core.setFailed('PR head changed during Claude review; no summary was published.');
+              return;
+            }
             const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -128,8 +138,8 @@ jobs:
         contains(github.event.comment.body, '@claude') &&
         github.event.comment.author_association == 'OWNER')
     concurrency:
-      group: claude-review-mention-${{ github.event.issue.number || github.event.pull_request.number }}
-      cancel-in-progress: false
+      group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -168,6 +178,7 @@ jobs:
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+            EXPECTED PR HEAD: ${{ steps.target.outputs.head_sha }}
 
             The repository owner explicitly requested an advisory re-review of the
             current pull request. Apply the review criteria and comment limits in
@@ -204,6 +215,15 @@ jobs:
             const headSha = process.env.REVIEW_HEAD_SHA || '';
             if (!/^[0-9a-f]{40}$/i.test(headSha)) {
               core.setFailed('No valid pull request head SHA was provided.');
+              return;
+            }
+            const current = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (current.data.head.sha !== headSha) {
+              core.setFailed('PR head changed during Claude review; no summary was published.');
               return;
             }
             const body = `## Advisory review (PR head ${headSha.slice(0, 7)})\n\nAdvisory only. This is not independent review, CI or owner acceptance.\n\n${result.summary.slice(0, 60000)}`;
