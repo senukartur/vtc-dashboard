@@ -2,8 +2,9 @@
 name: Claude code review
 
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -17,12 +18,13 @@ jobs:
   review:
     name: Automatic PR review
     if: >-
-      github.event_name == 'pull_request_target' &&
-      !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]'
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.pull_requests[0].number &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.actor.login != 'dependabot[bot]'
     concurrency:
-      group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -30,9 +32,33 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: Check review target
+        id: target
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REVIEWED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          target=$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" \
+            --json isCrossRepository,isDraft,state,headRefOid,baseRefOid,baseRefName \
+            --jq '[.isCrossRepository, .isDraft, .state, .headRefOid, .baseRefOid, .baseRefName] | @tsv')
+          IFS=$'\t' read -r is_cross_repository is_draft state head_sha base_sha base_ref <<< "$target"
+          eligible=false
+          if [[ "$is_cross_repository" == "false" && "$is_draft" == "false" && \
+                "$state" == "OPEN" && "$head_sha" == "$REVIEWED_HEAD_SHA" && \
+                "$base_ref" == "$DEFAULT_BRANCH" ]]; then
+            eligible=true
+          fi
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        if: steps.target.outputs.eligible == 'true'
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.target.outputs.base_sha }}
           fetch-depth: 1
           persist-credentials: false
       - uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
@@ -43,8 +69,8 @@ jobs:
           show_full_output: false
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
-            EXPECTED PR HEAD: ${{ github.event.pull_request.head.sha }}
+            PR NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+            EXPECTED PR HEAD: ${{ steps.target.outputs.head_sha }}
 
             You are an advisory reviewer for this pull request. The checkout is
             the trusted base commit. Read AGENTS.md and CONCEPT.MD first, then the
@@ -94,11 +120,11 @@ jobs:
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
-        if: steps.review.outputs.structured_output != ''
+        if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REVIEW_HEAD_SHA: ${{ steps.target.outputs.head_sha }}
         with:
           script: |
             const result = JSON.parse(process.env.REVIEW_RESULT);
