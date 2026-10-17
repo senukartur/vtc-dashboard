@@ -86,16 +86,12 @@ VTC-006's seven scaffold checks are not the full unit/MySQL integration/E2E tool
 
 ## Ownership and branches
 
-### Task delivery with Codex or Claude Code
-
-The repository-local [deliver skill](.agents/skills/deliver/SKILL.md) adapts the telemetry project's delivery workflow for Codex. Invoke it with `$deliver VTC-023`, `$deliver VTC-023 --review-plan`, or `$deliver <task description>`. It plans one scoped task, implements in a separate worktree, verifies the candidate, obtains independent subagent review, and opens a draft PR. `--review-plan` pauses for approval before implementation. The skill is manual-only, preserving the original invocation policy; it does not activate for ordinary editing requests.
-
-Delivery state stays under ignored `.local/deliver/`; the workflow preserves unrelated changes and carries missing checks into the draft PR. It uses the current pnpm/Docker/MySQL baseline and inspects actual CI configuration rather than assuming automation exists. Creating a draft does not authorize Trello writes, marking ready, merging or deployment. See the skill for resume behavior, role boundaries and bounded fix/review rounds. Codex's repository discovery and invocation format follow the [official skills documentation](https://learn.chatgpt.com/docs/build-skills).
-
-Claude Code has its own [deliver entrypoint](.claude/skills/deliver/SKILL.md): use `/deliver VTC-023`, `/deliver VTC-023 --review-plan`, or `/deliver <task description>`. It is also manual-only and uses the project agents in `.claude/agents/`. Both entrypoints read one [shared workflow](.agents/skills/deliver/references/workflow.md) and [role instructions](.agents/skills/deliver/references/roles.md), so verification, resume, ownership and publication rules stay consistent. Claude's entrypoint selects the native `Agent` tool and `claude/` branches; Codex uses its subagent tools and `codex/` branches. Neither entrypoint requires the other host's runtime. Keep these shared references with both entrypoints when moving them. Start a new Claude Code session in that checkout for the first use so the newly created agent directory is loaded. See Claude Code's official [skills](https://code.claude.com/docs/en/skills) and [subagent](https://code.claude.com/docs/en/sub-agents) references for host metadata.
-
-### Module ownership
-
 Use one VTC card and scoped branch per change; preserve unrelated work. Read prerequisites and integration gates in the [backlog](docs/planning/mvp-trello-backlog.md). VTC-006 owns root tooling/lockfile and app composition; feature owners use their module directories and public facades. The migration owner alone generates/orders the Drizzle journal under VTC-007. Coordinate changes to generated contracts, capabilities, root dependencies and shared composition rather than independently regenerating them on parallel branches.
 
 Keep secrets, real reports, extracted game data and host inventory out of Git and PR logs. Inspect the exact staged diff. Relevant checks, independent review, updated English docs and merge are separate completion requirements; a prepared PR does not authorize deployment or mark a feature Done.
+
+## Agent task delivery
+
+Repository-local manual delivery entrypoints are available for [Codex](.agents/skills/deliver/SKILL.md) and [Claude Code](.claude/skills/deliver/SKILL.md). Follow the relevant entrypoint for invocation and host setup; the [shared workflow](.agents/skills/deliver/references/workflow.md) owns execution, trust, recovery, budgets and publication rules, with [shared role instructions](.agents/skills/deliver/references/roles.md).
+
+For first use in Claude Code, start a new session in a checkout containing the native definitions in `.claude/agents/`. Tool enforcement differs by host and is described in the entrypoints; these files do not create a security sandbox.
