@@ -8,6 +8,7 @@ import { cleanupAllocation, type OwnedAllocation } from "../test/support/allocat
 import { bounded } from "../test/support/concurrency.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
+import { eventLine } from "./ci-result.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
@@ -41,6 +42,7 @@ async function child(args: string[], env: NodeJS.ProcessEnv, capture = false) {
 }
 
 async function execute(name: string, probe = false, capture = false, guardFailure = false) {
+  const started = Date.now();
   const env: NodeJS.ProcessEnv = {
     ...safeChildEnvironment(),
     VTC_TEST_LANE: name,
@@ -68,6 +70,7 @@ async function execute(name: string, probe = false, capture = false, guardFailur
           ];
     const result = await child(args, env, capture);
     if (!capture) console.log(`LANE ${name}: ${result.code === 0 ? "PASS" : "FAIL"}`);
+    if (!probe) console.log(eventLine(name, result.code, Date.now() - started));
     return result;
   } finally {
     await cleanup();
@@ -343,9 +346,20 @@ async function disposeAllocations(disposers: (() => Promise<void>)[]) {
 }
 
 try {
-  if (lane === "failure-reporting") await proveFailures();
+  if (process.env.VTC_TEST_PROBE === "assertion") {
+    if (!["unit", "integration", "e2e"].includes(lane)) throw new Error("INVALID_TEST_LANE");
+    const started = Date.now();
+    const result = await execute(lane, true, true);
+    if (!isDeliberateFailure(lane, result)) throw new Error("FAILURE_PROBE_INVALID");
+    console.log(eventLine(lane, 1, Date.now() - started));
+    process.exitCode = 1;
+  } else if (lane === "failure-reporting") await proveFailures();
   else if (lane === "all") {
-    if (!process.argv.includes("--assertion-probe")) await proveIsolation();
+    if (!process.argv.includes("--assertion-probe")) {
+      const started = Date.now();
+      await proveIsolation();
+      console.log(eventLine("isolation", 0, Date.now() - started));
+    }
     for (const name of lanes) {
       const result = await execute(
         name,
@@ -357,7 +371,11 @@ try {
         break;
       }
     }
-    if (!process.exitCode) await proveFailures();
+    if (!process.exitCode) {
+      const started = Date.now();
+      await proveFailures();
+      console.log(eventLine("failure-reporting", 0, Date.now() - started));
+    }
   } else process.exitCode = (await execute(lane)).code;
 } catch (error) {
   console.error(

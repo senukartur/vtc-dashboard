@@ -11,7 +11,7 @@ pnpm install --frozen-lockfile
 pnpm test:local
 ```
 
-No development `.env`, running app, published port or existing volume is used. Downloads occur during the image build. At runtime, the runner and real MySQL **8.4.11** are attached only to an explicit `internal: true` network; there are no external networks, host aliases, Docker sockets or published ports. The image uses the repository's pinned Node digest, installs Chromium and its OS dependencies at build time, and runs tests as `node`. Container and browser dependencies are separate from host dependencies. On native Linux, the output bind directory must be writable by container UID 1000; apply your normal local ownership policy before running if your host UID differs.
+No development `.env`, running app, published port or existing volume is used. Downloads occur during the image build. At runtime, the runner and real MySQL **8.4.11** are attached only to an explicit `internal: true` network; there are no external networks, host aliases, Docker sockets or published ports. The image uses the repository's pinned Node digest, installs Chromium and its OS dependencies at build time, and runs tests as `node`. Container and browser dependencies are separate from host dependencies. The launcher passes its POSIX UID/GID as narrowly scoped image build arguments so the unprivileged runner can write its new output mount; Windows defaults to 1000:1000. Root UID/GID are rejected.
 
 Optional focused invocation still performs check/build before its chosen lane:
 
@@ -24,6 +24,60 @@ pnpm test:local failure-reporting
 ```
 
 `unit` and `contracts` are also valid focus names. The launcher uses a fresh random Compose project and private `.local/testing/<run>/stack.env` (mode 0600 on POSIX). It removes only that project's containers/network/volume in `finally`, propagates failure and handles interruption. Once cleanup starts, additional SIGINT/SIGTERM signals are not forwarded to the cleanup child. Cleanup runs in its own detached process group/session on POSIX, so terminal-generated signals sent to the launcher's foreground group cannot reach it directly. Cleanup stdin is ignored; its stdout/stderr are piped through the launcher instead of inheriting terminal handles. The launcher continues awaiting cleanup and never unreferences it; helper windows are hidden on Windows. Compose receives a five-second container-stop timeout, and the cleanup command has a separate fifteen-second deadline. Expiry closes the owned output readers and terminates only the owned cleanup group on POSIX, or the owned child on Windows, then retains configuration for explicit recovery. This is a bounded fallback, not proof that the Docker daemon completed cleanup. Successful cleanup deletes that run's private `stack.env`; failed or timed-out cleanup retains it and prints a fixed failure category plus the exact owned-project recovery command. Reports/screenshots/traces and private allocation configuration are ignored under `.local/testing/`; they must never be committed or uploaded blindly. Abrupt host/engine termination can interrupt cleanup; the printed project name identifies the owned stack for explicit recovery. Do not clean by a wildcard or remove development volumes. Retained private stack configuration can be removed after explicit recovery confirms that owned stack is gone.
+
+## Runner ownership profiles
+
+The test Dockerfile's `runner-ownership` stage isolates account setup from dependency/browser installation. Its default user is `node`, including when the requested non-root GID already belongs to another base-image group. The final `runner` stage inherits this setup and still ends with `USER node`. These focused checks exercise the actual image setup; the complete isolated suite remains a separate check.
+
+From the repository root with a POSIX shell and Docker Linux containers, run:
+
+```sh
+set -eu
+profile_tag="vtc-ownership-$(date +%s)-$$"
+trap 'docker image rm "$profile_tag" >/dev/null 2>&1 || true' EXIT
+for profile in 1000:1000 1001:20 1001:100; do
+  runner_uid=${profile%:*}
+  runner_gid=${profile#*:}
+  if [ "$profile" = 1000:1000 ]; then
+    docker build --target runner-ownership -f deploy/test/Dockerfile -t "$profile_tag" .
+  else
+    docker build --target runner-ownership -f deploy/test/Dockerfile \
+      --build-arg RUNNER_UID="$runner_uid" --build-arg RUNNER_GID="$runner_gid" \
+      -t "$profile_tag" .
+  fi
+  docker run --rm --network none --read-only \
+    --tmpfs "/probe:uid=$runner_uid,gid=$runner_gid,mode=0700" \
+    "$profile_tag" node -e '
+      const assert = require("node:assert/strict");
+      const fs = require("node:fs");
+      const uid = Number(process.argv[1]), gid = Number(process.argv[2]);
+      assert.equal(process.getuid(), uid); assert.equal(process.getgid(), gid);
+      assert(uid > 0 && gid > 0);
+      const directory = fs.statSync("/probe");
+      assert.equal(directory.uid, uid); assert.equal(directory.gid, gid);
+      assert.equal(directory.mode & 0o777, 0o700);
+      if ([20, 100].includes(gid)) {
+        const groups = fs.readFileSync("/etc/group", "utf8").split("\n");
+        assert(groups.filter(line => line.split(":")[2] === String(gid)).length >= 2);
+      }
+      fs.writeFileSync("/probe/synthetic", "synthetic", { mode: 0o600 });
+      const file = fs.statSync("/probe/synthetic");
+      assert.equal(file.uid, uid); assert.equal(file.gid, gid);
+      assert.equal(file.mode & 0o777, 0o600);
+      console.log("OWNERSHIP_PROFILE_WRITE_PASS");
+    ' "$runner_uid" "$runner_gid"
+done
+for profile in 0:1000 1000:0; do
+  if docker build --target runner-ownership -f deploy/test/Dockerfile \
+    --build-arg RUNNER_UID="${profile%:*}" --build-arg RUNNER_GID="${profile#*:}" \
+    -t "$profile_tag" .; then
+    echo "ROOT_PROFILE_WAS_ACCEPTED" >&2
+    exit 1
+  fi
+done
+```
+
+Every successful profile must report `OWNERSHIP_PROFILE_WRITE_PASS`; both root profiles must fail at the positive-ID guard, rather than at an unrelated build/download step. UID 1001 with GIDs 20 and 100 exercises groups already present in the pinned Debian image; the probe also verifies that each shared GID has multiple group entries. Each write probe uses a fresh mode-0700 Linux tmpfs with matching ownership, no network and a read-only image. It does not mount a development directory or volume, change broad permissions, or run the suite as root. The default profile builds without ID overrides. The unique local image tag is removed on exit; normal Docker build cache may remain.
 
 ## Lanes and configuration
 
@@ -59,12 +113,12 @@ These are accident guards for cooperating test code, not a sandbox against a dev
 - `MailFake` captures reference-only inputs and deterministic receipts. `BlobFake` copies streamed bytes, checks checksum/length and exposes private read/remove. `IdentityFake` captures the supplied transaction reference and a nonfunctional synthetic credential. `ProviderFake` preserves known/unavailable/ambiguous states. All support one-shot failures and reset. They are test-only architectural sketches, not installed production interfaces, actual password hashing/auth atomicity, provider verification, file authorization/retention or delivery proof.
 - Playwright creates a fresh context per case, explicitly sets locale/timezone, uses role/label queries and waits for conditions/actual requests. The server helper applies migrations and starts built Fastify plus built SPA; readiness reaches the actual fresh database. `reuseExistingServer: false` rejects an occupied local port. The smoke checks RU/EN text/document language, a real retry request, unknown route/Home, usable focus and horizontal overflow at 1280×800 and 390×844. Mobile Chromium emulation is not native-device or Safari evidence.
 
-Probes under `test/probes/` are excluded from ordinary suites and enabled only by the failure-reporting wrapper. The wrapper requires exit 1 and an exact assertion diagnostic containing the named `VTC008_*_ASSERTION_PROBE` plus `deliberate assertion reached`. A title, generic AssertionError, or marker echoed in a source codeframe cannot count as proof. The integration negative probe deliberately supplies the wrong suite-lock owner under the same test title and verifies that this earlier guard assertion is rejected as deliberate-proof evidence. Unit regressions cover realistic title/codeframe lookalikes and wrong exit statuses. The aggregate probe actually runs the aggregate and verifies propagation of that unit assertion. These expected failed subprocesses make the proof wrapper pass only when failure reporting works. Cleanup regressions inject lock/schema/user/file/admin failures and verify later cleanup, owned-file deletion and safe categories. POSIX launcher regressions use an inert fake Docker executable and condition-controlled child processes to prove repeated signals cannot kill cleanup, successful cleanup deletes private configuration, and failed cleanup retains recovery configuration. The group-signal regression creates a new detached launcher group and sends repeated SIGINT/SIGTERM only to that known owned group, including while cleanup is active; the PID-signal regression remains separate. All three signal/process tests run in Linux Docker and are explicitly skipped on native Windows. Windows terminal signal isolation is not claimed as tested. These regressions do not signal the test runner's group or manipulate development Docker resources.
+Probes under `test/probes/` are excluded from ordinary suites and enabled by the failure-reporting wrapper or the explicit local `node scripts/test-ci.mjs --probe unit|integration|e2e` negative check described in the [CI guide](ci.md). The wrapper requires exit 1 and an exact assertion diagnostic containing the named `VTC008_*_ASSERTION_PROBE` plus `deliberate assertion reached`. A title, generic AssertionError, or marker echoed in a source codeframe cannot count as proof. The integration negative probe deliberately supplies the wrong suite-lock owner under the same test title and verifies that this earlier guard assertion is rejected as deliberate-proof evidence. Unit regressions cover realistic title/codeframe lookalikes and wrong exit statuses. The aggregate probe actually runs the aggregate and verifies propagation of that unit assertion. These expected failed subprocesses make the proof wrapper pass only when failure reporting works. Cleanup regressions inject lock/schema/user/file/admin failures and verify later cleanup, owned-file deletion and safe categories. POSIX launcher regressions use an inert fake Docker executable and condition-controlled child processes to prove repeated signals cannot kill cleanup, successful cleanup deletes private configuration, and failed cleanup retains recovery configuration. The group-signal regression creates a new detached launcher group and sends repeated SIGINT/SIGTERM only to that known owned group, including while cleanup is active; the PID-signal regression remains separate. Early callback-failure regressions also prove bounded natural completion and recorded-owned-PID fallback when fake cleanup refuses release, while preserving the original callback error. All signal/process tests run in Linux Docker and are explicitly skipped on native Windows. Windows terminal signal isolation is not claimed as tested. These regressions do not signal the test runner's group or manipulate development Docker resources.
 
 ## Evidence and remaining gates
 
 Implementation feedback and exact-candidate independent verification are recorded in the delivery PR. Synthetic concurrency demonstrations support the future canonical-trip/job/transaction work; they do not implement ingestion, durable workers, domain acceptance, permissions or qualification policy. Structural schema acceptance does not prove telemetry UTF-8 byte/depth/u64 semantics, lifecycle truth, ownership, durable ACK or actual desktop-client integration. Existing browser examples remain structural evidence only.
 
-CI (VTC-009), enforced review (VTC-010), staging (VTC-011), feature workflows/adapters, integrated journeys (VTC-040), and Hostland/capacity/backup/restore (VTC-041) remain pending. Local checks and independent review do not imply merge, Done or deployment.
+[CI configuration (VTC-009)](ci.md) now wraps this same isolated runner; hosted execution evidence is recorded separately. Enforced review (VTC-010), staging (VTC-011), feature workflows/adapters, integrated journeys (VTC-040), and Hostland/capacity/backup/restore (VTC-041) remain pending. Local checks and independent review do not imply merge, Done or deployment.
 
 Primary references: [Vitest setup files](https://vitest.dev/config/setupfiles.html), [Playwright web server](https://playwright.dev/docs/test-webserver), [Playwright Docker guidance](https://playwright.dev/docs/docker), [Compose internal networks](https://docs.docker.com/reference/compose-file/networks/), [Ajv dialects](https://ajv.js.org/guide/schema-language.html), and [MySQL locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html).
