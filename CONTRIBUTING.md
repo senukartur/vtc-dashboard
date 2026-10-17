@@ -30,7 +30,7 @@ docker compose up --build --watch
 
 Open [the local UI](http://127.0.0.1:5173). Compose Watch synchronizes app/package source while the API, TypeScript packages and Vite watch for changes. Dependency/contract/tooling changes trigger a rebuild. Container dependencies are not shared with host `node_modules`. Keep the foreground watch command running; `docker compose up --build -d --wait` is an alternative without live synchronization, followed by `docker compose watch` in a foreground terminal.
 
-The UI is a bilingual development connection screen. Authentication, company pages, schema/migrations, jobs and seed accounts are not implemented by VTC-006. MySQL starts with an empty application database; [fixture ownership](test/fixtures/README.md) explains the later test data.
+The UI is a bilingual development connection screen. Authentication, company pages, jobs and seed accounts remain pending. MySQL starts with an empty application database; VTC-007 adds an explicit audit-only migration and transaction/value primitives through the [persistence commands and recovery runbook](docs/development/persistence.md). Startup never migrates or seeds. [Fixture ownership](test/fixtures/README.md) separates synthetic tests from runtime data.
 
 ```sh
 docker compose exec app pnpm check
@@ -49,6 +49,8 @@ The dedicated readiness pool fails immediately when all five slots are busy. Con
 Compose passes the server settings as MySQL command arguments. Do not replace them with a Windows bind-mounted `.cnf`: Docker Desktop exposed that file as world-writable during verification, and MySQL silently skipped its settings after a warning. `deploy/local/mysql.cnf` remains the equivalent portable configuration reference; scaffold checks keep both forms aligned with `config/runtime.json`. Readiness checks server UTC/InnoDB as well as the explicit session UTC.
 
 The API uses `tsx watch`; the Docker app enables Chokidar polling for reliable file replacement events after Compose synchronization. API, web, shared-package and test sources are synchronized; dependency/build/tooling changes have explicit rebuild rules. After changing `compose.yaml` or private environment values, rerun `docker compose up --build -d --wait` and restart the foreground watch command so its rules and service configuration are reloaded.
+
+VTC-007's separate transaction pool has five additional slots when instantiated, with fail-fast acquisition and session reset on every checkout. One readiness pool, one UnitOfWork and one dedicated migration invocation have an aggregate bound of eleven connections; replicas, jobs and competing migrators add their own budgets. The [persistence guide](docs/development/persistence.md#runtime-and-connections) records the complete formula, operation deadlines and command boundaries.
 
 ## Native tooling and portable builds
 
@@ -79,6 +81,9 @@ An optional production image is `docker build --target production -t vtc-dashboa
 | `pnpm test:scaffold` | Node test runner: HTTP/config/schema-bridge checks, including all reviewed structural browser examples |
 | `pnpm check` | Generated-file, format, lint, type and scaffold checks |
 | `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |
+| `pnpm db:generate` | Sole migration integrator generates/reviews Drizzle SQL/journal and formats metadata |
+| `pnpm db:migrate` | Build packages and run explicit dedicated, locked migrations; never reset/seed |
+| `pnpm db:test` / `pnpm db:recovery` | Destructive synthetic-only real MySQL checks / separate partial-DDL rehearsal; require the [documented guards](docs/development/persistence.md#explicit-synthetic-verification) |
 | `pnpm smoke:local` | Actual local HTTP/module/readiness probe; defaults to the Vite origin |
 | `pnpm build` / `pnpm start` | Portable production build / same-origin start |
 
@@ -89,6 +94,8 @@ Generated browser files are committed so frontend/backend owners consume one rev
 Body and response validation do not coerce types; query, path and header validators decode string wire values using their declared schema types. Unexpected 5xx errors emit only a fixed event/code and the server-generated request ID, without exception text, input or headers. Full observability remains VTC-039. The built server caches fingerprinted JS/CSS assets; HTML, APIs, health, missing files and unversioned assets remain `no-store`.
 
 VTC-006's twelve scaffold checks are not the full unit/MySQL integration/E2E tooling of VTC-008, GitHub CI of VTC-009 or review enforcement of VTC-010. The synthetic stalled-MySQL protocol fixture tests deadlines, recovery and process exit with a half-open peer, not real MySQL transactions. No native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
+
+VTC-007 adds narrow real MySQL transaction/value/audit/migration checks separately from `pnpm check`. Its [persistence guide](docs/development/persistence.md) documents the synthetic database name and reset acknowledgment, production artifact migration command, sticky partial-DDL state and remaining integration gates. Never run the destructive fixture commands against real data.
 
 ## Ownership and branches
 

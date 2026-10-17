@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "noEmit": true, "allowImportingTsExtensions": true },
-  "include": ["test/scaffold/**/*.ts", "apps/api/src/**/*.ts"]
+  "include": ["test/scaffold/**/*.ts", "test/persistence/**/*.ts", "apps/api/src/**/*.ts"]
 }

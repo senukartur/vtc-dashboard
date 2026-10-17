@@ -5,6 +5,34 @@ import {
   type RowDataPacket,
 } from "mysql2/promise";
 
+export { type AuditInput, createAudit } from "./core/audit.js";
+export { migrationFolder, migrationLockName, runMigrations } from "./core/migrations.js";
+export { dedicatedConnection, settingsFromEnvironment } from "./core/session.js";
+export {
+  createUnitOfWork,
+  TRANSACTION_COMMIT_OUTCOME_UNKNOWN,
+  type TransactionClient,
+  TransactionCommitOutcomeUnknownError,
+  type TxContext,
+  transactionConnectionLimit,
+  type UnitOfWork,
+} from "./core/unit-of-work.js";
+export {
+  applicationId,
+  bigintColumn,
+  decimal38_18,
+  decimalColumn,
+  idColumn,
+  newId,
+  opaqueBytes,
+  opaqueColumn,
+  opaqueUtf8,
+  signedBigint,
+  utcColumn,
+  utcDateTime,
+  utcIso,
+} from "./core/values.js";
+
 function discardConnection(connection: PoolConnection): void {
   // mysql2 3.24.6 destroy() only calls stream.end(); force-close a half-open peer too.
   // The pinned driver's stream exists at runtime but is absent from its promise types.

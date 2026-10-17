@@ -22,6 +22,10 @@
     "contracts:check": "node scripts/generate-contracts.mjs --check",
     "dev:setup": "node scripts/setup-local.mjs",
     "db:check": "pnpm --filter @vtc/api db:check",
+    "db:generate": "pnpm --filter @vtc/db generate && biome format --write packages/db/migrations/meta",
+    "db:migrate": "pnpm build:packages && pnpm --filter @vtc/db migrate",
+    "db:test": "pnpm build:packages && node --env-file-if-exists=.env --import tsx --test test/persistence/persistence.test.ts",
+    "db:recovery": "pnpm build:packages && node --env-file-if-exists=.env --import tsx --test test/persistence/recovery.test.ts",
     "smoke:local": "node scripts/smoke-local.mjs",
     "test:scaffold": "pnpm build:packages && node --import tsx --test test/scaffold/*.test.ts",
     "check": "pnpm contracts:check && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test:scaffold"
@@ -33,6 +37,8 @@
     "@types/node": "24.19.2",
     "openapi-typescript": "7.13.0",
     "tsx": "4.23.15",
+    "drizzle-orm": "0.45.4",
+    "mysql2": "3.24.6",
     "typescript": "5.9.3"
   }
 }

@@ -2,6 +2,8 @@
 
 These are architectural interface signatures, not installed TypeScript exports. VTC-006/007/013/014/019/021/022/025 implement them against the reviewed contracts. Keep provider details out of domain/UI code.
 
+VTC-007 now exports the opaque `TxContext`, `UnitOfWork`/`createUnitOfWork`, exact value helpers and `createAudit` from `@vtc/db`; use the [implemented persistence contract](../development/persistence.md) for their actual signatures/lifetime and connection budget. The combined `AuditOutbox` sketch below is still future architecture: audit append exists separately, while durable events/outbox remain VTC-021. Other ports below remain specifications rather than installed services.
+
 ```ts
 type Id = string;
 type TxContext = { readonly transactionId: Id }; // opaque, owned by platform/db
