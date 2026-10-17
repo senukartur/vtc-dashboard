@@ -160,7 +160,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 | [VTC-016: Build the public landing and application experience](#vtc-016) | Frontend | VTC-012 |
 | [VTC-017: Build login, invitation, recovery, and account settings screens](#vtc-017) | Frontend | VTC-012 |
 | [VTC-018: Link Steam and resolve TruckersMP identities](#vtc-018) | Backend | VTC-013 |
-| [VTC-019: Implement versioned catalogs, imports, and identity normalization](#vtc-019) | Backend | VTC-002, VTC-007, VTC-008 |
+| [VTC-019: Implement versioned catalogs, imports, and identity normalization](#vtc-019) | Backend | VTC-002, VTC-007, VTC-008, VTC-021 |
 | [VTC-020: Build catalog administration and localized selectors](#vtc-020) | Frontend | VTC-012 |
 | [VTC-021: Implement durable jobs and transactional domain events](#vtc-021) | Backend | VTC-005, VTC-007, VTC-008 |
 | [VTC-022: Implement canonical trip records and source adapter boundaries](#vtc-022) | Backend | VTC-003, VTC-007, VTC-019, VTC-021 |
@@ -303,13 +303,15 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Freeze enough interfaces for independent frontend and backend work.
 
+**Specification delivery (2026-10-17):** [Architecture and ownership](../architecture/README.md), [stack ADR](../decisions/stack.md), [browser API/OpenAPI](../contracts/dashboard/README.md), [UI coverage](../contracts/dashboard/ui-coverage.md) and [compatibility evidence](../research/stack-compatibility.md). [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and the [review correction record](../architecture/review-vtc-005.md) track independent review, the five read-contract corrections and final merge/acceptance. The isolated probe pins and exercises the core Node/Fastify/Drizzle/auth/React combination without a live database; real MySQL, session/invitation transactions, root tooling and deployment remain implementation gates. The five specification deliverables below are supplied; VTC-005 is Done only after final-head review/merge. The frozen telemetry contract is unchanged. Asynchronous catalog import now explicitly depends on VTC-021's durable jobs rather than an undeclared worker.
+
 **Scope and acceptance checklist**
 
-- [ ] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions using local/CI evidence. Hostland-specific execution is deferred to VTC-041 and does not block this architecture.
-- [ ] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
-- [ ] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
-- [ ] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
-- [ ] Define blob storage, email, catalog source, and trip source interfaces; document schema/migration ownership and compatibility rules.
+- [x] Record React/TypeScript/Fastify with owner-selected MySQL in a modular monolith; baseline Node.js 24 and MySQL 8.4, then pin compatible library/driver versions using local/CI evidence. Hostland-specific execution is deferred to VTC-041 and does not block this architecture.
+- [x] Specify Drizzle's MySQL dialect/mysql2 driver, Better Auth adapter compatibility, transaction boundaries, unique-key semantics, UTC/ID handling, and job claim strategy; avoid PostgreSQL-only SQL, extensions, partial indexes, and notification mechanisms.
+- [x] Define module boundaries, IDs, units, UTC timestamps, statuses, permissions, pagination, errors, and versioned domain events.
+- [x] Specify endpoints and example responses for auth/admissions, catalogs, trips/review, qualifications, analytics, events/RSVP, notifications, and admin.
+- [x] Define blob storage, email, catalog source, and trip source interfaces; document schema/migration ownership and compatibility rules.
 
 **Validation:** Check each planned UI against a contract example, including loading/empty/error/forbidden cases. Review trip status transitions and the dependency graph.
 
@@ -584,7 +586,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 ### [VTC-019] Implement versioned catalogs, imports, and identity normalization
 
 - **Track:** Backend
-- **Depends on:** VTC-002, VTC-007, VTC-008
+- **Depends on:** VTC-002, VTC-007, VTC-008, VTC-021
 - **Primary ownership:** apps/api/src/modules/catalogs/, packages/db/schema/catalogs/, scripts/catalogs/
 
 **Goal:** Serve local game catalogs and resolve provider entities independently of display language.

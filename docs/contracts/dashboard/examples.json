@@ -1,0 +1,3493 @@
+{
+  "description": "Synthetic structural/UI fixtures only, never runnable credentials or evidence of domain integration.",
+  "cases": [
+    {
+      "id": "getPublicCompany:success",
+      "operationId": "getPublicCompany",
+      "status": 200,
+      "response": {
+        "data": {
+          "name": "synthetic-example",
+          "description": "synthetic-example",
+          "games": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listPublicEvents:success",
+      "operationId": "listPublicEvents",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "title": "synthetic-example",
+              "description": "synthetic-example",
+              "game": "ets2",
+              "startsAt": "2026-10-17T12:00:00.000Z",
+              "endsAt": null,
+              "status": "scheduled",
+              "origin": null,
+              "destination": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listPublicEvents:empty",
+      "operationId": "listPublicEvents",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getPublicEvent:success",
+      "operationId": "getPublicEvent",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "title": "synthetic-example",
+          "description": "synthetic-example",
+          "game": "ets2",
+          "startsAt": "2026-10-17T12:00:00.000Z",
+          "endsAt": null,
+          "status": "scheduled",
+          "origin": null,
+          "destination": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "submitApplication:success",
+      "operationId": "submitApplication",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "nickname": "Fixture Driver",
+        "email": "fixture@example.invalid",
+        "steamProfileUrl": "https://example.invalid/nonfunctional",
+        "games": [
+          "ets2"
+        ],
+        "discord": null,
+        "introduction": null
+      }
+    },
+    {
+      "id": "getCsrf:success",
+      "operationId": "getCsrf",
+      "status": 200,
+      "response": {
+        "data": {
+          "token": "NONFUNCTIONAL_EXAMPLE_ONLY"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "login:success",
+      "operationId": "login",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "nickname": "Fixture Driver",
+            "formerMember": false,
+            "roles": []
+          },
+          "email": "fixture@example.invalid",
+          "emailVerified": false,
+          "capabilities": [],
+          "preferences": {
+            "locale": "en",
+            "displayTimezone": "UTC"
+          },
+          "steamVerified": false,
+          "identityEpoch": 1,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "email": "fixture@example.invalid",
+        "password": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "logout:success",
+      "operationId": "logout",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestPasswordReset:success",
+      "operationId": "requestPasswordReset",
+      "status": 202,
+      "response": {
+        "data": {
+          "status": "received"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "email": "fixture@example.invalid"
+      }
+    },
+    {
+      "id": "resetPassword:success",
+      "operationId": "resetPassword",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "token": "NONFUNCTIONAL_EXAMPLE_ONLY",
+        "newPassword": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "redeemInvitation:success",
+      "operationId": "redeemInvitation",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "invitationToken": "NONFUNCTIONAL_EXAMPLE_ONLY",
+        "password": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "getMe:success",
+      "operationId": "getMe",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "nickname": "Fixture Driver",
+            "formerMember": false,
+            "roles": [
+              "driver"
+            ]
+          },
+          "email": "fixture@example.invalid",
+          "emailVerified": false,
+          "capabilities": [
+            "company.read",
+            "trips.submit_own",
+            "trips.read_own_private",
+            "events.respond"
+          ],
+          "preferences": {
+            "locale": "en",
+            "displayTimezone": "UTC"
+          },
+          "steamVerified": false,
+          "identityEpoch": 1,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestEmailVerification:success",
+      "operationId": "requestEmailVerification",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "pending"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "confirmEmailVerification:success",
+      "operationId": "confirmEmailVerification",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "challengeId": "41000000-0000-4000-8000-000000000001",
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "updatePreferences:success",
+      "operationId": "updatePreferences",
+      "status": 200,
+      "response": {
+        "data": {
+          "locale": "en",
+          "displayTimezone": "UTC"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "locale": "en"
+      }
+    },
+    {
+      "id": "requestCredentialChallenge:success",
+      "operationId": "requestCredentialChallenge",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "pending"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "purpose": "email_change",
+        "newEmail": "fixture@example.invalid"
+      }
+    },
+    {
+      "id": "confirmCredentialChange:success",
+      "operationId": "confirmCredentialChange",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "kind": "email_change",
+        "challengeId": "41000000-0000-4000-8000-000000000001",
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "getIdentity:success",
+      "operationId": "getIdentity",
+      "status": 200,
+      "response": {
+        "data": {
+          "steamStatus": "unlinked",
+          "steamProfileUrl": null,
+          "pendingReplacementId": null,
+          "identityEpoch": 1,
+          "truckersMp": {
+            "status": "available",
+            "displayName": null,
+            "checkedAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestSteamVerification:success",
+      "operationId": "requestSteamVerification",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "verificationUrl": "https://example.invalid/nonfunctional",
+          "expiresAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestSteamReplacementProof:success",
+      "operationId": "requestSteamReplacementProof",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "verificationUrl": "https://example.invalid/nonfunctional",
+          "expiresAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMySteamReplacementProof:success",
+      "operationId": "getMySteamReplacementProof",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "memberId": "41000000-0000-4000-8000-000000000001",
+          "identityEpoch": 1,
+          "state": "verified",
+          "candidateSteamProfileUrl": "https://example.invalid/fictional-verified-profile",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "expiresAt": "2026-10-17T12:10:00.000Z",
+          "verifiedAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listSteamReplacementProofs:success",
+      "operationId": "listSteamReplacementProofs",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "memberId": "41000000-0000-4000-8000-000000000001",
+              "identityEpoch": 1,
+              "state": "pending",
+              "candidateSteamProfileUrl": null,
+              "createdAt": "2026-10-17T12:00:00.000Z",
+              "expiresAt": "2026-10-17T12:00:00.000Z",
+              "verifiedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listSteamReplacementProofs:empty",
+      "operationId": "listSteamReplacementProofs",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getSteamReplacementProof:success",
+      "operationId": "getSteamReplacementProof",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "memberId": "41000000-0000-4000-8000-000000000001",
+          "identityEpoch": 1,
+          "state": "verified",
+          "candidateSteamProfileUrl": "https://example.invalid/fictional-verified-profile",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "expiresAt": "2026-10-17T12:10:00.000Z",
+          "verifiedAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMembers:success",
+      "operationId": "listMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMembers:empty",
+      "operationId": "listMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMember:success",
+      "operationId": "getMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "nickname": "Fixture Driver",
+            "formerMember": false,
+            "roles": []
+          },
+          "qualifications": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listAdminMembers:success",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "profile": {
+                "member": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "qualifications": []
+              },
+              "email": "fixture@example.invalid",
+              "status": "active",
+              "accessEpoch": 1,
+              "identityEpoch": 1
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listAdminMembers:empty",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getAdminMember:success",
+      "operationId": "getAdminMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "profile": {
+            "member": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "qualifications": []
+          },
+          "email": "fixture@example.invalid",
+          "status": "active",
+          "accessEpoch": 1,
+          "identityEpoch": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "setRoles:success",
+      "operationId": "setRoles",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "roles": [],
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "deactivateMember:success",
+      "operationId": "deactivateMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "reinstateMember:success",
+      "operationId": "reinstateMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "roles": [],
+        "assignments": [],
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "replaceSteam:success",
+      "operationId": "replaceSteam",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "verificationId": "41000000-0000-4000-8000-000000000001",
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "requestLeadershipChallenge:success",
+      "operationId": "requestLeadershipChallenge",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "pending"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "successorId": "41000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "id": "confirmLeadershipTransfer:success",
+      "operationId": "confirmLeadershipTransfer",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "challengeId": "41000000-0000-4000-8000-000000000001",
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "listApplications:success",
+      "operationId": "listApplications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "status": "submitted",
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "nickname": "Fixture Driver",
+                "email": "fixture@example.invalid",
+                "steamProfileUrl": "https://example.invalid/nonfunctional",
+                "games": [
+                  "ets2"
+                ],
+                "discord": null,
+                "introduction": null
+              },
+              "decisionReason": null,
+              "invitationId": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listApplications:empty",
+      "operationId": "listApplications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getApplication:success",
+      "operationId": "getApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-10-17T12:00:00.000Z",
+          "fields": {
+            "nickname": "Fixture Driver",
+            "email": "fixture@example.invalid",
+            "steamProfileUrl": "https://example.invalid/nonfunctional",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null
+          },
+          "decisionReason": null,
+          "invitationId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "decideApplication:success",
+      "operationId": "decideApplication",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "status": "submitted",
+          "submittedAt": "2026-10-17T12:00:00.000Z",
+          "fields": {
+            "nickname": "Fixture Driver",
+            "email": "fixture@example.invalid",
+            "steamProfileUrl": "https://example.invalid/nonfunctional",
+            "games": [
+              "ets2"
+            ],
+            "discord": null,
+            "introduction": null
+          },
+          "decisionReason": null,
+          "invitationId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "decision": "approve"
+      }
+    },
+    {
+      "id": "getInvitation:success",
+      "operationId": "getInvitation",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "applicationId": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "active",
+          "emailDelivery": "queued"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "copyInvitation:success",
+      "operationId": "copyInvitation",
+      "status": 200,
+      "response": {
+        "data": {
+          "invitationId": "41000000-0000-4000-8000-000000000001",
+          "link": "https://example.invalid/nonfunctional",
+          "expiresAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "reissueInvitation:success",
+      "operationId": "reissueInvitation",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "applicationId": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "active",
+          "emailDelivery": "queued"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogRevisions:success",
+      "operationId": "listCatalogRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "publicationVersion": 1,
+              "game": "ets2",
+              "state": "draft",
+              "coverageComplete": false,
+              "englishLabelsComplete": false,
+              "sourceReviewComplete": false,
+              "createdAt": "2026-10-17T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogRevisions:empty",
+      "operationId": "listCatalogRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogEntities:success",
+      "operationId": "listCatalogEntities",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "revisionId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "kind": "city",
+              "mapNamespace": "synthetic-example",
+              "display": {
+                "entityId": "41000000-0000-4000-8000-000000000001",
+                "label": "synthetic-example",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "retired": false
+              },
+              "relatedEntityIds": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogEntities:empty",
+      "operationId": "listCatalogEntities",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCatalogEntity:success",
+      "operationId": "getCatalogEntity",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "kind": "city",
+          "mapNamespace": "synthetic-example",
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000001",
+            "label": "synthetic-example",
+            "requestedLocale": "en",
+            "renderedLocale": "en",
+            "englishFallback": false,
+            "retired": false
+          },
+          "relatedEntityIds": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCatalogImportPolicy:success",
+      "operationId": "getCatalogImportPolicy",
+      "status": 200,
+      "response": {
+        "data": {
+          "enabled": false,
+          "maxFileBytes": null,
+          "maxFilesPerReport": null,
+          "allowedMimeTypes": [],
+          "policyRevision": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "uploadCatalogArtifact:success",
+      "operationId": "uploadCatalogArtifact",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "byteLength": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "file": "synthetic-example"
+      }
+    },
+    {
+      "id": "getCatalogArtifact:success",
+      "operationId": "getCatalogArtifact",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "byteLength": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "importCatalog:success",
+      "operationId": "importCatalog",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "resultId": null,
+          "failureCode": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "artifactId": "41000000-0000-4000-8000-000000000001",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "game": "ets2"
+      }
+    },
+    {
+      "id": "getCatalogRevision:success",
+      "operationId": "getCatalogRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "publicationVersion": 1,
+          "game": "ets2",
+          "state": "draft",
+          "coverageComplete": false,
+          "englishLabelsComplete": false,
+          "sourceReviewComplete": false,
+          "createdAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCatalogReview:success",
+      "operationId": "getCatalogReview",
+      "status": 200,
+      "response": {
+        "data": {
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "comparisonRevisionId": null,
+          "gameBuild": "synthetic-example",
+          "releaseInventoryAsOf": "2026-10-01",
+          "addedEntities": 1,
+          "changedEntities": 1,
+          "retiredEntities": 1,
+          "expectedPacks": 1,
+          "validatedPacks": 1,
+          "missingPacks": 1,
+          "failedPacks": 1,
+          "nonContributingPacks": 1,
+          "mappingIssues": 1,
+          "sourceReviewState": "pending",
+          "provenance": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogChanges:success",
+      "operationId": "listCatalogChanges",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "entityId": "41000000-0000-4000-8000-000000000001",
+              "kind": "city",
+              "changeKind": "added",
+              "fields": [],
+              "reasonCodes": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogChanges:empty",
+      "operationId": "listCatalogChanges",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogCoverage:success",
+      "operationId": "listCatalogCoverage",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "packId": "synthetic-example",
+              "title": "synthetic-example",
+              "state": "validated",
+              "contributionKinds": [],
+              "provenance": [],
+              "reasonCodes": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogCoverage:empty",
+      "operationId": "listCatalogCoverage",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogMappingIssues:success",
+      "operationId": "listCatalogMappingIssues",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "provider": "synthetic-example",
+              "mapNamespace": null,
+              "sourceId": null,
+              "sourceLocale": null,
+              "reasonCode": "synthetic-example",
+              "candidateEntityIds": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogMappingIssues:empty",
+      "operationId": "listCatalogMappingIssues",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "publishCatalog:success",
+      "operationId": "publishCatalog",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "publicationVersion": 1,
+          "game": "ets2",
+          "state": "draft",
+          "coverageComplete": false,
+          "englishLabelsComplete": false,
+          "sourceReviewComplete": false,
+          "createdAt": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "expectedPublicationVersion": 1,
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "addCatalogMapping:success",
+      "operationId": "addCatalogMapping",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+        "provider": "synthetic-example",
+        "game": "ets2",
+        "mapNamespace": "synthetic-example",
+        "sourceId": "synthetic-example",
+        "entityId": "41000000-0000-4000-8000-000000000001",
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "listTelemetryTokens:success",
+      "operationId": "listTelemetryTokens",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "label": "synthetic-example",
+              "createdAt": "2026-10-17T12:00:00.000Z",
+              "lastUsedAt": null,
+              "revokedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTelemetryTokens:empty",
+      "operationId": "listTelemetryTokens",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "issueTelemetryToken:success",
+      "operationId": "issueTelemetryToken",
+      "status": 201,
+      "response": {
+        "data": {
+          "token": "NONFUNCTIONAL_EXAMPLE_ONLY",
+          "info": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "label": "synthetic-example",
+            "createdAt": "2026-10-17T12:00:00.000Z",
+            "lastUsedAt": null,
+            "revokedAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "label": "synthetic-example"
+      }
+    },
+    {
+      "id": "revokeTelemetryToken:success",
+      "operationId": "revokeTelemetryToken",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getSourceSync:success",
+      "operationId": "getSourceSync",
+      "status": 200,
+      "response": {
+        "data": {
+          "lastReceiptAt": null,
+          "receivedRecords": 1,
+          "pendingReviewTrips": 1,
+          "identityEpoch": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getUploadPolicy:success",
+      "operationId": "getUploadPolicy",
+      "status": 200,
+      "response": {
+        "data": {
+          "enabled": false,
+          "maxFileBytes": null,
+          "maxFilesPerReport": null,
+          "allowedMimeTypes": [],
+          "policyRevision": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "uploadEvidence:success",
+      "operationId": "uploadEvidence",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "contentType": "synthetic-example",
+          "byteLength": 1,
+          "originalName": "synthetic-example"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "file": "synthetic-example"
+      }
+    },
+    {
+      "id": "getEvidence:success",
+      "operationId": "getEvidence",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "contentType": "synthetic-example",
+          "byteLength": 1,
+          "originalName": "synthetic-example"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTrips:success",
+      "operationId": "listTrips",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "view": "summary",
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "open",
+              "decision": "unassessed",
+              "origin": null,
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": null,
+              "reportingAt": null,
+              "sourceKinds": []
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTrips:empty",
+      "operationId": "listTrips",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getTrip:success",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "summary",
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "owner": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "nickname": "Fixture Driver",
+            "formerMember": false,
+            "roles": []
+          },
+          "game": "ets2",
+          "outcome": "open",
+          "decision": "unassessed",
+          "origin": null,
+          "destination": null,
+          "cargo": null,
+          "actualDistanceM": null,
+          "reportingAt": null,
+          "sourceKinds": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMyTripStatusSummary:success",
+      "operationId": "getMyTripStatusSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "counts": {
+            "unassessed": 1,
+            "pendingReview": 1,
+            "accepted": 1,
+            "rejected": 1
+          },
+          "activeTrips": 1,
+          "correctionPending": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "submitManualTrip:success",
+      "operationId": "submitManualTrip",
+      "status": 201,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "unassessed",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "game": "ets2",
+        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+        "originCityId": "41000000-0000-4000-8000-000000000011",
+        "destinationCityId": "41000000-0000-4000-8000-000000000012",
+        "cargoId": "41000000-0000-4000-8000-000000000013",
+        "cargoMassKg": "12500.5",
+        "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+        "actualDistanceM": "12500.5",
+        "evidenceIds": [
+          "41000000-0000-4000-8000-000000000001"
+        ],
+        "eventId": null,
+        "comment": null
+      }
+    },
+    {
+      "id": "reviseManualTrip:success",
+      "operationId": "reviseManualTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "unassessed",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "game": "ets2",
+        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+        "originCityId": "41000000-0000-4000-8000-000000000011",
+        "destinationCityId": "41000000-0000-4000-8000-000000000012",
+        "cargoId": "41000000-0000-4000-8000-000000000013",
+        "cargoMassKg": "12500.5",
+        "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+        "actualDistanceM": "12500.5",
+        "evidenceIds": [
+          "41000000-0000-4000-8000-000000000001"
+        ],
+        "eventId": null,
+        "comment": null
+      }
+    },
+    {
+      "id": "getTripReview:success",
+      "operationId": "getTripReview",
+      "status": 200,
+      "response": {
+        "data": {
+          "trip": {
+            "view": "private",
+            "summary": {
+              "view": "summary",
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "open",
+              "decision": "unassessed",
+              "origin": null,
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": null,
+              "reportingAt": null,
+              "sourceKinds": []
+            },
+            "manualRevision": null,
+            "evidence": [],
+            "decisions": [],
+            "pendingProposalId": null,
+            "reviewReasonCodes": []
+          },
+          "factRevisionId": "41000000-0000-4000-8000-000000000001",
+          "facts": [],
+          "evaluation": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          },
+          "canDecide": false,
+          "blockedReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listManualRevisions:success",
+      "operationId": "listManualRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "number": 1,
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+                "originCityId": "41000000-0000-4000-8000-000000000011",
+                "destinationCityId": "41000000-0000-4000-8000-000000000012",
+                "cargoId": "41000000-0000-4000-8000-000000000013",
+                "cargoMassKg": "12500.5",
+                "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "41000000-0000-4000-8000-000000000001"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listManualRevisions:empty",
+      "operationId": "listManualRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getManualRevision:success",
+      "operationId": "getManualRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "number": 1,
+          "submittedAt": "2026-10-17T12:00:00.000Z",
+          "fields": {
+            "game": "ets2",
+            "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+            "originCityId": "41000000-0000-4000-8000-000000000011",
+            "destinationCityId": "41000000-0000-4000-8000-000000000012",
+            "cargoId": "41000000-0000-4000-8000-000000000013",
+            "cargoMassKg": "12500.5",
+            "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+            "actualDistanceM": "12500.5",
+            "evidenceIds": [
+              "41000000-0000-4000-8000-000000000001"
+            ],
+            "eventId": null,
+            "comment": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripProposals:success",
+      "operationId": "listTripProposals",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "revisionId": "41000000-0000-4000-8000-000000000001",
+              "tripId": "41000000-0000-4000-8000-000000000001",
+              "kind": "correction_request",
+              "createdAt": "2026-10-17T12:00:00.000Z",
+              "authorId": "41000000-0000-4000-8000-000000000001",
+              "baseTripVersion": 1,
+              "baseFactRevisionId": null,
+              "reason": "synthetic-example",
+              "evidence": [],
+              "changes": null,
+              "state": "pending",
+              "review": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripProposals:empty",
+      "operationId": "listTripProposals",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getTripProposal:success",
+      "operationId": "getTripProposal",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "tripId": "41000000-0000-4000-8000-000000000001",
+          "kind": "resolution",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "authorId": "41000000-0000-4000-8000-000000000001",
+          "baseTripVersion": 1,
+          "baseFactRevisionId": null,
+          "reason": "Fictional supported distance correction",
+          "evidence": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "state": "processing",
+              "contentType": "synthetic-example",
+              "byteLength": 1,
+              "originalName": "synthetic-example"
+            }
+          ],
+          "changes": {
+            "actualDistanceM": "12500.5"
+          },
+          "state": "pending",
+          "review": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:success",
+      "operationId": "decideTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "accepted",
+          "reasonCodes": [],
+          "reason": null,
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "decision": "accept",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "factRevisionId": "41000000-0000-4000-8000-000000000001",
+        "proposalId": null,
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "requestTripCorrection:success",
+      "operationId": "requestTripCorrection",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "proposeTripResolution:success",
+      "operationId": "proposeTripResolution",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "reason": "synthetic-example",
+        "evidenceIds": [],
+        "actualDistanceM": "12500.5"
+      }
+    },
+    {
+      "id": "decideTripProposal:success",
+      "operationId": "decideTripProposal",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "outcome": "accepted",
+          "reasonCodes": [],
+          "reason": null,
+          "decidedAt": "2026-10-17T12:00:00.000Z",
+          "reviewerId": null,
+          "reviewedRevisionId": null,
+          "basis": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "catalogRevisionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "decision": "approve",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "associateTripEvent:success",
+      "operationId": "associateTripEvent",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "eventId": "41000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "id": "listReconciliationCandidates:success",
+      "operationId": "listReconciliationCandidates",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "primaryTripId": "41000000-0000-4000-8000-000000000001",
+              "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+              "reasonCodes": [],
+              "confidence": "review_required"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listReconciliationCandidates:empty",
+      "operationId": "listReconciliationCandidates",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "reconcileTrips:success",
+      "operationId": "reconcileTrips",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "primaryTripId": "41000000-0000-4000-8000-000000000001",
+          "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+          "primaryVersion": 1,
+          "secondaryVersion": 1,
+          "state": "applied"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "primaryTripId": "41000000-0000-4000-8000-000000000001",
+        "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+        "primaryVersion": 1,
+        "secondaryVersion": 1,
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "getReconciliation:success",
+      "operationId": "getReconciliation",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "primaryTripId": "41000000-0000-4000-8000-000000000001",
+          "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+          "primaryVersion": 1,
+          "secondaryVersion": 1,
+          "state": "applied"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "reverseReconciliation:success",
+      "operationId": "reverseReconciliation",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "primaryTripId": "41000000-0000-4000-8000-000000000001",
+          "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+          "primaryVersion": 1,
+          "secondaryVersion": 1,
+          "state": "applied"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "primaryVersion": 1,
+        "secondaryVersion": 1,
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "listQualificationLevels:success",
+      "operationId": "listQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "game": "ets2",
+              "code": "trainee",
+              "name": "synthetic-example",
+              "ruleVersionId": null,
+              "configured": false,
+              "requiredTrips": null,
+              "requiredDistanceM": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listQualificationLevels:empty",
+      "operationId": "listQualificationLevels",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listQualificationRuleVersions:success",
+      "operationId": "listQualificationRuleVersions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "publishedAt": "2026-10-17T12:00:00.000Z",
+              "rules": [],
+              "requiredTrips": null,
+              "requiredDistanceM": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listQualificationRuleVersions:empty",
+      "operationId": "listQualificationRuleVersions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getQualificationRuleVersion:success",
+      "operationId": "getQualificationRuleVersion",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "levelId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "publishedAt": "2026-10-17T12:00:00.000Z",
+          "rules": [
+            {
+              "type": "max_mass",
+              "maxKg": "20000"
+            },
+            {
+              "type": "allowed_trailer_types",
+              "entityIds": [
+                "41000000-0000-4000-8000-000000000014"
+              ]
+            },
+            {
+              "type": "allowed_adr_categories",
+              "entityIds": []
+            }
+          ],
+          "requiredTrips": null,
+          "requiredDistanceM": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getQualificationProgress:success",
+      "operationId": "getQualificationProgress",
+      "status": 200,
+      "response": {
+        "data": {
+          "assignment": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "levelId": "41000000-0000-4000-8000-000000000001",
+            "game": "ets2",
+            "assignedAt": "2026-10-17T12:00:00.000Z",
+            "periodId": "41000000-0000-4000-8000-000000000001"
+          },
+          "acceptedTrips": 1,
+          "actualDistanceM": "12500.5",
+          "requiredTrips": null,
+          "requiredDistanceM": null,
+          "eligibleForConfirmation": false,
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "projectionVersion": 1,
+          "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMyQualificationProgress:success",
+      "operationId": "getMyQualificationProgress",
+      "status": 200,
+      "response": {
+        "data": {
+          "assignment": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "levelId": "41000000-0000-4000-8000-000000000001",
+            "game": "ets2",
+            "assignedAt": "2026-10-17T12:00:00.000Z",
+            "periodId": "41000000-0000-4000-8000-000000000001"
+          },
+          "acceptedTrips": 1,
+          "actualDistanceM": "12500.5",
+          "requiredTrips": null,
+          "requiredDistanceM": null,
+          "eligibleForConfirmation": false,
+          "reviewRequired": false,
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "projectionVersion": 1,
+          "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getAdminQualificationProgress:success",
+      "operationId": "getAdminQualificationProgress",
+      "status": 200,
+      "response": {
+        "data": {
+          "assignment": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "levelId": "41000000-0000-4000-8000-000000000001",
+            "game": "ets2",
+            "assignedAt": "2026-10-17T12:00:00.000Z",
+            "periodId": "41000000-0000-4000-8000-000000000001"
+          },
+          "acceptedTrips": 1,
+          "actualDistanceM": "12500.5",
+          "requiredTrips": null,
+          "requiredDistanceM": null,
+          "eligibleForConfirmation": false,
+          "reviewRequired": false,
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "projectionVersion": 1,
+          "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMyQualificationAssignments:success",
+      "operationId": "listMyQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMyQualificationAssignments:empty",
+      "operationId": "listMyQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripQualificationAssignments:success",
+      "operationId": "listTripQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTripQualificationAssignments:empty",
+      "operationId": "listTripQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMemberQualificationAssignments:success",
+      "operationId": "listMemberQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "levelId": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "assignedAt": "2026-10-17T12:00:00.000Z",
+              "periodId": "41000000-0000-4000-8000-000000000001",
+              "endedAt": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMemberQualificationAssignments:empty",
+      "operationId": "listMemberQualificationAssignments",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "renameQualificationLevel:success",
+      "operationId": "renameQualificationLevel",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "game": "ets2",
+          "code": "trainee",
+          "name": "synthetic-example",
+          "ruleVersionId": null,
+          "configured": false,
+          "requiredTrips": null,
+          "requiredDistanceM": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "name": "synthetic-example"
+      }
+    },
+    {
+      "id": "publishQualificationRules:success",
+      "operationId": "publishQualificationRules",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "game": "ets2",
+          "code": "trainee",
+          "name": "synthetic-example",
+          "ruleVersionId": null,
+          "configured": false,
+          "requiredTrips": null,
+          "requiredDistanceM": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "rules": [],
+        "requiredTrips": null,
+        "requiredDistanceM": null,
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "assignQualification:success",
+      "operationId": "assignQualification",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "levelId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "assignedAt": "2026-10-17T12:00:00.000Z",
+          "periodId": "41000000-0000-4000-8000-000000000001"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "game": "ets2",
+        "levelId": "41000000-0000-4000-8000-000000000001",
+        "reason": "synthetic-example",
+        "purpose": "initial"
+      }
+    },
+    {
+      "id": "confirmPromotion:success",
+      "operationId": "confirmPromotion",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "levelId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "assignedAt": "2026-10-17T12:00:00.000Z",
+          "periodId": "41000000-0000-4000-8000-000000000001"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "game": "ets2",
+        "assignmentId": "41000000-0000-4000-8000-000000000001",
+        "targetLevelId": "41000000-0000-4000-8000-000000000001",
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "listEvents:success",
+      "operationId": "listEvents",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "title": "synthetic-example",
+              "description": "synthetic-example",
+              "game": "ets2",
+              "startsAt": "2026-10-17T12:00:00.000Z",
+              "endsAt": null,
+              "status": "scheduled",
+              "origin": null,
+              "destination": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listEvents:empty",
+      "operationId": "listEvents",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getEvent:success",
+      "operationId": "getEvent",
+      "status": 200,
+      "response": {
+        "data": {
+          "event": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "title": "synthetic-example",
+            "description": "synthetic-example",
+            "game": "ets2",
+            "startsAt": "2026-10-17T12:00:00.000Z",
+            "endsAt": null,
+            "status": "scheduled",
+            "origin": null,
+            "destination": null
+          },
+          "visibility": "public",
+          "myResponse": {
+            "version": 1,
+            "response": "unanswered",
+            "declineReason": null
+          },
+          "myAttendance": "unconfirmed",
+          "prescribedCargoId": null,
+          "prescribedMassKg": null,
+          "prescribedTrailerTypeId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getEventResponse:success",
+      "operationId": "getEventResponse",
+      "status": 200,
+      "response": {
+        "data": {
+          "version": 1,
+          "response": "unanswered",
+          "declineReason": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "setEventResponse:success",
+      "operationId": "setEventResponse",
+      "status": 200,
+      "response": {
+        "data": {
+          "version": 1,
+          "response": "unanswered",
+          "declineReason": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "response": "participating"
+      }
+    },
+    {
+      "id": "listEventParticipants:success",
+      "operationId": "listEventParticipants",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listEventParticipants:empty",
+      "operationId": "listEventParticipants",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getUpcomingEvent:success",
+      "operationId": "getUpcomingEvent",
+      "status": 200,
+      "response": {
+        "data": null,
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "createEvent:success",
+      "operationId": "createEvent",
+      "status": 201,
+      "response": {
+        "data": {
+          "event": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "title": "synthetic-example",
+            "description": "synthetic-example",
+            "game": "ets2",
+            "startsAt": "2026-10-17T12:00:00.000Z",
+            "endsAt": null,
+            "status": "scheduled",
+            "origin": null,
+            "destination": null
+          },
+          "visibility": "public",
+          "myResponse": {
+            "version": 1,
+            "response": "unanswered",
+            "declineReason": null
+          },
+          "myAttendance": "unconfirmed",
+          "prescribedCargoId": null,
+          "prescribedMassKg": null,
+          "prescribedTrailerTypeId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "title": "synthetic-example",
+        "description": "synthetic-example",
+        "game": "ets2",
+        "startsAt": "2026-10-17T12:00:00.000Z",
+        "endsAt": null,
+        "visibility": "public",
+        "originCityId": null,
+        "destinationCityId": null,
+        "prescribedCargoId": null,
+        "prescribedMassKg": null,
+        "prescribedTrailerTypeId": null
+      }
+    },
+    {
+      "id": "updateEvent:success",
+      "operationId": "updateEvent",
+      "status": 200,
+      "response": {
+        "data": {
+          "event": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "title": "synthetic-example",
+            "description": "synthetic-example",
+            "game": "ets2",
+            "startsAt": "2026-10-17T12:00:00.000Z",
+            "endsAt": null,
+            "status": "scheduled",
+            "origin": null,
+            "destination": null
+          },
+          "visibility": "public",
+          "myResponse": {
+            "version": 1,
+            "response": "unanswered",
+            "declineReason": null
+          },
+          "myAttendance": "unconfirmed",
+          "prescribedCargoId": null,
+          "prescribedMassKg": null,
+          "prescribedTrailerTypeId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "title": "synthetic-example",
+        "description": "synthetic-example",
+        "game": "ets2",
+        "startsAt": "2026-10-17T12:00:00.000Z",
+        "endsAt": null,
+        "visibility": "public",
+        "originCityId": null,
+        "destinationCityId": null,
+        "prescribedCargoId": null,
+        "prescribedMassKg": null,
+        "prescribedTrailerTypeId": null
+      }
+    },
+    {
+      "id": "cancelEvent:success",
+      "operationId": "cancelEvent",
+      "status": 200,
+      "response": {
+        "data": {
+          "event": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "title": "synthetic-example",
+            "description": "synthetic-example",
+            "game": "ets2",
+            "startsAt": "2026-10-17T12:00:00.000Z",
+            "endsAt": null,
+            "status": "scheduled",
+            "origin": null,
+            "destination": null
+          },
+          "visibility": "public",
+          "myResponse": {
+            "version": 1,
+            "response": "unanswered",
+            "declineReason": null
+          },
+          "myAttendance": "unconfirmed",
+          "prescribedCargoId": null,
+          "prescribedMassKg": null,
+          "prescribedTrailerTypeId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "getEventAttendance:success",
+      "operationId": "getEventAttendance",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "response": {
+                "version": 1,
+                "response": "unanswered",
+                "declineReason": null
+              },
+              "attendance": "unconfirmed"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getEventAttendance:empty",
+      "operationId": "getEventAttendance",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "setEventAttendance:success",
+      "operationId": "setEventAttendance",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "members": []
+      }
+    },
+    {
+      "id": "pollNotifications:success",
+      "operationId": "pollNotifications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": "synthetic-example",
+          "hasMore": false,
+          "unreadCount": 1,
+          "serverTime": "2026-10-17T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listNotificationHistory:success",
+      "operationId": "listNotificationHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "category": "synthetic-example",
+              "messageKey": "synthetic-example",
+              "display": {
+                "actorNickname": null,
+                "game": null,
+                "eventTitle": null
+              },
+              "target": null,
+              "occurredAt": "2026-10-17T12:00:00.000Z",
+              "readAt": null,
+              "liveToastEligible": false
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listNotificationHistory:empty",
+      "operationId": "listNotificationHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "markNotificationRead:success",
+      "operationId": "markNotificationRead",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "markNotificationsReadThrough:success",
+      "operationId": "markNotificationsReadThrough",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "throughCursor": "synthetic-example"
+      }
+    },
+    {
+      "id": "getNotificationPreferences:success",
+      "operationId": "getNotificationPreferences",
+      "status": 200,
+      "response": {
+        "data": {
+          "tripStarted": false,
+          "tripFinished": false,
+          "tripRejected": false,
+          "eventChanges": false,
+          "eventReminders": false,
+          "qualificationChanges": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "setNotificationPreferences:success",
+      "operationId": "setNotificationPreferences",
+      "status": 200,
+      "response": {
+        "data": {
+          "tripStarted": false,
+          "tripFinished": false,
+          "tripRejected": false,
+          "eventChanges": false,
+          "eventReminders": false,
+          "qualificationChanges": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "tripStarted": false,
+        "tripFinished": false,
+        "tripRejected": false,
+        "eventChanges": false,
+        "eventReminders": false,
+        "qualificationChanges": false
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:success",
+      "operationId": "getCompanyAnalytics",
+      "status": 200,
+      "response": {
+        "data": {
+          "acceptedTrips": 1,
+          "actualDistanceM": "12500.5",
+          "reportingTimezone": "UTC",
+          "fromDate": "2026-10-17",
+          "toDateExclusive": "2026-10-18",
+          "granularity": "day",
+          "buckets": [
+            {
+              "date": "2026-10-17",
+              "acceptedTrips": 1,
+              "actualDistanceM": "12500.5"
+            }
+          ],
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "projectionVersion": 1,
+          "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getMemberAnalytics:success",
+      "operationId": "getMemberAnalytics",
+      "status": 200,
+      "response": {
+        "data": {
+          "acceptedTrips": 1,
+          "actualDistanceM": "12500.5",
+          "reportingTimezone": "UTC",
+          "fromDate": "2026-10-17",
+          "toDateExclusive": "2026-10-18",
+          "granularity": "day",
+          "buckets": [
+            {
+              "date": "2026-10-17",
+              "acceptedTrips": 1,
+              "actualDistanceM": "12500.5"
+            }
+          ],
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "projectionVersion": 1,
+          "projectionPending": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getLeaderboard:success",
+      "operationId": "getLeaderboard",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "acceptedTrips": 1,
+              "actualDistanceM": "12500.5"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getLeaderboard:empty",
+      "operationId": "getLeaderboard",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCompanySettings:success",
+      "operationId": "getCompanySettings",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "reportingTimezone": null,
+          "launchReady": false,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "updateCompanySettings:success",
+      "operationId": "updateCompanySettings",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "reportingTimezone": null,
+          "launchReady": false,
+          "missingSetup": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "reportingTimezone": "UTC"
+      }
+    },
+    {
+      "id": "listSourceConnections:success",
+      "operationId": "listSourceConnections",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "provider": "ets2telemetry",
+              "enabled": false,
+              "availability": "available",
+              "version": 1
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listSourceConnections:empty",
+      "operationId": "listSourceConnections",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getSourceConnection:success",
+      "operationId": "getSourceConnection",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "provider": "ets2telemetry",
+          "enabled": false,
+          "availability": "available",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "updateSourceConnection:success",
+      "operationId": "updateSourceConnection",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "provider": "ets2telemetry",
+          "enabled": false,
+          "availability": "available",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "enabled": false
+      }
+    },
+    {
+      "id": "listAudit:success",
+      "operationId": "listAudit",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "actorId": null,
+              "action": "synthetic-example",
+              "subjectId": "41000000-0000-4000-8000-000000000001",
+              "occurredAt": "2026-10-17T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listAudit:empty",
+      "operationId": "listAudit",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getOperation:success",
+      "operationId": "getOperation",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "state": "processing",
+          "resultId": null,
+          "failureCode": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listTrips:error-403",
+      "operationId": "listTrips",
+      "status": 403,
+      "response": {
+        "error": {
+          "code": "FORBIDDEN",
+          "messageKey": "errors.forbidden",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "getTrip:error-404",
+      "operationId": "getTrip",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:error-409",
+      "operationId": "decideTrip",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "messageKey": "errors.version_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "pollNotifications:error-401",
+      "operationId": "pollNotifications",
+      "status": 401,
+      "response": {
+        "error": {
+          "code": "SESSION_INVALID",
+          "messageKey": "errors.session_invalid",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "getCompanyAnalytics:error-409",
+      "operationId": "getCompanyAnalytics",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "SETUP_REQUIRED",
+          "messageKey": "errors.setup_required",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "getMe:error-503",
+      "operationId": "getMe",
+      "status": 503,
+      "response": {
+        "error": {
+          "code": "TEMPORARILY_UNAVAILABLE",
+          "messageKey": "errors.temporarily_unavailable",
+          "retryable": true
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
+      "id": "decideTrip:self_review_forbidden",
+      "operationId": "decideTrip",
+      "status": 403,
+      "response": {
+        "error": {
+          "code": "SELF_REVIEW_FORBIDDEN",
+          "messageKey": "errors.self_review_forbidden",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "getPublicEvent:not_found",
+      "operationId": "getPublicEvent",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "reviseManualTrip:state_conflict",
+      "operationId": "reviseManualTrip",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "STATE_CONFLICT",
+          "messageKey": "errors.state_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "issueTelemetryToken:secret_already_issued",
+      "operationId": "issueTelemetryToken",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "SECRET_ALREADY_ISSUED",
+          "messageKey": "errors.secret_already_issued",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "submitManualTrip:invalid_payload",
+      "operationId": "submitManualTrip",
+      "status": 422,
+      "response": {
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "messageKey": "errors.invalid_payload",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "pollNotifications:rate_limited",
+      "operationId": "pollNotifications",
+      "status": 429,
+      "response": {
+        "error": {
+          "code": "RATE_LIMITED",
+          "messageKey": "errors.rate_limited",
+          "retryable": true
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
+      "id": "setEventResponse:declined",
+      "operationId": "setEventResponse",
+      "status": 200,
+      "request": {
+        "response": "declined",
+        "reason": "Fictional scheduling conflict"
+      },
+      "response": {
+        "data": {
+          "version": 2,
+          "response": "declined",
+          "declineReason": "Fictional scheduling conflict"
+        },
+        "meta": {
+          "requestId": "synthetic-request-004"
+        }
+      }
+    },
+    {
+      "id": "getTrip:resubmitted-with-history",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": {
+            "id": "41000000-0000-4000-8000-000000000002",
+            "number": 2,
+            "submittedAt": "2026-10-17T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+              "originCityId": "41000000-0000-4000-8000-000000000011",
+              "destinationCityId": "41000000-0000-4000-8000-000000000012",
+              "cargoId": "41000000-0000-4000-8000-000000000013",
+              "cargoMassKg": "12500.5",
+              "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "41000000-0000-4000-8000-000000000001"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "evidence": [],
+          "decisions": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "outcome": "rejected",
+              "reasonCodes": [
+                "MANUAL_EVIDENCE_MISMATCH"
+              ],
+              "reason": "Fictional screenshot does not support the submitted distance",
+              "decidedAt": "2026-10-17T12:00:00.000Z",
+              "reviewerId": "41000000-0000-4000-8000-000000000003",
+              "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+              "basis": {
+                "factRevisionId": "41000000-0000-4000-8000-000000000001",
+                "qualificationAssignmentId": null,
+                "levelId": null,
+                "ruleVersionId": null,
+                "catalogRevisionId": null,
+                "eventId": null,
+                "attendanceRevisionId": null,
+                "attributionAt": null,
+                "attributionBasis": "actual_start",
+                "reportingAt": null
+              }
+            }
+          ],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCatalogEntity:english-fallback",
+      "operationId": "getCatalogEntity",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "kind": "city",
+          "mapNamespace": "synthetic-example",
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000001",
+            "label": "Fixture City",
+            "requestedLocale": "ru",
+            "renderedLocale": "en",
+            "englishFallback": true,
+            "retired": false
+          },
+          "relatedEntityIds": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    }
+  ]
+}
