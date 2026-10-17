@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { eventLine } from "./ci-result.mjs";
 
 if (process.env.VTC_TEST_LAUNCH !== "isolated-compose")
   throw new Error("ISOLATED_TEST_LAUNCH_REQUIRED");
@@ -22,6 +23,8 @@ async function run(args, env = base) {
     active.once("exit", (status) => accept(status ?? 1));
   });
   console.log(`STACK ${args[0]}: ${code === 0 ? "PASS" : "FAIL"} (${Date.now() - started}ms)`);
+  if (["check", "build"].includes(args[0]))
+    console.log(eventLine(args[0], code, Date.now() - started));
   return code;
 }
 const check = await run(["check"]);
@@ -40,6 +43,7 @@ if (build === 0 && !interrupted)
       VTC_TEST_RUN: process.env.VTC_TEST_RUN,
       VTC_TEST_ROOT_PASSWORD: process.env.VTC_TEST_ROOT_PASSWORD,
       VTC_TEST_LAUNCH: process.env.VTC_TEST_LAUNCH,
+      VTC_TEST_PROBE: process.env.VTC_TEST_PROBE,
     },
   );
 process.exitCode = check || build || tests;

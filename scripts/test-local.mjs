@@ -3,9 +3,12 @@ import { randomBytes } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { eventLine } from "./ci-result.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const focus = process.argv[2] ?? "all";
+const probe = process.argv[3] === "--probe";
+if (probe && !["unit", "integration", "e2e"].includes(focus)) throw new Error("INVALID_PROBE_LANE");
 if (
   ![
     "all",
@@ -32,6 +35,9 @@ await writeFile(
     `VTC_TEST_ROOT_PASSWORD=${randomBytes(32).toString("hex")}`,
     `VTC_TEST_RUN=${run}`,
     `VTC_TEST_FOCUS=${focus}`,
+    `VTC_TEST_PROBE=${probe ? "assertion" : ""}`,
+    `VTC_TEST_UID=${process.getuid?.() ?? 1000}`,
+    `VTC_TEST_GID=${process.getgid?.() ?? 1000}`,
     `VTC_TEST_OUTPUT=${output.replaceAll("\\", "/")}`,
     "",
   ].join("\n"),
@@ -69,6 +75,9 @@ async function docker(tail, timeout) {
         // Explicit env-file plus these values prevent shell interpolation overriding the allocation.
         VTC_TEST_RUN: run,
         VTC_TEST_FOCUS: focus,
+        VTC_TEST_PROBE: probe ? "assertion" : "",
+        VTC_TEST_UID: String(process.getuid?.() ?? 1000),
+        VTC_TEST_GID: String(process.getgid?.() ?? 1000),
         VTC_TEST_OUTPUT: output.replaceAll("\\", "/"),
         VTC_TEST_ROOT_PASSWORD: undefined,
       },
@@ -108,12 +117,21 @@ async function docker(tail, timeout) {
 let result = 1;
 try {
   console.log(`Owned isolated test project: ${project}`);
+  const started = Date.now();
   const built = await docker(["build", "runner"]);
+  console.log(eventLine("build-image", built, Date.now() - started));
   if (built === 0 && !interrupted)
-    result = await docker(["up", "--abort-on-container-exit", "--exit-code-from", "runner"]);
+    result = await docker([
+      "up",
+      "--no-log-prefix",
+      "--abort-on-container-exit",
+      "--exit-code-from",
+      "runner",
+    ]);
 } finally {
   // The project name is a fresh random allocation, never an existing development stack.
   cleaning = true;
+  const started = Date.now();
   let cleaned = 1;
   try {
     cleaned = await docker(["down", "--volumes", "--remove-orphans", "--timeout", "5"], 15000);
@@ -138,5 +156,6 @@ try {
       `Recovery: docker compose --project-name ${project} --env-file .local/testing/${run}/stack.env -f deploy/test/compose.yaml down --volumes --remove-orphans --timeout 5`,
     );
   }
+  console.log(eventLine("cleanup", cleaned, Date.now() - started));
 }
 process.exitCode = interrupted ? 130 : result;

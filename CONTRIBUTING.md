@@ -80,6 +80,7 @@ An optional production image is `docker build --target production -t vtc-dashboa
 | `pnpm lint` / `pnpm typecheck` | Lint and strict TypeScript checks |
 | `pnpm test:scaffold` | Node test runner: HTTP/config/schema-bridge checks, including all reviewed structural browser examples |
 | `pnpm check` | Generated-file, format, lint, type and scaffold checks |
+| `node scripts/test-ci.mjs` | Safe structured CI wrapper around the same isolated suite; [CI gates and negative probes](docs/development/ci.md) |
 | `pnpm test:local` | Owned isolated Docker stack: check/build, Vitest unit/contract/real-MySQL lanes, separate persistence/recovery, desktop/mobile Playwright and failure-reporting proof; see [testing](docs/development/testing.md) |
 | `pnpm test:unit` / `pnpm test:contracts` | Native database-independent Vitest lanes after `pnpm build:packages`; Docker remains the network-isolated path |
 | `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |

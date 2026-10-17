@@ -22,6 +22,9 @@ services:
     build:
       context: ../..
       dockerfile: deploy/test/Dockerfile
+      args:
+        RUNNER_UID: ${VTC_TEST_UID:-1000}
+        RUNNER_GID: ${VTC_TEST_GID:-1000}
     init: true
     shm_size: 256mb
     environment:
@@ -31,6 +34,7 @@ services:
       VTC_TEST_ROOT_PASSWORD: ${VTC_TEST_ROOT_PASSWORD:?Private launcher configuration required}
       VTC_TEST_LAUNCH: isolated-compose
       VTC_TEST_FOCUS: ${VTC_TEST_FOCUS:-all}
+      VTC_TEST_PROBE: ${VTC_TEST_PROBE:-}
     networks: [isolated]
     volumes:
       - ${VTC_TEST_OUTPUT:?Private launcher configuration required}:/workspace/.local/testing
