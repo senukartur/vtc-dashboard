@@ -410,6 +410,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Make reviews and merge protection explicit for humans and coding agents.
 
+**Scoped implementation:** The owner requested the telemetry repository's Claude review setup. [Advisory review configuration and verification gates](../development/review.md) cover that subset; VTC-006/009 dependencies and the remaining VTC-010 acceptance criteria stay in place. Configuration alone does not establish hosted review, seeded-defect detection or enforced merge protection.
+
 **Scope and acceptance checklist**
 
 - [ ] Define review ownership, PR template with card ID/behavior/validation, protected main branch, required CI, and resolved review conversations.
