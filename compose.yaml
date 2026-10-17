@@ -1,0 +1,86 @@
+name: vtc-dashboard
+
+services:
+  db:
+    image: mysql:8.4.11@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Run the local setup first}
+      MYSQL_USER: ${MYSQL_USER:?Run the local setup first}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run the local setup first}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run the local setup first}
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./deploy/local/mysql.cnf:/etc/mysql/conf.d/vtc.cnf:ro
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, --silent]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+  app:
+    build:
+      context: .
+      target: development
+    init: true
+    environment:
+      NODE_ENV: development
+      API_HOST: 0.0.0.0
+      API_PORT: "3000"
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "5173"
+      API_PROXY_TARGET: http://127.0.0.1:3000
+      SERVE_WEB: "false"
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Run the local setup first}
+      MYSQL_USER: ${MYSQL_USER:?Run the local setup first}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run the local setup first}
+    ports:
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+      - "127.0.0.1:${WEB_PORT:-5173}:5173"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 30
+      start_period: 60s
+    develop:
+      watch:
+        - action: sync
+          path: ./apps
+          target: /workspace/apps
+          initial_sync: true
+          ignore: [node_modules/, dist/, '**/package.json']
+        - action: sync
+          path: ./packages
+          target: /workspace/packages
+          initial_sync: true
+          ignore: [node_modules/, dist/, '**/package.json']
+        - action: rebuild
+          path: ./package.json
+        - action: rebuild
+          path: ./pnpm-lock.yaml
+        - action: rebuild
+          path: ./pnpm-workspace.yaml
+        - action: rebuild
+          path: ./tsconfig.base.json
+        - action: rebuild
+          path: ./apps/api/package.json
+        - action: rebuild
+          path: ./apps/web/package.json
+        - action: rebuild
+          path: ./packages/contracts/package.json
+        - action: rebuild
+          path: ./packages/db/package.json
+        - action: rebuild
+          path: ./docs/contracts/dashboard
+        - action: rebuild
+          path: ./scripts
+
+volumes:
+  mysql-data:

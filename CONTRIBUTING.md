@@ -1,0 +1,87 @@
+# Contributing
+
+Read [AGENTS.md](AGENTS.md), [CONCEPT.MD](CONCEPT.MD) and the [architecture](docs/architecture/README.md) first. Documentation and explanatory comments are English; the product supports Russian and English.
+
+## Local development with Docker
+
+Docker Compose is the owner's preferred local environment. Use Docker Desktop with **Linux containers**, or Docker Engine with Compose **2.32+**. Windows Docker Desktop requires its working Linux/WSL backend. The application and real MySQL run in containers; host-installed MySQL is not required.
+
+Generate private local configuration once. With any host Node.js 18+:
+
+```sh
+node scripts/setup-local.mjs
+```
+
+Without host Node, run the same helper in the pinned image (PowerShell and POSIX shells expand `${PWD}`):
+
+```sh
+docker run --rm --user node --mount "type=bind,source=${PWD},target=/workspace" --workdir /workspace node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 node scripts/setup-local.mjs
+```
+
+The container's `node` user is UID/GID 1000. On native Linux with another host UID/GID, replace `--user node` with `--user "$(id -u):$(id -g)"` so the private file remains readable by its owner. The helper never overwrites an existing `.env` or prints generated passwords. Keep that file private; `.env.example` contains placeholders only.
+
+Start development from the repository root:
+
+```sh
+docker compose up --build --watch
+```
+
+Open [the local UI](http://127.0.0.1:5173). Compose Watch synchronizes app/package source while the API, TypeScript packages and Vite watch for changes. Dependency/contract/tooling changes trigger a rebuild. Container dependencies are not shared with host `node_modules`. Keep the foreground watch command running; `docker compose up --build -d --wait` is an alternative without live synchronization, followed by `docker compose watch` in a foreground terminal.
+
+The UI is a bilingual development connection screen. Authentication, company pages, schema/migrations, jobs and seed accounts are not implemented by VTC-006. MySQL starts with an empty application database; [fixture ownership](test/fixtures/README.md) explains the later test data.
+
+```sh
+docker compose exec app pnpm check
+docker compose exec app pnpm db:check
+docker compose exec app pnpm smoke:local
+docker compose exec app pnpm build
+docker compose down
+```
+
+`down` preserves the named MySQL volume. Reusing the volume retains its original database users/passwords; editing `.env` does not change existing MySQL credentials. Do not remove a data volume to fix an ordinary connection error. Check the Docker engine, port availability, configuration field names and stored development credentials first. When `.env` changes, recreate the app container; source watch deliberately does not copy secrets.
+
+Only loopback ports are published: UI 5173, API 3000 and MySQL 3307 by default, configurable through `.env`. The API's `/health/live` checks its process; `/health/ready` authenticates to MySQL and checks the pinned version/configuration, returning 503 when unavailable. The MySQL container's ping is only liveness, not the application's authenticated readiness.
+
+## Native tooling and portable builds
+
+Host editing/typechecking or a future non-Docker deployment uses Node **24.22.0** and pnpm **12.14.0**. Install those versions using your normal runtime manager; `npm install --global pnpm@12.14.0` is one package-manager installation option. Exact versions are recorded in [the shared runtime baseline](config/runtime.json), `.node-version`, the root manifest and container images. The setup helper's Node 18 minimum does not weaken the application runtime pin.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm contracts:check
+pnpm check
+pnpm build
+```
+
+For native app development with only MySQL in Docker, start `docker compose up db -d --wait` and then `pnpm dev`. The host `.env` defaults to MySQL on loopback port 3307. The default local workflow above keeps the application in Docker too.
+
+For a portable production build, set `NODE_ENV=production`, `SERVE_WEB=true` and the target database variables through the environment or private `.env`, then run `pnpm start` from the repository root. It serves the built SPA and API on one origin. Deep frontend links return the SPA; unknown API/telemetry/evidence paths and missing assets return 404. `pnpm jobs` is a bounded placeholder that reports `not_configured`; VTC-021 supplies durable work. No auth/telemetry route is mounted just because a schema exists.
+
+An optional production image is `docker build --target production -t vtc-dashboard:local .`. It packages only the API's production dependency deployment and built web assets, runs without root and has no embedded secrets. Building it is not staging deployment, a Hostland compatibility test or schema migration. Hostland does not have to support Docker.
+
+## Commands and verification
+
+| Command | Scope |
+| --- | --- |
+| `pnpm dev:setup` | Create private local configuration if absent |
+| `pnpm dev` | Generate contracts/build shared packages, then watch API/web/packages |
+| `pnpm contracts:generate` / `pnpm contracts:check` | Regenerate or verify browser types/runtime schemas from the approved OpenAPI |
+| `pnpm format` / `pnpm format:check` | Format or check scaffold source/configuration with Biome |
+| `pnpm lint` / `pnpm typecheck` | Lint and strict TypeScript checks |
+| `pnpm test:scaffold` | Node test runner: HTTP/config/schema-bridge checks, including all reviewed structural browser examples |
+| `pnpm check` | Generated-file, format, lint, type and scaffold checks |
+| `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |
+| `pnpm smoke:local` | Actual local HTTP/module/readiness probe; defaults to the Vite origin |
+| `pnpm build` / `pnpm start` | Portable production build / same-origin start |
+
+For a production server on another loopback port, set `SMOKE_BASE_URL` for the smoke command. `SMOKE_EXPECT_READY=false` deliberately tests the unavailable-database path; success in that mode is never database proof. Do not run mutating tests or send real mail/webhooks with production identities.
+
+Generated browser files are committed so frontend/backend owners consume one reviewed baseline. Edit `docs/contracts/dashboard/openapi.json` through a coordinated contract PR, then regenerate. Generated types and JSON Schema 2020-12 stay separate from the frozen telemetry contract. The API uses explicit Ajv 2020 compilers, rejects extra fields/input coercion and fails closed on invalid response DTOs. This is structural enforcement, not a replacement for session/permission/domain checks in later cards.
+
+VTC-006's seven scaffold checks are not the full unit/MySQL integration/E2E tooling of VTC-008, GitHub CI of VTC-009 or review enforcement of VTC-010. No real database transaction, native authentication, deployment or game-client integration is proved by HTTP injection. See [the delivery evidence](docs/development/workspace.md).
+
+## Ownership and branches
+
+Use one VTC card and scoped branch per change; preserve unrelated work. Read prerequisites and integration gates in the [backlog](docs/planning/mvp-trello-backlog.md). VTC-006 owns root tooling/lockfile and app composition; feature owners use their module directories and public facades. The migration owner alone generates/orders the Drizzle journal under VTC-007. Coordinate changes to generated contracts, capabilities, root dependencies and shared composition rather than independently regenerating them on parallel branches.
+
+Keep secrets, real reports, extracted game data and host inventory out of Git and PR logs. Inspect the exact staged diff. Relevant checks, independent review, updated English docs and merge are separate completion requirements; a prepared PR does not authorize deployment or mark a feature Done.

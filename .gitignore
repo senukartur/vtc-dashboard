@@ -1,4 +1,4 @@
-# Dependencies and generated output; refine when the scaffold lands.
+# Dependencies and generated build output. Reviewed contract source is committed.
 node_modules/
 dist/
 build/

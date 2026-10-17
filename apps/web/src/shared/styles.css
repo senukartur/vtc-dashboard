@@ -1,0 +1,19 @@
+@import "tailwindcss" source("../");
+
+:root {
+  font-family: system-ui, sans-serif;
+  color: #18232d;
+  background: #f2f5f7;
+}
+body {
+  margin: 0;
+}
+button,
+select {
+  font: inherit;
+}
+button,
+select,
+a {
+  outline-offset: 4px;
+}

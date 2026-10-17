@@ -327,6 +327,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Provide a reproducible workspace and English contributor instructions.
 
+**Prepared delivery (2026-10-17):** [Contributor commands](../../CONTRIBUTING.md) and [workspace evidence](../development/workspace.md) describe the root pnpm/API/web/contracts scaffold, Docker-first local workflow and portable builds. The owner selected Docker for local app/MySQL development. Docker Desktop installation requires a system restart, so actual image/MySQL/watch/persistence checks remain pending; do not mark this card Done from native build or Compose syntax checks. Final-head review and merge are separate gates.
+
 **Scope and acceptance checklist**
 
 - [ ] Set up the chosen runtime/package manager with pinned versions, workspace layout, formatting, linting, and TypeScript checks.
