@@ -1,4 +1,19 @@
-import { createPool, type PoolOptions, type RowDataPacket } from "mysql2/promise";
+import {
+  createPool,
+  type PoolConnection,
+  type PoolOptions,
+  type RowDataPacket,
+} from "mysql2/promise";
+
+function discardConnection(connection: PoolConnection): void {
+  // mysql2 3.24.6 destroy() only calls stream.end(); force-close a half-open peer too.
+  // The pinned driver's stream exists at runtime but is absent from its promise types.
+  const driver = connection.connection as typeof connection.connection & {
+    stream: { destroy(): void };
+  };
+  connection.destroy();
+  driver.stream.destroy();
+}
 
 export const expectedMysqlVersion = "8.4.11";
 export const requiredSqlModes = [
@@ -22,7 +37,8 @@ export function createDatabase(settings: DatabaseSettings) {
   const options: PoolOptions = {
     ...settings,
     connectionLimit: 5,
-    connectTimeout: 2000,
+    waitForConnections: false,
+    connectTimeout: 1000,
     timezone: "Z",
     charset: "utf8mb4_0900_ai_ci",
     dateStrings: true,
@@ -35,14 +51,18 @@ export function createDatabase(settings: DatabaseSettings) {
   return {
     async check(): Promise<boolean> {
       const connection = await pool.getConnection();
+      let reusable = false;
       try {
-        await connection.query("SET SESSION time_zone = '+00:00'");
-        const [rows] = await connection.query<RowDataPacket[]>(
-          "SELECT VERSION() AS version, @@session.time_zone AS timezone, " +
+        await connection.query({ sql: "SET SESSION time_zone = '+00:00'", timeout: 1000 });
+        const [rows] = await connection.query<RowDataPacket[]>({
+          sql:
+            "SELECT VERSION() AS version, @@session.time_zone AS timezone, " +
             "@@global.time_zone AS serverTimezone, @@default_storage_engine AS engineName, " +
             "@@session.sql_mode AS sqlMode, @@session.transaction_isolation AS isolationLevel, " +
             "@@character_set_database AS charsetName, @@collation_database AS collationName",
-        );
+          timeout: 1000,
+        });
+        reusable = true;
         const row = rows[0];
         if (!row) return false;
         const modes = String(row.sqlMode).split(",");
@@ -57,7 +77,9 @@ export function createDatabase(settings: DatabaseSettings) {
           requiredSqlModes.every((mode) => modes.includes(mode))
         );
       } finally {
-        connection.release();
+        // A query timeout does not cancel the wire operation; never reuse that socket.
+        if (reusable) connection.release();
+        else discardConnection(connection);
       }
     },
     close: () => pool.end(),

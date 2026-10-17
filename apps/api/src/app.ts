@@ -1,10 +1,28 @@
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
+
+const assetCache = "public, max-age=31536000, immutable";
+const errorCodes: Readonly<Record<number, string>> = {
+  400: "BAD_REQUEST",
+  401: "UNAUTHORIZED",
+  403: "FORBIDDEN",
+  404: "NOT_FOUND",
+  405: "METHOD_NOT_ALLOWED",
+  406: "NOT_ACCEPTABLE",
+  409: "STATE_CONFLICT",
+  412: "PRECONDITION_FAILED",
+  413: "PAYLOAD_TOO_LARGE",
+  415: "UNSUPPORTED_MEDIA_TYPE",
+  422: "INVALID_PAYLOAD",
+  428: "PRECONDITION_REQUIRED",
+  429: "RATE_LIMITED",
+  503: "SERVICE_UNAVAILABLE",
+};
 
 export interface AppOptions {
   checkReadiness: () => Promise<boolean>;
@@ -22,7 +40,11 @@ export async function createApp(options: AppOptions) {
   installSchemaCompilers(app);
   app.addHook("onSend", async (_request, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
-    reply.header("Cache-Control", "no-store");
+    if (
+      ![200, 206, 304].includes(reply.statusCode) ||
+      reply.getHeader("cache-control") !== assetCache
+    )
+      reply.header("Cache-Control", "no-store");
   });
   app.setErrorHandler((error, request, reply) => {
     const httpError = typeof error === "object" && error !== null ? error : {};
@@ -31,27 +53,12 @@ export async function createApp(options: AppOptions) {
         ? httpError.statusCode
         : 500;
     const status =
-      "validation" in httpError
-        ? 422
-        : [400, 403, 413, 415, 429].includes(errorStatus)
-          ? errorStatus
-          : 500;
-    const code =
-      status === 422
-        ? "INVALID_PAYLOAD"
-        : status === 413
-          ? "PAYLOAD_TOO_LARGE"
-          : status === 400
-            ? "BAD_REQUEST"
-            : status === 415
-              ? "UNSUPPORTED_MEDIA_TYPE"
-              : status === 429
-                ? "RATE_LIMITED"
-                : status === 403
-                  ? "FORBIDDEN"
-                  : "INTERNAL_ERROR";
+      "validation" in httpError ? 422 : Object.hasOwn(errorCodes, errorStatus) ? errorStatus : 500;
+    const code = errorCodes[status] ?? "INTERNAL_ERROR";
+    if (status >= 500)
+      console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));
     reply.code(status).send({
-      error: { code, messageKey: `errors.${code.toLowerCase()}`, retryable: false },
+      error: { code, messageKey: `errors.${code.toLowerCase()}`, retryable: status === 503 },
       meta: { requestId: request.id },
     });
   });
@@ -83,8 +90,17 @@ export async function createApp(options: AppOptions) {
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
   if (options.webRoot) {
-    await access(join(options.webRoot, "index.html"));
-    await app.register(fastifyStatic, { root: options.webRoot, index: false });
+    const webRoot = options.webRoot;
+    await access(join(webRoot, "index.html"));
+    await app.register(fastifyStatic, {
+      root: webRoot,
+      index: false,
+      setHeaders(response, filePath) {
+        const path = relative(webRoot, filePath).replaceAll("\\", "/");
+        if (/^assets\/[^/]+-[\w-]{8,}\.(js|css)$/.test(path))
+          response.header("Cache-Control", assetCache);
+      },
+    });
     app.get("/", async (_request, reply) => reply.type("text/html").sendFile("index.html"));
   }
   app.setNotFoundHandler((request, reply) => {
