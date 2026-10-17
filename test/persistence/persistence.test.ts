@@ -7,7 +7,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   type AuditInput,
   applicationId,
-  auditEntries,
   bigintColumn,
   createAudit,
   createDatabase,
@@ -32,6 +31,7 @@ import {
 import { eq, type SQL, sql } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import type { RowDataPacket } from "mysql2/promise";
+import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import {
   extendedFixtureFolder,
   fixtureRoot,

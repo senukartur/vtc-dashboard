@@ -14,6 +14,7 @@ interface PeerConnection extends EventEmitter {
   sequenceId: number;
   serverHandshake(options: Record<string, unknown>): void;
   writeOk(): void;
+  writeError(options: { code: number; message: string }): void;
   writeColumns(columns: Record<string, string | number>[]): void;
   writeTextRow(row: string[]): void;
   writeEof(): void;
@@ -26,6 +27,7 @@ const require = createRequire(new URL("../../packages/db/package.json", import.m
 const mysql = require("mysql2") as { createServer(): PeerServer };
 type Phase =
   | "commit"
+  | "commit-error"
   | "rollback"
   | "rollback-queued"
   | "migration-baseline"
@@ -93,6 +95,10 @@ async function peer(phase: Phase) {
       }
       if (query === "COMMIT") {
         counts.commits++;
+        if (phase === "commit-error") {
+          connection.writeError({ code: 1105, message: "SYNTHETIC_PRIVATE_COMMIT_DIAGNOSTIC" });
+          return;
+        }
         if (phase === "commit" && counts.commits <= 5) {
           counts.stalls++;
           return;
@@ -184,7 +190,7 @@ async function probe(phase: Phase, body: string) {
       "--eval",
       `
 import assert from 'node:assert/strict';
-import { createUnitOfWork, runMigrations } from '@vtc/db';
+import { createUnitOfWork, runMigrations, TransactionCommitOutcomeUnknownError, TRANSACTION_COMMIT_OUTCOME_UNKNOWN } from '@vtc/db';
 const settings = { host: '127.0.0.1', port: Number(process.env.FIXTURE_PORT),
   database: 'synthetic_database', user: 'synthetic_user', password: 'NONFUNCTIONAL_EXAMPLE_ONLY' };
 ${body}
@@ -234,6 +240,16 @@ const unit = createUnitOfWork(settings);
 try {
   const results = await Promise.allSettled(Array.from({length: 5}, () => unit.run(async () => 1)));
   assert.equal(results.filter(result => result.status === 'rejected').length, 5);
+  for (const result of results) {
+    assert.equal(result.status, 'rejected');
+    const error = result.reason;
+    assert.ok(error instanceof TransactionCommitOutcomeUnknownError);
+    assert.equal(error.code, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
+    assert.equal(error.message, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
+    assert.ok(error.cause instanceof Error);
+    assert.ok(error.cause.code === 'PROTOCOL_SEQUENCE_TIMEOUT' || error.cause.message === 'TRANSACTION_CONTROL_TIMEOUT');
+    assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(error)), 'cause'), false);
+  }
   assert.equal(await unit.run(async () => 2), 2);
 } finally { await unit.close(); }
 `,
@@ -244,12 +260,36 @@ try {
   assert.equal(counts.ends, 6);
 });
 
+test("server COMMIT errors have a safe distinct outcome code with the original private cause", async () => {
+  const counts = await probe(
+    "commit-error",
+    `
+const unit = createUnitOfWork(settings);
+try {
+  await assert.rejects(unit.run(async () => 1), error => {
+    assert.ok(error instanceof TransactionCommitOutcomeUnknownError);
+    assert.equal(error.code, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
+    assert.equal(error.message, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
+    assert.ok(error.cause instanceof Error);
+    assert.equal(error.cause.code, 'ER_UNKNOWN_ERROR');
+    assert.ok(error.cause.message.includes('SYNTHETIC_PRIVATE_COMMIT_DIAGNOSTIC'));
+    assert.equal(JSON.stringify(error).includes('SYNTHETIC_PRIVATE_COMMIT_DIAGNOSTIC'), false);
+    return true;
+  });
+} finally { await unit.close(); }
+`,
+  );
+  assert.equal(counts.commits, 1);
+  assert.equal(counts.rollbacks, 0);
+});
+
 test("stalled rollback preserves the command failure and disposes its half-open socket", async () => {
   const counts = await probe(
     "rollback",
     `
 const unit = createUnitOfWork(settings);
-try { await assert.rejects(unit.run(async () => { throw new Error('SYNTHETIC_COMMAND_FAILURE'); }), /SYNTHETIC_COMMAND_FAILURE/); }
+const failure = new Error('SYNTHETIC_COMMAND_FAILURE');
+try { await assert.rejects(unit.run(async () => { throw failure; }), error => error === failure && !(error instanceof TransactionCommitOutcomeUnknownError)); }
 finally { await unit.close(); }
 `,
   );
@@ -264,13 +304,14 @@ test("rollback queued behind unresolved wire work is wall-clock bounded and rele
 import { sql } from 'drizzle-orm';
 import { setTimeout as delay } from 'node:timers/promises';
 const unit = createUnitOfWork(settings);
+const failure = new Error('SYNTHETIC_COMMAND_FAILURE');
 try {
   await assert.rejects(unit.run(async tx => {
     // Deliberately simulate a caller abort while its query is still active on the wire.
     const pending = unit.client(tx).execute(sql.raw('SELECT synthetic_stalled_domain')).then(() => {}, () => {});
     await Promise.race([pending, delay(50)]);
-    throw new Error('SYNTHETIC_COMMAND_FAILURE');
-  }), /SYNTHETIC_COMMAND_FAILURE/);
+    throw failure;
+  }), error => error === failure && !(error instanceof TransactionCommitOutcomeUnknownError));
   assert.equal(await unit.run(async () => 2), 2);
 } finally { await unit.close(); }
 `,

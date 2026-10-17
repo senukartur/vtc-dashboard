@@ -14,6 +14,16 @@ export interface UnitOfWork {
 }
 
 export const transactionConnectionLimit = 5;
+export const TRANSACTION_COMMIT_OUTCOME_UNKNOWN = "TRANSACTION_COMMIT_OUTCOME_UNKNOWN";
+
+export class TransactionCommitOutcomeUnknownError extends Error {
+  readonly code = TRANSACTION_COMMIT_OUTCOME_UNKNOWN;
+
+  constructor(cause: unknown) {
+    super(TRANSACTION_COMMIT_OUTCOME_UNKNOWN, { cause });
+    this.name = "TransactionCommitOutcomeUnknownError";
+  }
+}
 
 async function controlQuery(connection: PoolConnection, sql: string): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -92,7 +102,11 @@ export function createUnitOfWork(settings: DatabaseSettings): UnitOfWork {
         if (state) state.active = false;
         // A lost COMMIT response is uncertain. Never queue rollback behind that command;
         // the outer finally immediately discards its connection on any commit failure.
-        await controlQuery(connection, "COMMIT");
+        try {
+          await controlQuery(connection, "COMMIT");
+        } catch (cause) {
+          throw new TransactionCommitOutcomeUnknownError(cause);
+        }
         reusable = true;
         return result;
       } finally {

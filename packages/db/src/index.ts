@@ -10,7 +10,9 @@ export { migrationFolder, migrationLockName, runMigrations } from "./core/migrat
 export { dedicatedConnection, settingsFromEnvironment } from "./core/session.js";
 export {
   createUnitOfWork,
+  TRANSACTION_COMMIT_OUTCOME_UNKNOWN,
   type TransactionClient,
+  TransactionCommitOutcomeUnknownError,
   type TxContext,
   transactionConnectionLimit,
   type UnitOfWork,
@@ -30,7 +32,6 @@ export {
   utcDateTime,
   utcIso,
 } from "./core/values.js";
-export { auditEntries } from "./schema/audit.js";
 
 function discardConnection(connection: PoolConnection): void {
   // mysql2 3.24.6 destroy() only calls stream.end(); force-close a half-open peer too.
