@@ -31,16 +31,22 @@ The initial host checks passed installation, browser contract generation, native
 
 A fresh ignored source copy, without existing dependencies/build output/private configuration, passed frozen-lockfile installation and production build. Its real Node HTTP process served the SPA and module assets, returned 404 for unimplemented API routes and 503 for unavailable MySQL as expected. The clean-source smoke exposed and fixed the static directory/root route handling. The web build explicitly selects production mode even inside the development container, and Tailwind scanning is limited to frontend source so private working copies cannot change generated CSS. Production-only API packaging through `pnpm deploy --prod --legacy` also passed on the host; this is not a Linux container execution result.
 
-Docker Compose configuration passed `docker compose config --quiet`. Docker Desktop was installed during this card, but its Linux engine requires an owner-completed system restart. Consequently image build, real MySQL readiness, source synchronization, persistence and production-container execution remain unverified; VTC-006 must stay In Progress. Resume these checks after the engine is available. Native clean-source installation/build and portable HTTP evidence are recorded in the PR/Trello when executed; a successful unavailable-database path is not real MySQL proof. No production/staging deployment, domain fixtures, CI workflow or independent review is supplied by this scaffold alone.
+After the owner's Docker installation restart, the following checks passed on Linux containers. [PR #6](https://github.com/senukartur/vtc-dashboard/pull/6) and [VTC-006](https://trello.com/c/wIHfWAYm) record the delivery/review state; a successful unavailable-database path alone is not database proof.
 
-## Resume after Docker installation restart
+| Check | Observed result |
+| --- | --- |
+| Development startup | `docker compose up --build -d --wait` built the pinned image and started healthy app/MySQL services |
+| Linux quality/build | `pnpm check` and `pnpm build` passed in the app container, including seven scaffold checks and all 160 structural browser fixtures |
+| Real MySQL | `pnpm db:check` passed on 8.4.11; an independent connection also verified global/session UTC, InnoDB, isolation and database charset/collation |
+| Outage and volume recovery | Liveness stayed available and readiness returned 503 while MySQL was stopped; a synthetic marker survived container recreation on the existing named volume, then was removed; readiness recovered |
+| Configuration regression | Restarting the local database with server timezone `SYSTEM` made both readiness and the baseline CLI fail despite session UTC; restoring the configured server timezone recovered both |
+| Compose Watch | Reversible API/web edits reached served responses/modules and disappeared after restoration; a shared-package edit recompiled/reloaded into API readiness and also recovered after restoration; manifest edits triggered a rebuild |
+| Clean Git checkout | A separate fresh branch clone, private generated environment, distinct project/loopback ports and empty MySQL volume built/started through Compose; its checks, database probe, build and internal/published HTTP smoke passed |
+| Production image | The production target built with checks and production-only API packaging; a temporary container served the SPA/assets/API and reached the local database, ran without root, and contained neither `.env` nor the probed development tools |
 
-1. Confirm Docker Desktop's Linux engine responds to `docker info`.
-2. Keep the generated private `.env`; `node scripts/setup-local.mjs` is safe to repeat and does not overwrite it.
-3. Run `docker compose up --build -d --wait`, then execute `pnpm check`, `pnpm db:check` and `pnpm smoke:local` inside the app container.
-4. Exercise Compose Watch with a reversible source edit and verify the UI/API updates; confirm database readiness recovers after a database-container recreation with its existing volume.
-5. Build the production image and verify its HTTP/assets/readiness with explicit production variables and the same local MySQL network; inspect production-only packaging and stop temporary probe containers.
-6. Record actual outcomes, correct any Linux/Docker differences, then obtain independent final-head review before merge/Done. No independent review or merge is authorized merely by this scaffold request.
+Two container-specific defects were corrected during verification. MySQL ignored the world-writable Windows-mounted config, so Compose now supplies explicit server arguments and readiness also checks the global timezone/engine. Native Node watch missed transitive TypeScript edits, and filesystem replacement notifications also left a stale process during restoration; `tsx watch` with Chokidar polling passed both directions and shared-package propagation. Watch rules explicitly include test sources and root build/configuration changes. No probe route, modified fixture version or synthetic persistence table is part of the application.
+
+The infrastructure probes are local verification, not feature-level MySQL transaction/authentication tests or browser E2E coverage. VTC-007/008/009/013/015 and feature cards retain those gates. No staging/production service, CI workflow or Hostland compatibility proof is supplied. Independent final-head review and merge are still required before VTC-006 is Done; this implementation request does not authorize either merge or deployment.
 
 ## Primary references
 

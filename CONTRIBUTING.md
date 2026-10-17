@@ -42,6 +42,10 @@ docker compose down
 
 Only loopback ports are published: UI 5173, API 3000 and MySQL 3307 by default, configurable through `.env`. The API's `/health/live` checks its process; `/health/ready` authenticates to MySQL and checks the pinned version/configuration, returning 503 when unavailable. The MySQL container's ping is only liveness, not the application's authenticated readiness.
 
+Compose passes the server settings as MySQL command arguments. Do not replace them with a Windows bind-mounted `.cnf`: Docker Desktop exposed that file as world-writable during verification, and MySQL silently skipped its settings after a warning. `deploy/local/mysql.cnf` remains the equivalent portable configuration reference; scaffold checks keep both forms aligned with `config/runtime.json`. Readiness checks server UTC/InnoDB as well as the explicit session UTC.
+
+The API uses `tsx watch`; the Docker app enables Chokidar polling for reliable file replacement events after Compose synchronization. API, web, shared-package and test sources are synchronized; dependency/build/tooling changes have explicit rebuild rules. After changing `compose.yaml` or private environment values, rerun `docker compose up --build -d --wait` and restart the foreground watch command so its rules and service configuration are reloaded.
+
 ## Native tooling and portable builds
 
 Host editing/typechecking or a future non-Docker deployment uses Node **24.22.0** and pnpm **12.14.0**. Install those versions using your normal runtime manager; `npm install --global pnpm@12.14.0` is one package-manager installation option. Exact versions are recorded in [the shared runtime baseline](config/runtime.json), `.node-version`, the root manifest and container images. The setup helper's Node 18 minimum does not weaken the application runtime pin.

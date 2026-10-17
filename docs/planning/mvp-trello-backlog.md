@@ -327,14 +327,14 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Provide a reproducible workspace and English contributor instructions.
 
-**Prepared delivery (2026-10-17):** [Contributor commands](../../CONTRIBUTING.md) and [workspace evidence](../development/workspace.md) describe the root pnpm/API/web/contracts scaffold, Docker-first local workflow and portable builds. The owner selected Docker for local app/MySQL development. Docker Desktop installation requires a system restart, so actual image/MySQL/watch/persistence checks remain pending; do not mark this card Done from native build or Compose syntax checks. Final-head review and merge are separate gates.
+**Implementation delivery (2026-10-17):** [Contributor commands](../../CONTRIBUTING.md) and [workspace evidence](../development/workspace.md) describe the root pnpm/API/web/contracts scaffold, Docker-first local workflow and portable builds in [PR #6](https://github.com/senukartur/vtc-dashboard/pull/6). After the owner completed Docker setup, real Linux development/production images, authenticated MySQL settings, outage/persistence recovery, source synchronization and a separate clean Git checkout passed verification. The Windows-mounted MySQL config and source-watcher defects were corrected. The four implementation criteria below are supplied; independent final-head review and merge remain separate completion gates. No CI, domain transactions/authentication or Hostland proof is inferred.
 
 **Scope and acceptance checklist**
 
-- [ ] Set up the chosen runtime/package manager with pinned versions, workspace layout, formatting, linting, and TypeScript checks.
-- [ ] Create API/web entry points, health/readiness routes, validated environment configuration, and an example environment file without secrets.
-- [ ] Document local startup with a real MySQL 8.4 database, fixtures, commands, module ownership, and one-card-per-branch workflow. Pin Node.js 24 and a verified MySQL patch/configuration; expose the same settings to CI and deployment tooling.
-- [ ] Keep production build/start commands portable; provide an optional container build without making Docker a host requirement.
+- [x] Set up the chosen runtime/package manager with pinned versions, workspace layout, formatting, linting, and TypeScript checks.
+- [x] Create API/web entry points, health/readiness routes, validated environment configuration, and an example environment file without secrets.
+- [x] Document local startup with a real MySQL 8.4 database, fixtures, commands, module ownership, and one-card-per-branch workflow. Pin Node.js 24 and a verified MySQL patch/configuration; expose the same settings to CI and deployment tooling.
+- [x] Keep production build/start commands portable; provide an optional container build without making Docker a host requirement.
 
 **Validation:** A clean checkout installs, starts locally, builds, and serves its health endpoint using the documented commands.
 
