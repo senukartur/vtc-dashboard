@@ -2,7 +2,7 @@
 
 **Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
-**Version:** 1.3 — includes the owner-confirmed VTC-002 catalog decisions, VTC-003 automatic initial-history upload requirement, and VTC-004 MySQL 8.4 target conditional on the same hosting budget, all of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
+**Version:** 1.3 — includes the owner-confirmed VTC-002 catalog decisions, VTC-003 automatic initial-history upload requirement, and VTC-004 MySQL 8.4 target conditional on the same hosting budget plus cron/polling notification timing, all of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
 
 **Updated:** 2026-10-17.
 
@@ -60,7 +60,7 @@ flowchart LR
   Rules --> DB["MySQL: facts, history, outbox and jobs"]
   API --> DB
   DB --> Jobs["Host-compatible job runner"]
-  Jobs --> Updates["Notification history and SSE or approved polling"]
+  Jobs --> Updates["Notification history and authenticated polling"]
   Updates --> Web
 ```
 
@@ -99,7 +99,7 @@ The project's technical maintainer prepares updates; the Director or Deputy Dire
 
 - Use InnoDB transactions, foreign/unique keys, utf8mb4 text, explicit exact comparison for opaque IDs/hashes, UTC persistence, normalized metric units, and lossless ID/decimal handling.
 - Commit domain changes and outbox events together. Claim jobs through transactional leases, bounded batches/retries, and idempotent effects; test the selected MySQL locking behavior with concurrent consumers.
-- Shared-host process lifetime is an early gate. Persistent workers/SSE remain candidates until verified. If necessary, explicitly approve bounded cron processing/authenticated polling and document the changed latency.
+- The owner approved the MVP notification model on 2026-10-17: bounded cron work once per minute and authenticated polling every 30 seconds while the site is visible, paused while hidden/offline with immediate refresh on return. Approximately 90 seconds is an accepted healthy/no-backlog delivery target, not a guaranteed maximum; chained jobs, cold starts and failures can add delay. Verify actual host behavior and suppress stale live alerts under the telemetry contract. SSE is an optional later optimization, not a launch prerequisite.
 - Keep MySQL migrations serialized and reviewed. DDL may implicitly commit; use compatible additive changes, forward repair, and rehearsed backup/restore rather than claiming transactional schema rollback.
 - Match the verified Node.js/MySQL family, version/configuration, timezone, and SQL modes across local development, CI, temporary hosting, and production. Never plan a later PostgreSQL-to-MySQL conversion.
 - Enforce permissions on the server and filter notification/evidence recipients; UI hiding alone does not authorize access. Audit privileged changes without exposing passwords, invitation/reset/transfer secrets, or telemetry tokens.

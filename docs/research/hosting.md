@@ -22,7 +22,7 @@ Account identifiers, internal endpoints, paths, version inventory, existing site
 | TLS | SSL listed [H1] | Dedicated test hostname/certificate, HTTPS origin, redirect/proxy handling, secure cookies and renewal |
 | Scheduled work | Provider describes minute-based cron [H4] | Actual Node CLI execution and timing with no website visitors, non-overlap, resource use, durable resume after failure |
 | Web process lifetime | Passenger manages application processes [P1] | Host configuration, idle/recycle behavior and shutdown grace; persistent in-process workers/timers are not assumed |
-| SSE | No reviewed Hostland source establishes end-to-end streaming/timeouts | Streaming through the real HTTPS proxy, buffering, heartbeat/reconnect, capacity and authorization; proposed polling fallback needs owner agreement |
+| Notifications | Owner approved minute cron and 30-second visible-site polling, approximately 90 seconds under healthy/no-backlog conditions | Actual polling/cron latency, chained jobs, catch-up and authorization; SSE remains optional and unverified |
 | Runtime resources | Provider publishes separate script and shell/cron limits [H5] | Which limits apply to Passenger and the account; measure Fastify memory, CPU and file descriptors |
 | Persistence/uploads | Application/static directories and backup facilities documented [H2/H6] | Private persistent evidence outside public releases, permissions, capacity, deployment survival and verified access control |
 | Email | Hosting advertises mail facilities [H1] | Authenticated outbound HTTPS email adapter or SMTP, provider limits and deliverability; no test messages sent |
@@ -68,7 +68,7 @@ The public feature page describes seven snapshots over fourteen days, while the 
 | HOST-02 | Patched Node.js 24 and a credible update mechanism; actual Fastify/Passenger execution | Provider + isolated proof; VTC-004 |
 | HOST-03 | Private all-in annual cost and capacity, including retained screenshots/backups | Project owner; VTC-004/039/041 |
 | HOST-04 | Isolated runtime/database/cron/TLS/storage/outbound proof | Authorized account operator; VTC-004 |
-| HOST-05 | Notifications delivery choice/latency approved and actual streaming or polling verified | Project owner; VTC-004/021/036 |
+| HOST-05 | Owner approved cron/polling and approximate healthy 90-second latency; execution/load/latency proof still required | VTC-004/021/036/037 |
 | HOST-06 | Target-compatible CI artifact, SSH deployment and rollback/restore rehearsal | VTC-009/011/041 |
 
 Provider questions are [prepared and unsent](hostland-provider-questions.md). The proof plan is prepared, not run. Do not close VTC-004 or freeze a production-compatible VTC-005 stack while its required host evidence remains missing. Continuing independent contract/domain planning is possible; it must not misrepresent a selected, verified production platform.

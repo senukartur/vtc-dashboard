@@ -37,11 +37,11 @@ The diagram is the recommended responsibility split, not deployed components. Th
 
 ### Jobs and notifications
 
-The first shared-host proposal uses a **minute-based cron invocation** of a short CLI runner over the same MySQL inbox/outbox/jobs. Domain events and their durable jobs commit together. Leases/unique keys make overlapping/crashed executions safe; each invocation bounds records, CPU and wall time, releases resources, and resumes later. Passenger timers are not the only scheduler. Actual CPU cost must remain below the provider's applicable limit; a suggested wall timeout alone does not enforce CPU limits.
+The owner approved this MVP execution direction on 2026-10-17: a **minute-based cron invocation** of a short CLI runner over the same MySQL inbox/outbox/jobs. Domain events and their durable jobs commit together. Leases/unique keys make overlapping/crashed executions safe; each invocation bounds records, CPU and wall time, releases resources, and resumes later. Passenger timers are not the only scheduler. Actual CPU cost must remain below the provider's applicable limit; a suggested wall timeout alone does not enforce CPU limits. Host execution remains unverified.
 
-SSE remains an unverified optimization. If supported, validate buffering/timeouts, heartbeat/reconnect, permission filtering and concurrent tabs under actual proxy limits. The simpler fallback is an authenticated notification-history poll **every 30 seconds while visible**, paused while hidden/offline, with an immediate refresh on return and no overlapping requests. This keeps the notifications model/outbox unchanged.
+The owner-approved MVP transport is an authenticated notification-history poll **every 30 seconds while visible**, paused while hidden/offline, with an immediate refresh on return and no overlapping requests. This keeps the notifications model/outbox unchanged. SSE remains an optional unverified optimization; any later adoption must validate buffering/timeouts, heartbeat/reconnect, permission filtering and concurrent tabs under actual proxy limits.
 
-With a healthy runner, no backlog and acceptable cold start, 60-second cron scheduling plus 30-second polling adds up to approximately **90 seconds** before a due queued notification becomes visible. This is a proposed latency target, not a hard worst-case guarantee or observed host performance; failures/backlog must be surfaced. It assumes any preceding ingestion/decision jobs and their generated notifications fit the same runner invocation; additional scheduling cycles add delay and must be measured. It may consume much of the telemetry contract's 120-second live-freshness window, so older events must still suppress live toasts. The owner must approve this transport/latency choice before it becomes the VTC-036 baseline. A requirement for near-immediate updates would instead require an SSE execution proof or another explicitly approved hosting arrangement.
+With a healthy runner, no backlog and acceptable cold start, 60-second cron scheduling plus 30-second polling adds up to approximately **90 seconds** before a due queued notification becomes visible. The owner accepted this healthy-operation target; it is not a hard worst-case guarantee or observed host performance, and failures/backlog must be surfaced. It assumes any preceding ingestion/decision jobs and their generated notifications fit the same runner invocation; additional scheduling cycles add delay and must be measured. It may consume much of the telemetry contract's 120-second live-freshness window, so older events must still suppress live toasts. This is the VTC-021/036/037 product baseline, subject to actual host compatibility and load evidence.
 
 ### Development and cost
 
@@ -51,7 +51,7 @@ Before production approval, privately total hosting renewal, required domain, TL
 
 ## Required exit evidence
 
-- [ ] Owner database-release and notification-latency decisions recorded.
+- [x] Owner database-release and notification-latency decisions recorded; technical feasibility remains unverified.
 - [ ] Provider confirms maintained runtime/database availability, patch policy, applicable limits and acceptable full cost.
 - [ ] Isolated Fastify/MySQL/cron/TLS/storage/outbound smoke succeeds without modifying existing services.
 - [ ] VTC-004 required findings are reviewed and merged; VTC-005 receives a verified runtime/configuration target.

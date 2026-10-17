@@ -57,11 +57,11 @@ Free development hosting can sleep, expire databases, or discard local files. Th
 
 VTC-004 remains open: actual runtime/database patches and maintenance, a host deployment test, background-task/SSE support, and full cost compatibility require verification. The temporary development budget also remains unanswered. Read-only account access does not authorize changing settings, applications, databases, or subscriptions. Keep verification evidence private and publish only a sanitized compatibility conclusion.
 
-**2026-10-17 update:** [VTC-004 findings](../research/hosting.md) identify MySQL 8.0 EOL and Hostland's public MySQL 8.4 offer, plus the need for a patched Node.js 24 execution/update proof. The owner approved maintained MySQL 8.4 LTS at the same approximately USD 35/year budget, superseding the earlier 8.0 target; actual account availability/cost remain open. This dated decision supersedes the preliminary version direction above. The [deployment direction](../decisions/hosting.md) proposes one Passenger application, CI artifacts/SSH delivery, bounded cron jobs and an owner-approved notification fallback if required. The [isolated proof](../research/hostland-verification.md) is prepared, not executed; [provider questions](../research/hostland-provider-questions.md) are unsent. Local development/standard public CI is the no-new-subscription recommendation; no hosted development spending is approved. All 8.4 implementation criteria below are conditional on passing those availability/cost gates.
+**2026-10-17 update:** [VTC-004 findings](../research/hosting.md) identify MySQL 8.0 EOL and Hostland's public MySQL 8.4 offer, plus the need for a patched Node.js 24 execution/update proof. The owner approved maintained MySQL 8.4 LTS at the same approximately USD 35/year budget, superseding the earlier 8.0 target; actual account availability/cost remain open. This dated decision supersedes the preliminary version direction above. The [deployment direction](../decisions/hosting.md) proposes one Passenger application, CI artifacts/SSH delivery, owner-approved minute cron jobs and 30-second visible-site notification polling (approximately 90 seconds under healthy conditions). The [isolated proof](../research/hostland-verification.md) is prepared, not executed; [provider questions](../research/hostland-provider-questions.md) are unsent. Local development/standard public CI is the no-new-subscription recommendation; no hosted development spending is approved. All 8.4 implementation criteria below are conditional on passing those availability/cost gates.
 
 ### Proposed stack, subject to VTC-004 and VTC-005
 
-React + TypeScript + Vite; shadcn/ui + Tailwind; Recharts; TanStack Query; React Hook Form + Zod; i18next. Backend: **Node.js 24 LTS + Fastify, MySQL 8.4 + Drizzle (mysql2 driver)**, Better Auth with its MySQL Drizzle adapter, a transactional email adapter (Resend candidate), and SSE. MySQL is confirmed by the owner; the remaining library versions and host execution model are finalized in VTC-004/VTC-005.
+React + TypeScript + Vite; shadcn/ui + Tailwind; Recharts; TanStack Query; React Hook Form + Zod; i18next. Backend: **Node.js 24 LTS + Fastify, MySQL 8.4 + Drizzle (mysql2 driver)**, Better Auth with its MySQL Drizzle adapter, a transactional email adapter (Resend candidate), and authenticated notification polling. MySQL is confirmed by the owner; the remaining library versions and host execution model are finalized in VTC-004/VTC-005.
 
 Use a modular monolith, one deployable application where supported, database-backed durable jobs/outbox, and replaceable email/blob/source adapters. A worker may initially run in-process, but jobs must survive restart and be safe under multiple consumers. No Redis, microservices, or per-second telemetry storage is required for MVP.
 
@@ -177,7 +177,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 | [VTC-033: Build company dashboard and driver profiles](#vtc-033) | Frontend | VTC-012 |
 | [VTC-034: Implement events, visibility, and RSVP APIs](#vtc-034) | Backend | VTC-013, VTC-021 |
 | [VTC-035: Build event management, public listings, and participation UI](#vtc-035) | Frontend | VTC-012 |
-| [VTC-036: Implement notification history, SSE, and event reminders](#vtc-036) | Backend | VTC-021, VTC-029, VTC-034 |
+| [VTC-036: Implement notification history, polling, and event reminders](#vtc-036) | Backend | VTC-021, VTC-029, VTC-034 |
 | [VTC-037: Build notifications UI and real-time connection behavior](#vtc-037) | Frontend | VTC-012 |
 | [VTC-038: Build member administration and source connection settings](#vtc-038) | Frontend | VTC-012 |
 | [VTC-039: Harden security, observability, retention, and recovery](#vtc-039) | Operations | VTC-011, VTC-029, VTC-036 |
@@ -642,7 +642,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 - [ ] Persist domain events in the same MySQL/InnoDB transaction and connection as domain state changes and provide versioned event envelopes.
 - [ ] Implement transactional job claims/leases, retry/backoff, idempotency, failure inspection, and duplicate-worker protection. Verify FOR UPDATE SKIP LOCKED on the target MySQL version or document an atomic alternative; commit the lease before doing network work and guard completion with the lease token.
 - [ ] Define indexes, bounded batches/pool size, deadlock retry behavior, and unique consumer-effect keys; duplicate delivery must remain safe after lease expiry or process restart.
-- [ ] Support the host-approved execution model: an in-process/independent runner when persistent execution is verified, or bounded cron invocations with overlapping runs protected by leases and an explicit latency bound.
+- [ ] Implement the owner-approved minute-based bounded cron runner with leases against overlap; measure CPU, backlog/catch-up and chained-job latency on the host. Approximately 90 seconds including 30-second visible-site polling is a healthy-operation notification target, not a hard maximum.
 - [ ] Document time handling, shutdown/restart behavior, and recovery of expired leases.
 
 **Validation:** Crash/restart between commit and processing, run two consumers, and verify no lost work or duplicated business effect.
@@ -942,7 +942,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 <a id="vtc-036"></a>
 
-### [VTC-036] Implement notification history, SSE, and event reminders
+### [VTC-036] Implement notification history, polling, and event reminders
 
 - **Track:** Backend
 - **Depends on:** VTC-021, VTC-029, VTC-034
@@ -953,11 +953,11 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Consume canonical trip and decision events; support start/end, rejection, event updates, and the approved admin/promotion categories.
-- [ ] Persist per-user notification/read state and category preferences; expose authenticated SSE with reconnect recovery.
+- [ ] Persist per-user notification/read state and category preferences; expose authenticated cursor-based polling/history with permission filtering and session revocation. MVP polls every 30 seconds while visible; SSE is optional later work.
 - [ ] Schedule the one-hour reminder for attending members; invalidate/reschedule it on time changes, cancellation, or RSVP change.
 - [ ] Suppress stale offline-replay toasts, enforce recipient permissions, and make retries idempotent.
 
-**Validation:** Test two workers, SSE reconnect/session revocation, delayed trip events, cancelled/rescheduled events, preference changes, and missed reminder windows.
+**Validation:** Test two workers, polling catch-up/session revocation, delayed trip events, cancelled/rescheduled events, preference changes, and missed reminder windows. Measure the approved approximately 90-second healthy-operation target, including any chained cron stages; do not claim a guaranteed maximum.
 
 **Boundaries / integration gates:** No Web Push or closed-browser delivery in MVP. Do not send obsolete reminders after a long outage.
 
@@ -974,7 +974,7 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 **Scope and acceptance checklist**
 
 - [ ] Build bell/unread count, history, read actions, category preferences, and navigable notification targets.
-- [ ] Connect SSE with authenticated reconnect/fallback behavior and avoid repeated toasts after reload.
+- [ ] Poll authenticated notification history every 30 seconds while visible, pause while hidden/offline, refresh immediately on return, prevent overlapping requests and duplicate toasts after reload; handle missed updates and session revocation.
 - [ ] Coordinate upcoming-event header state with the event feature.
 - [ ] Handle deleted/inaccessible targets and preserve localized reason rendering.
 
