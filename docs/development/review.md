@@ -1,10 +1,10 @@
-# Advisory Claude review (VTC-010)
+# Advisory Claude review history (VTC-010; disabled)
 
-[VTC-010](https://trello.com/c/czpF65wG/10-vtc-010-configure-code-review-repository-rules-and-dependency-hygiene) includes automated review, repository rules and dependency hygiene. This change supplies only the [Claude workflow](../../.github/workflows/claude-review.yml), adapted from the owner's [telemetry workflow](https://github.com/senukartur/ets2telemetry/blob/main/.github/workflows/claude-review.yml). It does not complete VTC-009/010, configure branch protection or dependency updates, or authorize a merge/deployment.
+[VTC-010](https://trello.com/c/czpF65wG/10-vtc-010-configure-code-review-repository-rules-and-dependency-hygiene) includes automated review, repository rules and dependency hygiene. This page records the former Claude workflow, which was adapted from the owner's [telemetry workflow](https://github.com/senukartur/ets2telemetry/blob/main/.github/workflows/claude-review.yml). The workflow has been removed from this repository. Once this change reaches the default branch, repository events will no longer invoke Claude review. This does not complete VTC-009/010, configure branch protection or dependency updates, or authorize a merge/deployment.
 
-Claude posts advisory comments. A successful workflow means the reviewer ran; it is not implementation acceptance, a required quality gate, independent review, or evidence that tests passed. The owner remains responsible for evaluating findings and obtaining the independent review required by [AGENTS.md](../../AGENTS.md).
+While enabled, Claude posted advisory comments. A successful workflow meant the reviewer ran; it was not implementation acceptance, a required quality gate, independent review, or evidence that tests passed. The owner remains responsible for evaluating findings and obtaining the independent review required by [AGENTS.md](../../AGENTS.md).
 
-## Triggers and usage
+## Former triggers and usage
 
 | Event | Behavior |
 | --- | --- |
@@ -18,9 +18,9 @@ PR conversation comments use the workflow on the default branch, so `@claude` in
 
 Automatic reviews cancel earlier automatic reviews of the same PR. Mention reviews use a separate concurrency group with at most one running and one pending job per PR; a newer mention replaces an already pending mention, while the running job continues. This uses GitHub's [default single-pending concurrency behavior](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency). Ordinary comments cannot cancel a review because concurrency is scoped to each eligible job. Both jobs have a 20-minute timeout.
 
-## Authentication and usage costs
+## Former authentication and usage costs
 
-Configure exactly one repository Actions secret in [GitHub settings](https://github.com/senukartur/vtc-dashboard/settings/secrets/actions):
+While enabled, the former workflow required exactly one repository Actions secret in [GitHub settings](https://github.com/senukartur/vtc-dashboard/settings/secrets/actions):
 
 | Secret | Source and usage |
 | --- | --- |
@@ -33,7 +33,7 @@ Both jobs pin `claude-opus-5-5`, matching the verified telemetry workflow. Updat
 
 The workflow uses the job's short-lived `GITHUB_TOKEN`; no Claude GitHub App installation or personal GitHub token is required for these comments. Missing/invalid Claude authentication fails the advisory job. Adding a secret does not rerun a failed job automatically; rerun that job from Actions.
 
-## Permissions and public-data handling
+## Former permissions and public-data handling
 
 Each job has `contents: read`, `pull-requests: write`, and `issues: write`. These scopes allow comments and review operations but no code push; the prompt prohibits approval and change requests. The explicit allowed tools cover file reading, PR views/diffs/comments and inline findings. In mention mode, the [pinned action also adds default tools and enables local edits](https://github.com/anthropics/claude-code-action/blob/756cc22e19660d20e8cc9496b4f242475a7f7790/src/modes/tag/index.ts), including progress-comment and CI-inspection tools and git operations. Both jobs therefore explicitly deny file-edit tools, git commands/the action's push wrapper and MCP file commits/deletions with `--disallowedTools`; the action's own setup still checks out the PR and prepares git authentication. This is a constrained reviewer, not a proof against prompt injection. The reviewer is instructed not to install project dependencies or run application code/tests.
 
@@ -43,7 +43,7 @@ Actions are pinned to telemetry's exact reviewed commits. Checkout does not pers
 
 Full model output is disabled even during debug reruns: this is a public repository. Findings must identify the location/category of a private value without repeating it. Review only public-safe synthetic evidence. Never upload private runtime diagnostics to prove a finding.
 
-## Verification and remaining gates
+## Historical verification and remaining gates
 
 Prepared in [PR #7](https://github.com/senukartur/vtc-dashboard/pull/7). On 2026-10-17, actionlint 1.7.12, local documentation links and staged whitespace checks passed; staged changes were inspected with a targeted privacy scan. GitHub accepted the workflow and [skipped both jobs for the draft PR](https://github.com/senukartur/vtc-dashboard/actions/runs/39046116323), as intended.
 
@@ -55,6 +55,6 @@ An owner review-line mention then triggered a [successful on-demand review](http
 - After authentication is configured, open/mark ready a same-repository PR and verify actual advisory output. Before merge, an owner review-line mention can test on-demand behavior; after merge, verify a PR conversation mention as well.
 - Verify that a controlled synthetic defect produces an actionable finding before claiming the VTC-010 seeded-defect acceptance criterion. A run completing without findings does not establish this.
 - Check skipped drafts, fork and non-owner events, and absence of automatic re-review on push. Local condition checks supplement but do not replace hosted event evidence.
-- Keep VTC-010 incomplete until its remaining ownership/template, protected-main/required-CI, resolved-conversation, dependency-update, independent-review and merge evidence exists. Never make this advisory job a substitute for VTC-009 quality checks.
+- Keep VTC-010 incomplete while automated review is disabled and until its remaining ownership/template, protected-main/required-CI, resolved-conversation, dependency-update, independent-review and merge evidence exists. Never make this advisory job a substitute for VTC-009 quality checks.
 
-To disable new invocations, disable **Claude code review** under GitHub Actions; cancel any already running reviews separately. Reverting the workflow removes the integration but does not revoke the underlying Claude credential. Credential revocation/rotation is a separate owner operation.
+Already running reviews must be cancelled separately. Removing the workflow does not revoke the underlying Claude credential; credential revocation/rotation is a separate owner operation.
