@@ -2,7 +2,7 @@
 
 **Status:** owner-approved product baseline. Documentation delivery and review/merge evidence are tracked in [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the VTC-001 card below. Application implementation has not started.
 
-**Version:** 1.1 — includes the owner-confirmed VTC-002 catalog coverage/localization decisions of 2026-10-17; VTC-001 approval remains recorded as v1.0.
+**Version:** 1.2 — includes the owner-confirmed VTC-002 catalog decisions and VTC-003 automatic initial-history upload requirement of 2026-10-17; VTC-001 approval remains recorded as v1.0. The [telemetry contract v1.0](docs/contracts/telemetry-v1.md) is adopted under the owner's conditional agreement authorization, with final independent review/merge evidence tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3).
 
 **Updated:** 2026-10-17.
 
@@ -71,6 +71,8 @@ This diagram describes responsibilities, not deployed components. Redis, microse
 - A driver creates a personal token and pastes it into the telemetry application. Tokens belong to authenticated members, are scoped/revocable, and must not allow a client to select a different trip owner.
 - Accept versioned start/completion/cancellation summaries with stable source/event identities, game/build context, real timestamps, units, and recording-completeness information as verified by VTC-003. Do not assume a field exists merely because the dashboard needs it.
 - Acknowledge only after durable storage; handle retries, offline delivery, late/out-of-order events, and restarts idempotently. Old replayed events must not appear as current live activity.
+- The owner requires automatic upload of all retained local game trips at the telemetry client's first dashboard connection, followed by new trips and material changes. This is MVP client-to-server history synchronization, not optional per-trip historical import. Retain partial/cancelled/closed outcomes visibly; upload or list presence does not imply company acceptance or qualification credit. Do not reassign previously bound records on account/token switch. The [VTC-003 discovery](docs/research/telemetry.md) and [agreed contract](docs/contracts/telemetry-v1.md) record the current client gaps and implementation/release gates. The contract explicitly records the first-binding trust boundary: a token authenticates the submitter, while the current SDK cannot prove who drove legacy unbound records.
+- The owner confirmed that an imported telemetry trip with unknown historical qualification remains visible but requires staff review before statistics/progress credit; never apply today's qualification as a historical substitute. When the historical qualification and other required facts are supported, use normal automatic validation. MVP synchronization is client-to-server only: dashboard-only manual trips are not downloaded into telemetry.
 - Preserve immutable source records and normalized facts/provenance alongside one canonical trip. Distinguish game outcome, evidence completeness, and company acceptance.
 - Deduplicate exact replays using scoped unique source/event identities. Reconcile manual/telemetry overlap using verified ownership, known facts, and reviewed matching rules; ambiguous candidates require review. Preserve source evidence, audited reversible merge/unmerge, and recomputation.
 - Future Trucky/VTCBase webhooks are company-wide connections configured by director/deputies, not by individual drivers. The architecture must accept new adapters without creating a second acceptance/statistics pipeline.
