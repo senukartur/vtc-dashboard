@@ -45,6 +45,8 @@ Full model output is disabled even during debug reruns: this is a public reposit
 
 ## Verification and remaining gates
 
+Prepared in [PR #7](https://github.com/senukartur/vtc-dashboard/pull/7). On 2026-10-17, actionlint 1.7.12, local documentation links and staged whitespace checks passed; staged changes were inspected with a targeted privacy scan. GitHub accepted the workflow and [skipped both jobs for the draft PR](https://github.com/senukartur/vtc-dashboard/actions/runs/39046116323), as intended. This is draft-trigger evidence only: no authenticated Claude review, seeded-defect finding, fork/non-owner hosted test, conversation mention or enforced merge gate is claimed.
+
 - Validate workflow syntax/expressions with actionlint and inspect the exact staged diff for whitespace and public-data safety.
 - After authentication is configured, open/mark ready a same-repository PR and verify actual advisory output. Before merge, an owner review-line mention can test on-demand behavior; after merge, verify a PR conversation mention as well.
 - Verify that a controlled synthetic defect produces an actionable finding before claiming the VTC-010 seeded-defect acceptance criterion. A run completing without findings does not establish this.
