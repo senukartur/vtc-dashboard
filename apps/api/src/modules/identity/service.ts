@@ -99,7 +99,45 @@ export function createIdentity(
 ) {
   validateIdentityConfig(config);
   const audit = createAudit(unit);
+  function causes(error: unknown): object[] {
+    const result: object[] = [];
+    let current = error;
+    for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
+      if (result.includes(current)) break;
+      result.push(current);
+      current = "cause" in current ? current.cause : null;
+    }
+    return result;
+  }
+  function availabilityCategory(error: unknown): string | null {
+    for (const current of causes(error)) {
+      if ("code" in current) {
+        if (["PROTOCOL_SEQUENCE_TIMEOUT", "ETIMEDOUT"].includes(current.code as string))
+          return "database_timeout";
+        if (
+          ["ECONNREFUSED", "ECONNRESET", "EPIPE", "PROTOCOL_CONNECTION_LOST"].includes(
+            current.code as string,
+          )
+        )
+          return "database_unavailable";
+        if (["ER_CON_COUNT_ERROR", "ER_TOO_MANY_USER_CONNECTIONS"].includes(current.code as string))
+          return "database_capacity";
+      }
+      // mysql2 3.24.6 BasePool.getConnection returns these exact uncoded errors.
+      // Queue-limit errors are excluded: this application's pool never queues.
+      if (
+        current instanceof Error &&
+        ["No connections available.", "Pool is closed."].includes(current.message)
+      )
+        return "database_capacity";
+      if (current instanceof Error && current.message === "TRANSACTION_CONTROL_TIMEOUT")
+        return "transaction_control_timeout";
+    }
+    return null;
+  }
   function failureCategory(error: unknown): string {
+    const availability = availabilityCategory(error);
+    if (availability) return availability;
     let current = error;
     for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
       if ("code" in current) {
@@ -129,7 +167,10 @@ export function createIdentity(
       try {
         return await unit.run(command);
       } catch (error) {
-        if (error instanceof TransactionCommitOutcomeUnknownError) {
+        const uncertain = causes(error).find(
+          (cause) => cause instanceof TransactionCommitOutcomeUnknownError,
+        );
+        if (uncertain) {
           console.error(
             JSON.stringify({
               event: "identity_operation_failed",
@@ -137,7 +178,14 @@ export function createIdentity(
               causeCategory: failureCategory(error),
             }),
           );
-          throw error;
+          throw uncertain;
+        }
+        const availability = availabilityCategory(error);
+        if (availability) {
+          console.error(
+            JSON.stringify({ event: "identity_operation_failed", category: availability }),
+          );
+          throw identityError(503);
         }
         if (attempt >= 2) throw error;
         let current: unknown = error,
@@ -546,16 +594,13 @@ export function createIdentity(
       return run(async (tx) => {
         const current = await lockCompany(tx);
         await client(tx).delete(session).where(lt(session.expiresAt, now())).limit(100);
-        let response: Response;
-        try {
-          response = await engine(client(tx), config).api.signInEmail({
-            body: { email, password },
-            asResponse: true,
-          });
-        } catch {
-          throw identityError(401);
-        }
-        if (!response.ok) throw identityError(401);
+        const response = await engine(client(tx), config).api.signInEmail({
+          body: { email, password },
+          asResponse: true,
+        });
+        if (response.status >= 500) throw identityError(503);
+        if ([400, 401, 403].includes(response.status)) throw identityError(401);
+        if (!response.ok) throw new Error("AUTH_ENGINE_UNEXPECTED_RESPONSE");
         const body = (await response.json()) as { user: { id: string }; token: string };
         const row = (await lockMembers(tx, [body.user.id])).get(body.user.id);
         if (row?.status !== "active") throw identityError(401);
