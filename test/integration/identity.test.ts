@@ -1,4 +1,3 @@
-import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import {
@@ -7,6 +6,7 @@ import {
   challenges,
   company,
   eq,
+  roles as memberRoles,
   membership,
   session,
   sql,
@@ -25,7 +25,9 @@ import {
   type Identity,
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
+import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
 const diagnostic = identityDiagnostics("identity");
 let control: Connection;
@@ -277,6 +279,7 @@ test("every role combination is additive, deputies match administration and all 
     const member = await addMember(assigned),
       login = await signIn(member.email);
     expect(login.actor.capabilities.includes("company.read")).toBe(true);
+    expect(login.actor.capabilities.includes("trips.read_own_private")).toBe(true);
     expect(login.actor.capabilities.includes("trips.submit_own")).toBe(
       assigned.some((r) => r === "trainee" || r === "driver"),
     );
@@ -294,6 +297,82 @@ test("every role combination is additive, deputies match administration and all 
   );
   const login = await signIn(row?.email ?? "");
   expect(() => guardManualReview(login.actor, login.actor.userId)).toThrow("SELF_REVIEW_FORBIDDEN");
+});
+
+test("administrative-only current actors retain own-private reads without member-role actions or self-review, and inactive members lose access", async () => {
+  instant += 60000;
+  const [currentCompany] = await unit.run((tx) => unit.client(tx).select().from(company));
+  if (!currentCompany) throw new Error("SYNTHETIC_DIRECTOR_MISSING");
+  const directorId = currentCompany.directorUserId;
+  const savedRoles = await unit.run((tx) =>
+    unit.client(tx).select().from(memberRoles).where(eq(memberRoles.userId, directorId)),
+  );
+  const [directorUser] = await unit.run((tx) =>
+    unit.client(tx).select().from(user).where(eq(user.id, directorId)),
+  );
+  if (!directorUser) throw new Error("SYNTHETIC_DIRECTOR_MISSING");
+  const dispatcher = await addMember(["dispatcher"]),
+    deputy = await addMember(["deputy_director"]);
+  const app = await createApp({ checkReadiness: async () => true, identity });
+  try {
+    // Fixture only: isolate the pointer-derived director role from explicit grants.
+    await safe(
+      unit.run((tx) =>
+        unit.client(tx).delete(memberRoles).where(eq(memberRoles.userId, directorId)),
+      ),
+    );
+    for (const [member, expectedRole] of [
+      [dispatcher, "dispatcher"],
+      [deputy, "deputy_director"],
+      [{ id: directorId, email: directorUser.email }, "director"],
+    ] as const) {
+      const login = await signIn(member.email);
+      const self = await safe(identity.current(login.actor));
+      expect(self.data.member.roles).toEqual([expectedRole]);
+      const response = await app.inject({
+        url: "/api/v1/me",
+        headers: { cookie: cookies(login.cookies) },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data.member.roles).toEqual([expectedRole]);
+      for (const assigned of [
+        login.actor.capabilities,
+        self.data.capabilities,
+        response.json().data.capabilities as string[],
+      ]) {
+        expect(assigned.includes("trips.read_own_private")).toBe(true);
+        expect(assigned.includes("trips.submit_own")).toBe(false);
+        expect(assigned.includes("events.respond")).toBe(false);
+      }
+      expect(() => guardManualReview(login.actor, member.id)).toThrow("SELF_REVIEW_FORBIDDEN");
+      if (expectedRole !== "director") {
+        await safe(
+          unit.run((tx) =>
+            unit
+              .client(tx)
+              .update(membership)
+              .set({ status: "inactive" })
+              .where(eq(membership.userId, member.id)),
+          ),
+        );
+        await expect(safe(identity.current(login.actor))).rejects.toMatchObject({
+          statusCode: 401,
+        });
+        expect(
+          (await app.inject({ url: "/api/v1/me", headers: { cookie: cookies(login.cookies) } }))
+            .statusCode,
+        ).toBe(401);
+      }
+    }
+  } finally {
+    await safe(
+      unit.run(async (tx) => {
+        await unit.client(tx).delete(memberRoles).where(eq(memberRoles.userId, directorId));
+        if (savedRoles.length) await unit.client(tx).insert(memberRoles).values(savedRoles);
+      }),
+    );
+    await app.close();
+  }
 });
 
 test("deactivation/reinstatement retains identity/history, replaces roles and makes every old cookie/epoch invalid", async () => {
@@ -479,43 +558,114 @@ test("protected email replacement requires both channels before invalidating epo
   await safe(identity.requestChallenge(changed.actor, newId(), "password_change"));
 });
 
-test("production engine emits exact host-only secure cookies and current membership epochs defeat a still-present session", async () => {
-  const member = await addMember();
-  const production = createIdentity(
-    unit,
-    { ...config, production: true, origin: "https://dashboard.example.invalid" },
-    ports(),
-    time,
-  );
-  const result = await safe(production.login(member.email, password));
-  const cookie = result.cookies.find((value) => value.startsWith("__Host-vtc_session="));
-  expect(
-    Boolean(
-      cookie?.includes("HttpOnly") &&
-        cookie.includes("Secure") &&
-        cookie.includes("SameSite=Lax") &&
-        cookie.includes("Path=/") &&
-        !cookie.includes("Domain="),
-    ),
-  ).toBe(true);
-  const headers = new Headers({ cookie: cookies(result.cookies) });
-  const actor = await safe(production.authenticate(headers));
-  await safe(
-    unit.run((tx) =>
-      unit
-        .client(tx)
-        .update(membership)
-        .set({ accessEpoch: 2 })
-        .where(eq(membership.userId, member.id)),
-    ),
-  );
-  expect(
-    await unit.run((tx) =>
-      unit.client(tx).select().from(session).where(eq(session.id, actor.sessionId)),
-    ),
-  ).toHaveLength(1);
-  await expect(safe(production.authenticate(headers))).rejects.toMatchObject({ statusCode: 401 });
-});
+test.each([false, true])(
+  "HTTPS engine/API cookies stay secure with production=%s and current membership epochs defeat a still-present session",
+  async (productionMode) => {
+    instant += 60000;
+    const member = await addMember();
+    const enabled = readConfig({
+      MYSQL_HOST: "127.0.0.1",
+      MYSQL_PORT: "3307",
+      MYSQL_DATABASE: "synthetic",
+      MYSQL_USER: "synthetic",
+      MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
+      ...(productionMode ? { NODE_ENV: "production" } : {}),
+      IDENTITY_ENABLED: "true",
+      IDENTITY_SECRET: config.secret,
+      IDENTITY_ORIGIN: "https://dashboard.example.invalid",
+    }).identity;
+    if (!enabled) throw new Error("SYNTHETIC_CONFIG_MISSING");
+    expect(enabled.production).toBe(productionMode);
+    const production = createIdentity(unit, enabled, ports(), time);
+    const result = await safe(production.login(member.email, password));
+    const cookie = result.cookies.find((value) => value.startsWith("__Host-vtc_session="));
+    expect(
+      Boolean(
+        cookie?.includes("HttpOnly") &&
+          cookie.includes("Secure") &&
+          cookie.includes("SameSite=Lax") &&
+          cookie.includes("Path=/") &&
+          !cookie.includes("Domain="),
+      ),
+    ).toBe(true);
+    const headers = new Headers({ cookie: cookies(result.cookies) });
+    const actor = await safe(production.authenticate(headers));
+    await safe(
+      unit.run((tx) =>
+        unit
+          .client(tx)
+          .update(membership)
+          .set({ accessEpoch: 2 })
+          .where(eq(membership.userId, member.id)),
+      ),
+    );
+    expect(
+      await unit.run((tx) =>
+        unit.client(tx).select().from(session).where(eq(session.id, actor.sessionId)),
+      ),
+    ).toHaveLength(1);
+    await expect(safe(production.authenticate(headers))).rejects.toMatchObject({ statusCode: 401 });
+    const app = await createApp({ checkReadiness: async () => true, identity: production });
+    const secureHeader = (values: readonly string[], name: string, cleared = false) => {
+      const value = values.find((header) => header.startsWith(`${name}=`));
+      return Boolean(
+        value?.includes("; Secure") &&
+          value.includes("; HttpOnly") &&
+          value.includes("; SameSite=Lax") &&
+          value.includes("; Path=/") &&
+          !value.includes("Domain=") &&
+          (!cleared || value.includes("Max-Age=0")),
+      );
+    };
+    const setCookies = (response: { headers: Record<string, unknown> }): string[] => {
+      const value = response.headers["set-cookie"];
+      return Array.isArray(value) ? (value as string[]) : typeof value === "string" ? [value] : [];
+    };
+    try {
+      const pre = await app.inject({ url: "/api/v1/auth/csrf" });
+      expect(pre.statusCode).toBe(200);
+      expect(secureHeader(setCookies(pre), "__Host-vtc_csrf")).toBe(true);
+      const logged = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        headers: {
+          origin: enabled.origin,
+          cookie: cookies(setCookies(pre)),
+          "x-csrf-token": pre.json().data.token,
+        },
+        payload: { email: member.email, password },
+      });
+      expect(logged.statusCode).toBe(200);
+      expect(Array.isArray(logged.headers["set-cookie"])).toBe(true);
+      expect(secureHeader(setCookies(logged), "__Host-vtc_session")).toBe(true);
+      expect(secureHeader(setCookies(logged), "__Host-vtc_csrf", true)).toBe(true);
+      const captured = cookies(setCookies(logged));
+      expect(
+        (await app.inject({ url: "/api/v1/me", headers: { cookie: captured } })).statusCode,
+      ).toBe(200);
+      const bound = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: captured } });
+      expect(bound.statusCode).toBe(200);
+      expect(secureHeader(setCookies(bound), "__Host-vtc_csrf", true)).toBe(true);
+      const logout = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/logout",
+        headers: {
+          origin: enabled.origin,
+          cookie: captured,
+          "x-csrf-token": bound.json().data.token,
+        },
+      });
+      expect(logout.statusCode).toBe(200);
+      expect(secureHeader(setCookies(logout), "__Host-vtc_session", true)).toBe(true);
+      expect(secureHeader(setCookies(logout), "__Host-vtc_csrf", true)).toBe(true);
+      expect(
+        (await app.inject({ url: "/api/v1/me", headers: { cookie: captured } })).statusCode,
+      ).toBe(401);
+    } finally {
+      await app.close();
+    }
+  },
+);
 
 test("preference command reserves concurrent keys, replays committed safe results and detects changed input/stale versions", async () => {
   const login = await signIn((await addMember()).email),
@@ -700,6 +850,9 @@ test("real API enforces structural schemas, current membership, CSRF/origin rota
     expect((await app.inject({ url: "/api/v1/me" })).statusCode).toBe(401);
     const pre = await app.inject({ url: "/api/v1/auth/csrf" });
     expect(pre.statusCode).toBe(200);
+    expect(pre.cookies.some((cookie) => cookie.name === "vtc_dev_csrf" && !cookie.secure)).toBe(
+      true,
+    );
     const preCookie = cookies(pre.cookies.map((c) => `${c.name}=${c.value}`));
     const preToken = pre.json().data.token as string;
     const request = (
@@ -715,6 +868,9 @@ test("real API enforces structural schemas, current membership, CSRF/origin rota
     expect((await request({ ...basic, "content-type": "text/plain" }, "bad")).statusCode).toBe(415);
     const logged = await request(basic);
     expect(logged.statusCode).toBe(200);
+    expect(
+      logged.cookies.some((cookie) => cookie.name === "vtc_dev_session" && !cookie.secure),
+    ).toBe(true);
     expect(Array.isArray(logged.headers["set-cookie"])).toBe(true);
     const sessionCookie = cookies(logged.cookies.map((c) => `${c.name}=${c.value}`));
     expect(

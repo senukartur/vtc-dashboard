@@ -11,10 +11,9 @@ const administration = [
   "company.configure",
 ];
 export function capabilities(roles: readonly Role[]): string[] {
-  const result = new Set(["company.read"]);
+  const result = new Set(["company.read", "trips.read_own_private"]);
   if (roles.some((role) => role === "trainee" || role === "driver"))
-    for (const capability of ["trips.submit_own", "trips.read_own_private", "events.respond"])
-      result.add(capability);
+    for (const capability of ["trips.submit_own", "events.respond"]) result.add(capability);
   if (roles.some((role) => ["dispatcher", "deputy_director", "director"].includes(role)))
     result.add("trips.review");
   if (roles.some((role) => role === "deputy_director" || role === "director"))

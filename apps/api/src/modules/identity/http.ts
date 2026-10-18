@@ -2,14 +2,15 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { IdentityConfig } from "./engine.js";
+import { type IdentityConfig, secureIdentityCookies } from "./engine.js";
 import { type Actor, type Identity, identityError } from "./service.js";
 
 type Schemas = components["schemas"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 
 export function csrfProtection(config: IdentityConfig, now: () => number = Date.now) {
-  const cookieName = config.production ? "__Host-vtc_csrf" : "vtc_dev_csrf";
+  const secureCookies = secureIdentityCookies(config);
+  const cookieName = secureCookies ? "__Host-vtc_csrf" : "vtc_dev_csrf";
   const sign = (value: string) =>
     createHmac("sha256", config.secret).update(`csrf:${value}`).digest("base64url");
   const equal = (a: string, b: string) => {
@@ -25,7 +26,7 @@ export function csrfProtection(config: IdentityConfig, now: () => number = Date.
     return split > 0 && equal(sign(payload), value.slice(split + 1)) ? payload : null;
   };
   const cookie = (value: string, maxAge: number) =>
-    `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${config.production ? "; Secure" : ""}`;
+    `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secureCookies ? "; Secure" : ""}`;
   function preSession(headers: { cookie?: string | undefined }): string | null {
     const raw = headers.cookie
       ?.split(";")

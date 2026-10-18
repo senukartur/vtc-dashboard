@@ -11,6 +11,10 @@ export interface IdentityConfig {
   production: boolean;
 }
 
+export function secureIdentityCookies(config: IdentityConfig): boolean {
+  return new URL(config.origin).protocol === "https:";
+}
+
 export function validateIdentityConfig(config: IdentityConfig): void {
   const origin = new URL(config.origin);
   if (
@@ -19,6 +23,8 @@ export function validateIdentityConfig(config: IdentityConfig): void {
     !["http:", "https:"].includes(origin.protocol) ||
     origin.origin !== config.origin ||
     (config.production && origin.protocol !== "https:") ||
+    (origin.protocol === "http:" &&
+      !["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname)) ||
     origin.username ||
     origin.password
   )
@@ -75,6 +81,7 @@ export function engine(
   proof?: CredentialProof,
   binding?: SignInBinding,
 ) {
+  const secureCookies = secureIdentityCookies(config);
   const verified = proof ? credentialProofs.get(proof) : undefined;
   if (
     proof &&
@@ -152,14 +159,14 @@ export function engine(
       useSecureCookies: false,
       defaultCookieAttributes: {
         httpOnly: true,
-        secure: config.production,
+        secure: secureCookies,
         sameSite: "lax",
         path: "/",
       },
       cookies: {
         session_token: {
-          name: config.production ? "__Host-vtc_session" : "vtc_dev_session",
-          attributes: { httpOnly: true, secure: config.production, sameSite: "lax", path: "/" },
+          name: secureCookies ? "__Host-vtc_session" : "vtc_dev_session",
+          attributes: { httpOnly: true, secure: secureCookies, sameSite: "lax", path: "/" },
         },
       },
       ipAddress: { disableIpTracking: true },
