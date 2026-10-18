@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import {
@@ -27,27 +28,32 @@ const credential = {
   email: "availability@example.invalid",
   password: randomBytes(24).toString("base64url"),
 };
+const diagnostic = identityDiagnostics("availability");
 let control: Connection;
 let unit: UnitOfWork;
 
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
-  await control.query(
-    "CREATE TABLE synthetic_availability_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_availability_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+    ),
   );
-  unit = createUnitOfWork(guardedSettings());
+  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
   try {
-    await createIdentity(unit, config, {
-      accessEvents: {
-        append: async (tx, event) => {
-          await unit
-            .client(tx)
-            .execute(sql`INSERT INTO synthetic_availability_events VALUES (${event.eventId})`);
+    await diagnostic.phase("bootstrap", () =>
+      createIdentity(unit, config, {
+        accessEvents: {
+          append: async (tx, event) => {
+            await unit
+              .client(tx)
+              .execute(sql`INSERT INTO synthetic_availability_events VALUES (${event.eventId})`);
+          },
         },
-      },
-    }).bootstrap({ ...credential, name: "Synthetic Availability Member" });
+      }).bootstrap({ ...credential, name: "Synthetic Availability Member" }),
+    );
   } catch {
     throw new Error("SYNTHETIC_AVAILABILITY_SETUP_FAILED");
   }

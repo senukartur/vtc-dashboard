@@ -27,6 +27,8 @@ const require = createRequire(new URL("../../packages/db/package.json", import.m
 const mysql = require("mysql2") as { createServer(): PeerServer };
 type Phase =
   | "commit"
+  | "commit-delayed"
+  | "commit-late"
   | "commit-error"
   | "rollback"
   | "rollback-queued"
@@ -37,6 +39,7 @@ type Phase =
 async function peer(phase: Phase) {
   const server = mysql.createServer();
   const sockets = new Set<Socket>();
+  const acknowledgements = new Set<ReturnType<typeof setTimeout>>();
   const counts = {
     commits: 0,
     rollbacks: 0,
@@ -45,6 +48,7 @@ async function peer(phase: Phase) {
     applying: 0,
     applied: 0,
     releaseQueries: 0,
+    delayedAcks: 0,
   };
   server.on("connection", (connection: PeerConnection) => {
     connection.stream.allowHalfOpen = true;
@@ -95,7 +99,19 @@ async function peer(phase: Phase) {
       }
       if (query === "COMMIT") {
         counts.commits++;
-        if (phase === "commit-error") {
+        if ((phase === "commit-delayed" || phase === "commit-late") && counts.commits === 1) {
+          const timer = setTimeout(
+            () => {
+              acknowledgements.delete(timer);
+              counts.delayedAcks++;
+              connection.writeOk();
+            },
+            phase === "commit-delayed" ? 2300 : 5600,
+          );
+          acknowledgements.add(timer);
+          return;
+        }
+        if (phase === "commit-error" && counts.commits === 1) {
           connection.writeError({ code: 1105, message: "SYNTHETIC_PRIVATE_COMMIT_DIAGNOSTIC" });
           return;
         }
@@ -175,6 +191,7 @@ async function peer(phase: Phase) {
     counts,
     port: (server._server.address() as AddressInfo).port,
     async close() {
+      for (const timer of acknowledgements) clearTimeout(timer);
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
@@ -213,15 +230,25 @@ ${body}
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
           () => reject(new Error("Synthetic child exceeded cleanup deadline")),
-          3500,
+          ["commit", "commit-delayed", "commit-late"].includes(phase) ? 8500 : 3500,
         );
       }),
     ]);
     assert.equal(code, 0, phase);
     const deadline = Date.now() + 500;
-    const expectedEnds = phase === "commit" ? 6 : phase === "rollback-queued" ? 2 : 1;
+    const expectedEnds =
+      phase === "commit"
+        ? 6
+        : ["rollback-queued", "commit-late", "commit-error"].includes(phase)
+          ? 2
+          : 1;
     while (fixture.counts.ends < expectedEnds && Date.now() < deadline) await delay(10);
     assert.equal(fixture.counts.ends, expectedEnds, "client sockets disposed before peer cleanup");
+    if (phase === "commit-late") {
+      const lateDeadline = Date.now() + 1500;
+      while (fixture.counts.delayedAcks === 0 && Date.now() < lateDeadline) await delay(10);
+      assert.equal(fixture.counts.delayedAcks, 1, "late response follows natural child exit");
+    }
     return fixture.counts;
   } finally {
     clearTimeout(timer);
@@ -238,7 +265,12 @@ test("five stalled COMMITs reject, dispose half-open sockets, recover pool capac
     `
 const unit = createUnitOfWork(settings);
 try {
-  const results = await Promise.allSettled(Array.from({length: 5}, () => unit.run(async () => 1)));
+  let calls = 0;
+  const started = performance.now();
+  const results = await Promise.allSettled(Array.from({length: 5}, () => unit.run(async () => { calls++; return 1; })));
+  assert.equal(calls, 5, 'uncertain commands are not retried');
+  assert.ok(performance.now() - started >= 4500, 'COMMIT retains its five-second receipt budget');
+  assert.ok(performance.now() - started < 7000, 'COMMIT rejection remains bounded');
   assert.equal(results.filter(result => result.status === 'rejected').length, 5);
   for (const result of results) {
     assert.equal(result.status, 'rejected');
@@ -260,13 +292,61 @@ try {
   assert.equal(counts.ends, 6);
 });
 
+test("a delayed COMMIT acknowledgement inside five seconds completes the callback exactly once", async () => {
+  const counts = await probe(
+    "commit-delayed",
+    `
+const unit = createUnitOfWork(settings);
+let calls = 0;
+const started = performance.now();
+try {
+  assert.equal(await unit.run(async () => { calls++; return 7; }), 7);
+  assert.equal(calls, 1);
+  assert.ok(performance.now() - started >= 2100);
+  assert.ok(performance.now() - started < 5000);
+} finally { await unit.close(); }
+`,
+  );
+  assert.equal(counts.commits, 1);
+  assert.equal(counts.delayedAcks, 1);
+  assert.equal(counts.rollbacks, 0);
+});
+
+test("a COMMIT acknowledgement after five seconds stays unknown, discards its socket and recovers capacity without retry", async () => {
+  const counts = await probe(
+    "commit-late",
+    `
+const unit = createUnitOfWork(settings);
+let calls = 0;
+const started = performance.now();
+try {
+  await assert.rejects(unit.run(async () => { calls++; return 1; }), error => {
+    assert.ok(error instanceof TransactionCommitOutcomeUnknownError);
+    assert.equal(error.code, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
+    assert.ok(error.cause instanceof Error);
+    assert.ok(error.cause.code === 'PROTOCOL_SEQUENCE_TIMEOUT' || error.cause.message === 'TRANSACTION_CONTROL_TIMEOUT');
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.ok(performance.now() - started >= 4500);
+  assert.ok(performance.now() - started < 7000);
+  assert.equal(await unit.run(async () => 2), 2);
+} finally { await unit.close(); }
+`,
+  );
+  assert.equal(counts.commits, 2);
+  assert.equal(counts.rollbacks, 0);
+  assert.equal(counts.delayedAcks, 1);
+});
+
 test("server COMMIT errors have a safe distinct outcome code with the original private cause", async () => {
   const counts = await probe(
     "commit-error",
     `
 const unit = createUnitOfWork(settings);
+let calls = 0;
 try {
-  await assert.rejects(unit.run(async () => 1), error => {
+  await assert.rejects(unit.run(async () => { calls++; return 1; }), error => {
     assert.ok(error instanceof TransactionCommitOutcomeUnknownError);
     assert.equal(error.code, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
     assert.equal(error.message, TRANSACTION_COMMIT_OUTCOME_UNKNOWN);
@@ -276,10 +356,12 @@ try {
     assert.equal(JSON.stringify(error).includes('SYNTHETIC_PRIVATE_COMMIT_DIAGNOSTIC'), false);
     return true;
   });
+  assert.equal(calls, 1);
+  assert.equal(await unit.run(async () => 2), 2);
 } finally { await unit.close(); }
 `,
   );
-  assert.equal(counts.commits, 1);
+  assert.equal(counts.commits, 2);
   assert.equal(counts.rollbacks, 0);
 });
 
@@ -289,7 +371,12 @@ test("stalled rollback preserves the command failure and disposes its half-open 
     `
 const unit = createUnitOfWork(settings);
 const failure = new Error('SYNTHETIC_COMMAND_FAILURE');
-try { await assert.rejects(unit.run(async () => { throw failure; }), error => error === failure && !(error instanceof TransactionCommitOutcomeUnknownError)); }
+const started = performance.now();
+try {
+  await assert.rejects(unit.run(async () => { throw failure; }), error => error === failure && !(error instanceof TransactionCommitOutcomeUnknownError));
+  assert.ok(performance.now() - started >= 800);
+  assert.ok(performance.now() - started < 2500, 'ROLLBACK retains its one-second budget');
+}
 finally { await unit.close(); }
 `,
   );
@@ -305,6 +392,7 @@ import { sql } from 'drizzle-orm';
 import { setTimeout as delay } from 'node:timers/promises';
 const unit = createUnitOfWork(settings);
 const failure = new Error('SYNTHETIC_COMMAND_FAILURE');
+const started = performance.now();
 try {
   await assert.rejects(unit.run(async tx => {
     // Deliberately simulate a caller abort while its query is still active on the wire.
@@ -312,6 +400,8 @@ try {
     await Promise.race([pending, delay(50)]);
     throw failure;
   }), error => error === failure && !(error instanceof TransactionCommitOutcomeUnknownError));
+  assert.ok(performance.now() - started >= 800);
+  assert.ok(performance.now() - started < 2500, 'queued ROLLBACK retains its one-second wall bound');
   assert.equal(await unit.run(async () => 2), 2);
 } finally { await unit.close(); }
 `,

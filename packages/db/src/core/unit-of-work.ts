@@ -25,15 +25,21 @@ export class TransactionCommitOutcomeUnknownError extends Error {
   }
 }
 
-async function controlQuery(connection: PoolConnection, sql: string): Promise<void> {
+const commitReceiptTimeoutMs = 5000;
+
+async function controlQuery(
+  connection: PoolConnection,
+  sql: string,
+  timeoutMs = 1000,
+): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // mysql2 starts its query timer only when the command reaches the wire. Bound the
     // wall clock too: cleanup may be queued behind a command that never completed.
     await Promise.race([
-      connection.query({ sql, timeout: 1000 }),
+      connection.query({ sql, timeout: timeoutMs }),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error("TRANSACTION_CONTROL_TIMEOUT")), 1000);
+        timer = setTimeout(() => reject(new Error("TRANSACTION_CONTROL_TIMEOUT")), timeoutMs);
       }),
     ]);
   } finally {
@@ -103,7 +109,7 @@ export function createUnitOfWork(settings: DatabaseSettings): UnitOfWork {
         // A lost COMMIT response is uncertain. Never queue rollback behind that command;
         // the outer finally immediately discards its connection on any commit failure.
         try {
-          await controlQuery(connection, "COMMIT");
+          await controlQuery(connection, "COMMIT", commitReceiptTimeoutMs);
         } catch (cause) {
           throw new TransactionCommitOutcomeUnknownError(cause);
         }

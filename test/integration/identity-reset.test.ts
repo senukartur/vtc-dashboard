@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import { eq, membership, sql } from "@vtc/db/identity-schema";
@@ -17,6 +18,7 @@ const config = {
   production: false,
 };
 const password = "Synthetic-reset-passphrase-42";
+const diagnostic = identityDiagnostics("reset");
 let control: Connection;
 let unit: ReturnType<typeof createUnitOfWork>;
 let instant = Date.now();
@@ -44,6 +46,7 @@ async function safe<T>(work: Promise<T>): Promise<T> {
   try {
     return await work;
   } catch (error) {
+    diagnostic.failure(error);
     throw Object.assign(new Error("SYNTHETIC_RESET_OPERATION_FAILED"), {
       statusCode:
         error && typeof error === "object" && "statusCode" in error ? error.statusCode : 500,
@@ -129,22 +132,26 @@ async function binding(app: Awaited<ReturnType<typeof createApp>>) {
   };
 }
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
-  await control.query(
-    "CREATE TABLE synthetic_reset_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_reset_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+    ),
   );
-  await control.query(
-    "CREATE TABLE synthetic_reset_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query("CREATE TABLE synthetic_reset_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB"),
   );
-  unit = createUnitOfWork(guardedSettings());
-  await safe(
-    owner().bootstrap({
-      email: "synthetic-reset-director@example.invalid",
-      name: "Synthetic Reset Director",
-      password,
-    }),
+  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
+  await diagnostic.phase("bootstrap", () =>
+    safe(
+      owner().bootstrap({
+        email: "synthetic-reset-director@example.invalid",
+        name: "Synthetic Reset Director",
+        password,
+      }),
+    ),
   );
 });
 beforeEach(() => {

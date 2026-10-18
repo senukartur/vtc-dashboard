@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { createHmac, randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext, type UnitOfWork } from "@vtc/db";
 import { account, company, eq, membership, sql, user } from "@vtc/db/identity-schema";
@@ -23,6 +24,7 @@ const config = {
   production: false,
 };
 const password = "Synthetic-admission-passphrase-42";
+const diagnostic = identityDiagnostics("admission");
 let control: Connection;
 let unit: UnitOfWork;
 let activeTransactions = 0;
@@ -63,6 +65,7 @@ async function safe<T>(work: Promise<T>): Promise<T> {
   try {
     return await work;
   } catch (error) {
+    diagnostic.failure(error);
     throw Object.assign(new Error("SYNTHETIC_ADMISSION_OPERATION_FAILED"), {
       statusCode:
         error && typeof error === "object" && "statusCode" in error ? error.statusCode : 500,
@@ -138,26 +141,38 @@ async function sessionCount(id: string) {
 }
 beforeAll(async () => {
   try {
-    control = await testConnection();
-    await reset(control);
-    await runMigrations(guardedSettings());
-    await control.query(
-      "CREATE TABLE synthetic_admission_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+    control = await diagnostic.phase("connection", () => testConnection());
+    await diagnostic.phase("reset", () => reset(control));
+    await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+    await diagnostic.phase("synthetic_ddl", () =>
+      control.query(
+        "CREATE TABLE synthetic_admission_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+      ),
     );
-    await control.query(
-      "CREATE TABLE synthetic_admission_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+    await diagnostic.phase("synthetic_ddl", () =>
+      control.query(
+        "CREATE TABLE synthetic_admission_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+      ),
     );
-    unit = createUnitOfWork(guardedSettings());
+    unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
     const email = "admission-director@example.invalid";
-    await identity().bootstrap({ email, name: "Synthetic Admission Director", password });
-    const logged = await signIn(email);
-    await identity().requestChallenge(logged.actor, newId(), "email_verification");
-    const challenge = await latest(logged.actor.userId, "email_verification");
-    await identity().confirmChallenge(logged.actor, newId(), {
-      purpose: "email_verification",
-      challengeId: challenge.id,
-      code: challenge.code,
-    });
+    await diagnostic.phase("bootstrap", () =>
+      identity().bootstrap({ email, name: "Synthetic Admission Director", password }),
+    );
+    const logged = await diagnostic.phase("verification", () => signIn(email));
+    await diagnostic.phase("verification", () =>
+      identity().requestChallenge(logged.actor, newId(), "email_verification"),
+    );
+    const challenge = await diagnostic.phase("verification", () =>
+      latest(logged.actor.userId, "email_verification"),
+    );
+    await diagnostic.phase("verification", () =>
+      identity().confirmChallenge(logged.actor, newId(), {
+        purpose: "email_verification",
+        challengeId: challenge.id,
+        code: challenge.code,
+      }),
+    );
   } catch {
     throw new Error("SYNTHETIC_ADMISSION_SETUP_FAILED");
   }

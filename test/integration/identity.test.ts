@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import {
@@ -26,6 +27,7 @@ import {
 } from "../../apps/api/src/modules/identity/service.ts";
 import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
 
+const diagnostic = identityDiagnostics("identity");
 let control: Connection;
 let unit: ReturnType<typeof createUnitOfWork>;
 let identity: Identity;
@@ -41,6 +43,7 @@ const safe = async <T>(operation: Promise<T>): Promise<T> => {
   try {
     return await operation;
   } catch (error) {
+    diagnostic.failure(error);
     throw Object.assign(new Error("SYNTHETIC_IDENTITY_OPERATION_FAILED"), {
       statusCode:
         error && typeof error === "object" && "statusCode" in error ? error.statusCode : 500,
@@ -130,16 +133,20 @@ async function verify(member: Awaited<ReturnType<typeof signIn>>) {
   );
 }
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
-  await control.query(
-    "CREATE TABLE synthetic_private_delivery (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_private_delivery (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+    ),
   );
-  await control.query(
-    "CREATE TABLE synthetic_access_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_access_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+    ),
   );
-  unit = createUnitOfWork(guardedSettings());
+  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
   identity = createIdentity(unit, config, ports(), time);
 });
 afterAll(async () => {

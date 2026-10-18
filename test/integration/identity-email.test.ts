@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import { eq, membership, sql } from "@vtc/db/identity-schema";
@@ -17,6 +18,7 @@ const config = {
   production: false,
 };
 const password = "Synthetic-email-passphrase-42";
+const diagnostic = identityDiagnostics("email");
 let control: Connection;
 let unit: ReturnType<typeof createUnitOfWork>;
 let instant = Date.now();
@@ -44,6 +46,7 @@ async function safe<T>(work: Promise<T>): Promise<T> {
   try {
     return await work;
   } catch (error) {
+    diagnostic.failure(error);
     throw Object.assign(new Error("SYNTHETIC_EMAIL_OPERATION_FAILED"), {
       statusCode:
         error && typeof error === "object" && "statusCode" in error ? error.statusCode : 500,
@@ -144,34 +147,42 @@ async function api(logged: { cookie: string }, identity = owner()) {
   };
 }
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
-  await control.query(
-    "CREATE TABLE synthetic_email_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_email_mail (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
+    ),
   );
-  await control.query(
-    "CREATE TABLE synthetic_email_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query("CREATE TABLE synthetic_email_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB"),
   );
-  unit = createUnitOfWork(guardedSettings());
-  await safe(
-    owner().bootstrap({
-      email: "synthetic-email-director@example.invalid",
-      name: "Synthetic Email Director",
-      password,
-    }),
+  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
+  await diagnostic.phase("bootstrap", () =>
+    safe(
+      owner().bootstrap({
+        email: "synthetic-email-director@example.invalid",
+        name: "Synthetic Email Director",
+        password,
+      }),
+    ),
   );
-  const director = await signIn("synthetic-email-director@example.invalid");
-  const requested = await safe(
-    owner().requestChallenge(director.actor, newId(), "email_verification"),
+  const director = await diagnostic.phase("verification", () =>
+    signIn("synthetic-email-director@example.invalid"),
   );
-  const proof = await mail(String(requested.id));
-  await safe(
-    owner().confirmChallenge(director.actor, newId(), {
-      purpose: "email_verification",
-      challengeId: proof.id,
-      code: proof.code,
-    }),
+  const requested = await diagnostic.phase("verification", () =>
+    safe(owner().requestChallenge(director.actor, newId(), "email_verification")),
+  );
+  const proof = await diagnostic.phase("verification", () => mail(String(requested.id)));
+  await diagnostic.phase("verification", () =>
+    safe(
+      owner().confirmChallenge(director.actor, newId(), {
+        purpose: "email_verification",
+        challengeId: proof.id,
+        code: proof.code,
+      }),
+    ),
   );
 });
 beforeEach(() => {
