@@ -332,9 +332,10 @@
         }
       },
       "request": {
-        "kind": "email_change",
+        "kind": "password_change",
         "challengeId": "41000000-0000-4000-8000-000000000001",
-        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY",
+        "newPassword": "NONFUNCTIONAL_EXAMPLE_ONLY"
       }
     },
     {
@@ -3487,6 +3488,75 @@
         "meta": {
           "requestId": "synthetic-request-001"
         }
+      }
+    },
+    {
+      "id": "confirmCredentialChange:pending-email",
+      "operationId": "confirmCredentialChange",
+      "status": 202,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "pending"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "kind": "email_change",
+        "challengeId": "41000000-0000-4000-8000-000000000001",
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
+      }
+    },
+    {
+      "id": "getPendingEmailChange:success",
+      "operationId": "getPendingEmailChange",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "proposedEmail": "synthetic@example.invalid",
+            "expiresAt": "2026-10-17T12:00:00.000Z",
+            "stage": "proposed_email"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getPendingEmailChange:none",
+      "operationId": "getPendingEmailChange",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "confirmProposedEmailChange:success",
+      "operationId": "confirmProposedEmailChange",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "challengeId": "41000000-0000-4000-8000-000000000001",
+        "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
       }
     }
   ]

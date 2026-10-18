@@ -12,7 +12,7 @@
 | `apps/api/src/modules/`, `use-cases/`, `platform/` | Domain ownership, cross-module coordination and infrastructure boundaries |
 | `apps/web/src/app/`, `features/`, `shared/`, `i18n/core/` | React router/providers, synthetic foundation previews, reusable primitives, exact formatting and RU/EN namespaces |
 | `packages/contracts/` | Generated OpenAPI browser types, reference-preserving JSON Schema 2020-12 and shared health DTO |
-| `packages/db/` | Authenticated readiness pool; VTC-007 adds separate [audit/value/transaction/migration foundations](persistence.md), with no domain/auth/company schema |
+| `packages/db/` | Authenticated readiness pool; VTC-007 adds separate [audit/value/transaction/migration foundations](persistence.md); VTC-013 adds the opt-in [identity foundation](identity.md) |
 | `config/runtime.json`, `deploy/local/mysql.cnf` | Common runtime/database target for local, later CI and deployment integration |
 | `compose.yaml`, `Dockerfile` | Docker local app/database with Compose Watch and optional production artifact |
 | `test/scaffold/` | Narrow configuration, HTTP and runtime schema bridge checks |
@@ -63,6 +63,10 @@ VTC-007 now implements the [persistence substrate](persistence.md) separately fr
 ## VTC-012 UI foundation addition
 
 The [UI foundation guide](ui-foundation.md) records the manually adapted shadcn primitives/license, tokens, public/member presentation shells, feature-local resources, typed schema-validated synthetic responses and exact decimal/timezone conventions. `/` still requests real readiness; `/foundation` and `/foundation/member` make no authentication/domain-integration claim. Used dependencies have exact pins with strict peers/release-age policy unchanged. The browser projects now include tablet, and synthetic state/focus/locale journeys save ignored screenshots for rendered review. Authentication, company launch configuration and live feature integration remain their owning cards' work; the delivery PR records actual candidate verification.
+
+## VTC-013 identity addition
+
+The [identity guide](identity.md) records the pinned auth engine, owned transaction bridge, additive schema, opt-in rollout and fail-closed mail/event seams. Existing startup remains compatible with identity disabled; no automatic migration/bootstrap occurs. Real MySQL and built-server identity checks are separate from the historical scaffold observations above.
 
 ## Primary references
 

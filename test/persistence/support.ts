@@ -57,6 +57,16 @@ export async function testConnection(): Promise<Connection> {
 export async function reset(connection: Connection) {
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   for (const name of [
+    "identity_command_results",
+    "identity_limits",
+    "identity_challenges",
+    "identity_company",
+    "identity_roles",
+    "identity_sessions",
+    "identity_accounts",
+    "identity_verifications",
+    "identity_memberships",
+    "identity_users",
     "synthetic_values",
     "synthetic_parent",
     "audit_entries",
@@ -72,6 +82,33 @@ interface Journal {
   entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   version: string;
   dialect: string;
+}
+
+export async function auditOnlyFolder(): Promise<string> {
+  return publishedPrefixFolder(1);
+}
+
+export async function identityFoundationFolder(): Promise<string> {
+  return publishedPrefixFolder(2);
+}
+
+async function publishedPrefixFolder(count: 1 | 2): Promise<string> {
+  await mkdir(join(root, ".local"), { recursive: true });
+  const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
+  await mkdir(join(folder, "meta"));
+  const production = JSON.parse(
+    await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+  ) as Journal;
+  const first = production.entries[0];
+  if (first?.tag !== "0000_solid_spencer_smythe")
+    throw new Error("PUBLISHED_AUDIT_PREFIX_REQUIRED");
+  const entries = production.entries.slice(0, count);
+  if (count === 2 && entries[1]?.tag !== "0001_mean_masked_marvel")
+    throw new Error("PUBLISHED_IDENTITY_PREFIX_REQUIRED");
+  for (const entry of entries)
+    await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
+  await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
+  return folder;
 }
 
 export async function extendedFixtureFolder(): Promise<string> {

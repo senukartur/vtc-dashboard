@@ -20,6 +20,8 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `PATCH /api/v1/me/preferences` | `updatePreferences` | `session` | VTC-013 |
 | `POST /api/v1/me/credential-challenges` | `requestCredentialChallenge` | `session` | VTC-013 |
 | `POST /api/v1/me/credential-changes` | `confirmCredentialChange` | `session` | VTC-013 |
+| `GET /api/v1/me/email-change` | `getPendingEmailChange` | `session` | VTC-013 |
+| `POST /api/v1/me/email-change-confirmations` | `confirmProposedEmailChange` | `session` | VTC-013 |
 | `GET /api/v1/me/identity` | `getIdentity` | `session` | VTC-018 |
 | `POST /api/v1/me/steam-verifications` | `requestSteamVerification` | `session` | VTC-018 |
 | `POST /api/v1/me/steam-replacement-verifications` | `requestSteamReplacementProof` | `session` | VTC-018 |

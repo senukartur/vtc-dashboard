@@ -1,5 +1,6 @@
 import { type Connection, createConnection, type PoolConnection } from "mysql2/promise";
 import { type DatabaseSettings, requiredSqlModes } from "../index.js";
+import { observeDatabaseOperation } from "./operation-context.js";
 
 export function connectionOptions(settings: DatabaseSettings) {
   return {
@@ -24,16 +25,22 @@ export function discard(connection: Connection | PoolConnection): void {
 }
 
 export async function initializeSession(connection: Connection): Promise<void> {
-  await connection.query({
-    sql: "SET SESSION time_zone = '+00:00', sql_mode = ?, transaction_isolation = 'REPEATABLE-READ', autocommit = 1",
-    values: [requiredSqlModes.join(",")],
-    timeout: 1000,
-  });
-  await connection.query({ sql: "SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci", timeout: 1000 });
+  await observeDatabaseOperation("session_configuration", 1000, () =>
+    connection.query({
+      sql: "SET SESSION time_zone = '+00:00', sql_mode = ?, transaction_isolation = 'REPEATABLE-READ', autocommit = 1",
+      values: [requiredSqlModes.join(",")],
+      timeout: 1000,
+    }),
+  );
+  await observeDatabaseOperation("session_charset", 1000, () =>
+    connection.query({ sql: "SET NAMES utf8mb4 COLLATE utf8mb4_0900_ai_ci", timeout: 1000 }),
+  );
 }
 
 export async function dedicatedConnection(settings: DatabaseSettings): Promise<Connection> {
-  const connection = await createConnection(connectionOptions(settings));
+  const connection = await observeDatabaseOperation("connection_open", 1000, () =>
+    createConnection(connectionOptions(settings)),
+  );
   try {
     await initializeSession(connection);
     return connection;
