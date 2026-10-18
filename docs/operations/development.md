@@ -12,6 +12,7 @@ Review this package independently before provisioning. Keep the completed worksh
 | Initial measured trial | Basic Regular 1 CPU / 1 GiB / 25 GiB: public USD 6/month plus 20% weekly backup (USD 1.20), USD 7.20 before tax/extras; verify actual checkout |
 | Fallback | If actual OOM, sustained swapping, latency or recovery peaks fail acceptance, review 2 GiB / 1 CPU at public USD 12 + USD 2.40 backups before tax/extras, within the ceiling; export first and prefer RAM/CPU-only resize preserving disk |
 | Runtime | Supported Ubuntu LTS with Python 3.11+, maintained updates, Docker Engine/Compose, CA certificates/sudo; images retain Node 24.22.0 / pnpm 12.14.0 / MySQL 8.4.11 |
+| Image store | Verify the current classic CI artifact against classic `overlay2` staging before enabling delivery; complete the [image-store prerequisite](#image-store-compatibility-before-first-release) |
 | DNS/TLS | Owner-controlled subdomain resolves to the new VM; public TCP 80/443 only at proxy; independently verify ACME HTTPS |
 | Access | Separate root/operator channel; deploy key restricted to fixed receiver, exact sudo entry, no Docker group/forwarding/PTY; independently compare host-key fingerprint through provider console before storing known_hosts |
 | Firewall | Restrict SSH according to reviewed operator/CI access policy; app, SQL and probe have no published ports; preserve independent console recovery |
@@ -19,6 +20,40 @@ Review this package independently before provisioning. Keep the completed worksh
 | Recovery copy | Verify available private owner-local encrypted storage at zero incremental cost for the initial synthetic trial, with key stored independently; no paid storage add-on assumed |
 
 Public sources: [Droplet pricing](https://www.digitalocean.com/pricing/droplets), [backup pricing](https://docs.digitalocean.com/products/backups/details/pricing/). Trial credit does not reduce recurring cost. Disk growth is not trivially reversible. A local container cap does not prove that a 1 GiB VM works.
+
+## Image-store compatibility before first release
+
+Fresh Docker Engine 29 installations default to the [containerd image store](https://docs.docker.com/engine/storage/containerd/), rather than the [classic storage drivers](https://docs.docker.com/engine/storage/drivers/). The selected pairing for this transport is the current classic CI artifact store and classic `overlay2` staging. This is an image-identity compatibility prerequisite, not a claim that the application cannot use containerd or a request to change local Docker Desktop/development storage.
+
+The receiver requires the loaded image ID to equal the trusted CI manifest's ID exactly. An initial classic-to-containerd trial exposed different IDs despite matching revision labels/environment and was rejected before application/database creation. Those identifier semantics are an observation of that trial, not a universal cryptographic identity claim. Keep the mismatch guard unchanged: labels/tags are not a fallback, and homogeneous local rehearsal does not prove cross-store portability.
+
+1. Keep deployment disabled and maintenance in place; wait for/acquire the operations lock. On **only the separately approved new VM**, privately prove there is no accepted release/current metadata, no database/evidence content in any volume or bind mount, and no running **or stopped** containers (`sudo docker ps -a`). Review the complete image/volume/network and on-disk store inventory; only approved new-VM resources may be present. If data, another workload or ownership is uncertain, stop for a reviewed backup/restore or migration decision and rehearsal. Do not apply this empty-host procedure to a populated host.
+2. Preserve independent operator/console access and privately back up existing daemon configuration and service options. Merge the following feature into a **full private candidate** for `/etc/docker/daemon.json` (or the configured alternative); preserve every other setting and feature. This fragment is not a replacement configuration:
+
+   ```json
+   {
+     "features": {
+       "containerd-snapshotter": false
+     }
+   }
+   ```
+
+3. Independently review the concrete merged candidate and reconcile daemon command-line/service flags. Validate the full candidate without starting another daemon; a successful JSON parse alone is insufficient. See the [daemon configuration reference](https://docs.docker.com/reference/cli/dockerd/#daemon-configuration-file).
+
+   ```sh
+   sudo dockerd --validate --config-file PRIVATE_CANDIDATE_JSON
+   ```
+
+4. Only after the empty-host proof, review and validation, the root operator installs that reviewed candidate at the existing daemon configuration path and restarts Docker. Keep raw configuration/readbacks, actual IDs and host details private:
+
+   ```sh
+   sudo systemctl restart docker
+   sudo docker info --format '{{.Driver}}'
+   sudo docker info --format '{{json .DriverStatus}}'
+   ```
+
+   Require `Driver` = `overlay2`, no `io.containerd.snapshotter.v1` driver-type marker, and continued absence of containers/accepted state/data before delivery. On restart/readback failure, keep deployment disabled and restore the validated prior configuration through the independent operator channel. Switching stores can hide the other store's images/containers while retaining them on disk; reverting the configuration restores that view. Do not prune, delete volumes or remove either store's files as part of this operation.
+5. Revalidate the exact successful-CI artifact through the normal protected automatic delivery and then historical manual redeployment, followed by all persistence/recovery/isolated-restore and hosted acceptance cases below. The loaded-ID guard must pass unchanged; mismatch remains a failed deployment even when CI passed. Every Docker upgrade, CI runner/image-store change or transport change requires renewed source/target identity proof. Setup/readbacks alone do not complete VTC-011. Node/MySQL pins, encryption, grants and durability remain unchanged; no script purchases resources or changes host storage automatically.
 
 ## Install and enable the single path
 
