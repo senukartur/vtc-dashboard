@@ -9,7 +9,7 @@ import {
   type TxContext,
   type UnitOfWork,
 } from "@vtc/db";
-import { sql, user } from "@vtc/db/identity-schema";
+import { session, sql, user } from "@vtc/db/identity-schema";
 import type { Connection } from "mysql2/promise";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -393,4 +393,171 @@ test("healthy native sign-in succeeds; wrong and absent credentials retain the s
   expect(absent.statusCode).toBe(401);
   expect(invalid.json().error).toEqual(absent.json().error);
   expect(invalid.json().error.retryable).toBe(false);
+});
+
+test("logout never acknowledges a swallowed nonfatal native delete failure; owned revocation rolls back then succeeds", async () => {
+  const signedIn = await loginRequest(unit);
+  const cookie = signedIn.cookies.map((item) => `${item.name}=${item.value}`).join("; ");
+  const sessionValue = signedIn.cookies.find((item) => item.name === "vtc_dev_session")?.value;
+  const decoratedCookie = `${cookie}; vtc_dev_session =${sessionValue}; VTC_DEV_SESSION=synthetic; better-auth.session_data.0=synthetic; better-auth.session_data.1=synthetic`;
+  const other = await loginRequest(unit);
+  const otherCookie = other.cookies.map((item) => `${item.name}=${item.value}`).join("; ");
+  const failedWrites: string[] = [];
+  const failures: string[] = [];
+  const contexts = new WeakMap<TxContext, { revocation: boolean }>();
+  let afterRevocationCalls = 0;
+  let faultEnabled = true;
+  const faultClient = (tx: TxContext): TransactionClient =>
+    new Proxy(unit.client(tx), {
+      get(target, key, receiver) {
+        const original: unknown = Reflect.get(target, key, receiver);
+        if (key !== "delete") return original;
+        return (table: unknown) => {
+          if (faultEnabled && table === session)
+            return {
+              // A real nonfatal MySQL statement error on this caller connection;
+              // no triggers, elevated grants or global server settings required.
+              where: () =>
+                unit
+                  .client(tx)
+                  .execute(
+                    sql`DELETE FROM identity_sessions WHERE synthetic_private_missing_column = 1`,
+                  ),
+            };
+          return Reflect.apply(original as (table: unknown) => unknown, target, [table]);
+        };
+      },
+    });
+  const subject: UnitOfWork = {
+    close: async () => {},
+    run: (command) =>
+      unit.run(async (tx) => {
+        contexts.set(tx, { revocation: false });
+        const marker = randomUUID();
+        await unit
+          .client(tx)
+          .execute(sql`INSERT INTO synthetic_availability_events VALUES (${marker})`);
+        try {
+          return await command(tx);
+        } catch (error) {
+          let cause = error;
+          for (let depth = 0; depth < 8 && cause && typeof cause === "object"; depth++) {
+            if ("code" in cause && cause.code === "ER_BAD_FIELD_ERROR") {
+              failures.push(cause.code);
+              failedWrites.push(marker);
+            }
+            cause = "cause" in cause ? cause.cause : null;
+          }
+          throw error;
+        }
+      }),
+    client(tx) {
+      const target = faultClient(tx);
+      return new Proxy(target, {
+        get(client, key, receiver) {
+          const original: unknown = Reflect.get(client, key, receiver);
+          if (!["select", "insert", "update", "delete", "execute"].includes(String(key)))
+            return original;
+          return (...args: unknown[]) => {
+            const state = contexts.get(tx);
+            if (state?.revocation) {
+              afterRevocationCalls++;
+              throw new Error("SYNTHETIC_POST_REVOCATION_DATABASE_ACCESS");
+            }
+            if (key === "delete" && args[0] === session && state) state.revocation = true;
+            return Reflect.apply(original as (...input: unknown[]) => unknown, client, args);
+          };
+        },
+      });
+    },
+  };
+  const app = await createApp({
+    checkReadiness: async () => true,
+    identity: createIdentity(subject, config),
+  });
+  const logs: string[] = [];
+  const output = vi.spyOn(console, "error").mockImplementation((value: unknown) => {
+    logs.push(String(value));
+  });
+  try {
+    // The real pinned native endpoint swallows the real statement failure and
+    // commits a usable transaction without revoking this captured session.
+    const native = await unit.run(async (tx) => {
+      const response = await engineModule.engine(faultClient(tx), config).api.signOut({
+        headers: new Headers({ cookie }),
+        asResponse: true,
+      });
+      // The same transaction is still usable after the swallowed SQL error.
+      await unit.client(tx).execute(sql`SELECT 1`);
+      return response;
+    });
+    expect(native.status).toBe(200);
+    const me = (value: string) => app.inject({ url: "/api/v1/me", headers: { cookie: value } });
+    expect((await me(cookie)).statusCode).toBe(200);
+    const csrf = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie } });
+    expect(csrf.statusCode).toBe(200);
+    const logout = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/auth/logout",
+        headers: {
+          CoOkIe: decoratedCookie,
+          origin: config.origin,
+          "x-csrf-token": csrf.json().data.token,
+        },
+      });
+    const denied = await logout();
+    expect(denied.statusCode).toBe(500);
+    expect(denied.json().error).toEqual({
+      code: "INTERNAL_ERROR",
+      messageKey: "errors.internal_error",
+      retryable: false,
+    });
+    expect(denied.headers["set-cookie"]).toBeUndefined();
+    expect(failures).toEqual(["ER_BAD_FIELD_ERROR"]);
+    const [rolledBack] = await control.query(
+      "SELECT id FROM synthetic_availability_events WHERE id = ?",
+      [failedWrites[0]],
+    );
+    expect(rolledBack).toEqual([]);
+    expect((await me(cookie)).statusCode).toBe(200);
+    faultEnabled = false;
+    const revoked = await logout();
+    expect(revoked.statusCode).toBe(200);
+    expect(Array.isArray(revoked.headers["set-cookie"])).toBe(true);
+    expect(
+      revoked.cookies.some((item) => item.name === "vtc_dev_session" && item.value === ""),
+    ).toBe(true);
+    for (const chunk of ["better-auth.session_data.0", "better-auth.session_data.1"])
+      expect(revoked.cookies.some((item) => item.name === chunk && item.value === "")).toBe(true);
+    expect((await me(cookie)).statusCode).toBe(401);
+    expect((await me(otherCookie)).statusCode).toBe(200);
+    expect(afterRevocationCalls).toBe(0);
+    expect(logs.join("").includes("SYNTHETIC_PRIVATE")).toBe(false);
+    expect(denied.body.includes("SYNTHETIC_PRIVATE")).toBe(false);
+  } finally {
+    await app.close();
+    output.mockRestore();
+  }
+});
+
+test("owned logout retains exact native production host-cookie expiry", async () => {
+  const production = createIdentity(unit, {
+    ...config,
+    origin: "https://company.example.invalid",
+    production: true,
+  });
+  const logged = await production.login(credential.email, credential.password);
+  const cookie = logged.cookies.map((item) => item.split(";", 1)[0]).join("; ");
+  const headers = new Headers({ COOKIE: cookie });
+  const actor = await production.authenticate(headers);
+  const result = await production.logout(actor, headers);
+  const expired = result.cookies.find((item) => item.startsWith("__Host-vtc_session="));
+  expect(expired?.includes("Max-Age=0")).toBe(true);
+  expect(expired?.includes("HttpOnly")).toBe(true);
+  expect(expired?.includes("Secure")).toBe(true);
+  expect(expired?.includes("Path=/")).toBe(true);
+  expect(expired?.includes("SameSite=Lax")).toBe(true);
+  expect(expired?.includes("Domain=")).toBe(false);
+  await expect(production.authenticate(headers)).rejects.toMatchObject({ statusCode: 401 });
 });

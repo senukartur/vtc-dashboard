@@ -662,11 +662,26 @@ export function createIdentity(
       return run(async (tx) => {
         const current = await lockCompany(tx),
           row = await checkActor(tx, actor, current);
-        const response = await engine(client(tx), config).api.signOut({
-          headers,
+        await client(tx)
+          .delete(session)
+          .where(and(eq(session.id, actor.sessionId), eq(session.userId, actor.userId)));
+        const native = engine(client(tx), config);
+        const cookieHeaders = new Headers(headers);
+        const cookieName = (await native.$context).authCookies.sessionToken.name;
+        // Native 1.7.10 swallows persistence failures. Use only its cookie expiry
+        // path: without its session token it performs no database/provider work.
+        // Retain other cookies so the native helper also expires cache chunks.
+        const retained = (cookieHeaders.get("cookie") ?? "")
+          .split(";")
+          .filter((part) => part.split("=", 1)[0]?.trim() !== cookieName)
+          .join(";");
+        if (retained.trim()) cookieHeaders.set("cookie", retained);
+        else cookieHeaders.delete("cookie");
+        const response = await native.api.signOut({
+          headers: cookieHeaders,
           asResponse: true,
         });
-        if (!response.ok) throw identityError(401);
+        if (!response.ok) throw new Error("AUTH_ENGINE_COOKIE_CLEAR_FAILED");
         return { id: actor.userId, version: row.version, cookies: response.headers.getSetCookie() };
       });
     },
