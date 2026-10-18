@@ -20,6 +20,8 @@ Every COMMIT-phase failure throws the root-exported `TransactionCommitOutcomeUnk
 
 VTC-013 focused identity workloads reproduced one-second COMMIT receipt timeouts while the same isolated MySQL 8.4.11 server recorded a COMMIT execution maximum of approximately 2.072 seconds. The aggregate does not identify the failed transaction or establish a storage cause. The five-second receipt budget gives bounded technical headroom over that observed server latency; it is not a throughput or production-latency guarantee. START/ROLLBACK, readiness, pool capacity and automatic-retry policy are unchanged. VTC-011 staging, VTC-039 operational hardening and VTC-041 final-host measurements still own capacity and latency proof; further timeout changes require coordinated failure/recovery evidence.
 
+For authorized internal diagnostics, `databaseFailureContext(error)` returns a copy of fixed operation, configured client `wireDeadlineMs` and observed `elapsedMs`, or `null` when unavailable. It covers connection opening, the two session-initialization queries and individual migration lock/baseline/journal/DDL queries. Private WeakMap metadata preserves the exact original error/cause and its first captured operation; the accessor can find that context through bounded cause traversal. It adds no enumerable error fields or production logging. These client timings do not identify server execution time, cancellation or durable outcome. Test sanitizers may retain this fixed context before replacing private fixture errors; never serialize the native error, SQL, parameters or connection settings. This observability change does not change any deadline or establish the cause of a historical timeout.
+
 ## Values and references
 
 | Storage/helper | Contract |

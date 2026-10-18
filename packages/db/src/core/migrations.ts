@@ -4,6 +4,7 @@ import { readMigrationFiles } from "drizzle-orm/migrator";
 import type { RowDataPacket } from "mysql2/promise";
 import { type DatabaseSettings, expectedMysqlVersion, requiredSqlModes } from "../index.js";
 import { dedicatedConnection, discard } from "./session.js";
+import { observeDatabaseOperation } from "./operation-context.js";
 
 export const migrationFolder = fileURLToPath(new URL("../../migrations/", import.meta.url));
 
@@ -47,16 +48,20 @@ export async function runMigrations(
   const connection = await dedicatedConnection(settings);
   const lockName = migrationLockName(settings.database);
   try {
-    const [lock] = await connection.query<RowDataPacket[]>({
-      sql: "SELECT GET_LOCK(?, ?) AS acquired",
-      values: [lockName, seconds],
-      timeout: (seconds + 2) * 1000,
-    });
+    const [lock] = await observeDatabaseOperation("migration_lock", (seconds + 2) * 1000, () =>
+      connection.query<RowDataPacket[]>({
+        sql: "SELECT GET_LOCK(?, ?) AS acquired",
+        values: [lockName, seconds],
+        timeout: (seconds + 2) * 1000,
+      }),
+    );
     if (String(lock[0]?.acquired) !== "1") throw new Error("MIGRATION_LOCK_UNAVAILABLE");
-    const [baseline] = await connection.query<RowDataPacket[]>({
-      sql: "SELECT VERSION() AS version, @@default_storage_engine AS engine, @@character_set_database AS charsetName, @@collation_database AS collationName, @@session.sql_mode AS sqlMode, @@session.time_zone AS timezone, @@session.transaction_isolation AS isolationLevel",
-      timeout: 1000,
-    });
+    const [baseline] = await observeDatabaseOperation("migration_baseline", 1000, () =>
+      connection.query<RowDataPacket[]>({
+        sql: "SELECT VERSION() AS version, @@default_storage_engine AS engine, @@character_set_database AS charsetName, @@collation_database AS collationName, @@session.sql_mode AS sqlMode, @@session.time_zone AS timezone, @@session.transaction_isolation AS isolationLevel",
+        timeout: 1000,
+      }),
+    );
     const row = baseline[0];
     if (
       !row ||
@@ -70,15 +75,21 @@ export async function runMigrations(
     ) {
       throw new Error("MIGRATION_BASELINE_MISMATCH");
     }
-    await connection.query({ sql: "SET SESSION autocommit = 1", timeout: 1000 });
-    await connection.query({
-      sql: "CREATE TABLE IF NOT EXISTS _vtc_migrations (version BIGINT NOT NULL PRIMARY KEY, hash BINARY(64) NOT NULL, state ENUM('applying','applied') NOT NULL, started_at DATETIME(3) NOT NULL, applied_at DATETIME(3) NULL) ENGINE=InnoDB",
-      timeout: statementTimeout,
-    });
-    const [history] = await connection.query<RowDataPacket[]>({
-      sql: "SELECT version, hash, state FROM _vtc_migrations ORDER BY version",
-      timeout: 1000,
-    });
+    await observeDatabaseOperation("migration_autocommit", 1000, () =>
+      connection.query({ sql: "SET SESSION autocommit = 1", timeout: 1000 }),
+    );
+    await observeDatabaseOperation("migration_journal_create", statementTimeout, () =>
+      connection.query({
+        sql: "CREATE TABLE IF NOT EXISTS _vtc_migrations (version BIGINT NOT NULL PRIMARY KEY, hash BINARY(64) NOT NULL, state ENUM('applying','applied') NOT NULL, started_at DATETIME(3) NOT NULL, applied_at DATETIME(3) NULL) ENGINE=InnoDB",
+        timeout: statementTimeout,
+      }),
+    );
+    const [history] = await observeDatabaseOperation("migration_history_read", 1000, () =>
+      connection.query<RowDataPacket[]>({
+        sql: "SELECT version, hash, state FROM _vtc_migrations ORDER BY version",
+        timeout: 1000,
+      }),
+    );
     for (const [index, applied] of history.entries()) {
       const expected = migrations[index];
       if (
@@ -93,19 +104,26 @@ export async function runMigrations(
     }
     let count = 0;
     for (const migration of migrations.slice(history.length)) {
-      await connection.query({
-        sql: "INSERT INTO _vtc_migrations (version, hash, state, started_at) VALUES (?, ?, 'applying', UTC_TIMESTAMP(3))",
-        values: [String(migration.folderMillis), Buffer.from(migration.hash, "ascii")],
-        timeout: 1000,
-      });
+      await observeDatabaseOperation("migration_journal_insert", 1000, () =>
+        connection.query({
+          sql: "INSERT INTO _vtc_migrations (version, hash, state, started_at) VALUES (?, ?, 'applying', UTC_TIMESTAMP(3))",
+          values: [String(migration.folderMillis), Buffer.from(migration.hash, "ascii")],
+          timeout: 1000,
+        }),
+      );
       for (const statement of migration.sql) {
-        if (statement.trim()) await connection.query({ sql: statement, timeout: statementTimeout });
+        if (statement.trim())
+          await observeDatabaseOperation("migration_statement", statementTimeout, () =>
+            connection.query({ sql: statement, timeout: statementTimeout }),
+          );
       }
-      await connection.query({
-        sql: "UPDATE _vtc_migrations SET state = 'applied', applied_at = UTC_TIMESTAMP(3) WHERE version = ? AND state = 'applying'",
-        values: [String(migration.folderMillis)],
-        timeout: 1000,
-      });
+      await observeDatabaseOperation("migration_journal_finalize", 1000, () =>
+        connection.query({
+          sql: "UPDATE _vtc_migrations SET state = 'applied', applied_at = UTC_TIMESTAMP(3) WHERE version = ? AND state = 'applying'",
+          values: [String(migration.folderMillis)],
+          timeout: 1000,
+        }),
+      );
       count++;
     }
     return count;

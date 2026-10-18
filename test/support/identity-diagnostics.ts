@@ -1,4 +1,4 @@
-import type { UnitOfWork } from "@vtc/db";
+import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 
@@ -36,10 +36,17 @@ const codes = new Set([
 
 // Never serialize the exception: driver/repository messages may contain private SQL/inputs.
 export function safeIdentityFailure(error: unknown) {
-  const result: { statusCode?: number; codes: string[]; category: string } = {
+  const result: {
+    statusCode?: number;
+    codes: string[];
+    category: string;
+    databaseOperation?: NonNullable<ReturnType<typeof databaseFailureContext>>;
+  } = {
     codes: [],
     category: "unclassified",
   };
+  const context = databaseFailureContext(error);
+  if (context) result.databaseOperation = context;
   const seen = new Set<object>();
   let current = error;
   for (

@@ -13,6 +13,7 @@ import {
   createUnitOfWork,
   decimal38_18,
   decimalColumn,
+  databaseFailureContext,
   idColumn,
   migrationLockName,
   newId,
@@ -127,6 +128,7 @@ async function cooperatingMigrations(
               error instanceof Error && Object.hasOwn(categories, error.message)
                 ? categories[error.message]
                 : "unclassified",
+            databaseOperation: databaseFailureContext(error),
             codes: [
               "PROTOCOL_SEQUENCE_TIMEOUT",
               "ETIMEDOUT",

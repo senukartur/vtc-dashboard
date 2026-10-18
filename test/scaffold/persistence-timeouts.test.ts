@@ -207,7 +207,7 @@ async function probe(phase: Phase, body: string) {
       "--eval",
       `
 import assert from 'node:assert/strict';
-import { createUnitOfWork, runMigrations, TransactionCommitOutcomeUnknownError, TRANSACTION_COMMIT_OUTCOME_UNKNOWN } from '@vtc/db';
+import { createUnitOfWork, runMigrations, databaseFailureContext, TransactionCommitOutcomeUnknownError, TRANSACTION_COMMIT_OUTCOME_UNKNOWN } from '@vtc/db';
 const settings = { host: '127.0.0.1', port: Number(process.env.FIXTURE_PORT),
   database: 'synthetic_database', user: 'synthetic_user', password: 'NONFUNCTIONAL_EXAMPLE_ONLY' };
 ${body}
@@ -419,7 +419,14 @@ for (const phase of ["migration-baseline", "migration-statement", "migration-jou
     const counts = await probe(
       phase,
       `
-await assert.rejects(runMigrations(settings, { statementTimeoutMs: 100 }));
+await assert.rejects(runMigrations(settings, { statementTimeoutMs: 100 }), error => {
+  const context = databaseFailureContext(error);
+  assert.equal(context?.operation, '${phase === "migration-baseline" ? "migration_baseline" : phase === "migration-statement" ? "migration_statement" : "migration_journal_finalize"}');
+  assert.equal(context.wireDeadlineMs, ${phase === "migration-statement" ? 100 : 1000});
+  assert.ok(context.elapsedMs >= ${phase === "migration-statement" ? 80 : 800});
+  assert.deepEqual(Object.keys(context).sort(), ['elapsedMs', 'operation', 'wireDeadlineMs']);
+  return true;
+});
 `,
     );
     assert.equal(counts.stalls, 1);
