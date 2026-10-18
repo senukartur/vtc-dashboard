@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
   }
   return {
     plugins: [react(), tailwind()],
+    resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
     server: {
       host: env.WEB_HOST ?? "127.0.0.1",
       port,

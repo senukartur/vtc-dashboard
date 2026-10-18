@@ -84,12 +84,12 @@ Every successful profile must report `OWNERSHIP_PROFILE_WRITE_PASS`; both root p
 | Command | Actual evidence |
 | --- | --- |
 | `pnpm check` | Generated contracts, formatting/lint/types and the existing Node scaffold checks, including all reviewed browser structural fixtures |
-| `pnpm test:unit` | Vitest: deterministic helpers, local doubles, retry boundaries and endpoint/environment guards; database independent |
+| `pnpm test:unit` | Vitest: deterministic helpers, local doubles, retry boundaries and endpoint/environment guards, lossless UI formatting and schema-validated foundation responses; database independent |
 | `pnpm test:contracts` | Vitest/Ajv 2020-12: all six canonical frozen telemetry examples and negative structural mutations |
 | `pnpm test:integration` | Vitest with real MySQL: unique-key races, durable synthetic leases/reconnect/reclaim, actual deadlock/retry, rollback/audit and ownership/grant denial |
 | `pnpm db:test` | Existing Node persistence lane, separately allocated: twelve reported tests including empty/replay/prior migration, sentinel/history, exact values and transaction boundaries |
 | `pnpm db:recovery` | Existing Node lane, separately allocated: two partial-DDL/timeout recovery rehearsals |
-| `pnpm test:e2e` | Playwright: one real built SPA/Fastify/MySQL smoke flow on desktop and mobile Chromium |
+| `pnpm test:e2e` | Playwright: real built SPA/Fastify/MySQL smoke, separately controlled negative readiness cases, and synthetic foundation journeys on desktop, tablet and mobile Chromium |
 | `pnpm test:failure-reporting` | Runs excluded deliberate assertions in each new runner and checks assertion identity plus exit 1; proves aggregate child failure propagation |
 | `pnpm test:all` | Sequential allocation-isolation proof, six lanes, then deliberate failure-reporting proof; fails closed when a child fails |
 
@@ -103,7 +103,7 @@ The provisioner alone receives the disposable server's admin credential. Before 
 
 The aggregate creates two simultaneous allocations with distinct sentinel values, proves each credential cannot read the other's real table, and rejects reuse of an occupied allocation without changing its sentinel or allocation-file bytes. Cleanup tracks only confirmed schema/user creation and exclusive allocation-file creation. A failed collision never drops a pre-existing schema/user or removes another allocation's file. Every appropriate cleanup step is attempted despite earlier failures, including owned-file removal, admin close and forced transport destruction; errors retain only fixed step categories. Integration also verifies immediate suite-lock contention and denial of global database/user access. Every invocation starts with a fresh MySQL volume; lanes have no shared mutable schema. Production migration SQL/journal/snapshot are unchanged. Empty/prior migration and dirty-DDL recovery remain separate Node lanes instead of duplicating that suite in Vitest.
 
-These are accident guards for cooperating test code, not a sandbox against a developer who forges configuration or rewrites the harness. A synthetic database name alone is never evidence that deletion is safe. The real runtime network boundary and schema grants provide independent containment. The runner starts each child with a small environment allowlist; provider/mail credentials and the disposable admin password are excluded. Browser contexts block unexpected origins and service workers; no HTTP responses are mocked. Real mail/identity/provider clients are absent from these tests.
+These are accident guards for cooperating test code, not a sandbox against a developer who forges configuration or rewrites the harness. A synthetic database name alone is never evidence that deletion is safe. The real runtime network boundary and schema grants provide independent containment. The runner starts each child with a small environment allowlist; provider/mail credentials and the disposable admin password are excluded. Browser contexts block unexpected origins and service workers. The real MySQL smoke mocks no HTTP response; supplemental VTC-012 readiness cases explicitly control only /health/ready to exercise pending/503/transport/invalid-response recovery. Real mail/identity/provider clients are absent from these tests.
 
 ## Add tests
 
@@ -122,3 +122,5 @@ Implementation feedback and exact-candidate independent verification are recorde
 [CI configuration (VTC-009)](ci.md) now wraps this same isolated runner; hosted execution evidence is recorded separately. Enforced review (VTC-010), staging (VTC-011), feature workflows/adapters, integrated journeys (VTC-040), and Hostland/capacity/backup/restore (VTC-041) remain pending. Local checks and independent review do not imply merge, Done or deployment.
 
 Primary references: [Vitest setup files](https://vitest.dev/config/setupfiles.html), [Playwright web server](https://playwright.dev/docs/test-webserver), [Playwright Docker guidance](https://playwright.dev/docs/docker), [Compose internal networks](https://docs.docker.com/reference/compose-file/networks/), [Ajv dialects](https://ajv.js.org/guide/schema-language.html), and [MySQL locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html).
+
+VTC-012 synthetic [foundation journeys](../../test/e2e/foundation.spec.ts) save success screenshots through Playwright output paths at 390x844, 768x1024 and 1280x800 in RU/EN. They cover both shells, long labels, complete content states, dialogs and mobile menus. These ignored captures require actual rendered review; DOM assertions alone do not establish visual acceptance. See the [foundation guide](ui-foundation.md) for scope, provenance and live integration boundaries.

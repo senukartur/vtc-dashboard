@@ -30,7 +30,7 @@ docker compose up --build --watch
 
 Open [the local UI](http://127.0.0.1:5173). Compose Watch synchronizes app/package source while the API, TypeScript packages and Vite watch for changes. Dependency/contract/tooling changes trigger a rebuild. Container dependencies are not shared with host `node_modules`. Keep the foreground watch command running; `docker compose up --build -d --wait` is an alternative without live synchronization, followed by `docker compose watch` in a foreground terminal.
 
-The UI is a bilingual development connection screen. Authentication, company pages, jobs and seed accounts remain pending. MySQL starts with an empty application database; VTC-007 adds an explicit audit-only migration and transaction/value primitives through the [persistence commands and recovery runbook](docs/development/persistence.md). Startup never migrates or seeds. [Fixture ownership](test/fixtures/README.md) separates synthetic tests from runtime data.
+The UI retains its bilingual real connection screen at `/`. Explicitly synthetic public/member previews at `/foundation` and `/foundation/member` demonstrate the [UI and localization foundation](docs/development/ui-foundation.md). Authentication, live company pages, jobs and seed accounts remain pending. MySQL starts with an empty application database; VTC-007 adds an explicit audit-only migration and transaction/value primitives through the [persistence commands and recovery runbook](docs/development/persistence.md). Startup never migrates or seeds. [Fixture ownership](test/fixtures/README.md) separates synthetic tests from runtime data.
 
 ```sh
 docker compose exec app pnpm check
