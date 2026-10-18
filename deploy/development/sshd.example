@@ -1,4 +1,7 @@
-# Validate continued independent console access and sshd -t before reloading.
+# Append this complete template at EOF of a global-only base sshd_config.
+# Reconcile existing Match blocks separately; never use an early Include.
+# Validate the full candidate and independent operator access before reload.
+PermitUserEnvironment no
 Match User vtc-deploy
   AuthenticationMethods publickey
   PasswordAuthentication no
@@ -8,4 +11,3 @@ Match User vtc-deploy
   X11Forwarding no
   PermitTTY no
   PermitTunnel no
-  PermitUserEnvironment no
