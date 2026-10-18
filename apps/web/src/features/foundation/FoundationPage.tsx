@@ -66,7 +66,12 @@ function TripList({ response, locale }: { response: FoundationMocks["trips"]; lo
                 {formatQuantity(trip.actualDistanceM, "km", locale)}
               </td>
               <td data-label={t("status")}>
-                <Badge>{t(trip.decision === "accepted" ? "accepted" : "unassessed")}</Badge>
+                <Badge
+                  className={trip.decision === "accepted" ? "badge-accepted" : "badge-neutral"}
+                >
+                  <span aria-hidden="true">{trip.decision === "accepted" ? "✓" : "—"}</span>
+                  {t(trip.decision === "accepted" ? "accepted" : "unassessed")}
+                </Badge>
               </td>
             </tr>
           ))}

@@ -35,10 +35,16 @@ export function AnalyticsExample({
             margin={{ left: 8, right: 8, top: 10 }}
           >
             <CartesianGrid vertical={false} stroke="var(--border)" />
-            <XAxis dataKey="date" tickLine={false} axisLine={false} />
+            <XAxis
+              dataKey="date"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: "var(--muted)" }}
+            />
             <Bar
               dataKey="value"
-              fill="var(--accent)"
+              fill="var(--chart)"
+              stroke="var(--focus)"
               radius={[4, 4, 0, 0]}
               isAnimationActive={false}
               maxBarSize={84}

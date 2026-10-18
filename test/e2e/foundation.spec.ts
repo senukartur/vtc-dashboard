@@ -1,4 +1,5 @@
-import type { Page, TestInfo } from "@playwright/test";
+import { createHash } from "node:crypto";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./support/fixtures.ts";
 
 async function capture(page: Page, info: TestInfo, name: string) {
@@ -13,6 +14,47 @@ async function noOverflow(page: Page) {
   );
 }
 
+async function contrast(
+  locator: Locator,
+  pseudo?: string,
+  property: "color" | "borderTopColor" = "color",
+  outside = false,
+) {
+  return locator.evaluate(
+    (element, options) => {
+      const rgba = (value: string) => {
+        const numbers = value.match(/[\d.]+/g)?.map(Number) ?? [];
+        return [numbers[0] ?? 0, numbers[1] ?? 0, numbers[2] ?? 0, numbers[3] ?? 1];
+      };
+      const mix = (front: number[], back: number[]) =>
+        [0, 1, 2].map(
+          (index) =>
+            (front[index] ?? 0) * (front[3] ?? 1) + (back[index] ?? 0) * (1 - (front[3] ?? 1)),
+        );
+      const ancestors: Element[] = [];
+      for (let node: Element | null = element; node; node = node.parentElement)
+        ancestors.unshift(node);
+      let background = [255, 255, 255];
+      for (const node of ancestors)
+        if (!options.outside || node !== element)
+          background = mix(rgba(getComputedStyle(node).backgroundColor), background);
+      const foreground = mix(
+        rgba(getComputedStyle(element, options.pseudo)[options.property]),
+        background,
+      );
+      const luminance = (color: number[]) =>
+        color
+          .map((value) => value / 255)
+          .map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+          .reduce((sum, value, index) => sum + value * ([0.2126, 0.7152, 0.0722][index] ?? 0), 0);
+      const a = luminance(foreground),
+        b = luminance(background);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    },
+    { pseudo, property, outside },
+  );
+}
+
 for (const route of ["/foundation", "/foundation/member"]) {
   for (const locale of ["ru", "en"]) {
     test(`synthetic rendered ${route} ${locale}: layouts, long labels and complete states`, async ({
@@ -22,6 +64,7 @@ for (const route of ["/foundation", "/foundation/member"]) {
       page.on("pageerror", () => errors.push("page error"));
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto(route);
+      await page.evaluate(() => document.fonts.ready);
       await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption(locale);
       const ru = locale === "ru";
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
@@ -116,7 +159,7 @@ for (const route of ["/foundation", "/foundation/member"]) {
 
 test("synthetic local form preserves input, prevents duplicate pending submissions and confirms locally", async ({
   page,
-}) => {
+}, info) => {
   await page.goto("/foundation");
   await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
   const submit = page.getByRole("button", { name: "Preview confirmation", exact: true });
@@ -124,6 +167,10 @@ test("synthetic local form preserves input, prevents duplicate pending submissio
   await submit.click();
   await expect(page.getByRole("alert")).toHaveText("Enter a note");
   await expect(note).toBeFocused();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(note).toBeFocused();
+  await capture(page, info, "keyboard-invalid-form-focus");
   await note.fill("Synthetic route inspection");
   await page.getByRole("checkbox", { name: "Simulate a recoverable failure" }).check();
   await submit.click();
@@ -144,10 +191,11 @@ test("synthetic local form preserves input, prevents duplicate pending submissio
 
 test("synthetic keyboard dialogs, skip link, navigation and locale preserve canonical selection", async ({
   page,
-}) => {
+}, info) => {
   await page.goto("/foundation");
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Перейти к содержимому" })).toBeFocused();
+  await capture(page, info, "keyboard-skip-focus");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("main")).toBeFocused();
   const city = page.getByRole("combobox", { name: "Выбор из каталога", exact: true });
@@ -167,6 +215,7 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
   await expect(close).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(connection).toBeFocused();
+  await capture(page, info, "keyboard-dialog-focus");
   await page.keyboard.press("Shift+Tab");
   await expect(close).toBeFocused();
   await page.keyboard.press("Escape");
@@ -174,8 +223,11 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
   await expect(trigger).toBeFocused();
   const menu = page.getByRole("button", { name: "Open navigation", exact: true });
   if (await menu.isVisible()) {
-    await menu.click();
+    await menu.focus();
+    await page.keyboard.press("Enter");
     const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+    await page.keyboard.press("Tab");
+    await capture(page, info, "keyboard-public-menu-focus");
     await navigation.getByRole("link", { name: "Member preview", exact: true }).click();
     await expect(navigation).toHaveCount(0);
     await expect(menu).toBeFocused();
@@ -186,7 +238,12 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
       .click();
   }
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Member workspace composition");
-  if (await menu.isVisible()) await menu.click();
+  if (await menu.isVisible()) {
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab");
+    await capture(page, info, "keyboard-member-menu-focus");
+  }
   await expect(page.getByRole("link", { name: "Member preview", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
@@ -195,6 +252,109 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
     await page.keyboard.press("Escape");
     await expect(menu).toBeFocused();
   }
+});
+
+test("dark public and member shells retain readable controls, bundled font/license and working navigation", async ({
+  page,
+}, info) => {
+  await page.goto("/foundation/member");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Композиция кабинета участника");
+  await page.evaluate(() => document.fonts.ready);
+  expect(
+    await page.evaluate(async () => {
+      const faces = await document.fonts.load('14px "Onest"', "Язык · Yukon Union");
+      return (
+        document.fonts.check('14px "Onest"', "Язык · Yukon Union") &&
+        faces.some((font) => font.family === "Onest" && font.status === "loaded")
+      );
+    }),
+  ).toBe(true);
+  await expect(page.getByRole("main")).toHaveCSS("font-family", /Onest/);
+  const license = await page
+    .getByRole("link", { name: "Лицензия шрифта Onest", exact: true })
+    .getAttribute("href");
+  expect(license).toMatch(/^\/assets\/OFL-[^/]+\.txt$/);
+  const response = await page.request.get(license ?? "");
+  expect(response.status()).toBe(200);
+  expect(
+    createHash("sha256")
+      .update(await response.body())
+      .digest("hex"),
+  ).toBe("071195d8806e226faeee60259c28ca67b458227af5195a73f5cfcab06e3003bc");
+  const sidebar = page.getByRole("complementary", {
+    name: "Пример рабочего пространства",
+    exact: true,
+  });
+  if ((page.viewportSize()?.width ?? 0) > 1050) {
+    await expect(sidebar).toBeVisible();
+    const side = await sidebar.boundingBox(),
+      content = await page.getByRole("main").boundingBox();
+    expect(side && content && side.x + side.width <= content.x).toBeTruthy();
+    expect(
+      await sidebar
+        .getByRole("link")
+        .evaluateAll((links) => links.map((link) => link.getAttribute("href"))),
+    ).toEqual(["/", "/", "/foundation", "/foundation/member"]);
+  } else {
+    await expect(sidebar).toBeHidden();
+    await expect(
+      page.getByRole("button", { name: "Открыть навигацию", exact: true }),
+    ).toBeVisible();
+  }
+  const note = page.getByRole("textbox", { name: "Текст примера", exact: true });
+  const submit = page.getByRole("button", { name: "Показать подтверждение", exact: true });
+  for (const target of [
+    page.getByRole("heading", { level: 1 }),
+    note,
+    submit,
+    page.getByRole("combobox", { name: "Состояние примера", exact: true }),
+    page.getByRole("cell").filter({ hasText: "Завершён · принят" }).locator("[data-slot=badge]"),
+  ])
+    expect(await contrast(target)).toBeGreaterThanOrEqual(4.5);
+  expect(await contrast(note, "::placeholder")).toBeGreaterThanOrEqual(4.5);
+  const outline = page.getByRole("button", { name: "Об этом примере", exact: true });
+  for (const control of [
+    note,
+    page.getByRole("combobox", { name: "Состояние примера", exact: true }),
+    outline,
+  ]) {
+    expect(await contrast(control, undefined, "borderTopColor")).toBeGreaterThanOrEqual(3);
+    expect(await contrast(control, undefined, "borderTopColor", true)).toBeGreaterThanOrEqual(3);
+  }
+  await outline.hover();
+  expect(await contrast(outline, undefined, "borderTopColor")).toBeGreaterThanOrEqual(3);
+  expect(await contrast(outline, undefined, "borderTopColor", true)).toBeGreaterThanOrEqual(3);
+  await capture(page, info, "enabled-control-contrast");
+  await note.fill("Синтетическая проверка контраста");
+  await submit.click();
+  const pending = page.getByRole("button", { name: "Готовим пример…", exact: true });
+  await expect(pending).toBeDisabled();
+  expect(await contrast(pending)).toBeGreaterThanOrEqual(4.5);
+  await expect(page.getByRole("status")).toHaveText(
+    "Пример подтверждён локально. Действие компании не отправлено.",
+  );
+  await page.goto("/foundation");
+  await expect(sidebar).toBeHidden();
+  await noOverflow(page);
+  await page.goto("/");
+  const previewLink = page
+    .getByRole("main")
+    .getByRole("link", { name: "Публичный пример", exact: true });
+  await previewLink.hover();
+  expect(await contrast(previewLink)).toBeGreaterThanOrEqual(4.5);
+});
+
+test("controlled font-download failure keeps the Cyrillic interface usable with the system fallback", async ({
+  page,
+}, info) => {
+  await page.route(/\/assets\/Onest-[^/]+\.ttf$/, (route) => route.abort("failed"));
+  await page.goto("/foundation/member");
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Композиция кабинета участника");
+  expect(await page.evaluate(() => document.fonts.check('14px "Onest"', "Язык"))).toBe(false);
+  await expect(page.getByRole("textbox", { name: "Текст примера", exact: true })).toBeVisible();
+  await noOverflow(page);
+  await capture(page, info, "font-unavailable-system-fallback");
 });
 
 test("synthetic chart keeps exact values and company reporting days when display timezone changes", async ({

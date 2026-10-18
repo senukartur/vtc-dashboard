@@ -11,7 +11,7 @@ import {
 } from "../shared/ui/dialog.js";
 import { Button } from "../shared/ui/primitives.js";
 
-export function Navigation() {
+export function Navigation({ variant = "public" }: { variant?: "public" | "sidebar" | "mobile" }) {
   const { t } = useTranslation("core");
   const [open, setOpen] = useState(false);
   const items = [
@@ -28,24 +28,31 @@ export function Navigation() {
   }
   return (
     <>
-      <nav className="desktop-navigation" aria-label={t("navigation")}>
-        {links()}
-      </nav>
-      <div className="mobile-navigation">
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">{t("menu")}</Button>
-          </DialogTrigger>
-          <DialogContent className="navigation-dialog">
-            <DialogTitle>{t("navigation")}</DialogTitle>
-            <DialogDescription>Yukon Union · {t("stage")}</DialogDescription>
-            <nav aria-label={t("navigation")}>{links(() => setOpen(false))}</nav>
-            <DialogClose asChild>
-              <Button variant="outline">{t("close")}</Button>
-            </DialogClose>
-          </DialogContent>
-        </Dialog>
-      </div>
+      {variant !== "mobile" && (
+        <nav
+          className={variant === "sidebar" ? "sidebar-navigation" : "desktop-navigation"}
+          aria-label={t("navigation")}
+        >
+          {links()}
+        </nav>
+      )}
+      {variant !== "sidebar" && (
+        <div className="mobile-navigation">
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline">{t("menu")}</Button>
+            </DialogTrigger>
+            <DialogContent className="navigation-dialog">
+              <DialogTitle>{t("navigation")}</DialogTitle>
+              <DialogDescription>Yukon Union · {t("stage")}</DialogDescription>
+              <nav aria-label={t("navigation")}>{links(() => setOpen(false))}</nav>
+              <DialogClose asChild>
+                <Button variant="outline">{t("close")}</Button>
+              </DialogClose>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
     </>
   );
 }

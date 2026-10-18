@@ -15,6 +15,9 @@ export const core = {
     home: "Home",
     skip: "Skip to content",
     navigation: "Navigation",
+    workspaceNavigation: "Workspace preview",
+    presentationOnly:
+      "Presentation navigation. Live membership and permissions will be connected separately.",
     menu: "Open navigation",
     close: "Close",
     public: "Public preview",
@@ -23,6 +26,7 @@ export const core = {
     renderError: "This view could not be displayed",
     recover: "Reload this view",
     footer: "Yukon Union · Development foundations",
+    fontLicense: "Onest font license",
   },
   ru: {
     language: "Язык",
@@ -40,6 +44,9 @@ export const core = {
     home: "На главную",
     skip: "Перейти к содержимому",
     navigation: "Навигация",
+    workspaceNavigation: "Пример рабочего пространства",
+    presentationOnly:
+      "Пример навигации. Учётная запись участника и права будут подключены отдельно.",
     menu: "Открыть навигацию",
     close: "Закрыть",
     public: "Публичный пример",
@@ -48,5 +55,6 @@ export const core = {
     renderError: "Не удалось отобразить страницу",
     recover: "Перезагрузить страницу",
     footer: "Yukon Union · Основа интерфейса",
+    fontLicense: "Лицензия шрифта Onest",
   },
 } as const;
