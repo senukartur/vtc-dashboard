@@ -15,7 +15,7 @@ Candidate SHA: <!-- Exact reviewed/tested head; update after every change. -->
 <!-- Independent reviewer, exact covered SHA, findings and dispositions. Critical changes
 require review independent of their author; ownership/self-review is not approval. -->
 
-<!-- Latest-head Copilot review link/SHA and disposition for every actionable finding.
+<!-- Latest automated-review link/SHA, if available, and disposition for every actionable finding.
 Inspect review comments and unresolved threads before merge, including after fixes. -->
 
 ## Delivery impact
