@@ -53,7 +53,9 @@ export function AnalyticsExample({
             <thead>
               <tr>
                 <th scope="col">{t("day")}</th>
-                <th scope="col">{t("distance")} (km)</th>
+                <th scope="col">
+                  {t("distance")} ({t("unitKm")})
+                </th>
               </tr>
             </thead>
             <tbody>

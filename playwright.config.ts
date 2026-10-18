@@ -3,7 +3,10 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: process.env.VTC_FAILURE_PROBE === "assertion" ? "test/probes" : "test/e2e",
   testMatch: "**/*.spec.ts",
-  outputDir: ".local/testing/browser-results",
+  outputDir:
+    process.env.VTC_FAILURE_PROBE === "assertion"
+      ? ".local/testing/browser-probe-results"
+      : ".local/testing/browser-results",
   reporter: "list",
   fullyParallel: false,
   workers: 1,

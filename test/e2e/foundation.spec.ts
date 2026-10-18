@@ -25,6 +25,12 @@ for (const route of ["/foundation", "/foundation/member"]) {
       await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption(locale);
       const ru = locale === "ru";
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
+      await expect(
+        page.getByRole("columnheader", {
+          name: ru ? "Фактический пробег (км)" : "Actual distance (km)",
+          exact: true,
+        }),
+      ).toBeVisible();
       await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
       await expect(
         page.getByText(ru ? "Синтетический пример" : "Synthetic preview", { exact: true }),

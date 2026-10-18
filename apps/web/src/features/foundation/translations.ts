@@ -1,5 +1,6 @@
 export const foundationTranslations = {
   en: {
+    unitKm: "km",
     eyebrow: "UI foundation / synthetic examples",
     title: "A shared language for the road",
     memberTitle: "Member workspace composition",
@@ -67,6 +68,7 @@ export const foundationTranslations = {
     fallbackProbe: "English namespace fallback is available.",
   },
   ru: {
+    unitKm: "км",
     eyebrow: "Основа интерфейса / синтетические примеры",
     title: "Общий язык в пути",
     memberTitle: "Композиция кабинета участника",
