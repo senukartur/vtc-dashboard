@@ -31,7 +31,63 @@ export async function prepareCredential(password: string): Promise<{ passwordHas
   return { passwordHash: await hashPassword(password) };
 }
 
-export function engine(client: TransactionClient, config: IdentityConfig) {
+declare const credentialProofBrand: unique symbol;
+export type CredentialProof = { readonly [credentialProofBrand]: true };
+export interface SignInBinding {
+  userId: string;
+  credentialId: string;
+  email: string;
+  emailVerified: boolean;
+  accessEpoch: number;
+  identityEpoch: number;
+  credentialEpoch: number;
+  emailEpoch: number;
+  companyVersion: number;
+}
+const credentialProofs = new WeakMap<
+  CredentialProof,
+  { hash: string; password: string; binding: SignInBinding; config: IdentityConfig }
+>();
+
+// This capability can only be minted by the pinned native verifier. Neither a
+// caller-supplied boolean nor an object with the same shape can skip verification.
+export async function verifySignInCredential(
+  hash: string | null,
+  password: string,
+  config: IdentityConfig,
+  binding?: SignInBinding,
+): Promise<CredentialProof | null> {
+  if (!hash) {
+    // Match the pinned native endpoint's dummy work for an absent credential.
+    await hashPassword(password);
+    return null;
+  }
+  if (!(await verifyPassword({ hash, password }))) return null;
+  if (!binding) throw new Error("MISSING_INTERNAL_CREDENTIAL_BINDING");
+  const proof = Object.freeze({}) as CredentialProof;
+  credentialProofs.set(proof, { hash, password, binding: { ...binding }, config: { ...config } });
+  return proof;
+}
+
+export function engine(
+  client: TransactionClient,
+  config: IdentityConfig,
+  proof?: CredentialProof,
+  binding?: SignInBinding,
+) {
+  const verified = proof ? credentialProofs.get(proof) : undefined;
+  if (
+    proof &&
+    (!verified ||
+      !binding ||
+      Object.entries(verified.binding).some(
+        ([key, value]) => binding[key as keyof SignInBinding] !== value,
+      ) ||
+      Object.entries(verified.config).some(
+        ([key, value]) => config[key as keyof IdentityConfig] !== value,
+      ))
+  )
+    throw new Error("INVALID_INTERNAL_CREDENTIAL_PROOF");
   // Adapter 1.7.10 uses transaction() for MySQL's post-write SELECT. Join the
   // caller's already active transaction: this bridge never starts/commits DML.
   const joined = new Proxy(client, {
@@ -46,15 +102,38 @@ export function engine(client: TransactionClient, config: IdentityConfig) {
     baseURL: config.origin,
     basePath: "/private-auth-engine",
     database: drizzleAdapter(joined, { provider: "mysql", schema: authSchema, transaction: false }),
+    databaseHooks: verified
+      ? {
+          session: {
+            create: {
+              before: async (session) => {
+                if (session.userId !== verified.binding.userId)
+                  throw Object.assign(new Error("STALE_INTERNAL_CREDENTIAL_PROOF"), {
+                    statusCode: 401,
+                  });
+                return { data: session };
+              },
+            },
+          },
+        }
+      : undefined,
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
       minPasswordLength: 12,
       maxPasswordLength: 128,
       password: {
-        hash: async (password: string): Promise<string> => hashPassword(password),
+        hash: async (password: string): Promise<string> => {
+          // Missing/changed native credential data must not restart expensive
+          // dummy work inside the final transaction or accept a stale proof.
+          if (verified)
+            throw Object.assign(new Error("STALE_INTERNAL_CREDENTIAL_PROOF"), { statusCode: 401 });
+          return hashPassword(password);
+        },
         verify: async (input: { hash: string; password: string }): Promise<boolean> =>
-          verifyPassword(input),
+          verified
+            ? input.hash === verified.hash && input.password === verified.password
+            : verifyPassword(input),
       },
     },
     session: {

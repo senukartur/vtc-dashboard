@@ -686,6 +686,9 @@ test("shared rate counters survive service recreation and concurrent requests; a
 });
 
 test("real API enforces structural schemas, current membership, CSRF/origin rotation, cookies and precise status envelopes", async () => {
+  // This API scenario has its own minute window, independent of the prior
+  // deliberate slot saturation (which may conservatively hash to this socket).
+  instant += 60000;
   const m = await addMember(),
     app = await createApp({ checkReadiness: async () => true, identity });
   try {

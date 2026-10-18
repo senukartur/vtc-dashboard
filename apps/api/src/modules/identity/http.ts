@@ -77,14 +77,32 @@ export function csrfProtection(config: IdentityConfig, now: () => number = Date.
 }
 
 export async function registerIdentityRoutes(app: FastifyInstance, identity: Identity) {
+  const ownedRoute = (route: string) =>
+    route.startsWith("/api/v1/auth/") || route === "/api/v1/me" || route.startsWith("/api/v1/me/");
+  app.addHook("onRequest", async (request) => {
+    const route = request.routeOptions.url;
+    if (!route || !ownedRoute(route)) return;
+    const category =
+      route === "/api/v1/auth/csrf"
+        ? "csrf"
+        : route === "/api/v1/auth/login"
+          ? "login"
+          : request.method === "GET"
+            ? "read"
+            : [
+                  "/api/v1/auth/password-reset-requests",
+                  "/api/v1/me/email-verification-requests",
+                  "/api/v1/me/credential-challenges",
+                ].includes(route)
+              ? "challenge"
+              : "command";
+    // Admission precedes parsing, authentication and every locked identity read.
+    // request.ip is the direct socket address: forwarded headers are not trusted.
+    await identity.rateLimit(category, request.ip);
+  });
   app.addHook("preValidation", async (request) => {
     const route = request.routeOptions.url;
-    if (
-      !route ||
-      !(route.startsWith("/api/v1/auth/") || route.startsWith("/api/v1/me")) ||
-      !["POST", "PATCH"].includes(request.method)
-    )
-      return;
+    if (!route || !ownedRoute(route) || !["POST", "PATCH"].includes(request.method)) return;
     if (
       request.body !== undefined &&
       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
@@ -131,11 +149,7 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     ...(body ? { body: ref(body) } : {}),
     response: { [status]: ref(response) },
   });
-  const limit = (request: FastifyRequest, category: "csrf" | "login" | "challenge" | "command") =>
-    identity.rateLimit(category, request.ip);
-
   app.get("/api/v1/auth/csrf", { schema: schema("EnvelopeCsrf") }, async (request, reply) => {
-    await limit(request, "csrf");
     const issued = csrf.issue(request.headers, await optionalActor(request));
     reply.header("Set-Cookie", issued.cookie);
     return envelope({ token: issued.token }, request);
@@ -145,7 +159,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     { schema: schema("EnvelopeSelf", "LoginInput") },
     async (request, reply) => {
       csrf.check(request, await optionalActor(request));
-      await limit(request, "login");
       const result = await identity.login(request.body.email, request.body.password);
       reply
         .header("Set-Cookie", [...result.cookies, csrf.clear()])
@@ -159,7 +172,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request, reply) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "command");
       const result = await identity.logout(current, headers(request));
       reply.header("Set-Cookie", [...result.cookies, csrf.clear()]);
       return envelope({ id: result.id, version: result.version }, request);
@@ -175,7 +187,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     { schema: schema("EnvelopeAcknowledged", "PasswordResetRequest", 202) },
     async (request, reply) => {
       const scope = csrf.check(request, await optionalActor(request));
-      await limit(request, "challenge");
       const result = await identity.requestReset(scope, key(request), request.body.email);
       return reply.code(202).send(envelope(result, request));
     },
@@ -185,7 +196,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     { schema: schema("EnvelopeCommandResult", "PasswordResetInput") },
     async (request) => {
       const scope = csrf.check(request, await optionalActor(request));
-      await limit(request, "command");
       return envelope(
         await identity.resetPassword(
           scope,
@@ -203,7 +213,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request, reply) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "challenge");
       return reply
         .code(202)
         .send(
@@ -220,7 +229,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "command");
       return envelope(
         await identity.confirmChallenge(current, key(request), {
           purpose: "email_verification",
@@ -236,7 +244,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request, reply) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "command");
       const match = request.headers["if-match"];
       if (typeof match !== "string") throw identityError(428);
       if (!/^"v[1-9][0-9]*"$/.test(match)) throw identityError(422);
@@ -256,7 +263,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request, reply) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "challenge");
       return reply
         .code(202)
         .send(
@@ -278,7 +284,6 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
     async (request) => {
       const current = await actor(request);
       csrf.check(request, current);
-      await limit(request, "command");
       return envelope(
         await identity.confirmChallenge(current, key(request), {
           purpose: request.body.kind,

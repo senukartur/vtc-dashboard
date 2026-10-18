@@ -28,6 +28,7 @@ import {
   type IdentityConfig,
   prepareCredential,
   validateIdentityConfig,
+  verifySignInCredential,
 } from "./engine.js";
 import {
   type AssignableRole,
@@ -370,6 +371,7 @@ export function createIdentity(
     key: string,
     input: unknown,
     command: () => Promise<SafeResult>,
+    persistFailure = false,
   ): Promise<SafeResult> {
     applicationId(key);
     const scopeHash = digest(`scope:${scope}`),
@@ -386,7 +388,7 @@ export function createIdentity(
       return saved.result;
     }
     const result = await command();
-    if (!isFailure(result))
+    if (!isFailure(result) || persistFailure)
       await client(tx)
         .insert(commandResults)
         .values({
@@ -495,17 +497,14 @@ export function createIdentity(
     config,
     prepareCredential,
     async rateLimit(
-      category: "csrf" | "login" | "challenge" | "command",
+      category: "csrf" | "login" | "challenge" | "command" | "read",
       source: string,
+      scope: "source" | "actor" = "source",
     ): Promise<void> {
       // Fixed slots prevent unbounded attacker-created identity/IP rows; collisions throttle conservatively.
-      const bucket = `${category}:${digest(source)[0]}`;
+      const bucket = `${scope}:${category}:${digest(source)[0]}`;
       const allowed = await run(async (tx) => {
-        let allowed = true;
-        for (const [name, maximum] of [
-          ["global", 200],
-          [bucket, 20],
-        ] as const) {
+        const charge = async (name: string, maximum: number) => {
           const window = Math.floor(now().getTime() / 60000);
           await client(tx)
             .insert(limits)
@@ -522,9 +521,12 @@ export function createIdentity(
             .update(limits)
             .set({ window, count: Math.min(count, maximum + 1) })
             .where(eq(limits.bucket, name));
-          if (count > maximum) allowed = false;
-        }
-        return allowed;
+          return count <= maximum;
+        };
+        // Always lock the source/actor slot before the category's global row.
+        // A denied source never spends another source's or category's budget.
+        if (!(await charge(bucket, 20))) return false;
+        return scope === "actor" || (await charge(`global:${category}`, 200));
       });
       if (!allowed) throw identityError(429);
     },
@@ -601,10 +603,94 @@ export function createIdentity(
       });
     },
     async login(email: string, password: string) {
+      const normalized = normalizedEmail(email);
+      const snapshot = await run(async (tx) => {
+        const [identity] = await client(tx).select().from(user).where(eq(user.email, normalized));
+        if (!identity) return null;
+        const [credential] = await client(tx)
+          .select()
+          .from(account)
+          .where(
+            and(
+              eq(account.userId, identity.id),
+              eq(account.accountId, identity.id),
+              eq(account.providerId, "credential"),
+            ),
+          );
+        const [member] = await client(tx)
+          .select()
+          .from(membership)
+          .where(eq(membership.userId, identity.id));
+        const [companyState] = await client(tx)
+          .select()
+          .from(company)
+          .where(eq(company.singleton, 1));
+        return credential && member && companyState
+          ? { identity, credential, member, companyVersion: companyState.version }
+          : null;
+      });
+      // The preflight has committed and released its connection before scrypt.
+      // Inactive and absent identities still perform native credential work.
+      const bind = (
+        identity: typeof user.$inferSelect,
+        credential: typeof account.$inferSelect,
+        member: Member,
+        companyVersion: number,
+      ) => ({
+        userId: identity.id,
+        credentialId: credential.id,
+        email: identity.email,
+        emailVerified: identity.emailVerified,
+        accessEpoch: member.accessEpoch,
+        identityEpoch: member.identityEpoch,
+        credentialEpoch: member.credentialEpoch,
+        emailEpoch: member.emailEpoch,
+        companyVersion,
+      });
+      const proof = await verifySignInCredential(
+        snapshot?.credential.password ?? null,
+        password,
+        config,
+        snapshot
+          ? bind(snapshot.identity, snapshot.credential, snapshot.member, snapshot.companyVersion)
+          : undefined,
+      );
+      if (!proof || !snapshot || snapshot.member.status !== "active") throw identityError(401);
       return run(async (tx) => {
         const current = await lockCompany(tx);
+        const row = (await lockMembers(tx, [snapshot.identity.id])).get(snapshot.identity.id);
+        const [identity] = await client(tx)
+          .select()
+          .from(user)
+          .where(eq(user.id, snapshot.identity.id))
+          .for("update");
+        const [credential] = await client(tx)
+          .select()
+          .from(account)
+          .where(eq(account.id, snapshot.credential.id))
+          .for("update");
+        if (
+          row?.status !== "active" ||
+          row.accessEpoch !== snapshot.member.accessEpoch ||
+          row.identityEpoch !== snapshot.member.identityEpoch ||
+          row.credentialEpoch !== snapshot.member.credentialEpoch ||
+          row.emailEpoch !== snapshot.member.emailEpoch ||
+          current.version !== snapshot.companyVersion ||
+          identity?.email !== normalized ||
+          identity.emailVerified !== snapshot.identity.emailVerified ||
+          credential?.userId !== snapshot.identity.id ||
+          credential.accountId !== snapshot.identity.id ||
+          credential.providerId !== "credential" ||
+          credential.password !== snapshot.credential.password
+        )
+          throw identityError(401);
         await client(tx).delete(session).where(lt(session.expiresAt, now())).limit(100);
-        const response = await engine(client(tx), config).api.signInEmail({
+        const response = await engine(
+          client(tx),
+          config,
+          proof,
+          bind(identity, credential, row, current.version),
+        ).api.signInEmail({
           body: { email, password },
           asResponse: true,
         });
@@ -612,8 +698,7 @@ export function createIdentity(
         if ([400, 401, 403].includes(response.status)) throw identityError(401);
         if (!response.ok) throw new Error("AUTH_ENGINE_UNEXPECTED_RESPONSE");
         const body = (await response.json()) as { user: { id: string }; token: string };
-        const row = (await lockMembers(tx, [body.user.id])).get(body.user.id);
-        if (row?.status !== "active") throw identityError(401);
+        if (body.user.id !== snapshot.identity.id) throw identityError(401);
         await client(tx)
           .update(session)
           .set({
@@ -730,7 +815,7 @@ export function createIdentity(
       proposedEmail: string | null = null,
     ) {
       if (!ports.delivery) throw identityError(503);
-      await this.rateLimit("challenge", actor.userId);
+      await this.rateLimit("challenge", actor.userId, "actor");
       return unwrap(
         await run(async (tx) => {
           const current = await lockCompany(tx),
@@ -791,10 +876,31 @@ export function createIdentity(
                 if (!ports.accessEvents) throw identityError(503);
                 if (input.purpose === "email_change") {
                   if (!challenge.proposedEmail) return { failure: 401 };
-                  await client(tx)
-                    .update(user)
-                    .set({ email: challenge.proposedEmail, emailVerified: false, updatedAt: now() })
+                  const [identity] = await client(tx)
+                    .select()
+                    .from(user)
                     .where(eq(user.id, actor.userId));
+                  if (identity?.email === challenge.proposedEmail) return { failure: 401 };
+                  try {
+                    await client(tx)
+                      .update(user)
+                      .set({
+                        email: challenge.proposedEmail,
+                        emailVerified: false,
+                        updatedAt: now(),
+                      })
+                      .where(eq(user.id, actor.userId));
+                  } catch (error) {
+                    // InnoDB rolls back only this duplicate-key statement. Keep
+                    // the consumed challenge/attempt and durable generic result.
+                    if (
+                      causes(error).some(
+                        (cause) => "code" in cause && cause.code === "ER_DUP_ENTRY",
+                      )
+                    )
+                      return { failure: 401 };
+                    throw error;
+                  }
                   await client(tx)
                     .update(membership)
                     .set({ emailEpoch: row.emailEpoch + 1 })
@@ -811,13 +917,14 @@ export function createIdentity(
               }
               return { id: actor.userId, version: row.version + 1 };
             },
+            input.purpose === "email_change",
           );
         }),
       );
     },
     async requestReset(scope: string, key: string, email: string) {
       if (!ports.delivery) throw identityError(503);
-      await this.rateLimit("challenge", scope);
+      await this.rateLimit("challenge", scope, "actor");
       return unwrap(
         await run(async (tx) => {
           await lockCompany(tx);
@@ -924,7 +1031,7 @@ export function createIdentity(
     },
     async requestSuccession(actor: Actor, successorId: string, key: string) {
       if (!ports.delivery) throw identityError(503);
-      await this.rateLimit("challenge", actor.userId);
+      await this.rateLimit("challenge", actor.userId, "actor");
       return unwrap(
         await run(async (tx) => {
           const current = await lockCompany(tx),
