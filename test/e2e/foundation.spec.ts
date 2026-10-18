@@ -254,6 +254,44 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
   }
 });
 
+for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
+  test(`direct member variant ${path} preserves its location and member navigation`, async ({
+    page,
+  }, info) => {
+    await page.goto(`${path}?preview=synthetic#main-content`);
+    await expect(page).toHaveURL(/\/foundation\/member\?preview=synthetic#main-content$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Композиция кабинета участника",
+    );
+    const sidebar = page.getByRole("complementary", {
+      name: "Пример рабочего пространства",
+      exact: true,
+    });
+    const menu = page.getByRole("button", { name: "Открыть навигацию", exact: true });
+    if ((page.viewportSize()?.width ?? 0) > 1050) {
+      await expect(sidebar).toBeVisible();
+    } else {
+      await expect(sidebar).toBeHidden();
+      await menu.focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("dialog", { name: "Навигация", exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole("link", { name: "Пример кабинета", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(
+      page.getByRole("link", { name: "Публичный пример", exact: true }),
+    ).not.toHaveAttribute("aria-current", "page");
+    await noOverflow(page);
+    await capture(page, info, "canonical-member-navigation");
+    if (await menu.isVisible()) {
+      await page.keyboard.press("Escape");
+      await expect(menu).toBeFocused();
+    }
+  });
+}
+
 test("dark public and member shells retain readable controls, bundled font/license and working navigation", async ({
   page,
 }, info) => {
