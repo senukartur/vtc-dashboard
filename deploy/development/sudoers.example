@@ -1,0 +1,4 @@
+Defaults:vtc-deploy !setenv
+Defaults:vtc-deploy env_reset,secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults:vtc-deploy env_keep += "SSH_ORIGINAL_COMMAND"
+vtc-deploy ALL=(root) NOPASSWD: /usr/bin/python3 /opt/vtc-development/operations.py receive

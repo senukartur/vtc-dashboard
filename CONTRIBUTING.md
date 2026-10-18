@@ -69,6 +69,8 @@ For a portable production build, set `NODE_ENV=production`, `SERVE_WEB=true` and
 
 An optional production image is `docker build --target production -t vtc-dashboard:local .`. It packages only the API's production dependency deployment and built web assets, runs without root and has no embedded secrets. Building it is not staging deployment, a Hostland compatibility test or schema migration. Hostland does not have to support Docker.
 
+The [development deployment runbook](docs/operations/development.md) covers reviewed CI artifacts, disabled protected delivery, operator-only probes and consistent export/restore. Run `node deploy/development/test.mjs` for deployment changes; hosted acceptance is separate on VTC-011.
+
 ## Commands and verification
 
 | Command | Scope |

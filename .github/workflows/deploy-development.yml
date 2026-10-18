@@ -1,0 +1,67 @@
+name: Deploy development
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full merged main SHA with a successful main-push CI artifact
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: development-release
+  cancel-in-progress: false
+jobs:
+  eligible:
+    if: ${{ vars.DEVELOPMENT_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      selected: ${{ steps.authorize.outputs.selected }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.0
+      - id: authorize
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node deploy/development/authorize.mjs
+  release:
+    needs: [eligible]
+    environment: development
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.0
+      - name: Revalidate eligibility and artifact before accessing SSH secrets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVIOUS_SELECTION: ${{ needs.eligible.outputs.selected }}
+        run: |
+          node deploy/development/authorize.mjs
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; if(readFileSync(".local/deploy/selected.json","utf8")!==process.env.PREVIOUS_SELECTION) process.exit(1);'
+          node deploy/development/download.mjs
+      - name: Send validated release over pinned SSH
+        env:
+          DEPLOY_TARGET: ${{ secrets.DEVELOPMENT_SSH_TARGET }}
+          DEPLOY_KEY: ${{ secrets.DEVELOPMENT_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEVELOPMENT_KNOWN_HOSTS }}
+        run: node deploy/development/send.mjs
+      - name: Remove ephemeral private transport files
+        if: ${{ always() }}
+        run: rm -rf .local/deploy

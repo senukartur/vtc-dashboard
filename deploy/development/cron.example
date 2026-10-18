@@ -1,0 +1,2 @@
+# Root cron. This synthetic infrastructure heartbeat is separate from the pending jobs CLI.
+* * * * * root /usr/bin/python3 /opt/vtc-development/operations.py heartbeat >/dev/null 2>&1

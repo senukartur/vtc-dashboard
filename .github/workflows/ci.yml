@@ -39,9 +39,45 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
+  deployment:
+    name: Deployment rehearsal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.0
+      - run: node deploy/development/test.mjs
+  artifact:
+    name: Production release artifact
+    needs: [quality, deployment]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.0
+      - run: node deploy/development/build-release.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: development-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            .local/release/image.tar
+            .local/release/release.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
   required:
     name: Required CI
-    needs: [quality]
+    needs: [quality, deployment, artifact]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -57,5 +93,7 @@ jobs:
       - name: Require explicit quality success
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          DEPLOYMENT_RESULT: ${{ needs.deployment.result }}
+          ARTIFACT_RESULT: ${{ needs.artifact.result }}
         run: |
-          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT });'
+          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT, deployment: process.env.DEPLOYMENT_RESULT, artifact: process.env.ARTIFACT_RESULT, event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF });'

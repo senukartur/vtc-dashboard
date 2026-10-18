@@ -8,7 +8,19 @@ import {
 } from "../../scripts/ci-result.mjs";
 
 test("required aggregate accepts only explicit success and rejects every other result", () => {
-  expect(requiredCi({ quality: "success" })).toBe(0);
+  const valid = {
+    quality: "success",
+    deployment: "success",
+    artifact: "success",
+    event: "push",
+    ref: "refs/heads/main",
+  };
+  expect(requiredCi(valid)).toBe(0);
+  expect(requiredCi({ ...valid, event: "pull_request", artifact: "skipped" })).toBe(0);
+  for (const field of ["quality", "deployment", "artifact", "event", "ref"])
+    for (const value of ["failure", "cancelled", "skipped", "unknown", undefined])
+      expect(requiredCi({ ...valid, [field]: value })).toBe(1);
+  expect(requiredCi({ ...valid, event: "pull_request", artifact: "success" })).toBe(1);
   for (const quality of ["failure", "cancelled", "skipped", "", "unknown", undefined, null, true])
     expect(requiredCi({ quality })).toBe(1);
   for (const missing of [undefined, null, {}, []]) expect(requiredCi(missing)).toBe(1);

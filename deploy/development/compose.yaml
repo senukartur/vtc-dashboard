@@ -1,0 +1,115 @@
+name: vtc-development
+services:
+  db:
+    image: mysql:8.4.11@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    restart: unless-stopped
+    env_file: [./private/db.env]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+      - --transaction-isolation=REPEATABLE-READ
+      - --sql-mode=ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --innodb-dedicated-server=OFF
+      - --innodb-buffer-pool-size=128M
+      - --innodb-redo-log-capacity=64M
+      - --max-connections=24
+      - --table-open-cache=128
+      - --temptable-max-ram=32M
+      - --tmp-table-size=8M
+      - --max-heap-table-size=8M
+      - --performance-schema=ON
+      - --innodb-flush-log-at-trx-commit=1
+      - --sync-binlog=1
+    mem_limit: 512m
+    cpus: 0.75
+    volumes:
+      - mysql:/var/lib/mysql
+      - ./private/bootstrap:/docker-entrypoint-initdb.d:ro
+      - ./private/admin.cnf:/run/secrets/admin.cnf:ro
+      - ./private/export.cnf:/run/secrets/export.cnf:ro
+    networks: [database]
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, 127.0.0.1, --silent]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+      start_period: 30s
+    logging: &logs
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+  app:
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
+    restart: unless-stopped
+    init: true
+    env_file: [./private/runtime.env]
+    environment:
+      NODE_OPTIONS: --max-old-space-size=128
+    mem_limit: 192m
+    cpus: 0.75
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    volumes: [evidence:/app/private-evidence]
+    networks: [frontend, database]
+    logging: *logs
+  probe:
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
+    command: [node, operations/probe.mjs, serve]
+    restart: unless-stopped
+    init: true
+    env_file: [./private/probe.env]
+    mem_limit: 64m
+    cpus: 0.25
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [frontend, database]
+    logging: *logs
+  heartbeat:
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
+    profiles: [tools]
+    command: [node, operations/probe.mjs, heartbeat]
+    env_file: [./private/heartbeat.env]
+    mem_limit: 64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [database]
+    logging: *logs
+  migrate:
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
+    profiles: [tools]
+    command: [node, node_modules/@vtc/db/dist/migrate-cli.js]
+    env_file: [./private/migrator.env]
+    mem_limit: 192m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [database]
+    logging: *logs
+  proxy:
+    image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    restart: unless-stopped
+    env_file: [./private/proxy.env]
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - tls:/data
+      - proxy-config:/config
+      - ./private/maintenance:/maintenance:ro
+    mem_limit: 64m
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    networks: [frontend]
+    logging: *logs
+networks:
+  frontend: {}
+  database: { internal: true }
+volumes:
+  mysql: {}
+  evidence: {}
+  tls: {}
+  proxy-config: {}
