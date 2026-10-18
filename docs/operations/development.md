@@ -12,6 +12,7 @@ Review this package independently before provisioning. Keep the completed worksh
 | Initial measured trial | Basic Regular 1 CPU / 1 GiB / 25 GiB: public USD 6/month plus 20% weekly backup (USD 1.20), USD 7.20 before tax/extras; verify actual checkout |
 | Fallback | If actual OOM, sustained swapping, latency or recovery peaks fail acceptance, review 2 GiB / 1 CPU at public USD 12 + USD 2.40 backups before tax/extras, within the ceiling; export first and prefer RAM/CPU-only resize preserving disk |
 | Runtime | Supported Ubuntu LTS with Python 3.11+, maintained updates, Docker Engine/Compose, CA certificates/sudo; images retain Node 24.22.0 / pnpm 12.14.0 / MySQL 8.4.11 |
+| Image store | Complete [image-store steps 1–4](#image-store-compatibility-before-first-release) before enabling delivery; validate the current classic CI artifact against classic `overlay2` staging in post-enable step 5 |
 | DNS/TLS | Owner-controlled subdomain resolves to the new VM; public TCP 80/443 only at proxy; independently verify ACME HTTPS |
 | Access | Separate root/operator channel; deploy key restricted to fixed receiver, exact sudo entry, no Docker group/forwarding/PTY; independently compare host-key fingerprint through provider console before storing known_hosts |
 | Firewall | Restrict SSH according to reviewed operator/CI access policy; app, SQL and probe have no published ports; preserve independent console recovery |
@@ -20,10 +21,48 @@ Review this package independently before provisioning. Keep the completed worksh
 
 Public sources: [Droplet pricing](https://www.digitalocean.com/pricing/droplets), [backup pricing](https://docs.digitalocean.com/products/backups/details/pricing/). Trial credit does not reduce recurring cost. Disk growth is not trivially reversible. A local container cap does not prove that a 1 GiB VM works.
 
+## Image-store compatibility before first release
+
+Run image-store **steps 1–4 after steps 1–2 of [installation](#install-and-enable-the-single-path)**: Docker is installed, `install.sh` has created root-owned controls/private credentials/state, and its ephemeral setup container has exited and been removed. Keep deployment **disabled through image-store steps 1–4**. Then return to installation steps 3–6; perform image-store step 5 only after enablement as post-enable validation.
+
+Prepared root-owned controls/state directories, private credentials, cached setup/dry-run images and diagnostics from a failed **pre-database** image-ID check are permitted empty-host preparation. Such a failed attempt does not itself make the host populated; the proof below still requires no accepted release/current metadata, database/evidence data, or running/stopped containers. Do not rerun `install.sh`, recreate credentials or drop data to satisfy that proof; populated or unowned resources require separate recovery review.
+
+Fresh Docker Engine 29 installations default to the [containerd image store](https://docs.docker.com/engine/storage/containerd/), rather than the [classic storage drivers](https://docs.docker.com/engine/storage/drivers/). The selected pairing for this transport is the current classic CI artifact store and classic `overlay2` staging. This is an image-identity compatibility prerequisite, not a claim that the application cannot use containerd or a request to change local Docker Desktop/development storage.
+
+The receiver requires the loaded image ID to equal the trusted CI manifest's ID exactly. An initial classic-to-containerd trial exposed different IDs despite matching revision labels/environment and was rejected before application/database creation. Those identifier semantics are an observation of that trial, not a universal cryptographic identity claim. Keep the mismatch guard unchanged: labels/tags are not a fallback, and homogeneous local rehearsal does not prove cross-store portability.
+
+1. Keep deployment disabled and maintenance in place; wait for/acquire the operations lock. On **only the separately approved new VM**, privately prove there is no accepted release/current metadata, no database/evidence content in any volume or bind mount, and no running **or stopped** containers (`sudo docker ps -a`). Review the complete image/volume/network and on-disk store inventory; only approved new-VM resources may be present. If data, another workload or ownership is uncertain, stop for a reviewed backup/restore or migration decision and rehearsal. Do not apply this empty-host procedure to a populated host.
+2. Preserve independent operator/console access and privately back up existing daemon configuration and service options. Merge the following feature into a **full private candidate** for `/etc/docker/daemon.json` (or the configured alternative); preserve every other setting and feature. This fragment is not a replacement configuration:
+
+   ```json
+   {
+     "features": {
+       "containerd-snapshotter": false
+     }
+   }
+   ```
+
+3. Independently review the concrete merged candidate and reconcile daemon command-line/service flags. Validate the full candidate without starting another daemon; a successful JSON parse alone is insufficient. See the [daemon configuration reference](https://docs.docker.com/reference/cli/dockerd/#daemon-configuration-file).
+
+   ```sh
+   sudo dockerd --validate --config-file PRIVATE_CANDIDATE_JSON
+   ```
+
+4. Only after the empty-host proof, review and validation, the root operator installs that reviewed candidate at the existing daemon configuration path and restarts Docker. Keep raw configuration/readbacks, actual IDs and host details private:
+
+   ```sh
+   sudo systemctl restart docker
+   sudo docker info --format '{{.Driver}}'
+   sudo docker info --format '{{json .DriverStatus}}'
+   ```
+
+   Require `Driver` = `overlay2`, no `io.containerd.snapshotter.v1` driver-type marker, and continued absence of containers/accepted state/data before delivery. On restart/readback failure, keep deployment disabled and restore the validated prior configuration through the independent operator channel. Switching stores can hide the other store's images/containers while retaining them on disk; reverting the configuration restores that view. Do not prune, delete volumes or remove either store's files as part of this operation.
+5. After completing installation steps 3–6 and enabling protected deployment, revalidate the exact successful-CI artifact through the normal protected automatic delivery and then historical manual redeployment, followed by all persistence/recovery/isolated-restore and hosted acceptance cases below. The loaded-ID guard must pass unchanged; mismatch remains a failed deployment even when CI passed. Every Docker upgrade, CI runner/image-store change or transport change requires renewed source/target identity proof. Setup/readbacks alone do not complete VTC-011. Node/MySQL pins, encryption, grants and durability remain unchanged; no script purchases resources or changes host storage automatically.
+
 ## Install and enable the single path
 
 1. Review the exact merged source and actual checkout total. Install maintained Docker/Compose and operator prerequisites on the approved new VM. Apply reviewed updates/firewall/swap and verify console recovery. No script creates or purchases a provider resource.
-2. Run `sudo sh deploy/development/install.sh` from the reviewed checkout. It refuses an existing installation and creates root-owned `/opt/vtc-development`, random private credentials and the restricted deploy account. Keep receiver, Compose, private files and code root-owned and unwritable by deploy. Private configuration is mode 0600 in a 0700 directory, except the dedicated bootstrap directory/file, which grant only pinned MySQL gid 999 the read/traverse access needed inside its read-only mount. The enclosing host private directory stays root-only. Never run this on another development or production server.
+2. Run `sudo sh deploy/development/install.sh` from the reviewed checkout. It refuses an existing installation and creates root-owned `/opt/vtc-development`, random private credentials and the restricted deploy account. Keep receiver, Compose, private files and code root-owned and unwritable by deploy. Private configuration is mode 0600 in a 0700 directory, except the dedicated bootstrap directory/file, which grant only pinned MySQL gid 999 the read/traverse access needed inside its read-only mount. The enclosing host private directory stays root-only. Never run this on another development or production server. After its setup container is removed, complete [image-store steps 1–4](#image-store-compatibility-before-first-release) while deployment remains disabled, then continue with installation steps 3–6 and finish image-store step 5 after enabling.
 3. Privately replace the `example.invalid` DNS/TLS placeholders in `private/proxy.env`. On an existing volume, editing bootstrap credentials does not change stored MySQL users. Never delete a volume to repair credentials.
 4. Install the public deploy key using `authorized_keys.example` into a root-owned, mode 0644 authorized_keys file in the root-owned deploy home/.ssh. Prepare a private full candidate `sshd_config` by appending the complete `sshd.example` at EOF after the host's global configuration. Verify that this insertion point is still global: `PermitUserEnvironment no` must precede the first active `Match`. Reconcile any existing conditional blocks separately while preserving their policy, and any earlier global `PermitUserEnvironment` value so the effective value stays `no`. Use this reviewed EOF layout rather than an early `Include`/`sshd_config.d` placement or a `Match all` workaround. Include/scope behavior depends on the complete configuration and server version; a local parser accepting another layout does not establish its portability or actual target policy. The [OpenSSH configuration manual](https://man.openbsd.org/sshd_config#Match) lists permitted conditional directives.
 
