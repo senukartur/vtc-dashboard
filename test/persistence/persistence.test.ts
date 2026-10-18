@@ -33,6 +33,7 @@ import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import type { RowDataPacket } from "mysql2/promise";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import {
+  auditOnlyFolder,
   extendedFixtureFolder,
   fixtureRoot,
   guardedSettings,
@@ -114,12 +115,30 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         await readiness.close();
       }
       await reset(connection);
-      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 2);
       assert.equal(await runMigrations(settings), 0);
       const [tables] = await connection.query<RowDataPacket[]>(
         "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
       );
       assert.equal(tables[0]?.ENGINE, "InnoDB");
+    });
+
+    await t.test("identity migration preserves existing published audit history", async () => {
+      await reset(connection);
+      const folder = await auditOnlyFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder }), 1);
+        const id = await unit.run((tx) => audit.append(tx, auditInput()));
+        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 0);
+        const [saved] = await connection.query<RowDataPacket[]>(
+          "SELECT COUNT(*) AS count FROM audit_entries WHERE id = ?",
+          [Buffer.from(id)],
+        );
+        assert.equal(String(saved[0]?.count), "1");
+      } finally {
+        await rm(folder, { recursive: true });
+      }
     });
 
     await t.test(
@@ -131,7 +150,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 1);
+        assert.equal(await runMigrations(settings, { folder: extended }), 2);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -493,16 +512,16 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        assert.equal(String(history[0]?.count), "2");
+        assert.equal(String(history[0]?.count), "3");
         await reset(connection);
         assert.deepEqual(
           (await Promise.all([runMigrations(settings), runMigrations(settings)])).sort(),
-          [0, 1],
+          [0, 2],
         );
         const [singleApply] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
         );
-        assert.equal(String(singleApply[0]?.count), "1");
+        assert.equal(String(singleApply[0]?.count), "2");
       },
     );
   } finally {

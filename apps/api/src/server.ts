@@ -1,13 +1,19 @@
-import { createDatabase } from "@vtc/db";
+import { createDatabase, createUnitOfWork } from "@vtc/db";
 import { createApp } from "./app.js";
+import { createIdentity } from "./modules/identity/service.js";
 import { readConfig } from "./platform/config/env.js";
 
 try {
   const config = readConfig();
   const database = createDatabase(config.database);
+  const unit = config.identity ? createUnitOfWork(config.database) : undefined;
   const app = await createApp({
     checkReadiness: database.check,
-    closeDatabase: database.close,
+    closeDatabase: async () => {
+      await database.close();
+      await unit?.close();
+    },
+    ...(config.identity && unit ? { identity: createIdentity(unit, config.identity) } : {}),
     ...(config.serveWeb ? { webRoot: config.webRoot } : {}),
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {

@@ -1,6 +1,6 @@
 # Migration journal
 
-VTC-007 owns generation and ordering. Coordinate one migration integrator across feature branches. Run root `pnpm db:generate`, review SQL plus snapshots/journal and check regeneration for drift. The initial migration contains only audit storage and indexes, explicitly using InnoDB/utf8mb4; domain schemas remain with their owners.
+VTC-007 owns generation and ordering. Coordinate one migration integrator across feature branches. Run root `pnpm db:generate`, review SQL plus snapshots/journal and check regeneration for drift. The initial migration contains only audit storage and indexes, explicitly using InnoDB/utf8mb4; VTC-013 adds the identity schema through one subsequent additive migration; later domain schemas remain with their owners.
 
 Use `pnpm db:migrate` explicitly, or `node node_modules/@vtc/db/dist/migrate-cli.js` from a production API artifact. Startup/install never migrate or seed. The runner uses the generated Drizzle SQL/journal and its own checksum-checked `_vtc_migrations` ledger with durable `applying`/`applied` state, on a dedicated locked connection. Never mix it with the upstream migrator or schema push.
 

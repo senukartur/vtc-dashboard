@@ -5,6 +5,7 @@ const example = new URL("../.env.example", import.meta.url);
 const destination = new URL("../.env", import.meta.url);
 const contents = (await readFile(example, "utf8"))
   .replace("REPLACE_WITH_GENERATED_LOCAL_PASSWORD", randomBytes(32).toString("hex"))
+  .replace("REPLACE_WITH_GENERATED_LOCAL_IDENTITY_SECRET", randomBytes(32).toString("hex"))
   .replace("REPLACE_WITH_GENERATED_LOCAL_ROOT_PASSWORD", randomBytes(32).toString("hex"));
 try {
   await writeFile(destination, contents, { flag: "wx", mode: 0o600 });

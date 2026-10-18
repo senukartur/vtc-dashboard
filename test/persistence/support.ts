@@ -57,6 +57,16 @@ export async function testConnection(): Promise<Connection> {
 export async function reset(connection: Connection) {
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   for (const name of [
+    "identity_command_results",
+    "identity_limits",
+    "identity_challenges",
+    "identity_company",
+    "identity_roles",
+    "identity_sessions",
+    "identity_accounts",
+    "identity_verifications",
+    "identity_memberships",
+    "identity_users",
     "synthetic_values",
     "synthetic_parent",
     "audit_entries",
@@ -72,6 +82,24 @@ interface Journal {
   entries: { idx: number; version: string; when: number; tag: string; breakpoints: boolean }[];
   version: string;
   dialect: string;
+}
+
+export async function auditOnlyFolder(): Promise<string> {
+  await mkdir(join(root, ".local"), { recursive: true });
+  const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
+  await mkdir(join(folder, "meta"));
+  const production = JSON.parse(
+    await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+  ) as Journal;
+  const first = production.entries[0];
+  if (first?.tag !== "0000_solid_spencer_smythe")
+    throw new Error("PUBLISHED_AUDIT_PREFIX_REQUIRED");
+  await copyFile(join(migrationFolder, `${first.tag}.sql`), join(folder, `${first.tag}.sql`));
+  await writeFile(
+    join(folder, "meta/_journal.json"),
+    JSON.stringify({ ...production, entries: [first] }),
+  );
+  return folder;
 }
 
 export async function extendedFixtureFolder(): Promise<string> {

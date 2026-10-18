@@ -1,12 +1,47 @@
 import { spawn } from "node:child_process";
-import { runMigrations } from "@vtc/db";
+import { createHmac, randomBytes } from "node:crypto";
+import { createUnitOfWork, runMigrations } from "@vtc/db";
+import { sql } from "@vtc/db/identity-schema";
+import { createIdentity } from "../../../apps/api/src/modules/identity/service.ts";
 import { guardedSettings, testConnection } from "../../persistence/support.ts";
-import { safeChildEnvironment } from "../../support/environment.ts";
+import { guardedAllocation, safeChildEnvironment } from "../../support/environment.ts";
 
 const settings = guardedSettings();
 const ownership = await testConnection();
+await ownership.query(
+  "CREATE TABLE synthetic_browser_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
+);
 await ownership.end();
 await runMigrations(settings);
+const secret = randomBytes(32).toString("hex");
+const password = createHmac("sha256", guardedAllocation().token)
+  .update("browser-identity-password")
+  .digest("base64url");
+const unit = createUnitOfWork(settings);
+try {
+  const identity = createIdentity(
+    unit,
+    { secret, origin: "http://127.0.0.1:4173", production: false },
+    {
+      accessEvents: {
+        append: async (tx, event) => {
+          await unit
+            .client(tx)
+            .execute(sql`INSERT INTO synthetic_browser_events VALUES (${event.eventId})`);
+        },
+      },
+    },
+  );
+  await identity.bootstrap({
+    email: "browser@example.invalid",
+    name: "Synthetic Browser Member",
+    password,
+  });
+} catch {
+  throw new Error("SYNTHETIC_BROWSER_IDENTITY_SETUP_FAILED");
+} finally {
+  await unit.close();
+}
 const app = spawn(process.execPath, ["apps/api/dist/server.js"], {
   stdio: "inherit",
   env: {
@@ -14,6 +49,9 @@ const app = spawn(process.execPath, ["apps/api/dist/server.js"], {
     SERVE_WEB: "true",
     API_HOST: "127.0.0.1",
     API_PORT: "4173",
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: secret,
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
     MYSQL_HOST: settings.host,
     MYSQL_PORT: String(settings.port),
     MYSQL_DATABASE: settings.database,
