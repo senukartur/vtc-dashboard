@@ -40,11 +40,11 @@ def verify_sshd():
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         global_config = (f'HostKey {key}\nPidFile {directory / "sshd.pid"}\nUsePAM no\n'
-                         'PubkeyAuthentication yes\nAuthenticationMethods publickey\n'
-                         'PasswordAuthentication no\nKbdInteractiveAuthentication no\n'
+                         'PubkeyAuthentication yes\nAuthenticationMethods any\n'
+                         'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\n'
                          'AllowTcpForwarding yes\nAllowAgentForwarding yes\n'
-                         'X11Forwarding yes\nPermitTTY yes\nPermitTunnel no\n'
-                         'AcceptEnv LANG LC_*\nSubsystem sftp internal-sftp\n')
+                         'X11Forwarding yes\nPermitTTY yes\nPermitTunnel yes\n'
+                         'AcceptEnv LANG\nAcceptEnv LC_*\nSubsystem sftp internal-sftp\n')
         template = (base / 'sshd.example').read_text()
         candidate = directory / 'sshd_config'
 
@@ -57,23 +57,50 @@ def verify_sshd():
             result = subprocess.run(['/usr/sbin/sshd', '-T', '-f', str(candidate), '-C',
                                      f'user={user},host=client.example.invalid,addr=192.0.2.2,laddr=192.0.2.1,lport=22'],
                                     check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            return dict(line.split(' ', 1) for line in result.stdout.decode().splitlines())
+            return result.stdout
 
-        assert parse(global_config).returncode == 0
-        operator_before = effective('vtc-operator')
-        assert parse(global_config + template).returncode == 0
-        deployed = effective('vtc-deploy')
-        for name, value in {
+        restricted = {
             'pubkeyauthentication': 'yes', 'authenticationmethods': 'publickey',
             'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
             'allowtcpforwarding': 'no', 'allowagentforwarding': 'no',
             'x11forwarding': 'no', 'permittty': 'no', 'permittunnel': 'no',
             'permituserenvironment': 'no',
-        }.items():
-            assert deployed[name] == value
+        }
+
+        def require_restricted(output):
+            # Only these known single-valued keys use a mapping; compare all operator bytes.
+            settings = dict(line.split(' ', 1) for line in output.decode().splitlines())
+            for name, value in restricted.items():
+                assert settings[name] == value, name
+
+        assert parse(global_config).returncode == 0
+        operator_before = effective('vtc-operator')
+        operator_lines = operator_before.decode().splitlines()
+        for setting in ['pubkeyauthentication yes', 'authenticationmethods any',
+                        'passwordauthentication yes', 'kbdinteractiveauthentication yes',
+                        'permittty yes', 'allowtcpforwarding yes', 'permittunnel yes']:
+            assert setting in operator_lines
+        assert operator_lines.count('acceptenv LANG') == 1
+        assert operator_lines.count('acceptenv LC_*') == 1
+        assert parse(global_config + template).returncode == 0
+        require_restricted(effective('vtc-deploy'))
         assert effective('vtc-operator') == operator_before
-        assert operator_before['permittty'] == 'yes'
-        assert operator_before['allowtcpforwarding'] == 'yes'
+        # Each removed Match restriction must independently fail the deployment expectation.
+        for directive, name in {
+            'AuthenticationMethods publickey': 'authenticationmethods',
+            'PasswordAuthentication no': 'passwordauthentication',
+            'KbdInteractiveAuthentication no': 'kbdinteractiveauthentication',
+        }.items():
+            line = f'  {directive}\n'
+            assert template.count(line) == 1
+            assert parse(global_config + template.replace(line, '')).returncode == 0
+            assert effective('vtc-operator') == operator_before
+            try:
+                require_restricted(effective('vtc-deploy'))
+            except AssertionError as failure:
+                assert failure.args == (name,)
+            else:
+                raise AssertionError('SSH_RESTRICTION_REMOVAL_UNDETECTED')
         # Recreate the original unsupported placement, retaining the same full base.
         bad_match = template.replace('PermitUserEnvironment no\n', '') + '  PermitUserEnvironment no\n'
         rejected = parse(global_config + bad_match)
