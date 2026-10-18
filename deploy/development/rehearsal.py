@@ -10,6 +10,7 @@ import shutil
 import ssl
 import subprocess
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -27,6 +28,65 @@ for path in pathlib.Path('/source').iterdir():
     if path.is_file():
         shutil.copyfile(path, base / path.name)
 subprocess.run(['node', str(base / 'setup.mjs'), str(base)], check=True, stdout=subprocess.DEVNULL)
+
+
+def verify_sshd():
+    # Parser/configuration inspection only: no daemon, socket or listening port.
+    assert not list(pathlib.Path('/etc/ssh').glob('ssh_host_*'))
+    pathlib.Path('/run/sshd').mkdir(mode=0o755, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='sshd-', dir=base / 'private') as directory:
+        directory = pathlib.Path(directory)
+        key = directory / 'host-key'
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        global_config = (f'HostKey {key}\nPidFile {directory / "sshd.pid"}\nUsePAM no\n'
+                         'PubkeyAuthentication yes\nAuthenticationMethods publickey\n'
+                         'PasswordAuthentication no\nKbdInteractiveAuthentication no\n'
+                         'AllowTcpForwarding yes\nAllowAgentForwarding yes\n'
+                         'X11Forwarding yes\nPermitTTY yes\nPermitTunnel no\n'
+                         'AcceptEnv LANG LC_*\nSubsystem sftp internal-sftp\n')
+        template = (base / 'sshd.example').read_text()
+        candidate = directory / 'sshd_config'
+
+        def parse(content):
+            candidate.write_text(content)
+            return subprocess.run(['/usr/sbin/sshd', '-t', '-f', str(candidate)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+
+        def effective(user):
+            result = subprocess.run(['/usr/sbin/sshd', '-T', '-f', str(candidate), '-C',
+                                     f'user={user},host=client.example.invalid,addr=192.0.2.2,laddr=192.0.2.1,lport=22'],
+                                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            return dict(line.split(' ', 1) for line in result.stdout.decode().splitlines())
+
+        assert parse(global_config).returncode == 0
+        operator_before = effective('vtc-operator')
+        assert parse(global_config + template).returncode == 0
+        deployed = effective('vtc-deploy')
+        for name, value in {
+            'pubkeyauthentication': 'yes', 'authenticationmethods': 'publickey',
+            'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
+            'allowtcpforwarding': 'no', 'allowagentforwarding': 'no',
+            'x11forwarding': 'no', 'permittty': 'no', 'permittunnel': 'no',
+            'permituserenvironment': 'no',
+        }.items():
+            assert deployed[name] == value
+        assert effective('vtc-operator') == operator_before
+        assert operator_before['permittty'] == 'yes'
+        assert operator_before['allowtcpforwarding'] == 'yes'
+        # Recreate the original unsupported placement, retaining the same full base.
+        bad_match = template.replace('PermitUserEnvironment no\n', '') + '  PermitUserEnvironment no\n'
+        rejected = parse(global_config + bad_match)
+        assert rejected.returncode != 0
+        assert b'Directive \'PermitUserEnvironment\' is not allowed within a Match block' in rejected.stderr
+        # A global-only directive cannot directly follow the open User condition.
+        rejected = parse(global_config + template + f'PidFile {directory / "later.pid"}\n')
+        assert rejected.returncode != 0 and b'is not allowed within a Match block' in rejected.stderr
+    assert not list((base / 'private').glob('sshd-*'))
+
+
+verify_sshd()
+print('OpenSSH template: full-config parser, effective deploy/operator policy and placement rejection passed', flush=True)
 # Fixed layout/expanded-size/type checks run before any infrastructure is started.
 zip_directory = base / '.local/deploy'
 for entries in [ {'../escape': b'x', 'release.json': b'{}'},
