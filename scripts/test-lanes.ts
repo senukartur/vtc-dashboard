@@ -5,6 +5,10 @@ import { resolve } from "node:path";
 import { createDatabase, dedicatedConnection } from "@vtc/db";
 import { type Connection, createConnection } from "mysql2/promise";
 import { cleanupAllocation, type OwnedAllocation } from "../test/support/allocation-cleanup.ts";
+import {
+  assertScreenshotsRetained,
+  screenshotInventory,
+} from "../test/support/browser-artifacts.ts";
 import { bounded } from "../test/support/concurrency.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
@@ -210,7 +214,11 @@ function destroyTransport(connection: Connection) {
 
 async function proveFailures() {
   for (const name of ["unit", "contracts", "integration", "e2e"]) {
+    const captures = name === "e2e" ? await screenshotInventory() : undefined;
+    if (captures && lane === "all" && captures.size === 0)
+      throw new Error("BROWSER_CAPTURE_BASELINE_MISSING");
     const result = await execute(name, true, true);
+    if (captures) await assertScreenshotsRetained(captures);
     const identity = probeIdentity(name);
     if (!isDeliberateFailure(name, result))
       throw new Error(`FAILURE_PROBE_INVALID_${name.toUpperCase()}`);
