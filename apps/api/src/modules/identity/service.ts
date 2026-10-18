@@ -1028,8 +1028,31 @@ export function createIdentity(
               .where(eq(user.email, normalizedEmail(email)));
             if (identity) {
               const row = (await lockMembers(tx, [identity.id])).get(identity.id);
-              if (row?.status === "active" && identity.emailVerified)
-                await issue(tx, row, "password_reset");
+              if (row?.status === "active" && identity.emailVerified) {
+                const pending = await client(tx)
+                  .select()
+                  .from(challenges)
+                  .where(
+                    and(
+                      eq(challenges.userId, row.userId),
+                      eq(challenges.purpose, "password_reset"),
+                      eq(challenges.consumed, false),
+                    ),
+                  )
+                  .for("update");
+                // An anonymous binding/key must not replace another caller's
+                // usable recovery code or amplify delivery to the same account.
+                const usable = pending.some(
+                  (challenge) =>
+                    challenge.expiresAt > now() &&
+                    challenge.attempts < 5 &&
+                    challenge.emailEpoch === row.emailEpoch &&
+                    challenge.accessEpoch === row.accessEpoch &&
+                    challenge.credentialEpoch === row.credentialEpoch &&
+                    challenge.identityEpoch === row.identityEpoch,
+                );
+                if (!usable) await issue(tx, row, "password_reset");
+              }
             }
             return { status: "received" };
           });

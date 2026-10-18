@@ -1,6 +1,6 @@
 # VTC-007 persistence foundations
 
-[VTC-007](https://trello.com/c/0Fz7jw4v) adds the local Drizzle/mysql2 transaction, value, audit and migration foundations. Its original migration contains `audit_entries` plus the migration runner's operational ledger. [VTC-013 identity](identity.md) adds auth/member/company/challenge storage through a subsequent additive migration. Canonical trips and outbox/jobs remain their owners' work. Persistence primitives alone do not establish passing domain scenarios or final-host compatibility.
+[VTC-007](https://trello.com/c/0Fz7jw4v) adds the local Drizzle/mysql2 transaction, value, audit and migration foundations. Its original `0000` migration contains `audit_entries` plus the migration runner's operational ledger. [VTC-013 identity](identity.md) adds two ordered additive migrations: `0001_mean_masked_marvel.sql` creates auth/member/company/challenge storage, then `0002_acoustic_starfox.sql` adds challenge stage and identity-epoch columns. Apply both in order and follow the [drain-and-reissue rollout gate](identity.md#email-replacement-rollout). Canonical trips and outbox/jobs remain their owners' work. Persistence primitives alone do not establish passing domain scenarios or final-host compatibility.
 
 ## Runtime and connections
 
