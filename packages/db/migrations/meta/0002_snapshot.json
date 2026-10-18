@@ -1,0 +1,907 @@
+{
+  "version": "5",
+  "dialect": "mysql",
+  "id": "a58ba230-a4f6-416b-ab8c-c9587dfea0ff",
+  "prevId": "151ad4a3-b801-4c1f-8cbc-b045528f6266",
+  "tables": {
+    "audit_entries": {
+      "name": "audit_entries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_kind": {
+          "name": "actor_kind",
+          "type": "enum('user','system')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "varchar(48)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject_kind": {
+          "name": "subject_kind",
+          "type": "enum('company','user','trip','catalog')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "audit_subject_time_idx": {
+          "name": "audit_subject_time_idx",
+          "columns": ["subject_kind", "subject_id", "occurred_at"],
+          "isUnique": false
+        },
+        "audit_actor_time_idx": {
+          "name": "audit_actor_time_idx",
+          "columns": ["actor_id", "occurred_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "audit_entries_id": {
+          "name": "audit_entries_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_accounts": {
+      "name": "identity_accounts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "access_token": {
+          "name": "access_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "id_token": {
+          "name": "id_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "access_token_expires_at": {
+          "name": "access_token_expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "identity_provider_account_unique": {
+          "name": "identity_provider_account_unique",
+          "columns": ["provider_id", "account_id"],
+          "isUnique": true
+        },
+        "identity_account_user": {
+          "name": "identity_account_user",
+          "columns": ["user_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "identity_accounts_user_id_identity_users_id_fk": {
+          "name": "identity_accounts_user_id_identity_users_id_fk",
+          "tableFrom": "identity_accounts",
+          "tableTo": "identity_users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_accounts_id": {
+          "name": "identity_accounts_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_challenges": {
+      "name": "identity_challenges",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "enum('email_verification','password_reset','password_change','email_change','succession')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "successor_id": {
+          "name": "successor_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "proposed_email": {
+          "name": "proposed_email",
+          "type": "varchar(254) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "current_email_confirmed": {
+          "name": "current_email_confirmed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "identity_epoch": {
+          "name": "identity_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "email_epoch": {
+          "name": "email_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "access_epoch": {
+          "name": "access_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "secret_hash": {
+          "name": "secret_hash",
+          "type": "varbinary(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "consumed": {
+          "name": "consumed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {
+        "identity_challenge_member_purpose": {
+          "name": "identity_challenge_member_purpose",
+          "columns": ["user_id", "purpose"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "identity_challenges_user_id_identity_memberships_user_id_fk": {
+          "name": "identity_challenges_user_id_identity_memberships_user_id_fk",
+          "tableFrom": "identity_challenges",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "identity_challenges_successor_id_identity_memberships_user_id_fk": {
+          "name": "identity_challenges_successor_id_identity_memberships_user_id_fk",
+          "tableFrom": "identity_challenges",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["successor_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_challenges_id": {
+          "name": "identity_challenges_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_command_results": {
+      "name": "identity_command_results",
+      "columns": {
+        "scope_hash": {
+          "name": "scope_hash",
+          "type": "varbinary(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "command_key": {
+          "name": "command_key",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "varbinary(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "result": {
+          "name": "result",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "identity_result_expiry": {
+          "name": "identity_result_expiry",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "identity_command_results_scope_hash_command_key_pk": {
+          "name": "identity_command_results_scope_hash_command_key_pk",
+          "columns": ["scope_hash", "command_key"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_company": {
+      "name": "identity_company",
+      "columns": {
+        "singleton": {
+          "name": "singleton",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "director_user_id": {
+          "name": "director_user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identity_company_director_fk": {
+          "name": "identity_company_director_fk",
+          "tableFrom": "identity_company",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["director_user_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_company_singleton": {
+          "name": "identity_company_singleton",
+          "columns": ["singleton"]
+        }
+      },
+      "uniqueConstraints": {
+        "identity_company_id_unique": {
+          "name": "identity_company_id_unique",
+          "columns": ["id"]
+        }
+      },
+      "checkConstraint": {
+        "identity_one_company": {
+          "name": "identity_one_company",
+          "value": "`identity_company`.`singleton` = 1"
+        }
+      }
+    },
+    "identity_limits": {
+      "name": "identity_limits",
+      "columns": {
+        "bucket": {
+          "name": "bucket",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "window": {
+          "name": "window",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "identity_limits_bucket": {
+          "name": "identity_limits_bucket",
+          "columns": ["bucket"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_memberships": {
+      "name": "identity_memberships",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('active','inactive')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "access_epoch": {
+          "name": "access_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "identity_epoch": {
+          "name": "identity_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "email_epoch": {
+          "name": "email_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "locale": {
+          "name": "locale",
+          "type": "enum('en','ru')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'en'"
+        },
+        "display_timezone": {
+          "name": "display_timezone",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'UTC'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identity_memberships_user_id_identity_users_id_fk": {
+          "name": "identity_memberships_user_id_identity_users_id_fk",
+          "tableFrom": "identity_memberships",
+          "tableTo": "identity_users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_memberships_user_id": {
+          "name": "identity_memberships_user_id",
+          "columns": ["user_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_roles": {
+      "name": "identity_roles",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "enum('trainee','driver','dispatcher','deputy_director')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "identity_roles_user_id_identity_memberships_user_id_fk": {
+          "name": "identity_roles_user_id_identity_memberships_user_id_fk",
+          "tableFrom": "identity_roles",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_roles_user_id_role_pk": {
+          "name": "identity_roles_user_id_role_pk",
+          "columns": ["user_id", "role"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_sessions": {
+      "name": "identity_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token": {
+          "name": "token",
+          "type": "varchar(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ip_address": {
+          "name": "ip_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "access_epoch": {
+          "name": "access_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "credential_epoch": {
+          "name": "credential_epoch",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "identity_session_user": {
+          "name": "identity_session_user",
+          "columns": ["user_id"],
+          "isUnique": false
+        },
+        "identity_session_expiry": {
+          "name": "identity_session_expiry",
+          "columns": ["expires_at"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "identity_sessions_user_id_identity_users_id_fk": {
+          "name": "identity_sessions_user_id_identity_users_id_fk",
+          "tableFrom": "identity_sessions",
+          "tableTo": "identity_users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "identity_sessions_id": {
+          "name": "identity_sessions_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {
+        "identity_sessions_token_unique": {
+          "name": "identity_sessions_token_unique",
+          "columns": ["token"]
+        }
+      },
+      "checkConstraint": {}
+    },
+    "identity_users": {
+      "name": "identity_users",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(254) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email_verified": {
+          "name": "email_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "image": {
+          "name": "image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "identity_email_unique": {
+          "name": "identity_email_unique",
+          "columns": ["email"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "identity_users_id": {
+          "name": "identity_users_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "identity_verifications": {
+      "name": "identity_verifications",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "identity_verifications_id": {
+          "name": "identity_verifications_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    }
+  },
+  "views": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "tables": {},
+    "indexes": {}
+  }
+}

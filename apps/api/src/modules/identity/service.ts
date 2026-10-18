@@ -58,6 +58,7 @@ export interface PrivateChallenge {
   purpose: Purpose;
   code: string;
   expiresAt: string;
+  emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
   // Implementations must persist on this tx and perform network delivery after commit.
@@ -410,6 +411,7 @@ export function createIdentity(
     purpose: Purpose,
     successorId: string | null = null,
     proposedEmail: string | null = null,
+    currentEmailConfirmed = false,
   ): Promise<SafeResult> {
     if (!ports.delivery) throw identityError(503);
     const [identity] = await client(tx).select().from(user).where(eq(user.id, member.userId));
@@ -440,6 +442,8 @@ export function createIdentity(
         purpose,
         successorId,
         proposedEmail,
+        currentEmailConfirmed,
+        identityEpoch: member.identityEpoch,
         emailEpoch: member.emailEpoch,
         accessEpoch: member.accessEpoch,
         credentialEpoch: member.credentialEpoch,
@@ -449,10 +453,17 @@ export function createIdentity(
     await ports.delivery.enqueue(tx, {
       id,
       userId: member.userId,
-      email: identity.email,
+      email: currentEmailConfirmed && proposedEmail ? proposedEmail : identity.email,
       purpose,
       code: purpose === "password_reset" ? `${id}.${secret}` : secret,
       expiresAt: expiresAt.toISOString(),
+      ...(purpose === "email_change"
+        ? {
+            emailChangeStage: currentEmailConfirmed
+              ? ("proposed_email" as const)
+              : ("current_email" as const),
+          }
+        : {}),
     });
     return { id, expiresAt: expiresAt.toISOString(), state: "pending" };
   }
@@ -463,6 +474,7 @@ export function createIdentity(
     id: string,
     code: string,
     successorId: string | null = null,
+    currentEmailConfirmed = false,
   ) {
     const [challenge] = await client(tx)
       .select()
@@ -473,6 +485,7 @@ export function createIdentity(
       !challenge ||
       challenge.userId !== row.userId ||
       challenge.purpose !== purpose ||
+      (purpose === "email_change" && challenge.currentEmailConfirmed !== currentEmailConfirmed) ||
       challenge.consumed
     )
       return null;
@@ -484,6 +497,7 @@ export function createIdentity(
       challenge.expiresAt > now() &&
       challenge.attempts < 5 &&
       challenge.emailEpoch === row.emailEpoch &&
+      challenge.identityEpoch === row.identityEpoch &&
       challenge.accessEpoch === row.accessEpoch &&
       challenge.credentialEpoch === row.credentialEpoch &&
       challenge.successorId === successorId &&
@@ -814,6 +828,13 @@ export function createIdentity(
       purpose: "email_verification" | "password_change" | "email_change",
       proposedEmail: string | null = null,
     ) {
+      if (
+        purpose === "email_change" &&
+        (!proposedEmail ||
+          normalizedEmail(proposedEmail).length > 254 ||
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(proposedEmail))
+      )
+        throw identityError(422);
       if (!ports.delivery) throw identityError(503);
       await this.rateLimit("challenge", actor.userId, "actor");
       return unwrap(
@@ -873,7 +894,6 @@ export function createIdentity(
                   .set({ version: row.version + 1 })
                   .where(eq(membership.userId, actor.userId));
               } else {
-                if (!ports.accessEvents) throw identityError(503);
                 if (input.purpose === "email_change") {
                   if (!challenge.proposedEmail) return { failure: 401 };
                   const [identity] = await client(tx)
@@ -881,31 +901,13 @@ export function createIdentity(
                     .from(user)
                     .where(eq(user.id, actor.userId));
                   if (identity?.email === challenge.proposedEmail) return { failure: 401 };
-                  try {
-                    await client(tx)
-                      .update(user)
-                      .set({
-                        email: challenge.proposedEmail,
-                        emailVerified: false,
-                        updatedAt: now(),
-                      })
-                      .where(eq(user.id, actor.userId));
-                  } catch (error) {
-                    // InnoDB rolls back only this duplicate-key statement. Keep
-                    // the consumed challenge/attempt and durable generic result.
-                    if (
-                      causes(error).some(
-                        (cause) => "code" in cause && cause.code === "ER_DUP_ENTRY",
-                      )
-                    )
-                      return { failure: 401 };
-                    throw error;
-                  }
-                  await client(tx)
-                    .update(membership)
-                    .set({ emailEpoch: row.emailEpoch + 1 })
-                    .where(eq(membership.userId, actor.userId));
-                } else if (credential)
+                  // The old channel remains authoritative until the separately
+                  // delivered proposed-address proof is consumed. A new ID/hash
+                  // also prevents an old-channel code from proving the new one.
+                  return issue(tx, row, "email_change", null, challenge.proposedEmail, true);
+                }
+                if (!ports.accessEvents) throw identityError(503);
+                if (credential)
                   await client(tx)
                     .update(account)
                     .set({ password: credential.passwordHash, updatedAt: now() })
@@ -918,6 +920,97 @@ export function createIdentity(
               return { id: actor.userId, version: row.version + 1 };
             },
             input.purpose === "email_change",
+          );
+        }),
+      );
+    },
+    async pendingEmailChange(actor: Actor) {
+      return run(async (tx) => {
+        const current = await lockCompany(tx),
+          row = await checkActor(tx, actor, current);
+        const [pending] = await client(tx)
+          .select()
+          .from(challenges)
+          .where(
+            and(
+              eq(challenges.userId, actor.userId),
+              eq(challenges.purpose, "email_change"),
+              eq(challenges.consumed, false),
+            ),
+          );
+        return {
+          pending:
+            pending &&
+            pending.proposedEmail &&
+            pending.expiresAt > now() &&
+            pending.attempts < 5 &&
+            pending.emailEpoch === row.emailEpoch &&
+            pending.identityEpoch === row.identityEpoch &&
+            pending.accessEpoch === row.accessEpoch &&
+            pending.credentialEpoch === row.credentialEpoch
+              ? {
+                  id: pending.id,
+                  proposedEmail: pending.proposedEmail,
+                  expiresAt: pending.expiresAt.toISOString(),
+                  stage: pending.currentEmailConfirmed ? "proposed_email" : "current_email",
+                }
+              : null,
+        };
+      });
+    },
+    async confirmEmailChange(
+      actor: Actor,
+      key: string,
+      input: { challengeId: string; code: string },
+    ) {
+      return unwrap(
+        await run(async (tx) => {
+          const current = await lockCompany(tx),
+            row = await checkActor(tx, actor, current);
+          return once(
+            tx,
+            `${actor.userId}:confirm:proposed-email`,
+            key,
+            input,
+            async () => {
+              const challenge = await consume(
+                tx,
+                row,
+                "email_change",
+                input.challengeId,
+                input.code,
+                null,
+                true,
+              );
+              if (!challenge?.proposedEmail) return { failure: 401 };
+              const [identity] = await client(tx)
+                .select()
+                .from(user)
+                .where(eq(user.id, actor.userId));
+              if (!identity?.emailVerified || identity.email === challenge.proposedEmail)
+                return { failure: 401 };
+              if (!ports.accessEvents) throw identityError(503);
+              try {
+                await client(tx)
+                  .update(user)
+                  .set({ email: challenge.proposedEmail, emailVerified: true, updatedAt: now() })
+                  .where(eq(user.id, actor.userId));
+              } catch (error) {
+                // A duplicate-key statement leaves this InnoDB transaction usable:
+                // retain the bounded attempt and generic idempotent failure.
+                if (causes(error).some((cause) => "code" in cause && cause.code === "ER_DUP_ENTRY"))
+                  return { failure: 401 };
+                throw error;
+              }
+              await client(tx)
+                .update(membership)
+                .set({ emailEpoch: row.emailEpoch + 1 })
+                .where(eq(membership.userId, actor.userId));
+              await invalidate(tx, row);
+              await changed(tx, actor.userId, actor.userId, current);
+              return { id: actor.userId, version: row.version + 1 };
+            },
+            true,
           );
         }),
       );

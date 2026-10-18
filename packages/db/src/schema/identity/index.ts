@@ -159,6 +159,8 @@ export const challenges = mysqlTable(
       onDelete: "restrict",
     }),
     proposedEmail: exactText("proposed_email", 254),
+    currentEmailConfirmed: boolean("current_email_confirmed").notNull().default(false),
+    identityEpoch: int("identity_epoch", { unsigned: true }).notNull().default(0),
     emailEpoch: int("email_epoch", { unsigned: true }).notNull(),
     accessEpoch: int("access_epoch", { unsigned: true }).notNull(),
     credentialEpoch: int("credential_epoch", { unsigned: true }).notNull(),

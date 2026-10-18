@@ -280,17 +280,39 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
   );
   app.post<{ Body: Schemas["CredentialChangeInput"] }>(
     "/api/v1/me/credential-changes",
-    { schema: schema("EnvelopeCommandResult", "CredentialChangeInput") },
+    {
+      schema: {
+        ...schema("EnvelopeCommandResult", "CredentialChangeInput"),
+        response: { 200: ref("EnvelopeCommandResult"), 202: ref("EnvelopeChallenge") },
+      },
+    },
+    async (request, reply) => {
+      const current = await actor(request);
+      csrf.check(request, current);
+      const result = await identity.confirmChallenge(current, key(request), {
+        purpose: request.body.kind,
+        challengeId: request.body.challengeId,
+        code: request.body.code,
+        ...("newPassword" in request.body ? { newPassword: request.body.newPassword } : {}),
+      });
+      return reply
+        .code(request.body.kind === "email_change" ? 202 : 200)
+        .send(envelope(result, request));
+    },
+  );
+  app.get(
+    "/api/v1/me/email-change",
+    { schema: schema("EnvelopeEmailChangeState") },
+    async (request) => envelope(await identity.pendingEmailChange(await actor(request)), request),
+  );
+  app.post<{ Body: Schemas["EmailVerificationInput"] }>(
+    "/api/v1/me/email-change-confirmations",
+    { schema: schema("EnvelopeCommandResult", "EmailVerificationInput") },
     async (request) => {
       const current = await actor(request);
       csrf.check(request, current);
       return envelope(
-        await identity.confirmChallenge(current, key(request), {
-          purpose: request.body.kind,
-          challengeId: request.body.challengeId,
-          code: request.body.code,
-          ...("newPassword" in request.body ? { newPassword: request.body.newPassword } : {}),
-        }),
+        await identity.confirmEmailChange(current, key(request), request.body),
         request,
       );
     },

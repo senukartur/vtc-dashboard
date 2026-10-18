@@ -449,7 +449,7 @@ test("reset is current-verified-email bound, one-time, concurrent-safe and revok
   ).toEqual({ status: "received" });
 });
 
-test("protected email changes confirm old verified address, invalidate epochs and leave new address unverified", async () => {
+test("protected email replacement requires both channels before invalidating epochs and verifying the new address", async () => {
   const m = await addMember(),
     login = await signIn(m.email);
   await verify(login);
@@ -464,14 +464,21 @@ test("protected email changes confirm old verified address, invalidate epochs an
       code: challenge.code,
     }),
   );
+  expect((await safe(identity.current(login.actor))).data.email).toBe(m.email);
+  const proposed = await latestChallenge(m.id, "email_change");
+  expect(proposed.email === newEmail).toBe(true);
+  await safe(
+    identity.confirmEmailChange(login.actor, newId(), {
+      challengeId: proposed.id,
+      code: proposed.code,
+    }),
+  );
   await expect(safe(identity.authenticate(login.headers))).rejects.toMatchObject({
     statusCode: 401,
   });
   const changed = await signIn(newEmail);
-  expect(changed.data.emailVerified).toBe(false);
-  await expect(
-    safe(identity.requestChallenge(changed.actor, newId(), "password_change")),
-  ).rejects.toMatchObject({ statusCode: 401 });
+  expect(changed.data.emailVerified).toBe(true);
+  await safe(identity.requestChallenge(changed.actor, newId(), "password_change"));
 });
 
 test("production engine emits exact host-only secure cookies and current membership epochs defeat a still-present session", async () => {

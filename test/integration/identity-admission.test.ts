@@ -261,6 +261,8 @@ test("every owned route rejects a denied socket source before actor/current/cryp
     "resetPassword",
     "requestChallenge",
     "confirmChallenge",
+    "pendingEmailChange",
+    "confirmEmailChange",
     "preferences",
   ] as const;
   const spies = guarded.map((method) =>
@@ -284,6 +286,8 @@ test("every owned route rejects a denied socket source before actor/current/cryp
       ["POST", "/api/v1/me/email-verifications"],
       ["POST", "/api/v1/me/credential-challenges"],
       ["POST", "/api/v1/me/credential-changes"],
+      ["GET", "/api/v1/me/email-change"],
+      ["POST", "/api/v1/me/email-change-confirmations"],
       ["PATCH", "/api/v1/me/preferences"],
     ] as const;
     for (const [method, url] of requests) {
@@ -529,7 +533,18 @@ test("taken and current email confirmations durably fail generically without ide
   try {
     for (const proposedEmail of [taken.email, member.email]) {
       await safe(owner.requestChallenge(member.actor, newId(), "email_change", proposedEmail));
-      const challenge = await latest(member.id, "email_change");
+      let challenge = await latest(member.id, "email_change");
+      const proposedStage = proposedEmail !== member.email;
+      if (proposedStage) {
+        await safe(
+          owner.confirmChallenge(member.actor, newId(), {
+            purpose: "email_change",
+            challengeId: challenge.id,
+            code: challenge.code,
+          }),
+        );
+        challenge = await latest(member.id, "email_change");
+      }
       const [before] = await safe(
         control.query<RowDataPacket[]>(
           "SELECT u.email, u.email_verified, m.version, m.access_epoch, m.identity_epoch, m.credential_epoch, m.email_epoch FROM identity_users u JOIN identity_memberships m ON m.user_id = u.id WHERE u.id = ?",
@@ -549,14 +564,20 @@ test("taken and current email confirmations durably fail generically without ide
       const confirm = (idempotencyKey: string, code = challenge.code) =>
         app.inject({
           method: "POST",
-          url: "/api/v1/me/credential-changes",
+          url: proposedStage
+            ? "/api/v1/me/email-change-confirmations"
+            : "/api/v1/me/credential-changes",
           headers: {
             cookie: member.cookie,
             origin: config.origin,
             "x-csrf-token": csrf.json().data.token,
             "idempotency-key": idempotencyKey,
           },
-          payload: { kind: "email_change", challengeId: challenge.id, code },
+          payload: {
+            ...(proposedStage ? {} : { kind: "email_change" }),
+            challengeId: challenge.id,
+            code,
+          },
         });
       const rejected = await confirm(key),
         replay = await confirm(key),

@@ -85,6 +85,14 @@ interface Journal {
 }
 
 export async function auditOnlyFolder(): Promise<string> {
+  return publishedPrefixFolder(1);
+}
+
+export async function identityFoundationFolder(): Promise<string> {
+  return publishedPrefixFolder(2);
+}
+
+async function publishedPrefixFolder(count: 1 | 2): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -94,11 +102,12 @@ export async function auditOnlyFolder(): Promise<string> {
   const first = production.entries[0];
   if (first?.tag !== "0000_solid_spencer_smythe")
     throw new Error("PUBLISHED_AUDIT_PREFIX_REQUIRED");
-  await copyFile(join(migrationFolder, `${first.tag}.sql`), join(folder, `${first.tag}.sql`));
-  await writeFile(
-    join(folder, "meta/_journal.json"),
-    JSON.stringify({ ...production, entries: [first] }),
-  );
+  const entries = production.entries.slice(0, count);
+  if (count === 2 && entries[1]?.tag !== "0001_mean_masked_marvel")
+    throw new Error("PUBLISHED_IDENTITY_PREFIX_REQUIRED");
+  for (const entry of entries)
+    await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
+  await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
   return folder;
 }
 

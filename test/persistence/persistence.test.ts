@@ -39,6 +39,7 @@ import {
   guardedSettings,
   hasCode,
   hasMessage,
+  identityFoundationFolder,
   reset,
   root,
   testConnection,
@@ -115,7 +116,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         await readiness.close();
       }
       await reset(connection);
-      assert.equal(await runMigrations(settings), 2);
+      assert.equal(await runMigrations(settings), 3);
       assert.equal(await runMigrations(settings), 0);
       const [tables] = await connection.query<RowDataPacket[]>(
         "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
@@ -123,13 +124,51 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
       assert.equal(tables[0]?.ENGINE, "InnoDB");
     });
 
+    await t.test(
+      "email stage migration preserves old identity rows and invalidates outstanding proof epochs",
+      async () => {
+        await reset(connection);
+        const folder = await identityFoundationFolder();
+        try {
+          assert.equal(await runMigrations(settings, { folder }), 2);
+          const id = newId(),
+            challengeId = newId();
+          await connection.execute(
+            "INSERT INTO identity_users (id, name, email, email_verified, created_at, updated_at) VALUES (?, 'Synthetic Upgrade', 'synthetic-upgrade@example.invalid', 1, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))",
+            [id],
+          );
+          await connection.execute(
+            "INSERT INTO identity_memberships (user_id, status) VALUES (?, 'active')",
+            [id],
+          );
+          await connection.execute(
+            "INSERT INTO identity_challenges (id, user_id, purpose, proposed_email, email_epoch, access_epoch, credential_epoch, secret_hash, expires_at) VALUES (?, ?, 'email_change', 'synthetic-new@example.invalid', 1, 1, 1, ?, UTC_TIMESTAMP(3) + INTERVAL 10 MINUTE)",
+            [challengeId, id, Buffer.alloc(32)],
+          );
+          assert.equal(await runMigrations(settings), 1);
+          assert.equal(await runMigrations(settings), 0);
+          const [rows] = await connection.query<RowDataPacket[]>(
+            "SELECT u.email_verified, c.proposed_email, c.current_email_confirmed, c.identity_epoch, c.consumed FROM identity_users u JOIN identity_challenges c ON c.user_id=u.id WHERE c.id=?",
+            [challengeId],
+          );
+          assert.equal(Number(rows[0]?.email_verified), 1);
+          assert.equal(rows[0]?.proposed_email, "synthetic-new@example.invalid");
+          assert.equal(Number(rows[0]?.current_email_confirmed), 0);
+          assert.equal(Number(rows[0]?.identity_epoch), 0);
+          assert.equal(Number(rows[0]?.consumed), 0);
+        } finally {
+          await rm(folder, { recursive: true });
+        }
+      },
+    );
+
     await t.test("identity migration preserves existing published audit history", async () => {
       await reset(connection);
       const folder = await auditOnlyFolder();
       try {
         assert.equal(await runMigrations(settings, { folder }), 1);
         const id = await unit.run((tx) => audit.append(tx, auditInput()));
-        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 2);
         assert.equal(await runMigrations(settings), 0);
         const [saved] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM audit_entries WHERE id = ?",
@@ -150,7 +189,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 2);
+        assert.equal(await runMigrations(settings, { folder: extended }), 3);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -512,16 +551,16 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        assert.equal(String(history[0]?.count), "3");
+        assert.equal(String(history[0]?.count), "4");
         await reset(connection);
         assert.deepEqual(
           (await Promise.all([runMigrations(settings), runMigrations(settings)])).sort(),
-          [0, 2],
+          [0, 3],
         );
         const [singleApply] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
         );
-        assert.equal(String(singleApply[0]?.count), "2");
+        assert.equal(String(singleApply[0]?.count), "3");
       },
     );
   } finally {

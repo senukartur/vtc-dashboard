@@ -265,7 +265,8 @@
             },
             "newEmail": {
               "type": "string",
-              "format": "email"
+              "format": "email",
+              "maxLength": 254
             }
           },
           "required": [
@@ -6759,6 +6760,75 @@
       "properties": {
         "data": {
           "$ref": "#/$defs/ListAuditEntry"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "PendingEmailChange": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "proposedEmail": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "current_email",
+            "proposed_email"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "proposedEmail",
+        "expiresAt",
+        "stage"
+      ],
+      "additionalProperties": false
+    },
+    "EmailChangeState": {
+      "type": "object",
+      "properties": {
+        "pending": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PendingEmailChange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "pending"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeEmailChangeState": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EmailChangeState"
         },
         "meta": {
           "$ref": "#/$defs/Meta"
