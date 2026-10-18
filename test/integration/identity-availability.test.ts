@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import {
   createUnitOfWork,
@@ -193,6 +193,29 @@ test("API recognizes a real mysql2 query timeout through repository causes and d
   expect(failed.calls()).toBe(1);
 });
 
+test("API recognizes temporary Node DNS/reachability codes through causes without retrying", async () => {
+  // Node 24 net forwards lookup/connect errors; mysql2 forwards their original codes.
+  for (const code of ["EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH"]) {
+    const failed = failingUnit(
+      new Error("SYNTHETIC_PRIVATE_REPOSITORY_DIAGNOSTIC", {
+        cause: Object.assign(new Error("SYNTHETIC_PRIVATE_TRANSPORT_DIAGNOSTIC"), { code }),
+      }),
+    );
+    await bounded(assertCsrfFailure(failed.unit, 503), "temporary_transport");
+    expect(failed.calls()).toBe(1);
+  }
+});
+
+test("permanent DNS and SQL errors remain nonretryable 500", async () => {
+  for (const code of ["ENOTFOUND", "ER_BAD_FIELD_ERROR"]) {
+    const failed = failingUnit(
+      Object.assign(new Error("SYNTHETIC_PRIVATE_CONFIGURATION_DIAGNOSTIC"), { code }),
+    );
+    await bounded(assertCsrfFailure(failed.unit, 500), "permanent_failure");
+    expect(failed.calls()).toBe(1);
+  }
+});
+
 test("uncertain COMMIT remains nonretryable 500, including a wrapper containing a recognized timeout cause", async () => {
   const timeout = await queryTimeout();
   for (const wrap of [false, true]) {
@@ -255,6 +278,61 @@ async function loginRequest(subject: UnitOfWork, input = credential) {
     await app.close();
   }
 }
+
+test("real InnoDB company lock timeout returns API 503 once, rolls back writes, releases and recovers", async () => {
+  const holder = await dedicatedConnection(guardedSettings());
+  const failedMarkers: string[] = [];
+  const observedCodes: unknown[] = [];
+  const subject: UnitOfWork = {
+    client: (tx) => unit.client(tx),
+    close: async () => {},
+    run: (command) =>
+      unit.run(async (tx) => {
+        await unit.client(tx).execute(sql`SET SESSION innodb_lock_wait_timeout = 1`);
+        const marker = randomUUID();
+        await unit
+          .client(tx)
+          .execute(sql`INSERT INTO synthetic_availability_events VALUES (${marker})`);
+        try {
+          return await command(tx);
+        } catch (error) {
+          failedMarkers.push(marker);
+          let cause = error;
+          for (let depth = 0; depth < 8 && cause && typeof cause === "object"; depth++) {
+            if ("code" in cause) observedCodes.push(cause.code);
+            cause = "cause" in cause ? cause.cause : null;
+          }
+          throw error;
+        }
+      }),
+  };
+  const output = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    await holder.beginTransaction();
+    await bounded(
+      holder.query("SELECT singleton FROM identity_company WHERE singleton = 1 FOR UPDATE"),
+      "company_lock_acquired",
+    );
+    // CSRF also authenticates an optional session through the company locking read.
+    await bounded(assertCsrfFailure(subject, 503), "company_lock_timeout", 5000);
+    expect(failedMarkers).toHaveLength(1);
+    expect(observedCodes).toContain("ER_LOCK_WAIT_TIMEOUT");
+    const [rows] = await control.query(
+      "SELECT id FROM synthetic_availability_events WHERE id = ?",
+      [failedMarkers[0]],
+    );
+    expect(rows).toEqual([]);
+    await holder.rollback();
+    expect((await bounded(loginRequest(unit), "company_lock_recovered", 5000)).statusCode).toBe(
+      200,
+    );
+    expect(failedMarkers).toHaveLength(1);
+  } finally {
+    await holder.rollback();
+    await holder.end();
+    output.mockRestore();
+  }
+});
 
 test("native engine database failures stay 503 while unrelated application errors remain nonretryable 500", async () => {
   const output = vi.spyOn(console, "error").mockImplementation(() => {});

@@ -112,12 +112,22 @@ export function createIdentity(
   function availabilityCategory(error: unknown): string | null {
     for (const current of causes(error)) {
       if ("code" in current) {
-        if (["PROTOCOL_SEQUENCE_TIMEOUT", "ETIMEDOUT"].includes(current.code as string))
-          return "database_timeout";
         if (
-          ["ECONNREFUSED", "ECONNRESET", "EPIPE", "PROTOCOL_CONNECTION_LOST"].includes(
+          ["PROTOCOL_SEQUENCE_TIMEOUT", "ETIMEDOUT", "ER_LOCK_WAIT_TIMEOUT"].includes(
             current.code as string,
           )
+        )
+          return "database_timeout";
+        if (
+          [
+            "ECONNREFUSED",
+            "ECONNRESET",
+            "EPIPE",
+            "PROTOCOL_CONNECTION_LOST",
+            "EAI_AGAIN",
+            "ENETUNREACH",
+            "EHOSTUNREACH",
+          ].includes(current.code as string)
         )
           return "database_unavailable";
         if (["ER_CON_COUNT_ERROR", "ER_TOO_MANY_USER_CONNECTIONS"].includes(current.code as string))
