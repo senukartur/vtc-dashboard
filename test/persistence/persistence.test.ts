@@ -81,6 +81,74 @@ async function rows(client: TransactionClient, query: SQL) {
   return result[0] as unknown as Record<string, unknown>[];
 }
 
+async function cooperatingMigrations(
+  settings: ReturnType<typeof guardedSettings>,
+  phase: "replay" | "fresh",
+  folder?: string,
+) {
+  // Successful waiters allow full fixture application; lock denial is tested separately.
+  const lockTimeoutSeconds = 15;
+  const results = await Promise.allSettled(
+    [0, 1].map(async (caller) => {
+      const started = performance.now();
+      try {
+        const applied = await runMigrations(settings, {
+          ...(folder === undefined ? {} : { folder }),
+          lockTimeoutSeconds,
+        });
+        console.log(
+          JSON.stringify({
+            event: "persistence_migration_concurrency",
+            phase,
+            caller,
+            state: "fulfilled",
+            durationMs: Math.round(performance.now() - started),
+            applied,
+            lockTimeoutSeconds,
+          }),
+        );
+        return applied;
+      } catch (error) {
+        const categories: Record<string, string> = {
+          MIGRATION_LOCK_UNAVAILABLE: "lock_unavailable",
+          MIGRATION_BASELINE_MISMATCH: "baseline_mismatch",
+          MIGRATION_HISTORY_DRIFT: "history_drift",
+          MIGRATION_RECOVERY_REQUIRED: "recovery_required",
+        };
+        console.log(
+          JSON.stringify({
+            event: "persistence_migration_concurrency",
+            phase,
+            caller,
+            state: "rejected",
+            durationMs: Math.round(performance.now() - started),
+            lockTimeoutSeconds,
+            category:
+              error instanceof Error && Object.hasOwn(categories, error.message)
+                ? categories[error.message]
+                : "unclassified",
+            codes: [
+              "PROTOCOL_SEQUENCE_TIMEOUT",
+              "ETIMEDOUT",
+              "ER_LOCK_WAIT_TIMEOUT",
+              "ER_LOCK_DEADLOCK",
+              "ECONNRESET",
+              "ECONNREFUSED",
+              "PROTOCOL_CONNECTION_LOST",
+            ].filter((code) => hasCode(code)(error)),
+          }),
+        );
+        throw new Error("SYNTHETIC_COOPERATING_MIGRATION_FAILED");
+      }
+    }),
+  );
+  // Drain every started caller before an assertion can exit into reset/teardown.
+  return results.map((result) => {
+    if (result.status !== "fulfilled") throw new Error("SYNTHETIC_COOPERATING_MIGRATION_FAILED");
+    return result.value;
+  });
+}
+
 test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
   const settings = guardedSettings();
   const connection = await testConnection();
@@ -534,13 +602,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         );
         assert.ok(Date.now() - start >= 900 && Date.now() - start < 3500);
         await connection.query("SELECT RELEASE_LOCK(?)", [lock]);
-        assert.deepEqual(
-          await Promise.all([
-            runMigrations(settings, { folder: extended }),
-            runMigrations(settings, { folder: extended }),
-          ]),
-          [0, 0],
-        );
+        assert.deepEqual(await cooperatingMigrations(settings, "replay", extended), [0, 0]);
         const disposable = await testConnection();
         await disposable.query("SELECT GET_LOCK(?, 0)", [lock]);
         // Begin a cooperating waiter, then terminate the lock holder's connection.
@@ -553,10 +615,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         );
         assert.equal(String(history[0]?.count), "4");
         await reset(connection);
-        assert.deepEqual(
-          (await Promise.all([runMigrations(settings), runMigrations(settings)])).sort(),
-          [0, 3],
-        );
+        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 3]);
         const [singleApply] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
         );
