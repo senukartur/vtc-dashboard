@@ -22,6 +22,7 @@ MAX_IMAGE = 800 * 1024 * 1024
 SHA = re.compile(r'^[a-f0-9]{40}$')
 HASH = re.compile(r'^[a-f0-9]{64}$')
 PROJECT = 'vtc-development'
+READINESS_ATTEMPTS = 30
 
 
 def require(condition, code):
@@ -34,8 +35,11 @@ def digest(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
-def run(args, *, revision=None, project=PROJECT, data=None, timeout=180, output=None):
+def run(args, *, revision=None, image_id=None, project=PROJECT, data=None, timeout=180, output=None):
     env = dict(os.environ, VTC_REVISION=revision or 'local')
+    if image_id is not None:
+        require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id), 'IMAGE_ID_INVALID')
+        env['VTC_IMAGE_ID'] = image_id
     (BASE / 'state').mkdir(mode=0o700, exist_ok=True)
     error_file = BASE / 'state/last-child.stderr'
     # Private, overwritten diagnostic only; never returned through the receiver or CI report.
@@ -48,9 +52,31 @@ def run(args, *, revision=None, project=PROJECT, data=None, timeout=180, output=
     return result.stdout
 
 
-def compose(args, *, revision, project=PROJECT, **kwargs):
+def accepted_image_id(revision):
+    for name in ['current.json', 'previous.json']:
+        path = BASE / 'state' / name
+        if path.exists():
+            release = json.loads(path.read_text())
+            if release.get('revision') == revision:
+                image_id = release.get('imageId', '')
+                require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id), 'IMAGE_ID_INVALID')
+                return image_id
+    raise RuntimeError('ACCEPTED_IMAGE_REQUIRED')
+
+
+def validate_image(image_id, revision):
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id), 'IMAGE_ID_INVALID')
+    image = json.loads(run(['docker', 'image', 'inspect', image_id]))[0]
+    require(image['Id'] == image_id and
+            image['Config']['Labels'].get('org.opencontainers.image.revision') == revision and
+            f'VTC_REVISION={revision}' in image['Config']['Env'], 'IMAGE_REVISION_MISMATCH')
+    return image
+
+
+def compose(args, *, revision, image_id=None, project=PROJECT, **kwargs):
+    image_id = image_id or accepted_image_id(revision)
     return run(['docker', 'compose', '--project-name', project, '--file', str(BASE / 'compose.yaml'),
-                *args], revision=revision, project=project, **kwargs)
+                *args], revision=revision, image_id=image_id, project=project, **kwargs)
 
 
 @contextlib.contextmanager
@@ -145,15 +171,15 @@ def maintenance(enabled):
         marker.unlink(missing_ok=True)
 
 
-def fenced(revision):
+def fenced(revision, image_id=None):
     maintenance(True)
-    compose(['stop', 'app', 'probe'], revision=revision)
+    compose(['stop', 'app', 'probe'], revision=revision, image_id=image_id)
 
 
-def synthetic_reference(revision, project=PROJECT):
+def synthetic_reference(revision, project=PROJECT, image_id=None):
     value = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/export.cnf', '-N', '-B',
                      '-e', 'SELECT evidence_sha FROM vtc_operations.synthetic_reference WHERE singleton=1;'],
-                    revision=revision, project=project).decode().strip()
+                    revision=revision, image_id=image_id, project=project).decode().strip()
     require(not value or HASH.fullmatch(value), 'SYNTHETIC_REFERENCE_INVALID')
     return value or None
 
@@ -161,11 +187,12 @@ def synthetic_reference(revision, project=PROJECT):
 def seed_synthetic_locked(revision):
     # Fixed fictional fixture in the operations schema; never a domain upload or production seed.
     fenced(revision)
+    image_id = accepted_image_id(revision)
     content = b'fictional-vtc011-evidence-sentinel\n'
     checksum = hashlib.sha256(content).hexdigest()
     run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '1000',
          '--mount', f'type=volume,source={PROJECT}_evidence,target=/app/private-evidence',
-         f'vtc-dashboard:{revision}', 'node', '-e',
+         image_id, 'node', '-e',
          "require('node:fs').writeFileSync('/app/private-evidence/vtc011-sentinel.txt','fictional-vtc011-evidence-sentinel\\n')"])
     compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
             revision=revision, data=f"REPLACE INTO vtc_operations.synthetic_reference VALUES (1, '{checksum}');".encode())
@@ -181,6 +208,8 @@ def export_locked(revision):
     directory = BASE / 'state/exports' / identity
     directory.mkdir(parents=True, mode=0o700)
     try:
+        image_id = accepted_image_id(revision)
+        validate_image(image_id, revision)
         with open(directory / 'database.sql', 'wb') as output:
             compose(['exec', '-T', 'db', 'mysqldump', '--defaults-extra-file=/run/secrets/export.cnf',
                      '--single-transaction', '--set-gtid-purged=OFF', '--no-tablespaces', '--hex-blob',
@@ -188,13 +217,13 @@ def export_locked(revision):
         with open(directory / 'evidence.tar', 'wb') as output:
             run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0',
                  '--mount', f'type=volume,source={PROJECT}_evidence,target=/evidence,readonly',
-                 f'vtc-dashboard:{revision}', 'tar', '-C', '/evidence', '-cf', '-', '.'], output=output)
+                 image_id, 'tar', '-C', '/evidence', '-cf', '-', '.'], output=output)
         archive_safe(directory / 'evidence.tar')
         reference = synthetic_reference(revision, PROJECT)
         inventory = evidence_inventory(directory / 'evidence.tar')
         if reference:
             require(inventory.get('vtc011-sentinel.txt', {}).get('sha256') == reference, 'SYNTHETIC_REFERENCE_MISMATCH')
-        manifest = {'version': 1, 'revision': revision, 'createdUtc': int(time.time()),
+        manifest = {'version': 1, 'revision': revision, 'imageId': image_id, 'createdUtc': int(time.time()),
                     'syntheticReference': reference,
                     'evidenceFiles': inventory,
                     'files': {name: {'sha256': digest(directory / name), 'bytes': (directory / name).stat().st_size}
@@ -211,6 +240,7 @@ def validate_export(identity):
     directory = BASE / 'state/exports' / identity
     manifest = json.loads((directory / 'manifest.json').read_text())
     require(manifest.get('version') == 1 and SHA.fullmatch(manifest.get('revision', '')), 'EXPORT_INVALID')
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', manifest.get('imageId', '')), 'EXPORT_IMAGE_INVALID')
     require(set(manifest.get('files', {})) == {'database.sql', 'evidence.tar'}, 'EXPORT_INVALID')
     for name, expected in manifest['files'].items():
         path = directory / name
@@ -224,6 +254,8 @@ def validate_export(identity):
 def restore_locked(identity):
     directory, manifest = validate_export(identity)  # Validate before touching any database.
     revision = manifest['revision']
+    image_id = manifest['imageId']
+    validate_image(image_id, revision)
     project = f'vtc-development-restore-{uuid.uuid4().hex[:12]}'
     active_revision = current()['revision'] if current() else revision
     # One small host cannot assume two MySQL instances fit. Fence and stop active SQL;
@@ -231,29 +263,29 @@ def restore_locked(identity):
     fenced(active_revision)
     compose(['stop', 'db'], revision=active_revision)
     # This destination has new named volumes and its own internal network. Never switch active data.
-    compose(['up', '-d', '--wait', 'db'], revision=revision, project=project, timeout=240)
+    compose(['up', '-d', '--wait', 'db'], revision=revision, image_id=image_id, project=project, timeout=240)
     try:
         compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
-                revision=revision, project=project, data=(directory / 'database.sql').read_bytes())
+                revision=revision, image_id=image_id, project=project, data=(directory / 'database.sql').read_bytes())
         run(['docker', 'volume', 'create', f'{project}_evidence'])
         run(['docker', 'run', '--rm', '-i', '--network', 'none', '--read-only', '--user', '0',
              '--mount', f'type=volume,source={project}_evidence,target=/restore',
-             f'vtc-dashboard:{revision}', 'tar', '-C', '/restore', '-xf', '-'],
+             image_id, 'tar', '-C', '/restore', '-xf', '-'],
             data=(directory / 'evidence.tar').read_bytes())
         # Existing migrator validates exact server baseline, immutable checksums and clean ledger;
         # a dirty ledger must fail. Applied migrations replay as no-ops.
-        compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision, project=project)
-        require(synthetic_reference(revision, project) == manifest['syntheticReference'], 'RESTORED_REFERENCE_MISMATCH')
+        compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision, image_id=image_id, project=project)
+        require(synthetic_reference(revision, project, image_id) == manifest['syntheticReference'], 'RESTORED_REFERENCE_MISMATCH')
         with tempfile.NamedTemporaryFile() as restored:
             run(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--user', '0',
                  '--mount', f'type=volume,source={project}_evidence,target=/evidence,readonly',
-                 f'vtc-dashboard:{revision}', 'tar', '-C', '/evidence', '-cf', '-', '.'], output=restored)
+                 image_id, 'tar', '-C', '/evidence', '-cf', '-', '.'], output=restored)
             restored.flush()
             require(evidence_inventory(pathlib.Path(restored.name)) == manifest['evidenceFiles'],
                     'RESTORED_EVIDENCE_MISMATCH')
     finally:
         # Leave isolated volumes intact for private inspection; never delete active volumes.
-        compose(['stop', 'db'], revision=revision, project=project)
+        compose(['stop', 'db'], revision=revision, image_id=image_id, project=project)
     if not (BASE / 'state/recovery-required').exists():
         compose(['up', '-d', '--wait', 'db'], revision=active_revision, timeout=240)
         compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=active_revision)
@@ -273,18 +305,17 @@ def release_locked(path, revision, run_id, attempt, mode, expected_image_id):
     require(shutil.disk_usage(BASE).free > path.stat().st_size * 3 + 1024**3, 'DISK_CAPACITY_REQUIRED')
     archive_safe(path, docker=True)
     run(['docker', 'load', '--input', str(path)], timeout=240)
-    image = json.loads(run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]
-    require(image['Id'] == expected_image_id and
-            image['Config']['Labels'].get('org.opencontainers.image.revision') == revision and
-            f'VTC_REVISION={revision}' in image['Config']['Env'], 'IMAGE_REVISION_MISMATCH')
-    fenced(previous['revision'] if previous else revision)
-    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
+    loaded = json.loads(run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]
+    require(loaded['Id'] == expected_image_id, 'LOADED_IMAGE_ID_MISMATCH')
+    image = validate_image(expected_image_id, revision)
+    fenced(previous['revision'] if previous else revision, previous['imageId'] if previous else expected_image_id)
+    compose(['up', '-d', '--wait', 'db'], revision=revision, image_id=expected_image_id, timeout=240)
     backup = export_locked(previous['revision']) if previous else None
     # Durable fail-closed intent survives even SIGKILL, SSH loss or host process death.
     # Remove only after complete promotion or verified zero-migration previous-image recovery.
     recovery_intent()
     try:
-        migration_output = compose(['run', '--rm', '--name', f'{PROJECT}-migration', '--no-deps', 'migrate'], revision=revision)
+        migration_output = compose(['run', '--rm', '--name', f'{PROJECT}-migration', '--no-deps', 'migrate'], revision=revision, image_id=expected_image_id)
     except BaseException:
         # A disconnect/timeout does not prove server-side DDL cancellation. Preserve sticky ledger.
         (BASE / 'state/recovery-required').touch(mode=0o600)
@@ -295,30 +326,30 @@ def release_locked(path, revision, run_id, attempt, mode, expected_image_id):
             with contextlib.suppress(Exception):
                 run(['docker', 'stop', '--time', '30', f'{PROJECT}-migration'], timeout=45)
             with contextlib.suppress(Exception):
-                compose(['stop', '--timeout', '30', 'db'], revision=revision, timeout=45)
+                compose(['stop', '--timeout', '30', 'db'], revision=revision, image_id=expected_image_id, timeout=45)
         finally:
             for number, handler in saved.items():
                 signal.signal(number, handler)
         raise RuntimeError('MIGRATION_RECOVERY_REQUIRED') from None
-    compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=revision)
+    compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=revision, image_id=expected_image_id)
     try:
-        ready(revision)
-        compose(['up', '-d', '--no-deps', 'proxy'], revision=revision)
+        ready(revision, expected_image_id)
+        compose(['up', '-d', '--no-deps', 'proxy'], revision=revision, image_id=expected_image_id)
         public_ready(revision)
     except BaseException:
-        fenced(revision)
+        fenced(revision, expected_image_id)
         # The packaged CLI's fixed applied=0 result proves no new schema work occurred.
         # Only that case supports automatic previous-image recovery.
         if previous and b'"applied":0' in migration_output:
-            compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=previous['revision'])
-            ready(previous['revision'])
+            compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=previous['revision'], image_id=previous['imageId'])
+            ready(previous['revision'], previous['imageId'])
             public_ready(previous['revision'])
             (BASE / 'state/recovery-required').unlink()
             maintenance(False)
             raise RuntimeError('CANDIDATE_REJECTED_PREVIOUS_RESTORED') from None
         (BASE / 'state/recovery-required').touch(mode=0o600)
         raise RuntimeError('READINESS_RECOVERY_REQUIRED') from None
-    if previous and previous['revision'] != revision:
+    if previous and previous['imageId'] != image['Id']:
         atomic_json(BASE / 'state/previous.json', previous)
     atomic_json(BASE / 'state/current.json', {'revision': revision, 'runId': run_id,
                                              'attempt': attempt, 'imageId': image['Id'], 'backup': backup})
@@ -351,11 +382,11 @@ def public_ready(revision):
     raise RuntimeError('PUBLIC_READINESS_FAILED')
 
 
-def ready(revision):
-    for _ in range(30):
+def ready(revision, image_id=None):
+    for _ in range(READINESS_ATTEMPTS):
         try:
             output = compose(['exec', '-T', 'app', 'node', '-e',
-                              "fetch('http://127.0.0.1:3000/health/ready',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], revision=revision, timeout=8)
+                              "fetch('http://127.0.0.1:3000/health/ready',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], revision=revision, image_id=image_id, timeout=8)
             require(output is not None, 'READINESS_FAILED')
             return
         except RuntimeError:

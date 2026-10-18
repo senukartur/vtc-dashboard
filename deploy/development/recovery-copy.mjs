@@ -13,9 +13,12 @@ try {
     if (key.length !== 32) throw new Error("KEY_INVALID");
     const iv = randomBytes(12);
     const cipher = createCipheriv("aes-256-gcm", key, iv);
-    const target = createWriteStream(input, { flags: "wx", mode: 0o600 });
-    target.write(Buffer.concat([Buffer.from("VTC011E1"), iv]));
+    // Establish ownership before any cleanup path can remove the output.
+    // An exclusive-open collision belongs to an earlier invocation and must survive.
+    const handle = await open(input, "wx", 0o600);
     try {
+      const target = handle.createWriteStream({ autoClose: true });
+      target.write(Buffer.concat([Buffer.from("VTC011E1"), iv]));
       await pipeline(process.stdin, cipher, target, { end: false });
       target.end(cipher.getAuthTag());
       await new Promise((accept, reject) => {
@@ -23,9 +26,11 @@ try {
         target.once("error", reject);
       });
     } catch {
-      target.destroy();
+      await handle.close();
       await rm(input, { force: true });
       throw new Error("SEAL_FAILED");
+    } finally {
+      await handle.close().catch(() => {});
     }
   } else if (operation === "open" && input && keyPath && output) {
     const key = await readFile(keyPath);

@@ -39,7 +39,7 @@ services:
       driver: json-file
       options: { max-size: "5m", max-file: "2" }
   app:
-    image: vtc-dashboard:${VTC_REVISION:?Set the validated revision}
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
     restart: unless-stopped
     init: true
     env_file: [./private/runtime.env]
@@ -55,7 +55,7 @@ services:
     networks: [frontend, database]
     logging: *logs
   probe:
-    image: vtc-dashboard:${VTC_REVISION:?Set the validated revision}
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
     command: [node, operations/probe.mjs, serve]
     restart: unless-stopped
     init: true
@@ -68,7 +68,7 @@ services:
     networks: [frontend, database]
     logging: *logs
   heartbeat:
-    image: vtc-dashboard:${VTC_REVISION:?Set the validated revision}
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
     profiles: [tools]
     command: [node, operations/probe.mjs, heartbeat]
     env_file: [./private/heartbeat.env]
@@ -79,7 +79,7 @@ services:
     networks: [database]
     logging: *logs
   migrate:
-    image: vtc-dashboard:${VTC_REVISION:?Set the validated revision}
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
     profiles: [tools]
     command: [node, node_modules/@vtc/db/dist/migrate-cli.js]
     env_file: [./private/migrator.env]

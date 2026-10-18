@@ -33,12 +33,23 @@ try {
     "production",
     "--build-arg",
     `VTC_REVISION=${revision}`,
+    "--label",
+    `vtc011.rehearsal=${project}`,
     "-t",
     `vtc-dashboard:${revision}`,
     ".",
   ]);
   console.log("Deployment rehearsal: production image built");
-  await docker(["build", "-f", "deploy/development/operator-test.Dockerfile", "-t", runner, "."]);
+  await docker([
+    "build",
+    "-f",
+    "deploy/development/operator-test.Dockerfile",
+    "--label",
+    `vtc011.rehearsal=${project}`,
+    "-t",
+    runner,
+    ".",
+  ]);
   await docker(["volume", "create", volume]);
   await docker(["network", "create", network]);
   await docker(
@@ -88,20 +99,46 @@ try {
 } finally {
   await docker(["rm", "-f", runner], 30000, true);
   // Only resources bearing this fresh random allocation are eligible for cleanup.
-  for (const type of ["container", "network", "volume"]) {
+  for (const type of ["container", "network", "volume", "image"]) {
     const { spawnSync } = await import("node:child_process");
     const filter =
       type === "container"
         ? ["ps", "-aq", "--filter", `label=vtc011.rehearsal=${project}`]
-        : type === "network"
-          ? ["network", "ls", "-q", "--filter", `label=vtc011.rehearsal=${project}`]
-          : ["volume", "ls", "-q", "--filter", `label=vtc011.rehearsal=${project}`];
+        : type === "image"
+          ? [
+              "image",
+              "ls",
+              "-a",
+              "-q",
+              "--no-trunc",
+              "--filter",
+              `label=vtc011.rehearsal=${project}`,
+            ]
+          : type === "network"
+            ? ["network", "ls", "-q", "--filter", `label=vtc011.rehearsal=${project}`]
+            : ["volume", "ls", "-q", "--filter", `label=vtc011.rehearsal=${project}`];
     const result = spawnSync("docker", filter, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
     if (result.status !== 0) passed = false;
-    for (const resource of result.stdout?.trim().split(/\s+/).filter(Boolean) ?? [])
+    if (type === "image") {
+      // Include untagged parent images after same-SHA retagging. Three bounded
+      // passes also cover engines that retain parent/child deletion ordering.
+      let pending = result;
+      for (let attempt = 0; attempt < 3 && pending.status === 0; attempt++) {
+        const images = new Set(pending.stdout.trim().split(/\s+/).filter(Boolean));
+        if (!images.size) break;
+        for (const resource of images) await docker(["image", "rm", "-f", resource], 30000, true);
+        pending = spawnSync("docker", filter, {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        });
+      }
+      if (pending.status !== 0 || pending.stdout?.trim()) passed = false;
+      continue;
+    }
+    for (const resource of new Set(result.stdout?.trim().split(/\s+/).filter(Boolean) ?? []))
       if (
         (await docker(
           type === "container" ? ["rm", "-f", resource] : [type, "rm", resource],
@@ -113,6 +150,5 @@ try {
   }
   if ((await docker(["volume", "rm", volume], 30000, true)) !== 0) passed = false;
   if ((await docker(["network", "rm", network], 30000, true)) !== 0) passed = false;
-  await docker(["image", "rm", runner, `vtc-dashboard:${revision}`], 30000, true);
 }
 process.exitCode = passed ? 0 : 1;

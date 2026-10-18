@@ -21,6 +21,8 @@ project = os.environ['REHEARSAL_PROJECT']
 revision = os.environ['REHEARSAL_REVISION']
 volume = os.environ['REHEARSAL_VOLUME']
 assert project.startswith('vtc011-') and len(project) == 23
+image_id = json.loads(subprocess.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout)[0]['Id']
 for path in pathlib.Path('/source').iterdir():
     if path.is_file():
         shutil.copyfile(path, base / path.name)
@@ -42,13 +44,15 @@ for entries in [ {'../escape': b'x', 'release.json': b'{}'},
 caddy = (base / 'Caddyfile').read_text().replace('{$STAGING_DOMAIN} {', '{$STAGING_DOMAIN} {\n  tls internal')
 (base / 'Caddyfile').write_text(caddy)
 result = subprocess.run(['docker', 'compose', '--profile', '*', '-f', str(base / 'compose.yaml'), 'config', '--format', 'json'],
-                        env=dict(os.environ, VTC_REVISION=revision), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
+                        env=dict(os.environ, VTC_REVISION=revision, VTC_IMAGE_ID=image_id), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
 config = json.loads(result.stdout)
 config['name'] = project
 label = {'vtc011.rehearsal': project}
 for name, value in config['services'].items():
     value['labels'] = label
     value.pop('ports', None)
+    if name in ['app', 'probe', 'heartbeat', 'migrate']:
+        value['image'] = '${VTC_IMAGE_ID:?Set the validated immutable image ID}'
 for name, value in config['volumes'].items():
     value['name'] = f'{project}_{name}'
     value['labels'] = label
@@ -81,7 +85,8 @@ ops.PROJECT = project
 original_compose = ops.compose
 
 
-def compose(args, *, revision, project=project, **kwargs):
+def compose(args, *, revision, image_id=None, project=project, **kwargs):
+    selected_image = image_id or (ops.accepted_image_id(revision) if ops.current() else globals()['image_id'])
     if project != ops.PROJECT:
         # Compose's explicit volume names must be allocated independently for each restore.
         restored = json.loads(json.dumps(config))
@@ -92,8 +97,8 @@ def compose(args, *, revision, project=project, **kwargs):
             value['name'] = f'{project}_{name}'
         file = base / f'{project}.json'
         file.write_text(json.dumps(restored))
-        return ops.run(['docker', 'compose', '-p', project, '-f', str(file), *args], revision=revision, **kwargs)
-    return original_compose(args, revision=revision, project=project, **kwargs)
+        return ops.run(['docker', 'compose', '-p', project, '-f', str(file), *args], revision=revision, image_id=selected_image, **kwargs)
+    return original_compose(args, revision=revision, image_id=selected_image, project=project, **kwargs)
 
 
 ops.compose = compose
@@ -186,25 +191,78 @@ second_release.start()
 assert release_queue.get(timeout=120) == 102
 first_release.join(timeout=120); second_release.join(timeout=120)
 assert first_release.exitcode == 0 and second_release.exitcode == 0 and ops.current()['runId'] == 102
-original_ready = ops.ready
-calls = 0
-def reject_candidate(candidate):
-    global calls
-    calls += 1
-    if calls == 1:
-        raise RuntimeError('SYNTHETIC_CANDIDATE_UNAVAILABLE')
-    return original_ready(candidate)
-ops.ready = reject_candidate
+# A healthy same-SHA rebuild can be accepted while retaining its predecessor by ID.
+rebuilt_context = io.BytesIO()
+rebuilt_dockerfile = f'FROM vtc-dashboard:{revision}\nLABEL vtc011.variant=healthy-rebuild\n'.encode()
+with tarfile.open(fileobj=rebuilt_context, mode='w') as archive:
+    entry = tarfile.TarInfo('Dockerfile'); entry.size = len(rebuilt_dockerfile)
+    archive.addfile(entry, io.BytesIO(rebuilt_dockerfile))
+rebuilt_tag = f'{project}:rebuilt'
+ops.run(['docker', 'build', '-t', rebuilt_tag, '-'], data=rebuilt_context.getvalue(), timeout=180)
+rebuilt_id = json.loads(ops.run(['docker', 'image', 'inspect', rebuilt_tag]))[0]['Id']
+assert rebuilt_id != image_id
+ops.run(['docker', 'tag', rebuilt_id, f'vtc-dashboard:{revision}'])
+rebuilt_archive = base / 'rebuilt-image.tar'
+ops.run(['docker', 'save', '--output', str(rebuilt_archive), f'vtc-dashboard:{revision}'])
 with ops.lock():
-    expect_failure(lambda: ops.release_locked(image_archive, revision, 103, 1, 'auto', image_id))
-ops.ready = original_ready
-assert ops.current()['runId'] == 102 and not (base / 'private/maintenance/enabled').exists()
+    ops.release_locked(rebuilt_archive, revision, 103, 1, 'auto', rebuilt_id)
+assert ops.current()['imageId'] == rebuilt_id and ops.current()['runId'] == 103
+assert json.loads((base / 'state/previous.json').read_text())['imageId'] == image_id
+assert json.loads((base / 'state/exports' / ops.current()['backup'] / 'manifest.json').read_text())['imageId'] == image_id
+image_id = rebuilt_id
+image_archive = rebuilt_archive
+# A rebuilt artifact for the SAME source SHA has a different immutable image and
+# actually returns HTTP 503. Loading it deliberately overwrites the revision tag.
+unhealthy_tag = f'{project}:unhealthy'
+unhealthy_script = b"""import {createServer} from 'node:http';
+import {writeFileSync} from 'node:fs';
+createServer((request,response)=>{
+  if(request.url==='/health/ready') {
+    writeFileSync('/app/private-evidence/unhealthy-http-observed.txt','HTTP_503_OBSERVED\\n');
+    response.writeHead(503).end('SYNTHETIC_UNAVAILABLE');
+  } else response.writeHead(200).end('SYNTHETIC_LIVE');
+}).listen(3000,'0.0.0.0');
+"""
+dockerfile = (f'FROM vtc-dashboard:{revision}\nCOPY --chown=node:node unhealthy.mjs /app/operations/unhealthy.mjs\n'
+              f'LABEL vtc011.rehearsal={project}\nCMD ["node","operations/unhealthy.mjs"]\n').encode()
+context_tar = io.BytesIO()
+with tarfile.open(fileobj=context_tar, mode='w') as archive:
+    for name, content in [('Dockerfile', dockerfile), ('unhealthy.mjs', unhealthy_script)]:
+        entry = tarfile.TarInfo(name); entry.size = len(content); archive.addfile(entry, io.BytesIO(content))
+ops.run(['docker', 'build', '-t', unhealthy_tag, '-'], data=context_tar.getvalue(), timeout=180)
+unhealthy_id = json.loads(ops.run(['docker', 'image', 'inspect', unhealthy_tag]))[0]['Id']
+assert unhealthy_id != image_id
+ops.run(['docker', 'tag', unhealthy_id, f'vtc-dashboard:{revision}'])
+unhealthy_archive = base / 'unhealthy-image.tar'
+ops.run(['docker', 'save', '--output', str(unhealthy_archive), f'vtc-dashboard:{revision}'])
+accepted_metadata = (base / 'state/current.json').read_bytes()
+accepted_previous = (base / 'state/previous.json').read_bytes()
+# Only the attempt count changes in this test; every attempt still performs the
+# production HTTP request. Production retains its 30-attempt bound.
+production_attempts = ops.READINESS_ATTEMPTS
+ops.READINESS_ATTEMPTS = 5
+with ops.lock():
+    expect_failure(lambda: ops.release_locked(unhealthy_archive, revision, 104, 1, 'auto', unhealthy_id))
+ops.READINESS_ATTEMPTS = production_attempts
+assert (base / 'state/current.json').read_bytes() == accepted_metadata
+assert (base / 'state/previous.json').read_bytes() == accepted_previous
+assert ops.current()['runId'] == 103 and ops.current()['imageId'] == image_id
+assert not (base / 'private/maintenance/enabled').exists() and not (base / 'state/recovery-required').exists()
+assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == unhealthy_id
+for service in ['app', 'probe']:
+    container = compose(['ps', '-q', service], revision=revision).decode().strip()
+    assert json.loads(ops.run(['docker', 'inspect', container]))[0]['Image'] == image_id
+assert json.loads(get('/_operations/readiness', token))['revision'] == revision
+assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
+compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
 ops.fenced(revision)
 with ops.lock():
     export_id = ops.export_locked(revision)
 directory, manifest = ops.validate_export(export_id)
 assert manifest['evidenceFiles']['sentinel.txt']['sha256'] == checksum
 assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
+assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
 assert manifest['files']['database.sql']['bytes'] > 0
 # Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
 # This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
@@ -251,8 +309,8 @@ ops.ready(revision)
 assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
 sql("UPDATE vtc._vtc_migrations SET state='applying';")
 with ops.lock():
-    expect_failure(lambda: ops.release_locked(image_archive, revision, 104, 1, 'auto', image_id))
-assert ops.current()['runId'] == 102 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
+    expect_failure(lambda: ops.release_locked(image_archive, revision, 105, 1, 'auto', image_id))
+assert ops.current()['runId'] == 103 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
 compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)  # Synthetic root-only inspection, writers remain fenced.
 assert b'applying' in sql('SELECT state FROM vtc._vtc_migrations;')
 expect_failure(lambda: compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision))
@@ -284,7 +342,7 @@ for command in ['sh', 'release $(id)', 'release ;id', 'release ' + 'a' * 40 + ' 
 # Exercise bounded stdin failure without ever reaching Docker load or active state.
 for data, length, checksum in [(b'x', 2, hashlib.sha256(b'x').hexdigest()), (b'xx', 1, hashlib.sha256(b'x').hexdigest()), (b'x', 1, '0' * 64)]:
     result = subprocess.run(['python3', str(base / 'operations.py'), 'receive'], input=data,
-                            env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 105 1 auto'),
+                            env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 106 1 auto'),
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-    assert result.returncode == 1 and ops.current()['runId'] == 102
+    assert result.returncode == 1 and ops.current()['runId'] == 103
 print('Synthetic deployment rehearsal passed')

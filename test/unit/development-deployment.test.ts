@@ -149,6 +149,9 @@ test("independent recovery copy authenticates ciphertext before publishing plain
   try {
     expect(invoke(["key", key])).toBe(0);
     expect(invoke(["seal", encrypted, key], sentinel)).toBe(0);
+    const originalCiphertext = await readFile(encrypted);
+    expect(invoke(["seal", encrypted, key], Buffer.from("different fictional input"))).toBe(1);
+    expect(await readFile(encrypted)).toEqual(originalCiphertext);
     expect(invoke(["open", encrypted, key, decrypted])).toBe(0);
     expect(await readFile(decrypted)).toEqual(sentinel);
     expect(invoke(["open", encrypted, key, decrypted])).toBe(1);
