@@ -141,7 +141,8 @@ test("built public documents contain real localized content before JavaScript an
     expect(body).toContain(phrase);
     expect(body).toContain('name="description"');
     expect(body).toContain('content="index, follow"');
-    expect(body).toContain("steamcommunity.com/groups/yukon_union");
+    expect(body).toContain('href="https://steamcommunity.com/groups/yukon_union"');
+    expect(body).not.toContain("hreflang=");
     expect(body).not.toContain("browser@example.invalid");
     expect(body).not.toContain("Synthetic Browser Member");
     expect(body).not.toContain("PRIVATE_SENTINEL");

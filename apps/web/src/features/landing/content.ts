@@ -95,7 +95,7 @@ export const publicContent = {
 } as const;
 export const publicContacts = [
   { label: "TruckersMP", href: "https://truckersmp.com/vtc/190" },
-  { label: "Steam", href: "http://steamcommunity.com/groups/yukon_union" },
+  { label: "Steam", href: "https://steamcommunity.com/groups/yukon_union" },
   { label: "VK", href: "https://vk.com/yukon_union_2" },
   { label: "Discord", href: "https://discord.com/invite/fBXecKW" },
   { label: "VTC.World", href: "https://forum.vtc.world/index.php?/clubs/7-yukon-union/" },
