@@ -1,2 +1,2 @@
-# Root cron. This synthetic infrastructure heartbeat is separate from the pending jobs CLI.
-* * * * * root /usr/bin/python3 /opt/vtc-development/operations.py heartbeat >/dev/null 2>&1
+# One nonblocking minute tick prevents jobs/heartbeat from starving each other.
+* * * * * root /usr/bin/python3 /opt/vtc-development/operations.py tick >/dev/null 2>&1

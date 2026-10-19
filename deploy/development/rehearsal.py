@@ -138,7 +138,7 @@ label = {'vtc011.rehearsal': project}
 for name, value in config['services'].items():
     value['labels'] = label
     value.pop('ports', None)
-    if name in ['app', 'probe', 'heartbeat', 'migrate']:
+    if name in ['app', 'probe', 'heartbeat', 'migrate', 'jobs']:
         value['image'] = '${VTC_IMAGE_ID:?Set the validated immutable image ID}'
 for name, value in config['volumes'].items():
     value['name'] = f'{project}_{name}'
@@ -206,6 +206,7 @@ def expect_failure(callback):
 
 compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
 compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+ops.jobs_grants_locked(revision)
 compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision)
 sql('CREATE TABLE vtc.rehearsal_reference (id INT PRIMARY KEY, evidence_sha CHAR(64) NOT NULL) ENGINE=InnoDB;')
 sentinel = b'fictional-evidence-sentinel-vtc011\n'
@@ -259,6 +260,27 @@ ops.run(['docker', 'save', '--output', str(image_archive), f'vtc-dashboard:{revi
 with ops.lock():
     ops.release_locked(image_archive, revision, 100, 1, 'auto', image_id)
 assert ops.current()['runId'] == 100
+with ops.lock():
+    heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+    ops.tick_locked(revision, image_id)
+    assert int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip()) == heartbeat_before + 1
+    acceptance_run = str(uuid.uuid4())
+    for mode in ['prepare', 'seed', 'seed', 'contend']:
+        ops.jobs_acceptance_locked(revision, image_id, mode, acceptance_run)
+    expect_failure(lambda: ops.jobs_locked(revision, image_id))
+    ops.tick_locked(revision, image_id)
+    assert json.loads((base / 'state/tick-last.json').read_text())['jobs'] == 'acceptance_window'
+    time.sleep(1.1)
+    ops.jobs_acceptance_locked(revision, image_id, 'run', acceptance_run)
+    ops.jobs_acceptance_locked(revision, image_id, 'inspect', acceptance_run)
+    rows = sql(f"SELECT COUNT(*),SUM(touches) FROM vtc.synthetic_job_counter WHERE run_id='{acceptance_run}';")
+    assert b'20\t20' in rows
+    ops.jobs_acceptance_locked(revision, image_id, 'cleanup', acceptance_run)
+    assert b'0' in sql('SELECT COUNT(*) FROM vtc.synthetic_job_counter;')
+    ops.tick_locked(revision, image_id)
+jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)']){let denied=false;try{await c.query(s)}catch{denied=true}if(!denied)process.exit(1)}await c.end();"""
+compose(['run', '--rm', '--no-deps', 'jobs', 'node', '--input-type=module', '-e', jobs_negative], revision=revision)
+print('Durable jobs rehearsal: empty pass, duplicate seed, two consumers, retry/chaining, scoped cleanup and denied grants passed', flush=True)
 with ops.lock():
     ops.seed_synthetic_locked(revision)
 expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))

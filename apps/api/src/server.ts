@@ -2,6 +2,7 @@ import { createDatabase, createUnitOfWork } from "@vtc/db";
 import { createApp } from "./app.js";
 import { createIdentity } from "./modules/identity/service.js";
 import { readConfig } from "./platform/config/env.js";
+import { identityAccessEvents } from "./platform/outbox/events.js";
 
 try {
   const config = readConfig();
@@ -13,7 +14,13 @@ try {
       await database.close();
       await unit?.close();
     },
-    ...(config.identity && unit ? { identity: createIdentity(unit, config.identity) } : {}),
+    ...(config.identity && unit
+      ? {
+          identity: createIdentity(unit, config.identity, {
+            accessEvents: identityAccessEvents(unit),
+          }),
+        }
+      : {}),
     ...(config.serveWeb ? { webRoot: config.webRoot } : {}),
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {

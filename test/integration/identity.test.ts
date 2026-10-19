@@ -12,6 +12,7 @@ import {
   sql,
   user,
 } from "@vtc/db/identity-schema";
+import { outboxEvents } from "@vtc/db/platform-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -26,6 +27,7 @@ import {
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
@@ -62,13 +64,7 @@ const ports = () => ({
         );
     },
   },
-  accessEvents: {
-    append: async (tx: TxContext, input: { eventId: string }) => {
-      await unit
-        .client(tx)
-        .execute(sql`INSERT INTO synthetic_access_events (id) VALUES (${input.eventId})`);
-    },
-  },
+  accessEvents: identityAccessEvents(unit),
 });
 const cookies = (values: readonly string[]) =>
   values
@@ -141,11 +137,6 @@ beforeAll(async () => {
   await diagnostic.phase("synthetic_ddl", () =>
     control.query(
       "CREATE TABLE synthetic_private_delivery (id VARCHAR(36) PRIMARY KEY, payload JSON NOT NULL) ENGINE=InnoDB",
-    ),
-  );
-  await diagnostic.phase("synthetic_ddl", () =>
-    control.query(
-      "CREATE TABLE synthetic_access_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
     ),
   );
   unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
@@ -812,12 +803,19 @@ test("missing mail/events refuse effects, event failure rolls back mutation and 
       .from(user)
       .where(eq(user.id, c?.directorUserId ?? newId())),
   );
+  const [existingEvent] = await unit.run((tx) =>
+    unit.client(tx).select({ id: outboxEvents.id }).from(outboxEvents).limit(1),
+  );
+  if (!existingEvent) throw new Error("SYNTHETIC_EVENT_REQUIRED");
+  const beforeEvents = await unit.run((tx) =>
+    unit.client(tx).select({ id: outboxEvents.id }).from(outboxEvents),
+  );
   const director = await signIn(u?.email ?? ""),
     failing = createIdentity(unit, config, {
       ...ports(),
       accessEvents: {
-        append: async () => {
-          throw new Error("SYNTHETIC_EVENT_FAILURE");
+        append: async (tx, input) => {
+          await identityAccessEvents(unit).append(tx, { ...input, eventId: existingEvent.id });
         },
       },
     });
@@ -825,6 +823,9 @@ test("missing mail/events refuse effects, event failure rolls back mutation and 
     safe(failing.administer(director.actor, m.id, newId(), 1, { kind: "deactivate" })),
   ).rejects.toMatchObject({ statusCode: 500 });
   expect((await safe(identity.current(login.actor))).data.member.id).toBe(m.id);
+  expect(
+    await unit.run((tx) => unit.client(tx).select({ id: outboxEvents.id }).from(outboxEvents)),
+  ).toEqual(beforeEvents);
   await expect(
     safe(unit.run((tx) => unit.client(tx).delete(user).where(eq(user.id, director.actor.userId)))),
   ).rejects.toMatchObject({ statusCode: 500 });

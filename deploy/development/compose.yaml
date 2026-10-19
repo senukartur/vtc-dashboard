@@ -89,6 +89,22 @@ services:
     security_opt: [no-new-privileges:true]
     networks: [database]
     logging: *logs
+  jobs:
+    image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
+    profiles: [tools]
+    command: [node, dist/jobs.js, run]
+    init: true
+    env_file: [./private/jobs.env]
+    environment:
+      NODE_OPTIONS: --max-old-space-size=64
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 32
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [database]
+    logging: *logs
   proxy:
     image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped

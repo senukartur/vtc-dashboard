@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -80,11 +81,11 @@ def compose(args, *, revision, image_id=None, project=PROJECT, **kwargs):
 
 
 @contextlib.contextmanager
-def lock():
+def lock(wait_seconds=600):
     (BASE / 'state').mkdir(mode=0o700, exist_ok=True)
     with open(BASE / 'state/operations.lock', 'a') as handle:
         # Also serializes cron, export and restore; waiting is bounded.
-        deadline = time.monotonic() + 600
+        deadline = time.monotonic() + wait_seconds
         while True:
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -173,7 +174,143 @@ def maintenance(enabled):
 
 def fenced(revision, image_id=None):
     maintenance(True)
+    stop_owned_jobs(revision, image_id)
     compose(['stop', 'app', 'probe'], revision=revision, image_id=image_id)
+
+
+def stop_owned_jobs(revision, image_id=None):
+    """A Docker client timeout does not stop its container. Keep recovery fenced on failure."""
+    try:
+        for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']:
+            container = f'{PROJECT}-{suffix}'
+            ids = run(['docker', 'ps', '-aq', '--filter', f'name=^/{container}$']).decode().split()
+            for identity in ids:
+                info = json.loads(run(['docker', 'inspect', identity]))[0]
+                labels = info['Config'].get('Labels') or {}
+                require(info['Name'] == '/' + container and
+                        labels.get('com.docker.compose.project') == PROJECT and
+                        labels.get('com.docker.compose.service') == ('heartbeat' if suffix == 'heartbeat' else 'jobs'), 'WORKER_OWNERSHIP_INVALID')
+                # The root-owned Compose name/project/service tuple identifies this one-off;
+                # stale accepted images must also be stoppable before migration/restore.
+                run(['docker', 'rm', '-f', identity], timeout=20)
+            require(not run(['docker', 'ps', '-aq', '--filter', f'name=^/{container}$']).strip(),
+                    'WORKER_STILL_PRESENT')
+    except BaseException:
+        maintenance(True)
+        recovery_intent()
+        raise RuntimeError('WORKER_RECOVERY_REQUIRED') from None
+
+
+def jobs_locked(revision, image_id):
+    require(not (BASE / 'state/jobs-acceptance').exists(), 'ACCEPTANCE_WINDOW')
+    validate_image(image_id, revision)
+    stop_owned_jobs(revision, image_id)
+    try:
+        output = compose(['run', '--rm', '--name', f'{PROJECT}-jobs', '--no-deps', 'jobs'],
+                         revision=revision, image_id=image_id, timeout=55)
+        require(len(output) <= 32768, 'WORKER_RESULT_TOO_LARGE')
+        # Safe fixed CLI JSON only; raw child diagnostics remain private.
+        value = json.loads(output)
+        require(value.get('event') == 'jobs_result', 'WORKER_RESULT_INVALID')
+        atomic_json(BASE / 'state/jobs-last.json', {'revision': revision, 'imageId': image_id,
+                    'completedUtc': int(time.time()), 'result': value})
+    finally:
+        stop_owned_jobs(revision, image_id)
+
+
+def tick_locked(revision, image_id):
+    """One nonblocking minute lock, bounded sequential jobs+heartbeat, no queued ticks."""
+    require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
+    require(not (BASE / 'state/recovery-required').exists(), 'RECOVERY_REQUIRED')
+    acceptance = (BASE / 'state/jobs-acceptance').exists()
+    if not acceptance:
+        jobs_locked(revision, image_id)
+    heartbeat_locked(revision, image_id, timeout=5)
+    atomic_json(BASE / 'state/tick-last.json', {'revision': revision, 'imageId': image_id,
+                'completedUtc': int(time.time()), 'jobs': 'acceptance_window' if acceptance else 'completed'})
+
+
+def heartbeat_locked(revision, image_id, timeout=30):
+    stop_owned_jobs(revision, image_id)
+    try:
+        compose(['run', '--rm', '--name', f'{PROJECT}-heartbeat', '--no-deps', 'heartbeat'],
+                revision=revision, image_id=image_id, timeout=timeout)
+    finally:
+        stop_owned_jobs(revision, image_id)
+
+
+def jobs_configuration():
+    path = BASE / 'private/jobs.env'
+    if path.exists():
+        values = dict(line.split('=', 1) for line in path.read_text().splitlines())
+        password = values.get('MYSQL_PASSWORD', '')
+        require(re.fullmatch(r'[a-f0-9]{64}', password), 'WORKER_CONFIG_INVALID')
+    else:
+        password = secrets.token_hex(32)
+        with open(path, 'x') as handle:
+            os.chmod(path, 0o600)
+            handle.write('MYSQL_HOST=db\nMYSQL_PORT=3306\nMYSQL_DATABASE=vtc\nMYSQL_USER=vtc_jobs\n'
+                         + f'MYSQL_PASSWORD={password}\n')
+    return password
+
+
+def jobs_grants_locked(revision):
+    """Explicit existing-installation update; never runs during ordinary startup/cron."""
+    password = jobs_configuration()
+    # No schema-wide writes, DDL, migration ledger or identity mutation grants.
+    statement = f"CREATE USER IF NOT EXISTS 'vtc_jobs'@'%' IDENTIFIED BY '{password}';\n"
+    for table, privileges in [('durable_jobs', 'SELECT,INSERT,UPDATE'),
+                              ('job_effect_receipts', 'SELECT,INSERT'),
+                              ('job_runner_leases', 'SELECT,INSERT,UPDATE,DELETE'),
+                              ('outbox_events', 'SELECT,INSERT')]:
+        statement += f"GRANT {privileges} ON vtc.{table} TO 'vtc_jobs'@'%';\n"
+    for role in ['runtime', 'jobs']:
+        statement += f"GRANT INSERT,SELECT ON vtc.outbox_events TO 'vtc_{role}'@'%';\n"
+    statement += "GRANT INSERT ON vtc.durable_jobs TO 'vtc_runtime'@'%';\n"
+    compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
+            revision=revision, data=statement.encode())
+
+
+def jobs_acceptance_locked(revision, image_id, mode, run_id):
+    require(re.fullmatch(r'[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}', run_id),
+            'ACCEPTANCE_ID_INVALID')
+    marker = BASE / 'state/jobs-acceptance'
+    def sql(statement):
+        return compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '--database=vtc'],
+                       revision=revision, image_id=image_id, data=statement.encode())
+    if mode == 'prepare':
+        require(not marker.exists() or marker.read_text() == run_id, 'OTHER_ACCEPTANCE_ACTIVE')
+        marker.write_text(run_id)
+        os.chmod(marker, 0o600)
+        sql("CREATE TABLE IF NOT EXISTS vtc.synthetic_job_counter (run_id BINARY(36) NOT NULL, sequence INT NOT NULL, stage INT NOT NULL, touches INT NOT NULL, PRIMARY KEY(run_id,sequence,stage)) ENGINE=InnoDB;\nGRANT SELECT,INSERT ON vtc.synthetic_job_counter TO 'vtc_jobs'@'%';")
+        return
+    require(marker.exists() and marker.read_text() == run_id, 'ACCEPTANCE_WINDOW_REQUIRED')
+    if mode == 'cleanup':
+        # Exact fixture run only. Domain/platform data and other fixture runs survive.
+        sql(f"DELETE r FROM vtc.job_effect_receipts r JOIN vtc.durable_jobs j ON j.id=r.job_id WHERE j.consumer='acceptance.counter' AND j.reference->>'$.runId'='{run_id}';\nDELETE FROM vtc.durable_jobs WHERE consumer='acceptance.counter' AND reference->>'$.runId'='{run_id}';\nDELETE FROM vtc.synthetic_job_counter WHERE run_id='{run_id}';\nREVOKE SELECT,INSERT ON vtc.synthetic_job_counter FROM 'vtc_jobs'@'%';")
+        marker.unlink()
+        return
+    require(mode in ['seed', 'seed-backlog', 'run', 'inspect', 'crash-claim', 'crash-effect', 'hang', 'contend'], 'ACCEPTANCE_MODE_INVALID')
+    stop_owned_jobs(revision, image_id)
+    def invoke(suffix, command):
+        return compose(['run', '--rm', '--name', f'{PROJECT}-{suffix}', '--no-deps',
+                        '-e', 'VTC_JOBS_ACCEPTANCE=synthetic-only', 'jobs', 'node',
+                        'dist/jobs-acceptance.js', command, run_id], revision=revision,
+                       image_id=image_id, timeout=55)
+    try:
+        if mode == 'contend':
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(invoke, f'jobs-acceptance-{suffix}', 'consume') for suffix in ['a', 'b']]
+                for future in futures:
+                    future.result()
+        else:
+            result = invoke('jobs-acceptance-a', mode)
+            require(len(result) <= 32768, 'ACCEPTANCE_RESULT_TOO_LARGE')
+            if mode == 'inspect':
+                atomic_json(BASE / 'state/jobs-acceptance-last.json', json.loads(result))
+    finally:
+        stop_owned_jobs(revision, image_id)
 
 
 def synthetic_reference(revision, project=PROJECT, image_id=None):
@@ -442,15 +579,31 @@ def main():
     if operation == ['receive']:
         receive()
         return
-    require(operation and operation[0] in ['heartbeat', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
-    with lock():
+    require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
+    with lock(wait_seconds=0 if operation[0] in ['tick', 'heartbeat', 'jobs'] else 600):
         active = current()
         require(active is not None, 'RELEASE_REQUIRED')
         revision = active['revision']
         require(not (BASE / 'state/recovery-required').exists() or operation[0] == 'restore', 'RECOVERY_REQUIRED')
-        if operation == ['heartbeat']:
+        if operation == ['tick']:
+            tick_locked(revision, active['imageId'])
+            print('Tick: success')
+        elif operation == ['jobs']:
             require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
-            compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision, timeout=30)
+            jobs_locked(revision, active['imageId'])
+            print('Jobs: success')
+        elif operation == ['jobs-config']:
+            jobs_configuration()
+            print('Jobs configuration: success')
+        elif operation == ['jobs-grants']:
+            jobs_grants_locked(revision)
+            print('Jobs grants: success')
+        elif len(operation) == 3 and operation[0] == 'jobs-acceptance':
+            jobs_acceptance_locked(revision, active['imageId'], operation[1], operation[2])
+            print('Jobs acceptance: success')
+        elif operation == ['heartbeat']:
+            require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
+            heartbeat_locked(revision, active['imageId'])
             print('Heartbeat: success')
         elif operation == ['seed-synthetic']:
             seed_synthetic_locked(revision)
