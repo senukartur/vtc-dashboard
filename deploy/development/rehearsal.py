@@ -9,6 +9,7 @@ import pathlib
 import shutil
 import ssl
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -18,6 +19,7 @@ import uuid
 import zipfile
 
 base = pathlib.Path('/opt/vtc-development')
+subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
 project = os.environ['REHEARSAL_PROJECT']
 revision = os.environ['REHEARSAL_REVISION']
 volume = os.environ['REHEARSAL_VOLUME']
@@ -138,7 +140,7 @@ label = {'vtc011.rehearsal': project}
 for name, value in config['services'].items():
     value['labels'] = label
     value.pop('ports', None)
-    if name in ['app', 'probe', 'heartbeat', 'migrate']:
+    if name in ['app', 'probe', 'heartbeat', 'migrate', 'jobs']:
         value['image'] = '${VTC_IMAGE_ID:?Set the validated immutable image ID}'
 for name, value in config['volumes'].items():
     value['name'] = f'{project}_{name}'
@@ -204,8 +206,19 @@ def expect_failure(callback):
     raise AssertionError('EXPECTED_FAILURE_MISSING')
 
 
+def tick_process():
+    # Fork inherits only the harness's isolated project/Compose allocation overrides.
+    # Exercise the real root dispatcher, nonblocking lock and nonzero failure mapping.
+    sys.argv = ['operations.py', 'tick']
+    try:
+        ops.main()
+    except BaseException:
+        raise SystemExit(1)
+
+
 compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
 compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+ops.jobs_grants_locked(revision)
 compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision)
 sql('CREATE TABLE vtc.rehearsal_reference (id INT PRIMARY KEY, evidence_sha CHAR(64) NOT NULL) ENGINE=InnoDB;')
 sentinel = b'fictional-evidence-sentinel-vtc011\n'
@@ -259,6 +272,68 @@ ops.run(['docker', 'save', '--output', str(image_archive), f'vtc-dashboard:{revi
 with ops.lock():
     ops.release_locked(image_archive, revision, 100, 1, 'auto', image_id)
 assert ops.current()['runId'] == 100
+with ops.lock():
+    heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+    ops.tick_locked(revision, image_id)
+    assert int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip()) == heartbeat_before + 1
+# Compose config has resolved env_file. The heartbeat fixes its schema but reads MYSQL_HOST;
+# its own container loopback has no MySQL server and cannot reach a host/external endpoint.
+# Real CLI failures, not replaced operations: keep diagnostics private and restore exact config.
+for service, setting, expected, unavailable in [
+        ('jobs', 'MYSQL_DATABASE', 'vtc', 'synthetic_unavailable'),
+        ('heartbeat', 'MYSQL_HOST', 'db', '127.0.0.1')]:
+    config_path = base / 'compose.yaml'
+    original = config_path.read_bytes()
+    heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+    started = time.monotonic()
+    try:
+        injected = json.loads(original)
+        assert injected['services'][service]['environment'][setting] == expected
+        injected['services'][service]['environment'][setting] = unavailable
+        config_path.write_text(json.dumps(injected))
+        child = multiprocessing.Process(target=tick_process)
+        child.start()
+        child.join(timeout=330)
+        if child.is_alive():
+            child.kill()
+            child.join(timeout=5)
+            raise AssertionError('TICK_REHEARSAL_DEADLINE')
+        assert child.exitcode == 1
+    finally:
+        config_path.write_bytes(original)
+    tick = json.loads((base / 'state/tick-last.json').read_text())
+    assert tick['status'] == 'failed' and 'completedUtc' not in tick
+    assert tick['steps'][service]['status'] == 'failed'
+    assert tick['steps'][service]['category'] == 'client_failed'
+    other = 'heartbeat' if service == 'jobs' else 'jobs'
+    assert tick['steps'][other]['status'] == 'completed'
+    assert all(step['durationMs'] >= 0 and step['attemptedUtc'] >= tick['attemptedUtc']
+               for step in tick['steps'].values())
+    heartbeat_after = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+    assert heartbeat_after == heartbeat_before + (1 if service == 'jobs' else 0)
+    for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']:
+        assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{project}-{suffix}$'], timeout=10).strip()
+    assert not (base / 'state/recovery-required').exists()
+    assert not (base / 'private/maintenance/enabled').exists()
+    print(f'Durable tick rehearsal: {service} failure, nonzero exit, safe failed result, writer routing and absence passed ({int((time.monotonic() - started) * 1000)} ms)', flush=True)
+with ops.lock():
+    acceptance_run = str(uuid.uuid4())
+    for mode in ['prepare', 'seed', 'seed', 'contend']:
+        ops.jobs_acceptance_locked(revision, image_id, mode, acceptance_run)
+    expect_failure(lambda: ops.jobs_locked(revision, image_id))
+    ops.tick_locked(revision, image_id)
+    assert json.loads((base / 'state/tick-last.json').read_text())['steps']['jobs']['status'] == 'skipped_acceptance_window'
+    time.sleep(1.1)
+    ops.jobs_acceptance_locked(revision, image_id, 'run', acceptance_run)
+    ops.jobs_acceptance_locked(revision, image_id, 'inspect', acceptance_run)
+    rows = sql(f"SELECT COUNT(*),SUM(touches) FROM vtc.synthetic_job_counter WHERE run_id='{acceptance_run}';")
+    assert b'20\t20' in rows
+    ops.jobs_acceptance_locked(revision, image_id, 'cleanup', acceptance_run)
+    assert b'0' in sql('SELECT COUNT(*) FROM vtc.synthetic_job_counter;')
+    ops.tick_locked(revision, image_id)
+jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)']){let denied=false;try{await c.query(s)}catch{denied=true}if(!denied)process.exit(1)}await c.end();"""
+compose(['run', '--rm', '--no-deps', 'jobs', 'node', '--input-type=module', '-e', jobs_negative], revision=revision)
+print('Durable jobs rehearsal: empty pass, duplicate seed, two consumers, retry/chaining, scoped cleanup and denied grants passed', flush=True)
 with ops.lock():
     ops.seed_synthetic_locked(revision)
 expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))

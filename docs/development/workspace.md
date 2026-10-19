@@ -8,7 +8,7 @@
 | --- | --- |
 | `apps/api/src/app.ts` | Fastify construction without listening; health routes, safe error boundary, schema compilers and optional built SPA |
 | `apps/api/src/server.ts` | Validated startup, listening and signal shutdown |
-| `apps/api/src/jobs.ts` | Explicit bounded placeholder; durable jobs belong to VTC-021 |
+| `apps/api/src/jobs.ts` | Bounded durable jobs CLI with retained unbound access events; see [jobs](jobs.md) |
 | `apps/api/src/modules/`, `use-cases/`, `platform/` | Domain ownership, cross-module coordination and infrastructure boundaries |
 | `apps/web/src/app/`, `features/`, `shared/`, `i18n/core/` | React router/providers, synthetic foundation previews, reusable primitives, exact formatting and RU/EN namespaces |
 | `packages/contracts/` | Generated OpenAPI browser types, reference-preserving JSON Schema 2020-12 and shared health DTO |

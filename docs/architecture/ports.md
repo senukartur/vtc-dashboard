@@ -2,7 +2,7 @@
 
 These are architectural interface signatures, not installed TypeScript exports. VTC-006/007/013/014/019/021/022/025 implement them against the reviewed contracts. Keep provider details out of domain/UI code.
 
-VTC-007 now exports the opaque `TxContext`, `UnitOfWork`/`createUnitOfWork`, exact value helpers and `createAudit` from `@vtc/db`; use the [implemented persistence contract](../development/persistence.md) for their actual signatures/lifetime and connection budget. The combined `AuditOutbox` sketch below is still future architecture: audit append exists separately, while durable events/outbox remain VTC-021. Other ports below remain specifications rather than installed services.
+VTC-007 exports the opaque `TxContext`, `UnitOfWork`/`createUnitOfWork`, exact value helpers and `createAudit` from `@vtc/db`; use the [implemented persistence contract](../development/persistence.md) for actual signatures/lifetime and connection budgets. VTC-021 adds the separate [safe outbox/jobs facades](../development/jobs.md). The combined `AuditOutbox` sketch below remains architectural shorthand. Other ports below remain specifications unless their owning implementation is explicitly linked.
 
 ```ts
 type Id = string;
@@ -124,3 +124,6 @@ Rule evaluators are registered pure functions over evidence, context and typed i
 VTC-006 produces package/tooling setup and imports the selected contracts; it does not regenerate frozen telemetry schemas opportunistically. Schema owners add module definitions, and the migration integrator alone regenerates/orders the journal. Auth CLI output is reviewed/merged through that same owner; no separate auth auto-migration runs against a deployed database.
 
 Every adapter needs contract fixtures and a real integration gate. A local fake or an imported npm package does not prove real MySQL persistence, invitation crash recovery, SMTP delivery, Steam ownership, private evidence access or Hostland compatibility. Keep such pending evidence visible in the implementing card.
+
+
+VTC-021 implements the transaction-scoped safe outbox and durable queue facade described in [jobs](../development/jobs.md). Server composition supplies IdentityPorts.accessEvents on the shared UnitOfWork, with member access version/epochs only and a documented event-ID correlation fallback. Private delivery remains absent/fail-closed. No access-event consumer or other domain handler is installed; future module consumers must register reviewed safe references and own permission/version checks.

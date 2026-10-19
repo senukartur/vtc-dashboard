@@ -69,3 +69,6 @@ Reminders are keyed by event revision/member/reminder kind; edit/cancel/RSVP cha
 ## Migrations and recovery
 
 Drizzle schema generation is owned and serialized in VTC-007. Review SQL, constraint/collation lengths, MySQL lack of generic `RETURNING`, unique keys involving NULL, and implicit DDL commits. Insert with application-generated IDs and select by those IDs; do not depend on PostgreSQL partial indexes or `ON CONFLICT` semantics. A rollback of DML does not roll back DDL. Use compatible additive migrations, forward repair and tested consistent database/evidence export/restore. VTC-008 tests real MySQL concurrency; VTC-041 tests the final host before cutover.
+
+
+The [VTC-021 implementation](../development/jobs.md) now supplies immutable safe events, queue leases, local effect receipts and a separately supervised bounded minute CLI. Membership/audit/access-event writes share the existing UnitOfWork. Local effects/chained enqueue/completion are atomic and token/expiry fenced; COMMIT uncertainty ends a pass without blind replay. No downstream access-event effect, mail, trip projection or hosted scheduler acceptance is implied.
