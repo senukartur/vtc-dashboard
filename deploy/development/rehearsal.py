@@ -331,9 +331,16 @@ with ops.lock():
     ops.jobs_acceptance_locked(revision, image_id, 'cleanup', acceptance_run)
     assert b'0' in sql('SELECT COUNT(*) FROM vtc.synthetic_job_counter;')
     ops.tick_locked(revision, image_id)
-jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)']){let denied=false;try{await c.query(s)}catch{denied=true}if(!denied)process.exit(1)}await c.end();"""
+jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});await c.beginTransaction();for(const t of ['identity_company','identity_memberships','identity_users','identity_challenges'])await c.query('SELECT * FROM '+t+' LIMIT 1 FOR SHARE');await c.rollback();for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)']){let denied=false;try{await c.query(s)}catch{denied=true}if(!denied)process.exit(1)}await c.end();"""
 compose(['run', '--rm', '--no-deps', 'jobs', 'node', '--input-type=module', '-e', jobs_negative], revision=revision)
-print('Durable jobs rehearsal: empty pass, duplicate seed, two consumers, retry/chaining, scoped cleanup and denied grants passed', flush=True)
+sql("REVOKE UPDATE ON vtc.mail_deliveries FROM 'vtc_jobs'@'%';")
+paused_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
+assert b'\"mailCleanup\":\"configuration_pending\"' in paused_cleanup
+with ops.lock():
+    ops.jobs_grants_locked(revision)
+completed_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
+assert b'\"mailCleanup\":\"completed\"' in completed_cleanup
+print('Durable jobs rehearsal: empty pass, duplicate seed, consumers, retry/chaining, shared identity reads, cleanup grant notice and denied writes passed', flush=True)
 with ops.lock():
     ops.seed_synthetic_locked(revision)
 expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))

@@ -6,6 +6,8 @@ import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
 import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
+import { registerMessagingRoutes } from "./modules/messaging/http.js";
+import type { Messaging } from "./modules/messaging/service.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 
 const assetCache = "public, max-age=31536000, immutable";
@@ -28,6 +30,7 @@ const errorCodes: Readonly<Record<number, string>> = {
 
 export interface AppOptions {
   identity?: Identity;
+  messaging?: Messaging;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -104,6 +107,8 @@ export async function createApp(options: AppOptions) {
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
   if (options.identity) await registerIdentityRoutes(app, options.identity);
+  if (options.identity && options.messaging)
+    await registerMessagingRoutes(app, options.identity, options.messaging);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

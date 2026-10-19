@@ -58,11 +58,18 @@ export interface PrivateChallenge {
   purpose: Purpose;
   code: string;
   expiresAt: string;
+  locale?: "en" | "ru";
   emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
   // Implementations must persist on this tx and perform network delivery after commit.
-  delivery?: { enqueue(tx: TxContext, input: PrivateChallenge): Promise<void> };
+  delivery?: {
+    enqueue(tx: TxContext, input: PrivateChallenge): Promise<void>;
+    invalidate?(
+      tx: TxContext,
+      input: { userId: string; purpose?: Purpose; generationId?: string },
+    ): Promise<void>;
+  };
   accessEvents?: {
     append(
       tx: TxContext,
@@ -351,6 +358,7 @@ export function createIdentity(
         .values(checked.map((role) => ({ userId: id, role })));
   }
   async function invalidate(tx: TxContext, row: Member, identityChange = false) {
+    await ports.delivery?.invalidate?.(tx, { userId: row.userId });
     await client(tx).delete(session).where(eq(session.userId, row.userId));
     await client(tx)
       .update(challenges)
@@ -420,6 +428,7 @@ export function createIdentity(
     const secret = randomBytes(32).toString("base64url"),
       id = newId(),
       expiresAt = new Date(now().getTime() + 600000);
+    await ports.delivery.invalidate?.(tx, { userId: member.userId, purpose });
     await client(tx)
       .update(challenges)
       .set({ consumed: true })
@@ -457,6 +466,7 @@ export function createIdentity(
       purpose,
       code: purpose === "password_reset" ? `${id}.${secret}` : secret,
       expiresAt: expiresAt.toISOString(),
+      locale: member.locale,
       ...(purpose === "email_change"
         ? {
             emailChangeStage: currentEmailConfirmed
@@ -502,6 +512,8 @@ export function createIdentity(
       challenge.credentialEpoch === row.credentialEpoch &&
       challenge.successorId === successorId &&
       timingSafeEqual(challenge.secretHash, digest(`challenge:${id}:${code}`));
+    if (valid || challenge.attempts + 1 >= 5)
+      await ports.delivery?.invalidate?.(tx, { userId: row.userId, generationId: id });
     if (!valid) return null;
     await client(tx).update(challenges).set({ consumed: true }).where(eq(challenges.id, id));
     return challenge;
@@ -1213,6 +1225,78 @@ export function createIdentity(
           );
         }),
       );
+    },
+    // Messaging owns no identity tables. Recheck the current bound generation
+    // immediately before provider I/O; redemption remains authoritative in flight.
+    async deliveryValid(
+      tx: TxContext,
+      input: {
+        id: string;
+        userId: string;
+        purpose: Purpose;
+        stage?: "current_email" | "proposed_email";
+      },
+    ): Promise<boolean> {
+      // Read-only worker grants suffice for shared current reads. Company first
+      // also blocks identity writers while this short validity snapshot is read.
+      const [current] = await client(tx)
+        .select()
+        .from(company)
+        .where(eq(company.singleton, 1))
+        .for("share");
+      const [member] = await client(tx)
+        .select()
+        .from(membership)
+        .where(eq(membership.userId, input.userId))
+        .for("share");
+      const [challenge] = await client(tx)
+        .select()
+        .from(challenges)
+        .where(eq(challenges.id, applicationId(input.id)))
+        .for("share");
+      const [identity] = await client(tx)
+        .select()
+        .from(user)
+        .where(eq(user.id, input.userId))
+        .for("share");
+      if (
+        !current ||
+        !member ||
+        member.status !== "active" ||
+        !identity ||
+        !challenge ||
+        challenge.userId !== input.userId ||
+        challenge.purpose !== input.purpose ||
+        challenge.consumed ||
+        challenge.attempts >= 5 ||
+        challenge.expiresAt <= now() ||
+        challenge.identityEpoch !== member.identityEpoch ||
+        challenge.emailEpoch !== member.emailEpoch ||
+        challenge.accessEpoch !== member.accessEpoch ||
+        challenge.credentialEpoch !== member.credentialEpoch ||
+        (input.purpose !== "email_verification" && !identity.emailVerified)
+      )
+        return false;
+      if (
+        input.purpose === "email_change" &&
+        (challenge.currentEmailConfirmed ? "proposed_email" : "current_email") !== input.stage
+      )
+        return false;
+      if (input.purpose === "succession") {
+        if (
+          current.directorUserId !== input.userId ||
+          !challenge.successorId ||
+          challenge.successorId === input.userId
+        )
+          return false;
+        const [successor] = await client(tx)
+          .select()
+          .from(membership)
+          .where(eq(membership.userId, challenge.successorId))
+          .for("share");
+        if (successor?.status !== "active") return false;
+      }
+      return true;
     },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {

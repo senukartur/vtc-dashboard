@@ -8,6 +8,7 @@ import {
   utcDateTime,
   utcIso,
 } from "@vtc/db";
+import { performance } from "node:perf_hooks";
 import {
   and,
   asc,
@@ -37,6 +38,7 @@ export const bounds = Object.freeze({
   routeBatch: 25,
   maxAttempts: 5,
   transactionAttempts: 3,
+  externalCompletionHeadroomMs: 6000,
 });
 type Job = typeof jobs.$inferSelect;
 export type Claim = Job & { leaseToken: string };
@@ -58,7 +60,33 @@ export interface Handler {
   validate(input: unknown): unknown;
   mode: "local" | "external";
   local?: (tx: TxContext, reference: unknown, claim: Claim) => Promise<void>;
-  external?: (reference: unknown, effectKey: string, signal: AbortSignal) => Promise<void>;
+  external?: (
+    reference: unknown,
+    effectKey: string,
+    signal: AbortSignal,
+    execution: ExternalExecution,
+  ) => Promise<void>;
+}
+export interface ExternalExecution {
+  remainingMs(): number;
+}
+export function externalExecutionBudget(
+  remainingAtMeasurementMs: number,
+  measuredAt: number,
+  upstream: AbortSignal,
+  clock: () => number = () => performance.now(),
+): ExternalExecution & { signal: AbortSignal } {
+  const remainingMs = () =>
+    Math.max(
+      0,
+      Math.floor(
+        remainingAtMeasurementMs - (clock() - measuredAt) - bounds.externalCompletionHeadroomMs,
+      ),
+    );
+  const budget = remainingMs();
+  if (!Number.isFinite(budget) || budget <= 0 || upstream.aborted)
+    throw new ExternalNotStartedError();
+  return { remainingMs, signal: AbortSignal.any([upstream, AbortSignal.timeout(budget)]) };
 }
 export interface Subscription {
   consumer: string;
@@ -68,6 +96,28 @@ export interface Subscription {
 }
 export class RetryableJobError extends Error {}
 export class ExternalAmbiguityError extends Error {}
+export class ExternalRejectedError extends Error {}
+export class JobReopenDeniedError extends Error {
+  constructor() {
+    super("JOB_REOPEN_DENIED");
+  }
+}
+// Only an adapter with a durable unchanged request and a safe retry decision may
+// use this outcome. Ordinary external exceptions remain terminal ambiguity.
+export class ExternalRetryError extends Error {
+  constructor(readonly delayMs: number) {
+    super("EXTERNAL_RETRY_SAFE");
+    if (!Number.isInteger(delayMs) || delayMs < 1000 || delayMs > 86400000)
+      throw new Error("INVALID_EXTERNAL_RETRY_DELAY");
+  }
+}
+// This classification is valid only when the callback/provider was never invoked.
+// Once invocation is possible, cancellation must preserve external uncertainty.
+export class ExternalNotStartedError extends ExternalRetryError {
+  constructor() {
+    super(1000);
+  }
+}
 export class LeaseLostError extends Error {
   constructor() {
     super("JOB_LEASE_LOST");
@@ -143,14 +193,16 @@ export function createQueue(
   handlers: readonly Handler[] = [],
   subscriptions: readonly Subscription[] = [],
   claimScope?: { kind: string; consumer: string; runId: string },
+  pausedKinds: readonly string[] = [],
 ) {
-  const scoped = claimScope
+  const scope = claimScope
     ? and(
         eq(jobs.kind, name(claimScope.kind)),
         eq(jobs.consumer, name(claimScope.consumer)),
         sql`JSON_UNQUOTE(JSON_EXTRACT(${jobs.reference}, '$.runId')) = ${applicationId(claimScope.runId)}`,
       )
     : undefined;
+  const scoped = and(scope, ...pausedKinds.map((kind) => sql`${jobs.kind} <> ${name(kind)}`));
   const registry = new Map<string, Handler>();
   for (const h of handlers) {
     name(h.kind);
@@ -291,6 +343,79 @@ export function createQueue(
   }
   return {
     enqueue,
+    async effectState(tx: TxContext, consumer: string, effectKey: string) {
+      const [row] = await unit
+        .client(tx)
+        .select({
+          state: jobs.state,
+          failure: jobs.failure,
+          kind: jobs.kind,
+          expired: sql<number>`${jobs.leaseUntil} <= UTC_TIMESTAMP(3)`,
+        })
+        .from(jobs)
+        .where(and(eq(jobs.consumer, name(consumer)), eq(jobs.effectKey, effect(effectKey))))
+        .for("share");
+      if (!row) return null;
+      return row.state === "running" &&
+        Number(row.expired) === 1 &&
+        registry.get(row.kind.toString())?.mode === "external"
+        ? { state: "failed" as const, failure: "external_ambiguity" as const }
+        : { state: row.state, failure: row.failure };
+    },
+    async retryRejected(
+      tx: TxContext,
+      consumer: string,
+      effectKey: string,
+      expectedReference: unknown,
+    ): Promise<void> {
+      const c = unit.client(tx);
+      const [saved] = await c
+        .select()
+        .from(jobs)
+        .where(and(eq(jobs.consumer, name(consumer)), eq(jobs.effectKey, effect(effectKey))))
+        .for("update");
+      const handler = saved && registry.get(saved.kind.toString());
+      if (
+        !saved ||
+        !(
+          (saved.state === "failed" && saved.failure === "handler_failed") ||
+          (saved.state === "ready" && saved.failure === "retryable")
+        ) ||
+        saved.attempts >= saved.maxAttempts ||
+        saved.leaseToken ||
+        saved.leaseUntil ||
+        handler?.mode !== "external" ||
+        handler.consumer !== consumer ||
+        handler.version !== saved.schemaVersion
+      )
+        throw new JobReopenDeniedError();
+      try {
+        if (
+          !fingerprint(handler.validate(saved.reference)).equals(
+            fingerprint(handler.validate(expectedReference)),
+          )
+        )
+          throw new JobReopenDeniedError();
+      } catch {
+        throw new JobReopenDeniedError();
+      }
+      const [receipt] = await c
+        .select()
+        .from(effectReceipts)
+        .where(
+          and(
+            eq(effectReceipts.consumer, saved.consumer),
+            eq(effectReceipts.effectKey, saved.effectKey),
+          ),
+        )
+        .for("share");
+      if (receipt) throw new JobReopenDeniedError();
+      await c
+        .update(jobs)
+        // Keep the original due time: a command cannot shorten provider backoff.
+        .set({ state: "ready", failure: null })
+        .where(eq(jobs.id, saved.id));
+    },
     async receipt(consumer: string, effectKey: string): Promise<{ jobId: string } | null> {
       return run(async (tx) => {
         const [saved] = await unit
@@ -428,7 +553,7 @@ export function createQueue(
           .where(and(eq(jobs.id, claim.id), eq(jobs.leaseToken, claim.leaseToken)));
       });
     },
-    async fail(claim: Claim, category: Failure): Promise<void> {
+    async fail(claim: Claim, category: Failure, retryDelayMs?: number): Promise<void> {
       await run(async (tx) => {
         const saved = await fence(tx, claim);
         const retry = category === "retryable" && saved.attempts < saved.maxAttempts;
@@ -438,7 +563,7 @@ export function createQueue(
           .set({
             state: retry ? "ready" : "failed",
             failure: category === "retryable" && !retry ? "exhausted" : category,
-            availableAt: due(Math.min(60000, 1000 * 2 ** (saved.attempts - 1))),
+            availableAt: due(retryDelayMs ?? Math.min(60000, 1000 * 2 ** (saved.attempts - 1))),
             leaseToken: null,
             leaseUntil: null,
           })
@@ -489,14 +614,28 @@ export function createQueue(
             await finish(tx, claim);
           });
         } else {
-          await run(async (tx) => {
+          const lease = await run(async (tx) => {
             await fence(tx, claim);
+            // Anchor before the DB clock read, conservatively including query
+            // response and COMMIT receipt latency in the monotonic elapsed time.
+            const measuredAt = performance.now();
+            const [remaining] = await unit
+              .client(tx)
+              .select({
+                remainingMs: sql<number>`TIMESTAMPDIFF(MICROSECOND, UTC_TIMESTAMP(3), ${jobs.leaseUntil}) DIV 1000`,
+              })
+              .from(jobs)
+              .where(eq(jobs.id, claim.id));
+            if (!remaining) throw new LeaseLostError();
+            return { measuredAt, remainingMs: Number(remaining.remainingMs) };
           });
+          const execution = externalExecutionBudget(lease.remainingMs, lease.measuredAt, signal);
           // Adapters must use this durable key with their provider and reconcile unknown outcomes.
           await h.external?.(
             reference,
             `${claim.consumer.toString()}:${claim.effectKey.toString()}`,
-            signal,
+            execution.signal,
+            execution,
           );
           await run(async (tx) => {
             await fence(tx, claim);
@@ -509,10 +648,15 @@ export function createQueue(
         await this.fail(
           claim,
           h.mode === "external"
-            ? "external_ambiguity"
+            ? error instanceof ExternalRetryError
+              ? "retryable"
+              : error instanceof ExternalRejectedError
+                ? "handler_failed"
+                : "external_ambiguity"
             : error instanceof RetryableJobError || retryableLocalDatabaseFailure(error)
               ? "retryable"
               : "handler_failed",
+          error instanceof ExternalRetryError ? error.delayMs : undefined,
         );
       }
     },

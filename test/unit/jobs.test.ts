@@ -2,7 +2,13 @@ import { newId, TransactionCommitOutcomeUnknownError, type UnitOfWork } from "@v
 import { expect, test } from "vitest";
 import { fixtureReference } from "../../apps/api/src/platform/jobs/acceptance.ts";
 import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
-import { LeaseLostError, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
+import {
+  bounds,
+  externalExecutionBudget,
+  ExternalNotStartedError,
+  LeaseLostError,
+  retryTransaction,
+} from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { accessEvent } from "../../apps/api/src/platform/outbox/events.ts";
 
@@ -19,6 +25,30 @@ const envelope = () => {
     data: { userId: id, accessEpoch: 1, identityEpoch: 1 },
   };
 };
+test("external lease budget subtracts pre-fence receipt and later preflight time monotonically", () => {
+  let instant = 1000;
+  const controller = new AbortController();
+  const budget = externalExecutionBudget(15000, instant, controller.signal, () => instant);
+  expect(budget.remainingMs()).toBe(15000 - bounds.externalCompletionHeadroomMs);
+  instant += 3500;
+  expect(budget.remainingMs()).toBe(5500);
+  instant += 6000;
+  expect(budget.remainingMs()).toBe(0);
+  controller.abort();
+  expect(budget.signal.aborted).toBe(true);
+});
+test("exhausted or aborted external budgets never authorize callback entry", () => {
+  const signal = new AbortController().signal;
+  for (const remaining of [0, 6000, Number.NaN])
+    expect(() => externalExecutionBudget(remaining, 0, signal, () => 1)).toThrow(
+      ExternalNotStartedError,
+    );
+  const aborted = new AbortController();
+  aborted.abort();
+  expect(() => externalExecutionBudget(15000, 0, aborted.signal, () => 1)).toThrow(
+    ExternalNotStartedError,
+  );
+});
 test("closed event/reference registry rejects private, extra, unsupported, oversized and accessor inputs", () => {
   const e = envelope();
   expect(accessEvent(e).occurredAt).toBe("2026-01-31T23:00:00.001Z");

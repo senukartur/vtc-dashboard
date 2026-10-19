@@ -15,6 +15,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./messaging-schema": {
+      "types": "./dist/schema/messaging.d.ts",
+      "default": "./dist/schema/messaging.js"
     }
   },
   "files": [

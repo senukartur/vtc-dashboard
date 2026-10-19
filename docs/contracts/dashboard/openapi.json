@@ -6836,6 +6836,131 @@
           }
         }
       }
+    },
+    "/api/v1/mail-deliveries/{deliveryId}": {
+      "get": {
+        "operationId": "getMailDelivery",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Read safe delivery evidence",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "messaging",
+        "x-owner-card": "VTC-014",
+        "x-capability": "session",
+        "x-guards": [
+          "current_session",
+          "own_security_or_applications_manage",
+          "no_director_staff_bypass"
+        ],
+        "parameters": [
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe delivery evidence; provider acceptance is not inbox receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeMailDelivery"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong delivery version."
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/mail-deliveries/{deliveryId}/resends": {
+      "post": {
+        "operationId": "resendMailDelivery",
+        "tags": [
+          "messaging"
+        ],
+        "summary": "Retry a known rejected delivery without replacing its generation",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "messaging",
+        "x-owner-card": "VTC-014",
+        "x-capability": "session",
+        "x-guards": [
+          "current_session",
+          "own_security_or_applications_manage",
+          "no_director_staff_bypass",
+          "unchanged_payload_expiry_key",
+          "no_accepted_or_ambiguous_resend",
+          "exact_origin",
+          "current_generation"
+        ],
+        "parameters": [
+          {
+            "name": "deliveryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe delivery evidence; provider acceptance is not inbox receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCommandResult"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong delivery version."
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -13667,6 +13792,124 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EmailChangeState"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "MailDelivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "email_verification",
+              "password_reset",
+              "password_change",
+              "email_change",
+              "succession",
+              "invitation",
+              "rejection"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "attempting",
+              "retryable",
+              "accepted",
+              "simulated",
+              "suppressed",
+              "failed",
+              "ambiguous"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "recovery": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "rate_limit",
+              "daily_quota",
+              "monthly_quota",
+              "authentication",
+              "validation",
+              "idempotency_conflict",
+              "concurrent_request",
+              "provider_unavailable",
+              "acceptance_unknown",
+              "payload_unavailable",
+              "obsolete",
+              "idempotency_expired",
+              "attempts_exhausted",
+              "provider_changed",
+              "worker_configuration",
+              "not_started"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "version",
+          "attempts",
+          "createdAt",
+          "updatedAt",
+          "expiresAt",
+          "nextAttemptAt",
+          "recovery"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeMailDelivery": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MailDelivery"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

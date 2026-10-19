@@ -1,8 +1,10 @@
+import { cleanupMail } from "./modules/messaging/service.js";
 import { createUnitOfWork } from "@vtc/db";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
+import { composeIdentity } from "./use-cases/identity-messaging.js";
 
 await ownedCli(async () => {
   // This watchdog terminates this owned CLI, including noncooperative handlers/hung SQL.
@@ -18,10 +20,27 @@ await ownedCli(async () => {
     const mode = process.argv[2] ?? "run";
     if (!["run", "inspect"].includes(mode) || process.argv.length > 3)
       throw new Error("INVALID_JOBS_MODE");
-    unit = createUnitOfWork(readConfig().database);
-    const queue = createQueue(unit);
+    const config = readConfig();
+    unit = createUnitOfWork(config.database);
+    const messaging =
+      config.identity && config.mail
+        ? composeIdentity(unit, config.identity, config.mail).messaging
+        : undefined;
+    const mailCleanup = mode === "run" ? await cleanupMail(unit, !!messaging) : "not_run";
+    if (mailCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
+      );
+    const queue = messaging?.queue ?? createQueue(unit, [], [], undefined, ["mail.deliver"]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
-    console.log(JSON.stringify({ event: "jobs_result", ...result }));
+    console.log(
+      JSON.stringify({
+        event: "jobs_result",
+        mailMode: config.mail?.mode ?? "disabled",
+        mailCleanup,
+        ...result,
+      }),
+    );
   } catch (error) {
     console.error(
       JSON.stringify({

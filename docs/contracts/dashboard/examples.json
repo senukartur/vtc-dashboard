@@ -3558,6 +3558,42 @@
         "challengeId": "41000000-0000-4000-8000-000000000001",
         "code": "NONFUNCTIONAL_EXAMPLE_ONLY"
       }
+    },
+    {
+      "id": "getMailDelivery:success",
+      "operationId": "getMailDelivery",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000099",
+          "kind": "password_change",
+          "state": "simulated",
+          "version": 3,
+          "attempts": 1,
+          "createdAt": "2026-10-19T12:00:00.000Z",
+          "updatedAt": "2026-10-19T12:00:01.000Z",
+          "expiresAt": "2026-10-19T12:10:00.000Z",
+          "nextAttemptAt": null,
+          "recovery": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-mail"
+        }
+      }
+    },
+    {
+      "id": "resendMailDelivery:success",
+      "operationId": "resendMailDelivery",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000099",
+          "version": 4
+        },
+        "meta": {
+          "requestId": "synthetic-request-mail"
+        }
+      }
     }
   ]
 }
