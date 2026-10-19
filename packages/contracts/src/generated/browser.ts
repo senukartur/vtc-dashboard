@@ -1042,6 +1042,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/email-change": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read current pending email replacement; null when absent, expired, consumed or invalidated */
+        get: operations["getPendingEmailChange"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/email-change-confirmations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm the separately delivered proposed-address proof and atomically replace email */
+        post: operations["confirmProposedEmailChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/email-verification-requests": {
         parameters: {
             query?: never;
@@ -2224,6 +2258,9 @@ export interface components {
             /** Format: uuid */
             reviewedRevisionId: string;
         };
+        EmailChangeState: {
+            pending: components["schemas"]["PendingEmailChange"] | null;
+        };
         EmailVerificationInput: {
             /** Format: uuid */
             challengeId: string;
@@ -2283,6 +2320,10 @@ export interface components {
         };
         EnvelopeDecision: {
             data: components["schemas"]["Decision"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeEmailChangeState: {
+            data: components["schemas"]["EmailChangeState"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeEventMember: {
@@ -2893,6 +2934,16 @@ export interface components {
         PasswordResetRequest: {
             /** Format: email */
             email: string;
+        };
+        PendingEmailChange: {
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            /** Format: email */
+            proposedEmail: string;
+            /** @enum {string} */
+            stage: "current_email" | "proposed_email";
         };
         Preferences: {
             displayTimezone: string;
@@ -5054,7 +5105,64 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Password change completed. Email changes never complete at this step. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCommandResult"];
+                };
+            };
+            /** @description Current channel confirmed; a separate proposed-address proof is pending. Current email remains unchanged and verified. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeChallenge"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPendingEmailChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
             /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeEmailChangeState"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    confirmProposedEmailChange: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailVerificationInput"];
+            };
+        };
+        responses: {
+            /** @description Both proofs succeeded; email replacement and session invalidation committed. */
             200: {
                 headers: {
                     [name: string]: unknown;

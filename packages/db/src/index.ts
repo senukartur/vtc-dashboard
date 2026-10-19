@@ -7,6 +7,7 @@ import {
 
 export { type AuditInput, createAudit } from "./core/audit.js";
 export { migrationFolder, migrationLockName, runMigrations } from "./core/migrations.js";
+export { databaseFailureContext } from "./core/operation-context.js";
 export { dedicatedConnection, settingsFromEnvironment } from "./core/session.js";
 export {
   createUnitOfWork,
