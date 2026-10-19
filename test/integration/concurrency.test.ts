@@ -1,3 +1,4 @@
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { createAudit, createUnitOfWork, dedicatedConnection, runMigrations } from "@vtc/db";
 import { sql } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
@@ -6,16 +7,21 @@ import { guardedSettings, hasCode, reset, testConnection } from "../persistence/
 import { clock, idGenerator } from "../support/builders.ts";
 import { barrier, bounded, connections, deferred, transaction } from "../support/concurrency.ts";
 
+const diagnostic = identityDiagnostics("concurrency");
 let control: Connection;
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
-  await control.query(
-    "CREATE TABLE synthetic_race (id INT PRIMARY KEY, source_key VARBINARY(64) NOT NULL UNIQUE, payload VARCHAR(64) NOT NULL, touches INT NOT NULL DEFAULT 0) ENGINE=InnoDB",
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_race (id INT PRIMARY KEY, source_key VARBINARY(64) NOT NULL UNIQUE, payload VARCHAR(64) NOT NULL, touches INT NOT NULL DEFAULT 0) ENGINE=InnoDB",
+    ),
   );
-  await control.query(
-    "CREATE TABLE synthetic_jobs (id INT PRIMARY KEY, token VARCHAR(36), lease_until DATETIME(3), done BOOLEAN NOT NULL DEFAULT FALSE) ENGINE=InnoDB",
+  await diagnostic.phase("synthetic_ddl", () =>
+    control.query(
+      "CREATE TABLE synthetic_jobs (id INT PRIMARY KEY, token VARCHAR(36), lease_until DATETIME(3), done BOOLEAN NOT NULL DEFAULT FALSE) ENGINE=InnoDB",
+    ),
   );
 });
 afterAll(async () => {
@@ -174,7 +180,7 @@ test("opposed lock order causes a real deadlock and bounded whole-transaction re
 });
 
 test("callback failure rolls back synthetic write and audit on the same transaction", async () => {
-  const unit = createUnitOfWork(guardedSettings());
+  const unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
   const audit = createAudit(unit);
   const ids = idGenerator("audit");
   try {

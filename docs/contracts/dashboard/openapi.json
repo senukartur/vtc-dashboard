@@ -723,11 +723,21 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed result; see semantic preconditions.",
+            "description": "Password change completed. Email changes never complete at this step.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/EnvelopeCommandResult"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Current channel confirmed; a separate proposed-address proof is pending. Current email remains unchanged and verified.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeChallenge"
                 }
               }
             }
@@ -6739,6 +6749,93 @@
           }
         ]
       }
+    },
+    "/api/v1/me/email-change-confirmations": {
+      "post": {
+        "operationId": "confirmProposedEmailChange",
+        "tags": [
+          "identity"
+        ],
+        "summary": "Confirm the separately delivered proposed-address proof and atomically replace email",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-013",
+        "x-capability": "session",
+        "x-guards": [
+          "existing_verified_email",
+          "consume_proposed_address_proof",
+          "current_security_epochs",
+          "protected_director_channel"
+        ],
+        "responses": {
+          "200": {
+            "description": "Both proofs succeeded; email replacement and session invalidation committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCommandResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailVerificationInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/email-change": {
+      "get": {
+        "operationId": "getPendingEmailChange",
+        "tags": [
+          "identity"
+        ],
+        "summary": "Read current pending email replacement; null when absent, expired, consumed or invalidated",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-013",
+        "x-capability": "session",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeEmailChangeState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7006,7 +7103,8 @@
               },
               "newEmail": {
                 "type": "string",
-                "format": "email"
+                "format": "email",
+                "maxLength": 254
               }
             },
             "required": [
@@ -13500,6 +13598,75 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ListAuditEntry"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PendingEmailChange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "proposedEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "current_email",
+              "proposed_email"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "proposedEmail",
+          "expiresAt",
+          "stage"
+        ],
+        "additionalProperties": false
+      },
+      "EmailChangeState": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingEmailChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeEmailChangeState": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EmailChangeState"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

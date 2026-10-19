@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vitest";
 import { bounded, until } from "../support/concurrency.ts";
@@ -147,6 +147,9 @@ for (const target of ["PID", "process group"] as const)
           await until(async () => output().includes("FAKE_UP_READY"));
           signal("SIGINT");
           await until(async () => output().includes("FAKE_CLEANUP_STARTED"));
+          expect(
+            JSON.parse(await readFile(join(dirname(configuration()), "cleanup.json"), "utf8")),
+          ).toMatchObject({ phase: "started", category: "pending", exitCode: null });
           signal("SIGINT");
           await until(async () => output().includes("Cleanup already running"));
           signal("SIGTERM");
@@ -155,6 +158,9 @@ for (const target of ["PID", "process group"] as const)
           expect(await bounded(exit, "signal-launcher-exit")).toBe(130);
           expect(output()).toContain("FAKE_CLEANUP_COMPLETE");
           expect(output()).not.toContain("FAKE_CLEANUP_SIGNAL_FORWARDED");
+          expect(
+            JSON.parse(await readFile(join(dirname(configuration()), "cleanup.json"), "utf8")),
+          ).toMatchObject({ phase: "completed", category: "completed", exitCode: 0 });
           await expect(access(configuration())).rejects.toMatchObject({ code: "ENOENT" });
         },
         target === "process group",
@@ -171,6 +177,9 @@ test.skipIf(process.platform === "win32")(
       expect(output()).toContain("TEST_STACK_CLEANUP_FAILED");
       expect(output()).toContain("Recovery: docker compose --project-name vtc008-");
       expect((await readFile(configuration(), "utf8")).length).toBeGreaterThan(0);
+      expect(
+        JSON.parse(await readFile(join(dirname(configuration()), "cleanup.json"), "utf8")),
+      ).toMatchObject({ phase: "completed", category: "nonzero-exit", exitCode: 7 });
     });
   },
 );

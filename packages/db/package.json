@@ -4,6 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./identity-schema": {
+      "types": "./dist/schema/identity/index.d.ts",
+      "default": "./dist/schema/identity/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

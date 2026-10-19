@@ -4,6 +4,8 @@ import { join, relative } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
+import { registerIdentityRoutes } from "./modules/identity/http.js";
+import type { Identity } from "./modules/identity/service.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 
 const assetCache = "public, max-age=31536000, immutable";
@@ -25,6 +27,7 @@ const errorCodes: Readonly<Record<number, string>> = {
 };
 
 export interface AppOptions {
+  identity?: Identity;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -54,7 +57,18 @@ export async function createApp(options: AppOptions) {
         : 500;
     const status =
       "validation" in httpError ? 422 : Object.hasOwn(errorCodes, errorStatus) ? errorStatus : 500;
-    const code = errorCodes[status] ?? "INTERNAL_ERROR";
+    const suppliedCode = "publicCode" in httpError ? httpError.publicCode : undefined;
+    const code =
+      typeof suppliedCode === "string" &&
+      [
+        "SETUP_REQUIRED",
+        "VERSION_CONFLICT",
+        "IDEMPOTENCY_CONFLICT",
+        "SELF_REVIEW_FORBIDDEN",
+      ].includes(suppliedCode)
+        ? suppliedCode
+        : (errorCodes[status] ?? "INTERNAL_ERROR");
+    if (status === 429) reply.header("Retry-After", "60");
     if (status >= 500)
       console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));
     reply.code(status).send({
@@ -89,6 +103,7 @@ export async function createApp(options: AppOptions) {
     },
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
+  if (options.identity) await registerIdentityRoutes(app, options.identity);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

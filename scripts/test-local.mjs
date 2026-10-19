@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eventLine } from "./ci-result.mjs";
+import { runTestProcess } from "./test-process.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const focus = process.argv[2] ?? "all";
@@ -55,6 +55,8 @@ const args = [
 let active;
 let interrupted = false;
 let cleaning = false;
+let cleanupCategory = "pending";
+let cleanupNativeExitCode = null;
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, () => {
     interrupted = true;
@@ -62,57 +64,30 @@ for (const signal of ["SIGINT", "SIGTERM"])
     else active?.kill(signal);
   });
 async function docker(tail, timeout) {
-  return new Promise((accept, reject) => {
-    const ownProcessGroup = cleaning;
-    const child = spawn("docker", [...args, ...tail], {
-      cwd: root,
-      stdio: ownProcessGroup ? ["ignore", "pipe", "pipe"] : "inherit",
-      // Await cleanup in a separate POSIX session so terminal signals cannot reach it directly.
-      detached: ownProcessGroup,
-      windowsHide: true,
-      env: {
-        ...process.env,
-        // Explicit env-file plus these values prevent shell interpolation overriding the allocation.
-        VTC_TEST_RUN: run,
-        VTC_TEST_FOCUS: focus,
-        VTC_TEST_PROBE: probe ? "assertion" : "",
-        VTC_TEST_UID: String(process.getuid?.() ?? 1000),
-        VTC_TEST_GID: String(process.getgid?.() ?? 1000),
-        VTC_TEST_OUTPUT: output.replaceAll("\\", "/"),
-        VTC_TEST_ROOT_PASSWORD: undefined,
-      },
-    });
-    if (ownProcessGroup) {
-      child.stdout.pipe(process.stdout, { end: false });
-      child.stderr.pipe(process.stderr, { end: false });
-    }
-    active = child;
-    let expired = false;
-    const timer =
-      timeout === undefined
-        ? undefined
-        : setTimeout(() => {
-            expired = true;
-            // A descendant retaining a pipe must not keep cleanup waiting after its deadline.
-            child.stdout?.destroy();
-            child.stderr?.destroy();
-            try {
-              if (ownProcessGroup && process.platform !== "win32" && child.pid)
-                process.kill(-child.pid, "SIGKILL");
-              else child.kill("SIGKILL");
-            } catch {
-              child.kill("SIGKILL");
-            }
-          }, timeout);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      accept(expired ? 1 : (code ?? 1));
-    });
+  const outcome = await runTestProcess("docker", [...args, ...tail], {
+    cwd: root,
+    cleanup: cleaning,
+    timeout,
+    onSpawn: (child) => {
+      active = child;
+    },
+    env: {
+      ...process.env,
+      // Explicit env-file plus these values prevent shell interpolation overriding the allocation.
+      VTC_TEST_RUN: run,
+      VTC_TEST_FOCUS: focus,
+      VTC_TEST_PROBE: probe ? "assertion" : "",
+      VTC_TEST_UID: String(process.getuid?.() ?? 1000),
+      VTC_TEST_GID: String(process.getgid?.() ?? 1000),
+      VTC_TEST_OUTPUT: output.replaceAll("\\", "/"),
+      VTC_TEST_ROOT_PASSWORD: undefined,
+    },
   });
+  if (cleaning) {
+    cleanupCategory = outcome.category;
+    cleanupNativeExitCode = outcome.nativeExitCode ?? null;
+  }
+  return outcome.exitCode;
 }
 let result = 1;
 try {
@@ -133,11 +108,26 @@ try {
   cleaning = true;
   const started = Date.now();
   let cleaned = 1;
+  const diagnostic = resolve(directory, "cleanup.json");
+  async function recordCleanup(phase) {
+    try {
+      await writeFile(
+        diagnostic,
+        `${JSON.stringify({ phase, category: cleanupCategory, exitCode: phase === "started" ? null : cleaned, nativeExitCode: cleanupNativeExitCode, durationMs: Date.now() - started })}\n`,
+        { mode: 0o600 },
+      );
+    } catch {
+      console.error("TEST_STACK_CLEANUP_DIAGNOSTIC_UNAVAILABLE");
+    }
+  }
+  await recordCleanup("started");
   try {
     cleaned = await docker(["down", "--volumes", "--remove-orphans", "--timeout", "5"], 15000);
   } catch {
+    cleanupCategory = "launcher-error";
     /* Retain the private configuration for explicit recovery below. */
   }
+  await recordCleanup("completed");
   if (cleaned === 0) {
     try {
       await rm(envFile, { force: true });

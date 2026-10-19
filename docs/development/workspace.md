@@ -10,9 +10,9 @@
 | `apps/api/src/server.ts` | Validated startup, listening and signal shutdown |
 | `apps/api/src/jobs.ts` | Explicit bounded placeholder; durable jobs belong to VTC-021 |
 | `apps/api/src/modules/`, `use-cases/`, `platform/` | Domain ownership, cross-module coordination and infrastructure boundaries |
-| `apps/web/src/app/`, `features/`, `shared/` | React router/providers, future feature UI and localization/styles |
+| `apps/web/src/app/`, `features/`, `shared/`, `i18n/core/` | React router/providers, synthetic foundation previews, reusable primitives, exact formatting and RU/EN namespaces |
 | `packages/contracts/` | Generated OpenAPI browser types, reference-preserving JSON Schema 2020-12 and shared health DTO |
-| `packages/db/` | Authenticated readiness pool; VTC-007 adds separate [audit/value/transaction/migration foundations](persistence.md), with no domain/auth/company schema |
+| `packages/db/` | Authenticated readiness pool; VTC-007 adds separate [audit/value/transaction/migration foundations](persistence.md); VTC-013 adds the opt-in [identity foundation](identity.md) |
 | `config/runtime.json`, `deploy/local/mysql.cnf` | Common runtime/database target for local, later CI and deployment integration |
 | `compose.yaml`, `Dockerfile` | Docker local app/database with Compose Watch and optional production artifact |
 | `test/scaffold/` | Narrow configuration, HTTP and runtime schema bridge checks |
@@ -59,6 +59,14 @@ The advisory recommendation to accept arbitrary newer MySQL 8.4 patches is not a
 ## Persistence follow-up
 
 VTC-007 now implements the [persistence substrate](persistence.md) separately from these historical scaffold observations: exact values, same-connection DML/audit transactions, a bounded transaction pool and explicit serialized migrations with dirty-state recovery. Its real MySQL suites remain separate from the VTC-006 checks. Seven database-independent protocol regressions and an audit public-surface regression bring `pnpm test:scaffold` to twenty tests: they verify bounded cleanup and natural shutdown after stalled transaction control/migration operations with half-open peers, distinct unknown-COMMIT outcome errors, original callback-error identity and the append-only public audit facade. Transaction control uses an independent wall-clock deadline; the dedicated migrator disconnects without queued lock-cleanup SQL. A separate real MySQL slow-statement rehearsal preserves dirty state after timeout and permits server-side disconnect/lock-release lag. Broader feature concurrency/permissions, authentication, outbox/jobs, CI and final-host recovery remain their named cards' gates.
+
+## VTC-012 UI foundation addition
+
+The [UI foundation guide](ui-foundation.md) records the manually adapted shadcn primitives/license, tokens, public/member presentation shells, feature-local resources, typed schema-validated synthetic responses and exact decimal/timezone conventions. `/` still requests real readiness; `/foundation` and `/foundation/member` make no authentication/domain-integration claim. Used dependencies have exact pins with strict peers/release-age policy unchanged. The browser projects now include tablet, and synthetic state/focus/locale journeys save ignored screenshots for rendered review. Authentication, company launch configuration and live feature integration remain their owning cards' work; the delivery PR records actual candidate verification.
+
+## VTC-013 identity addition
+
+The [identity guide](identity.md) records the pinned auth engine, owned transaction bridge, additive schema, opt-in rollout and fail-closed mail/event seams. Existing startup remains compatible with identity disabled; no automatic migration/bootstrap occurs. Real MySQL and built-server identity checks are separate from the historical scaffold observations above.
 
 ## Primary references
 
