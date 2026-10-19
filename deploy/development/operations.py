@@ -325,11 +325,20 @@ def jobs_grants_locked(revision):
     for table, privileges in [('durable_jobs', 'SELECT,INSERT,UPDATE'),
                               ('job_effect_receipts', 'SELECT,INSERT'),
                               ('job_runner_leases', 'SELECT,INSERT,UPDATE,DELETE'),
-                              ('outbox_events', 'SELECT,INSERT')]:
+                              ('outbox_events', 'SELECT,INSERT'),
+                              ('mail_deliveries', 'SELECT,UPDATE'),
+                              ('mail_commands', 'SELECT,DELETE'),
+                              ('identity_company', 'SELECT'),
+                              ('identity_memberships', 'SELECT'),
+                              ('identity_users', 'SELECT'),
+                              ('identity_challenges', 'SELECT')]:
         statement += f"GRANT {privileges} ON vtc.{table} TO 'vtc_jobs'@'%';\n"
     for role in ['runtime', 'jobs']:
         statement += f"GRANT INSERT,SELECT ON vtc.outbox_events TO 'vtc_{role}'@'%';\n"
-    statement += "GRANT INSERT ON vtc.durable_jobs TO 'vtc_runtime'@'%';\n"
+    statement += "GRANT SELECT,INSERT,UPDATE ON vtc.durable_jobs TO 'vtc_runtime'@'%';\n"
+    statement += "GRANT SELECT ON vtc.job_effect_receipts TO 'vtc_runtime'@'%';\n"
+    statement += "GRANT SELECT,INSERT,UPDATE ON vtc.mail_deliveries TO 'vtc_runtime'@'%';\n"
+    statement += "GRANT SELECT,INSERT,DELETE ON vtc.mail_commands TO 'vtc_runtime'@'%';\n"
     compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
             revision=revision, data=statement.encode())
 

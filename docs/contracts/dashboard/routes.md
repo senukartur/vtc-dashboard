@@ -125,3 +125,5 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `PATCH /api/v1/admin/source-connections/{connectionId}` | `updateSourceConnection` | `connections.manage` | VTC-038 |
 | `GET /api/v1/admin/audit` | `listAudit` | `members.manage` | VTC-039 |
 | `GET /api/v1/operations/{operationId}` | `getOperation` | `session` | VTC-021 |
+| `GET /api/v1/mail-deliveries/{deliveryId}` | `getMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
+| `POST /api/v1/mail-deliveries/{deliveryId}/resends` | `resendMailDelivery` | `session` (owner or applications.manage) | VTC-014 |

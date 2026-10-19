@@ -1,8 +1,7 @@
 import { createDatabase, createUnitOfWork } from "@vtc/db";
 import { createApp } from "./app.js";
-import { createIdentity } from "./modules/identity/service.js";
 import { readConfig } from "./platform/config/env.js";
-import { identityAccessEvents } from "./platform/outbox/events.js";
+import { composeIdentity } from "./use-cases/identity-messaging.js";
 
 try {
   const config = readConfig();
@@ -16,9 +15,7 @@ try {
     },
     ...(config.identity && unit
       ? {
-          identity: createIdentity(unit, config.identity, {
-            accessEvents: identityAccessEvents(unit),
-          }),
+          ...composeIdentity(unit, config.identity, config.mail),
         }
       : {}),
     ...(config.serveWeb ? { webRoot: config.webRoot } : {}),

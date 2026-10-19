@@ -6839,6 +6839,123 @@
         "meta"
       ],
       "additionalProperties": false
+    },
+    "MailDelivery": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "email_verification",
+            "password_reset",
+            "password_change",
+            "email_change",
+            "succession",
+            "invitation",
+            "rejection"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "attempting",
+            "retryable",
+            "accepted",
+            "simulated",
+            "suppressed",
+            "failed",
+            "ambiguous"
+          ]
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "nextAttemptAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "recovery": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            null,
+            "rate_limit",
+            "daily_quota",
+            "monthly_quota",
+            "authentication",
+            "validation",
+            "idempotency_conflict",
+            "concurrent_request",
+            "provider_unavailable",
+            "acceptance_unknown",
+            "payload_unavailable",
+            "obsolete",
+            "idempotency_expired",
+            "attempts_exhausted",
+            "provider_changed",
+            "worker_configuration"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "version",
+        "attempts",
+        "createdAt",
+        "updatedAt",
+        "expiresAt",
+        "nextAttemptAt",
+        "recovery"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeMailDelivery": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/MailDelivery"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
     }
   }
 }

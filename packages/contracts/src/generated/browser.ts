@@ -974,6 +974,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/mail-deliveries/{deliveryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read safe delivery evidence */
+        get: operations["getMailDelivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/mail-deliveries/{deliveryId}/resends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry a known rejected delivery without replacing its generation */
+        post: operations["resendMailDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/manual-trips": {
         parameters: {
             query?: never;
@@ -2450,6 +2484,10 @@ export interface components {
             data: components["schemas"]["ListTripSummary"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeMailDelivery: {
+            data: components["schemas"]["MailDelivery"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeManualRevision: {
             data: components["schemas"]["ManualRevision"];
             meta: components["schemas"]["Meta"];
@@ -2792,6 +2830,26 @@ export interface components {
             /** Format: email */
             email: string;
             password: string;
+        };
+        MailDelivery: {
+            attempts: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "email_verification" | "password_reset" | "password_change" | "email_change" | "succession" | "invitation" | "rejection";
+            /** Format: date-time */
+            nextAttemptAt: string | null;
+            /** @enum {string|null} */
+            recovery: null | "rate_limit" | "daily_quota" | "monthly_quota" | "authentication" | "validation" | "idempotency_conflict" | "concurrent_request" | "provider_unavailable" | "acceptance_unknown" | "payload_unavailable" | "obsolete" | "idempotency_expired" | "attempts_exhausted" | "provider_changed" | "worker_configuration";
+            /** @enum {string} */
+            state: "queued" | "attempting" | "retryable" | "accepted" | "simulated" | "suppressed" | "failed" | "ambiguous";
+            /** Format: date-time */
+            updatedAt: string;
+            version: number;
         };
         ManualInput: {
             actualDistanceM: string;
@@ -5008,6 +5066,59 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getMailDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe delivery evidence; provider acceptance is not inbox receipt. */
+            200: {
+                headers: {
+                    /** @description Strong delivery version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeMailDelivery"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    resendMailDelivery: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                deliveryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe delivery evidence; provider acceptance is not inbox receipt. */
+            200: {
+                headers: {
+                    /** @description Strong delivery version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCommandResult"];
                 };
             };
             default: components["responses"]["Error"];

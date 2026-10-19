@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
+import { validateMessagingConfig, type MessagingConfig } from "../../modules/messaging/service.js";
 
 const port = z.coerce.number().int().min(1).max(65535);
 const settings = z.object({
@@ -43,6 +44,36 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       throw new Error("Invalid environment fields: IDENTITY_SECRET, IDENTITY_ORIGIN");
     }
   }
+  const mode = input.MAIL_MODE ?? "disabled";
+  if (!["disabled", "local", "resend"].includes(mode))
+    throw new Error("Invalid environment fields: MAIL_MODE");
+  let mail: (MessagingConfig & { apiKey?: string }) | undefined;
+  if (mode !== "disabled") {
+    try {
+      if (
+        !identity ||
+        (mode === "resend" &&
+          (input.MAIL_TRACKING_DISABLED !== "true" ||
+            !input.MAIL_API_KEY ||
+            input.MAIL_API_KEY.startsWith("REPLACE_") ||
+            /\s/.test(input.MAIL_API_KEY)))
+      )
+        throw new Error();
+      mail = {
+        mode: mode as "local" | "resend",
+        key: input.MAIL_ENCRYPTION_KEY ?? "",
+        sender: input.MAIL_SENDER ?? "",
+        origin: identity.origin,
+        production: env.NODE_ENV === "production",
+        ...(mode === "resend" ? { apiKey: input.MAIL_API_KEY ?? "" } : {}),
+      };
+      validateMessagingConfig(mail);
+    } catch {
+      throw new Error(
+        "Invalid environment fields: MAIL_MODE, MAIL_ENCRYPTION_KEY, MAIL_SENDER, MAIL_API_KEY, MAIL_TRACKING_DISABLED, IDENTITY_ENABLED",
+      );
+    }
+  }
   return {
     environment: env.NODE_ENV,
     host: env.API_HOST,
@@ -50,6 +81,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     serveWeb: env.SERVE_WEB === "true",
     webRoot: resolve(env.WEB_ROOT),
     identity,
+    mail,
     database: {
       host: env.MYSQL_HOST,
       port: env.MYSQL_PORT,
