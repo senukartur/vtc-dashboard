@@ -117,11 +117,11 @@ for (const locale of ["ru", "en"] as const) {
       .getByRole("link", { name: locale === "ru" ? "Войти" : "Sign in", exact: true })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      locale === "ru" ? "Вход в кабинет ещё готовится" : "Member sign-in is on the way",
+      locale === "ru" ? "Войти" : "Sign in",
     );
     await page
       .getByRole("main")
-      .getByRole("link", { name: locale === "ru" ? "Подать заявку" : "Apply to join", exact: true })
+      .getByRole("link", { name: locale === "ru" ? "На главную" : "Home", exact: true })
       .click();
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
   });

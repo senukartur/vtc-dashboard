@@ -138,3 +138,7 @@ A separate native Windows child regression reproduces an out-of-range process st
 ## Public landing and admissions UI
 
 [VTC-016](public-landing.md) adds field/transport unit checks and controlled RU/EN browser journeys with synthetic captures at 390×844, 768×1024 and 1280×800. Separate initial-HTTP checks inspect meaningful localized HTML and noindex boundaries. The rendered-form journey submits to the real VTC-015 API in the isolated MySQL/local-mail harness and verifies repeat-email nondisclosure and anonymous permissions. Readiness journeys continue at `/status`. Controlled mocks are UI evidence only; they never substitute for that integration.
+
+## Account lifecycle
+
+[VTC-017](account.md) adds controlled account fixtures and real rendered identity/admissions/local-mail journeys. Account real tests disable trace, screenshot and video; guarded allocation-derived mail keys decrypt existing durable intents only in memory. Fixed failure phases and boolean sensitive comparisons keep generated proofs/credentials out of diagnostics. New account and account-real spec identifiers are explicitly allowlisted. Synthetic account captures remain local review evidence; real queued mail is not inbox delivery proof.

@@ -10,6 +10,7 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
   const navigate = useNavigate();
   const { t, i18n } = useTranslation("core");
   const home = i18n.resolvedLanguage === "en" ? "/en" : "/";
+  const preview = location.pathname.startsWith("/foundation");
   return (
     <div className={member ? "app-shell member-shell" : "app-shell public-shell"}>
       <a className="skip-link" href="#main-content">
@@ -19,9 +20,9 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
         <Link className="wordmark" to="/">
           Yukon Union
         </Link>
-        <p className="sidebar-label">{t("workspaceNavigation")}</p>
+        <p className="sidebar-label">{preview ? t("workspaceNavigation") : t("account:account")}</p>
         <Navigation variant="sidebar" />
-        <p className="sidebar-note">{t("presentationOnly")}</p>
+        {preview && <p className="sidebar-note">{t("presentationOnly")}</p>}
       </aside>
       <header className="site-header">
         <Link
@@ -34,7 +35,7 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
         >
           Yukon Union
         </Link>
-        <p className="member-context">{t("member")}</p>
+        <p className="member-context">{preview ? t("member") : t("account:account")}</p>
         <Navigation variant={member ? "mobile" : "public"} />
         <label className="language-picker">
           {t("language")}

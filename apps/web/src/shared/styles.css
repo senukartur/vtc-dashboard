@@ -935,3 +935,66 @@ textarea {
     font-size: 9px;
   }
 }
+/* Account workflows reuse the shared Yukon Union controls and semantic tokens. */
+.auth-card {
+  width: min(100%, 34rem);
+  margin: clamp(1rem, 5vw, 4rem) auto;
+}
+.account-page {
+  max-width: 72rem;
+  margin-inline: auto;
+}
+.account-page .page-heading > .button {
+  justify-self: start;
+}
+.account-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.account-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 25rem), 1fr));
+  align-items: start;
+}
+.account-grid > * {
+  min-width: 0;
+  scroll-margin-top: 6rem;
+}
+.account-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+.account-sections a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+.account-address,
+.account-grid p,
+.auth-card p {
+  overflow-wrap: anywhere;
+}
+.error-summary {
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.error-summary a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+}
+.unavailable-navigation {
+  display: block;
+  color: var(--muted);
+  padding-block: 0.65rem;
+  font-size: 0.875rem;
+}
+.auth-card .input,
+.account-page .input {
+  font-size: 16px;
+}

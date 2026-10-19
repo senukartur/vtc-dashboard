@@ -2,6 +2,25 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="referrer" content="no-referrer" />
+    <script>
+      // Run before resources: one-time links must not survive in history or referrers.
+      (() => {
+        const url = new URL(location.href);
+        let path;
+        try { path = decodeURIComponent(url.pathname).toLowerCase().replace(/\/+$/, ""); }
+        catch { return; }
+        if (path === "/invitation" || path === "/password-reset") {
+          const tokens = url.searchParams.getAll("token");
+          const token = tokens.length === 1 ? tokens[0] : null;
+          Object.defineProperty(window, "__vtcLink", {
+            configurable: true,
+            value: { path, token },
+          });
+          history.replaceState(null, "", path);
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex, nofollow" />
     <title>VTC Dashboard</title>

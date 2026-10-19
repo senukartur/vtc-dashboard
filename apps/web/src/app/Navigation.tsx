@@ -11,10 +11,12 @@ import {
 } from "../shared/ui/dialog.js";
 import { publicContent, publicPath } from "../features/landing/content.js";
 import { Button } from "../shared/ui/primitives.js";
+import { useSession } from "./Session.js";
 
 export function Navigation({ variant = "public" }: { variant?: "public" | "sidebar" | "mobile" }) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
+  const session = useSession();
   const preview = location.pathname.startsWith("/foundation") || location.pathname === "/status";
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const c = publicContent[locale];
@@ -25,13 +27,40 @@ export function Navigation({ variant = "public" }: { variant?: "public" | "sideb
     { to: "/foundation/member", label: "member" },
   ];
   function links(close?: () => void) {
+    if (!preview && location.pathname.startsWith("/account"))
+      return (
+        <>
+          <NavLink to="/account" onClick={close}>
+            {t("account:account")}
+          </NavLink>
+          <Link to={publicPath(locale)} onClick={close}>
+            {t("home")}
+          </Link>
+          {[
+            ["company.read", "dashboard"],
+            ["trips.submit_own", "reports"],
+            ["trips.review", "review"],
+            ["applications.manage", "administration"],
+            ["leadership.transfer", "leadership"],
+          ]
+            .filter(([capability]) => capability && session.self?.capabilities.includes(capability))
+            .map(([, label]) => (
+              <span className="unavailable-navigation" key={label}>
+                {t(`account:nav.${label}`)} · {t("account:unavailable")}
+              </span>
+            ))}
+        </>
+      );
     if (!preview)
       return [
         { to: `${publicPath(locale)}#about`, label: c.about },
         { to: `${publicPath(locale)}#apply`, label: c.apply },
         { to: `${publicPath(locale)}#contacts`, label: c.contacts },
         { to: "/events", label: c.events },
-        { to: "/login", label: c.login },
+        {
+          to: session.self ? "/account" : "/login",
+          label: session.self ? t("account:account") : c.login,
+        },
       ].map((item) => (
         <Link key={item.to} to={item.to} onClick={close}>
           {item.label}
