@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
 import { Navigation } from "./Navigation.js";
 
 /** Shared landmarks with public navigation or a presentation-only member sidebar/topbar. */
 export function AppLayout({ member, children }: { member: boolean; children: ReactNode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { t, i18n } = useTranslation("core");
+  const home = i18n.resolvedLanguage === "en" ? "/en" : "/";
   return (
     <div className={member ? "app-shell member-shell" : "app-shell public-shell"}>
       <a className="skip-link" href="#main-content">
@@ -21,7 +24,14 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
         <p className="sidebar-note">{t("presentationOnly")}</p>
       </aside>
       <header className="site-header">
-        <Link className="wordmark header-wordmark" to="/">
+        <Link
+          className="wordmark header-wordmark"
+          to={
+            member || location.pathname.startsWith("/foundation") || location.pathname === "/status"
+              ? "/"
+              : home
+          }
+        >
           Yukon Union
         </Link>
         <p className="member-context">{t("member")}</p>
@@ -30,7 +40,19 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
           {t("language")}
           <select
             value={i18n.resolvedLanguage}
-            onChange={(event) => void i18n.changeLanguage(event.target.value)}
+            onChange={(event) => {
+              const locale = event.target.value;
+              void i18n.changeLanguage(locale);
+              if (["/", "/en"].includes(location.pathname))
+                navigate(
+                  {
+                    pathname: locale === "en" ? "/en" : "/",
+                    search: location.search,
+                    hash: location.hash,
+                  },
+                  { replace: true },
+                );
+            }}
           >
             <option value="ru">Русский</option>
             <option value="en">English</option>
@@ -41,7 +63,11 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
         {children}
       </main>
       <footer className="site-footer">
-        <span>{t("footer")}</span>
+        <span>
+          {location.pathname.startsWith("/foundation") || location.pathname === "/status"
+            ? t("footer")
+            : "Yukon Union · ETS2 / ATS"}
+        </span>
         <a href={fontLicenseUrl}>{t("fontLicense")}</a>
       </footer>
     </div>
