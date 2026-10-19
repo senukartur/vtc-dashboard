@@ -326,4 +326,86 @@ test.describe("real rendered admissions", () => {
       expect((await context.request.get("/api/v1/admin/applications")).status()).toBe(401);
     }
   });
+  for (const locale of ["en", "ru"] as const) {
+    test(`committed but unconfirmed ${locale} submission replays after switching the interface language`, async ({
+      page,
+      context,
+    }) => {
+      const control = await testConnection();
+      try {
+        await control.query("DELETE FROM admissions_limits");
+        await control.query("DELETE FROM identity_limits");
+      } finally {
+        await control.end();
+      }
+      const nextLocale = locale === "en" ? "ru" : "en";
+      let attempts = 0;
+      let original:
+        | { key: string | undefined; payload: string | null; locale: string | undefined }
+        | undefined;
+      await page.route("**/api/v1/public/applications", async (route) => {
+        const request = route.request();
+        const command = {
+          key: request.headers()["idempotency-key"],
+          payload: request.postData(),
+          locale: request.headers()["accept-language"],
+        };
+        const response = await route.fetch({ timeout: 5000 }).catch(() => {
+          throw new Error("SYNTHETIC_APPLICATION_REPLAY_REQUEST_FAILED");
+        });
+        // Both responses come from real VTC-015 after its MySQL transaction commits.
+        // Boolean comparisons avoid printing request material if a regression fails.
+        expect(response.status()).toBe(201);
+        attempts++;
+        if (attempts === 1) {
+          original = command;
+          expect(command.locale === locale).toBe(true);
+          await route.abort("failed");
+        } else {
+          expect(command.key === original?.key).toBe(true);
+          expect(command.payload === original?.payload).toBe(true);
+          expect(command.locale === original?.locale).toBe(true);
+          await route.fulfill({ response });
+        }
+      });
+      await page.goto(locale === "en" ? "/en" : "/");
+      await fill(page, locale);
+      await page
+        .getByRole("textbox", {
+          name: locale === "en" ? "Invitation email" : "Email для приглашения",
+          exact: true,
+        })
+        .fill(`${randomUUID()}@example.invalid`);
+      await page
+        .getByRole("button", {
+          name: locale === "en" ? "Send application" : "Отправить заявку",
+          exact: true,
+        })
+        .click();
+      await expect(page.getByRole("alert")).toContainText(
+        locale === "en" ? "Submission could not be confirmed" : "Не удалось подтвердить отправку",
+      );
+      await page
+        .getByRole("combobox", { name: locale === "en" ? "Language" : "Язык", exact: true })
+        .selectOption(nextLocale);
+      await expect(page.locator("html")).toHaveAttribute("lang", nextLocale);
+      await expect(page.getByRole("alert")).toContainText(
+        nextLocale === "en"
+          ? "Submission could not be confirmed"
+          : "Не удалось подтвердить отправку",
+      );
+      await page
+        .getByRole("button", {
+          name: nextLocale === "en" ? "Retry submission" : "Повторить отправку",
+          exact: true,
+        })
+        .click();
+      await expect(page.getByRole("status")).toContainText(
+        nextLocale === "en" ? "Submission acknowledged" : "Отправка подтверждена",
+      );
+      expect(attempts).toBe(2);
+      expect((await context.request.get("/api/v1/me")).status()).toBe(401);
+      expect((await context.request.get("/api/v1/admin/applications")).status()).toBe(401);
+    });
+  }
 });

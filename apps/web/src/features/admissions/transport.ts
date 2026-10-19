@@ -79,12 +79,16 @@ export interface SubmissionAttempt {
   serialized: string;
   payload: ApplicationInput;
   key: string;
+  locale: "ru" | "en";
 }
 export function submissionAttempt(
   payload: ApplicationInput,
+  locale: "ru" | "en",
   previous: SubmissionAttempt | null,
   createKey: () => string = () => crypto.randomUUID(),
 ): SubmissionAttempt {
   const serialized = JSON.stringify(payload);
-  return previous?.serialized === serialized ? previous : { serialized, payload, key: createKey() };
+  return previous?.serialized === serialized
+    ? previous
+    : { serialized, payload, key: createKey(), locale };
 }

@@ -165,17 +165,42 @@ describe("same-origin admissions transport", () => {
       ),
     ).rejects.toBeInstanceOf(ApplicationFailure);
     expect(fetcher).toHaveBeenCalledTimes(1);
-    const first = submissionAttempt(applicationPayload(fields), null, () => "first");
-    expect(submissionAttempt(applicationPayload(fields), first, () => "unused")).toBe(first);
+    const first = submissionAttempt(applicationPayload(fields), "en", null, () => "first");
+    expect(submissionAttempt(applicationPayload(fields), "en", first, () => "unused")).toBe(first);
     expect(
       submissionAttempt(
         applicationPayload({ ...fields, nickname: "Changed" }),
+        "en",
         first,
         () => "second",
       ).key,
     ).toBe("second");
     expect(first.payload.nickname).toBe(fields.nickname);
   });
+  test.each(["en", "ru"] as const)(
+    "unchanged retries retain the original %s command locale; changed payload captures the current locale",
+    (locale) => {
+      const changedLocale = locale === "en" ? "ru" : "en";
+      const first = submissionAttempt(applicationPayload(fields), locale, null, () => "first");
+      const replay = submissionAttempt(
+        applicationPayload(fields),
+        changedLocale,
+        first,
+        () => "unused",
+      );
+      expect(replay).toBe(first);
+      expect(replay.locale).toBe(locale);
+      const changed = submissionAttempt(
+        applicationPayload({ ...fields, nickname: "Changed" }),
+        changedLocale,
+        replay,
+        () => "second",
+      );
+      expect(changed.locale).toBe(changedLocale);
+      expect(changed.key).toBe("second");
+      expect(first.locale).toBe(locale);
+    },
+  );
   test("Retry-After is bounded and ignores malformed/raw text", () => {
     expect(retryDelay("60")).toBe(60);
     expect(retryDelay("999999")).toBe(3600);

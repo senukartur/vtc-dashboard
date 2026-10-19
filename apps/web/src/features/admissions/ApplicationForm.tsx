@@ -45,7 +45,11 @@ export function ApplicationForm() {
     retry: false,
     mutationFn: async (fields: ApplicationFields) => {
       const payload = applicationPayload(fields);
-      attempt.current = submissionAttempt(payload, attempt.current);
+      attempt.current = submissionAttempt(
+        payload,
+        i18n.resolvedLanguage === "en" ? "en" : "ru",
+        attempt.current,
+      );
       const current = new AbortController();
       controller.current = current;
       const timer = window.setTimeout(() => current.abort(), 15000);
@@ -53,7 +57,7 @@ export function ApplicationForm() {
         await submitApplication(
           attempt.current.payload,
           attempt.current.key,
-          i18n.resolvedLanguage === "en" ? "en" : "ru",
+          attempt.current.locale,
           current.signal,
         );
       } finally {
