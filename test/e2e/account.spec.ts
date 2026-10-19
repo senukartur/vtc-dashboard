@@ -1,4 +1,4 @@
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { expect, test } from "./support/fixtures.ts";
 const meta = { requestId: "synthetic-request" };
@@ -458,6 +458,97 @@ test("confirmed anonymous sessions can recover a new shared-cookie session on fo
   await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
   expect(reads).toBe(before + 1);
 });
+for (const held of ["probe", "command"] as const) {
+  test(`old logout ${held} cannot end B or start an unowned probe after shared-cookie identity switching`, async ({
+    page,
+  }) => {
+    await mocks(page);
+    const first = accountFixture();
+    first.data.member.nickname = "Fictional Member A";
+    const second = accountFixture();
+    second.data.member.id = "41000000-0000-4000-8000-000000000018";
+    second.data.member.nickname = "Fictional Member B";
+    let current = first;
+    let logoutStarted = false;
+    let reads = 0;
+    let probes = 0;
+    let heldRequest: Request | undefined;
+    let release = () => {};
+    let started = () => {};
+    let handled = () => {};
+    let settled = () => {};
+    const began = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const delayed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const handlerFinished = new Promise<void>((resolve) => {
+      handled = resolve;
+    });
+    const requestSettled = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    const onSettled = (request: Request) => {
+      if (request === heldRequest) settled();
+    };
+    page.on("requestfinished", onSettled);
+    page.on("requestfailed", onSettled);
+    await page.route("**/api/v1/me", async (route) => {
+      reads++;
+      if (current === first && logoutStarted) {
+        probes++;
+        heldRequest = route.request();
+        started();
+        await delayed;
+        await route.fulfill(error(401)).catch(() => {});
+        handled();
+      } else await route.fulfill({ json: current, headers: { ETag: '"v1"' } });
+    });
+    await page.route("**/api/v1/auth/logout", async (route) => {
+      logoutStarted = true;
+      if (held === "command") {
+        heldRequest = route.request();
+        started();
+        await delayed;
+      }
+      await route.fulfill(error(503)).catch(() => {});
+      if (held === "command") handled();
+    });
+    try {
+      await page.goto("/account");
+      await expect(page.getByText("Fictional Member A", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Sign out", exact: true }).click();
+      await began;
+      expect(probes).toBe(held === "probe" ? 1 : 0);
+      const beforeSwitch = reads;
+      current = second;
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(page.getByText("Fictional Member B", { exact: true })).toBeVisible();
+      const timezone = page.getByLabel("Display timezone", { exact: true });
+      await timezone.fill("Europe/Warsaw");
+      release();
+      await Promise.all([handlerFinished, requestSettled]);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await expect(page.getByText("Fictional Member B", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      await expect(timezone).toHaveValue("Europe/Warsaw");
+      await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
+      // Focus discovers B, then the new access generation confirms B. Disposed A owns no read.
+      expect(reads).toBe(beforeSwitch + 2);
+      expect(probes).toBe(held === "probe" ? 1 : 0);
+    } finally {
+      release();
+      page.off("requestfinished", onSettled);
+      page.off("requestfailed", onSettled);
+    }
+  });
+}
 test("late private reads from A cannot appear after rendered logout and B login in the same app cache", async ({
   page,
 }) => {

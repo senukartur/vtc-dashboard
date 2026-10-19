@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
 import { formatUtc } from "../../shared/formatting.js";
 import { Form, codeValid, emailValid, newPasswordValid, type AccountField } from "./Form.js";
-import { AccountFailure, readPending, readSelf, type DTO } from "./transport.js";
+import { AccountFailure, readPending, type DTO } from "./transport.js";
 import { useCommand } from "./useCommand.js";
 
 const codeField: AccountField = {
@@ -351,19 +351,22 @@ export function AccountPage() {
   const { t } = useTranslation("account");
   const logout = useCommand();
   const [leaving, setLeaving] = useState(false);
+  const lifetime = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
   const self = session.self;
   if (!self) return null;
   async function signOut() {
+    const current = lifetime.current;
+    if (!current || current.signal.aborted) return;
     setLeaving(true);
     const result = await logout.run("logout", undefined);
+    if (current.signal.aborted) return;
     if (result) session.end();
-    else {
-      try {
-        await readSelf(AbortSignal.timeout(15000));
-      } catch (error) {
-        if (error instanceof AccountFailure && error.kind === "unauthorized") session.end();
-      }
-    }
+    else await session.confirmSessionLoss(current.signal);
   }
   if (leaving)
     return (

@@ -21,6 +21,7 @@ type Session = {
   etag: string | null;
   generation: number;
   refresh: () => Promise<void>;
+  confirmSessionLoss: (signal: AbortSignal) => Promise<void>;
   end: () => void;
   changed: () => void;
 };
@@ -130,6 +131,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             clear();
           } else {
             await query.refetch({ cancelRefetch: false });
+          }
+        },
+        confirmSessionLoss: async (signal) => {
+          if (signal.aborted || epoch.current !== generation) return;
+          try {
+            await readSelf(signal);
+          } catch (error) {
+            if (
+              !signal.aborted &&
+              epoch.current === generation &&
+              error instanceof AccountFailure &&
+              error.kind === "unauthorized"
+            )
+              end();
           }
         },
         end,

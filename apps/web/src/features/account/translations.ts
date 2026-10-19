@@ -47,7 +47,7 @@ export const accountTranslations = {
     hidePassword: "Hide: {{field}}",
     validationSummary: "Review the highlighted fields.",
     invalidField: "Check {{field}}.",
-    wait: "Wait {{seconds}} seconds before retrying.",
+    wait: "Wait {{seconds}} s before retrying.",
     linkUnavailable: "This link is unavailable",
     invitationUnavailable:
       "Ask the company administrators for another invitation. Expired, used and replaced links cannot be used.",
