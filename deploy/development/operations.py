@@ -17,6 +17,9 @@ import tempfile
 import time
 import uuid
 import urllib.request
+import activation
+import identity_acceptance
+import ingress_probe
 
 BASE = pathlib.Path('/opt/vtc-development')
 MAX_IMAGE = 800 * 1024 * 1024
@@ -50,6 +53,10 @@ def run(args, *, revision=None, image_id=None, project=PROJECT, data=None, timeo
         result = subprocess.run(args, cwd=BASE, env=env, input=data,
                                 stdout=output or subprocess.PIPE, stderr=errors,
                                 timeout=timeout, check=False)
+    if result.returncode != 0:
+        # Later owned-container cleanup must not erase the failed child's private diagnostic.
+        shutil.copyfile(error_file, BASE / 'state/last-failed-child.stderr')
+        os.chmod(BASE / 'state/last-failed-child.stderr', 0o600)
     require(result.returncode == 0, 'OPERATION_CHILD_FAILED')
     return result.stdout
 
@@ -77,7 +84,7 @@ def validate_image(image_id, revision, *, timeout=180):
 
 def compose(args, *, revision, image_id=None, project=PROJECT, **kwargs):
     image_id = image_id or accepted_image_id(revision)
-    return run(['docker', 'compose', '--project-name', project, '--file', str(BASE / 'compose.yaml'),
+    return run(['docker', 'compose', '--env-file', str(BASE / 'private/ingress.env'), '--project-name', project, '--file', str(BASE / 'compose.yaml'),
                 *args], revision=revision, image_id=image_id, project=project, **kwargs)
 
 
@@ -214,6 +221,8 @@ def stop_owned_jobs(revision, image_id=None):
 
 def jobs_locked(revision, image_id):
     require(not (BASE / 'state/jobs-acceptance').exists(), 'ACCEPTANCE_WINDOW')
+    require(not (BASE / 'state/identity-acceptance').exists(), 'ACCEPTANCE_WINDOW')
+    require(not (BASE / 'state/ingress-check.json').exists(), 'ACCEPTANCE_WINDOW')
     validate_image(image_id, revision, timeout=WORKER_CONTROL_TIMEOUT)
     stop_owned_jobs(revision, image_id)
     try:
@@ -278,7 +287,7 @@ def tick_locked(revision, image_id):
             value['steps']['jobs']['status'] = 'skipped_safety_fence'
         elif not may_continue:
             value['steps']['jobs']['status'] = 'skipped_control_failure'
-        elif (BASE / 'state/jobs-acceptance').exists():
+        elif any((BASE / f'state/{name}').exists() for name in ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']):
             value['steps']['jobs']['status'] = 'skipped_acceptance_window'
         else:
             attempt('jobs', lambda: jobs_locked(revision, image_id))
@@ -303,6 +312,11 @@ def heartbeat_locked(revision, image_id, timeout=30):
 
 
 def jobs_configuration():
+    shared = BASE / 'private/identity-mail.env'
+    if not shared.exists():
+        with open(shared, 'x') as handle:
+            os.chmod(shared, 0o600)
+            handle.write('IDENTITY_ENABLED=false\nMAIL_MODE=disabled\n')
     path = BASE / 'private/jobs.env'
     if path.exists():
         values = dict(line.split('=', 1) for line in path.read_text().splitlines())
@@ -505,6 +519,12 @@ def restore_locked(identity):
 
 
 def release_locked(path, revision, run_id, attempt, mode, expected_image_id):
+    require(not any((BASE / f'state/{name}').exists() for name in
+                    ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
+    for name in ['activation-intent.json', 'controls-update.json']:
+        control = BASE / 'state' / name
+        require(not control.exists() or json.loads(control.read_text()).get('pending') is not True,
+                'ACTIVATION_PENDING')
     previous = current()
     high_water_file = BASE / 'state/high-water.json'
     high_water = json.loads(high_water_file.read_text()) if high_water_file.exists() else previous
@@ -651,12 +671,20 @@ def main():
     if operation == ['receive']:
         receive()
         return
-    require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
+    require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'activation', 'identity-acceptance', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
     with lock(wait_seconds=0 if operation[0] in ['tick', 'heartbeat', 'jobs'] else 600):
         active = current()
         require(active is not None, 'RELEASE_REQUIRED')
         revision = active['revision']
-        require(not (BASE / 'state/recovery-required').exists() or operation[0] == 'restore', 'RECOVERY_REQUIRED')
+        require(not (BASE / 'state/recovery-required').exists() or operation[0] == 'restore' or
+                operation in [['activation', 'recover'], ['activation', 'rollback']] or
+                (operation in [['activation', 'validate'], ['activation', 'apply']] and
+                 activation.controls_pending(sys.modules[__name__], revision, active['imageId'])), 'RECOVERY_REQUIRED')
+        require(not (BASE / 'state/identity-acceptance').exists() or operation[0] in
+                ['identity-acceptance', 'tick', 'jobs', 'heartbeat'], 'ACCEPTANCE_WINDOW')
+        require(not (BASE / 'state/ingress-check.json').exists() or operation[0] in
+                ['tick', 'jobs', 'heartbeat'] or operation == ['activation', 'ingress-cleanup'],
+                'ACCEPTANCE_WINDOW')
         if operation == ['tick']:
             tick_locked(revision, active['imageId'])
             print('Tick: success')
@@ -670,6 +698,16 @@ def main():
         elif operation == ['jobs-grants']:
             jobs_grants_locked(revision)
             print('Jobs grants: success')
+        elif len(operation) == 2 and operation[0] == 'activation':
+            if operation[1] in ['ingress-check', 'ingress-cleanup']:
+                ingress_probe.check(sys.modules[__name__], revision, active['imageId'],
+                                    cleanup=operation[1] == 'ingress-cleanup')
+            else:
+                activation.config_operation(sys.modules[__name__], revision, active['imageId'], operation[1])
+            print('Activation: success')
+        elif len(operation) == 3 and operation[0] == 'identity-acceptance':
+            identity_acceptance.operation(sys.modules[__name__], revision, active['imageId'], operation[1], operation[2])
+            print('Identity acceptance: success')
         elif len(operation) == 3 and operation[0] == 'jobs-acceptance':
             jobs_acceptance_locked(revision, active['imageId'], operation[1], operation[2])
             print('Jobs acceptance: success')

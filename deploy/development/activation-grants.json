@@ -1,0 +1,31 @@
+{
+  "runtime": {
+    "identity_users": ["SELECT", "INSERT", "UPDATE"],
+    "identity_accounts": ["SELECT", "INSERT", "UPDATE"],
+    "identity_sessions": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "identity_memberships": ["SELECT", "INSERT", "UPDATE"],
+    "identity_roles": ["SELECT", "INSERT", "DELETE"],
+    "identity_company": ["SELECT", "INSERT", "UPDATE"],
+    "identity_challenges": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "identity_limits": ["SELECT", "INSERT", "UPDATE"],
+    "identity_command_results": ["SELECT", "INSERT", "DELETE"],
+    "audit_entries": ["INSERT"],
+    "outbox_events": ["SELECT", "INSERT"],
+    "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
+    "job_effect_receipts": ["SELECT"],
+    "mail_deliveries": ["SELECT", "INSERT", "UPDATE"],
+    "mail_commands": ["SELECT", "INSERT", "DELETE"]
+  },
+  "jobs": {
+    "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
+    "job_effect_receipts": ["SELECT", "INSERT"],
+    "job_runner_leases": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "outbox_events": ["SELECT", "INSERT"],
+    "mail_deliveries": ["SELECT", "UPDATE"],
+    "mail_commands": ["SELECT", "DELETE"],
+    "identity_company": ["SELECT"],
+    "identity_memberships": ["SELECT"],
+    "identity_users": ["SELECT"],
+    "identity_challenges": ["SELECT"]
+  }
+}

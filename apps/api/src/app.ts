@@ -9,6 +9,7 @@ import type { Identity } from "./modules/identity/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
+import { ingressTrust } from "./platform/http/ingress.js";
 
 const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
@@ -34,6 +35,7 @@ export interface AppOptions {
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
+  proxyAddress?: string;
 }
 
 export async function createApp(options: AppOptions) {
@@ -41,7 +43,7 @@ export async function createApp(options: AppOptions) {
     logger: false,
     bodyLimit: 64 * 1024,
     genReqId: () => randomUUID(),
-    trustProxy: false,
+    trustProxy: ingressTrust(options.proxyAddress),
   });
   installSchemaCompilers(app);
   app.addHook("onSend", async (_request, reply) => {

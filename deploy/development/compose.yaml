@@ -42,9 +42,10 @@ services:
     image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
     restart: unless-stopped
     init: true
-    env_file: [./private/runtime.env]
+    env_file: [./private/runtime.env, ./private/identity-mail.env]
     environment:
       NODE_OPTIONS: --max-old-space-size=128
+      API_TRUSTED_PROXY_IPV4: ${VTC_INGRESS_PROXY_IPV4:?Set the exact ingress peer}
     mem_limit: 192m
     cpus: 0.75
     read_only: true
@@ -52,7 +53,10 @@ services:
     security_opt: [no-new-privileges:true]
     tmpfs: ["/tmp:size=16m,mode=1777"]
     volumes: [evidence:/app/private-evidence]
-    networks: [frontend, database]
+    networks:
+      database: {}
+      ingress:
+        ipv4_address: ${VTC_INGRESS_APP_IPV4:?Set the ingress app address}
     logging: *logs
   probe:
     image: ${VTC_IMAGE_ID:?Set the validated immutable image ID}
@@ -94,7 +98,7 @@ services:
     profiles: [tools]
     command: [node, dist/jobs.js, run]
     init: true
-    env_file: [./private/jobs.env]
+    env_file: [./private/jobs.env, ./private/identity-mail.env]
     environment:
       NODE_OPTIONS: --max-old-space-size=64
     mem_limit: 96m
@@ -103,7 +107,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    networks: [database]
+    networks: [database, mail-egress]
     logging: *logs
   proxy:
     image: caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
@@ -119,11 +123,20 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
-    networks: [frontend]
+    networks:
+      frontend: {}
+      ingress:
+        ipv4_address: ${VTC_INGRESS_PROXY_IPV4:?Set the exact ingress peer}
     logging: *logs
 networks:
   frontend: {}
   database: { internal: true }
+  mail-egress: {}
+  ingress:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${VTC_INGRESS_SUBNET:?Set a nonoverlapping private IPv4 subnet}
 volumes:
   mysql: {}
   evidence: {}

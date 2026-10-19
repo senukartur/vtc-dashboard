@@ -7,7 +7,7 @@ command -v python3 >/dev/null
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'
 test ! -e /opt/vtc-development
 install -d -m 755 -o root -g root /opt/vtc-development
-for file in compose.yaml Caddyfile operations.py receive.sh setup.mjs; do
+for file in compose.yaml Caddyfile operations.py activation.py activation-grants.json identity_acceptance.py ingress_probe.py receive.sh setup.mjs; do
   install -m 644 -o root -g root "$(dirname "$0")/$file" "/opt/vtc-development/$file"
 done
 chmod 755 /opt/vtc-development/receive.sh

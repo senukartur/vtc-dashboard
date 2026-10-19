@@ -8,6 +8,7 @@ try {
   const database = createDatabase(config.database);
   const unit = config.identity ? createUnitOfWork(config.database) : undefined;
   const app = await createApp({
+    ...(config.proxyAddress ? { proxyAddress: config.proxyAddress } : {}),
     checkReadiness: database.check,
     closeDatabase: async () => {
       await database.close();

@@ -29,6 +29,7 @@ for (const role of ["runtime", "migrator", "probe", "heartbeat", "jobs"]) {
   );
 }
 await save("operator.env", `OPERATOR_TOKEN=${keys.operator}\n`);
+await save("identity-mail.env", "IDENTITY_ENABLED=false\nMAIL_MODE=disabled\n");
 await save(
   "proxy.env",
   "STAGING_DOMAIN=staging.example.invalid\nTLS_EMAIL=operator@example.invalid\n",
@@ -38,7 +39,7 @@ let sql =
 for (const role of ["runtime", "migrator", "export", "probe", "heartbeat", "jobs"])
   sql += `CREATE USER 'vtc_${role}'@'%' IDENTIFIED BY '${keys[role]}';\n`;
 sql +=
-  "GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';\nGRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,DROP,INDEX,REFERENCES ON vtc.* TO 'vtc_migrator'@'%';\nGRANT SELECT,SHOW VIEW,TRIGGER ON vtc.* TO 'vtc_export'@'%';\nGRANT SELECT,SHOW VIEW,TRIGGER ON vtc_operations.* TO 'vtc_export'@'%';\nGRANT SELECT ON vtc_operations.heartbeat TO 'vtc_probe'@'%';\nGRANT SELECT,INSERT,UPDATE ON vtc_operations.heartbeat TO 'vtc_heartbeat'@'%';\n";
+  "GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,DROP,INDEX,REFERENCES ON vtc.* TO 'vtc_migrator'@'%';\nGRANT SELECT,SHOW VIEW,TRIGGER ON vtc.* TO 'vtc_export'@'%';\nGRANT SELECT,SHOW VIEW,TRIGGER ON vtc_operations.* TO 'vtc_export'@'%';\nGRANT SELECT ON vtc_operations.heartbeat TO 'vtc_probe'@'%';\nGRANT SELECT,INSERT,UPDATE ON vtc_operations.heartbeat TO 'vtc_heartbeat'@'%';\n";
 await save("bootstrap/init.sql", sql);
 // The pinned MySQL image drops to uid/gid 999 before reading initialization files.
 // Its dedicated bind mount can read this file; the host's enclosing private directory is 0700.

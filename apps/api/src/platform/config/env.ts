@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { z } from "zod";
+import { exactProxyAddress } from "../http/ingress.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { validateMessagingConfig, type MessagingConfig } from "../../modules/messaging/service.js";
 
@@ -27,6 +28,14 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     throw new Error(`Invalid environment fields: ${fields.join(", ")}`);
   }
   const env = parsed.data;
+  let proxyAddress: string | undefined;
+  if (input.API_TRUSTED_PROXY_IPV4 !== undefined) {
+    try {
+      proxyAddress = exactProxyAddress(input.API_TRUSTED_PROXY_IPV4);
+    } catch {
+      throw new Error("Invalid environment fields: API_TRUSTED_PROXY_IPV4");
+    }
+  }
   const enabled = input.IDENTITY_ENABLED === "true";
   if (input.IDENTITY_ENABLED !== undefined && !["true", "false"].includes(input.IDENTITY_ENABLED))
     throw new Error("Invalid environment fields: IDENTITY_ENABLED");
@@ -80,6 +89,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     port: env.API_PORT,
     serveWeb: env.SERVE_WEB === "true",
     webRoot: resolve(env.WEB_ROOT),
+    proxyAddress,
     identity,
     mail,
     database: {
