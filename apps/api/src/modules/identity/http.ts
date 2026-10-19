@@ -98,7 +98,7 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
               ? "challenge"
               : "command";
     // Admission precedes parsing, authentication and every locked identity read.
-    // request.ip is the direct socket address: forwarded headers are not trusted.
+    // request.ip uses the socket unless the exact configured ingress peer is hop zero.
     await identity.rateLimit(category, request.ip);
   });
   app.addHook("preValidation", async (request) => {

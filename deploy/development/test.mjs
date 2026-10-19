@@ -91,7 +91,7 @@ try {
       `type=volume,source=${volume},target=/opt/vtc-development`,
       runner,
       "cat",
-      "/opt/vtc-development/state/last-child.stderr",
+      "/opt/vtc-development/state/last-failed-child.stderr",
     ],
     30000,
     true,
