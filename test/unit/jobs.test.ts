@@ -5,7 +5,7 @@ import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
 import {
   bounds,
   externalExecutionBudget,
-  ExternalAmbiguityError,
+  ExternalNotStartedError,
   LeaseLostError,
   retryTransaction,
 } from "../../apps/api/src/platform/jobs/queue.ts";
@@ -41,12 +41,12 @@ test("exhausted or aborted external budgets never authorize callback entry", () 
   const signal = new AbortController().signal;
   for (const remaining of [0, 6000, Number.NaN])
     expect(() => externalExecutionBudget(remaining, 0, signal, () => 1)).toThrow(
-      ExternalAmbiguityError,
+      ExternalNotStartedError,
     );
   const aborted = new AbortController();
   aborted.abort();
   expect(() => externalExecutionBudget(15000, 0, aborted.signal, () => 1)).toThrow(
-    ExternalAmbiguityError,
+    ExternalNotStartedError,
   );
 });
 test("closed event/reference registry rejects private, extra, unsupported, oversized and accessor inputs", () => {

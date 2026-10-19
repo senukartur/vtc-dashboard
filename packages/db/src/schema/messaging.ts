@@ -31,6 +31,7 @@ export const mailDeliveries = mysqlTable(
     templateVersion: int("template_version").notNull(),
     fingerprint: opaqueColumn("fingerprint", { length: 32 }).notNull(),
     ciphertext: mediumtext("ciphertext"),
+    payloadExpiresAt: utcColumn("payload_expires_at"),
     state: mysqlEnum("state", [
       "queued",
       "attempting",
@@ -54,7 +55,7 @@ export const mailDeliveries = mysqlTable(
   (t) => [
     uniqueIndex("mail_generation_unique").on(t.owner, t.generationId, t.kind),
     index("mail_user_idx").on(t.userId, t.id),
-    index("mail_expiry_idx").on(t.expiresAt, t.id),
+    index("mail_payload_expiry_idx").on(t.payloadExpiresAt, t.id),
   ],
 );
 

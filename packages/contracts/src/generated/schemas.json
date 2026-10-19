@@ -6923,7 +6923,8 @@
             "idempotency_expired",
             "attempts_exhausted",
             "provider_changed",
-            "worker_configuration"
+            "worker_configuration",
+            "not_started"
           ]
         }
       },

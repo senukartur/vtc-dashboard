@@ -2844,7 +2844,7 @@ export interface components {
             /** Format: date-time */
             nextAttemptAt: string | null;
             /** @enum {string|null} */
-            recovery: null | "rate_limit" | "daily_quota" | "monthly_quota" | "authentication" | "validation" | "idempotency_conflict" | "concurrent_request" | "provider_unavailable" | "acceptance_unknown" | "payload_unavailable" | "obsolete" | "idempotency_expired" | "attempts_exhausted" | "provider_changed" | "worker_configuration";
+            recovery: null | "rate_limit" | "daily_quota" | "monthly_quota" | "authentication" | "validation" | "idempotency_conflict" | "concurrent_request" | "provider_unavailable" | "acceptance_unknown" | "payload_unavailable" | "obsolete" | "idempotency_expired" | "attempts_exhausted" | "provider_changed" | "worker_configuration" | "not_started";
             /** @enum {string} */
             state: "queued" | "attempting" | "retryable" | "accepted" | "simulated" | "suppressed" | "failed" | "ambiguous";
             /** Format: date-time */

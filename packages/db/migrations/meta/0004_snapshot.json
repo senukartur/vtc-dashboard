@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "f015d8b9-0b1e-4358-848f-7ea1fea1f192",
+  "id": "8c7ac3a7-3517-466d-9059-a63cf1157dc7",
   "prevId": "5d7355db-f6ba-4ea6-a180-9014162e21a5",
   "tables": {
     "audit_entries": {
@@ -1398,6 +1398,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "payload_expires_at": {
+          "name": "payload_expires_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "state": {
           "name": "state",
           "type": "enum('queued','attempting','retryable','accepted','simulated','suppressed','failed','ambiguous')",
@@ -1480,9 +1487,9 @@
           "columns": ["user_id", "id"],
           "isUnique": false
         },
-        "mail_expiry_idx": {
-          "name": "mail_expiry_idx",
-          "columns": ["expires_at", "id"],
+        "mail_payload_expiry_idx": {
+          "name": "mail_payload_expiry_idx",
+          "columns": ["payload_expires_at", "id"],
           "isUnique": false
         }
       },

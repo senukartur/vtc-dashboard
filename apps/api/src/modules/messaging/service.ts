@@ -16,6 +16,7 @@ import {
   ExternalAmbiguityError,
   ExternalRejectedError,
   ExternalRetryError,
+  ExternalNotStartedError,
   JobReopenDeniedError,
   type Handler,
   retryTransaction,
@@ -79,24 +80,28 @@ const reference = (input: unknown): { deliveryId: string } => {
   const value = closed(input, ["deliveryId"]);
   return { deliveryId: applicationId(value.deliveryId as string) };
 };
+// One eligibility index excludes all ciphertext-cleared retained history. Exposed
+// as a builder so integration inspection measures this exact production shape.
+export function mailExpirySweep(unit: UnitOfWork, tx: TxContext, at: string) {
+  return unit
+    .client(tx)
+    .update(deliveries)
+    .set({
+      ciphertext: null,
+      payloadExpiresAt: null,
+      updatedAt: at,
+      version: sql`${deliveries.version} + 1`,
+      state: sql`IF(${deliveries.state} IN ('accepted','simulated','ambiguous','attempting'), ${deliveries.state}, 'suppressed')`,
+      category: sql`IF(${deliveries.state} IN ('accepted','simulated','ambiguous','attempting'), ${deliveries.category}, 'obsolete')`,
+      nextAttemptAt: null,
+    })
+    .where(lte(deliveries.payloadExpiresAt, at))
+    .limit(100);
+}
 export async function purgeExpiredMail(unit: UnitOfWork, now: () => Date = () => new Date()) {
-  const timestamp = () => now().toISOString(),
-    client = (tx: TxContext) => unit.client(tx);
+  const client = (tx: TxContext) => unit.client(tx);
   return retryTransaction(unit, async (tx) => {
-    // Indexed bounded sweep removes ephemeral secrets even after a failed
-    // job or an unknown provider outcome. Safe delivery/history rows remain.
-    await client(tx)
-      .update(deliveries)
-      .set({
-        ciphertext: null,
-        updatedAt: timestamp(),
-        version: sql`${deliveries.version} + 1`,
-        state: sql`IF(${deliveries.state} IN ('accepted','simulated','ambiguous','attempting'), ${deliveries.state}, 'suppressed')`,
-        category: sql`IF(${deliveries.state} IN ('accepted','simulated','ambiguous','attempting'), ${deliveries.category}, 'obsolete')`,
-        nextAttemptAt: null,
-      })
-      .where(and(lte(deliveries.expiresAt, timestamp()), sql`${deliveries.ciphertext} IS NOT NULL`))
-      .limit(100);
+    await mailExpirySweep(unit, tx, now().toISOString());
     await client(tx)
       .delete(mailCommands)
       .where(lte(mailCommands.createdAt, new Date(now().getTime() - 86400000).toISOString()))
@@ -176,6 +181,9 @@ export function createMessaging(
     return row;
   }
   async function change(tx: TxContext, row: Row, values: Partial<typeof deliveries.$inferInsert>) {
+    // Every terminal/private-payload transition clears indexed eligibility in
+    // the same write. Safe expiry/history timestamps remain unchanged.
+    if (values.ciphertext === null) values.payloadExpiresAt = null;
     await client(tx)
       .update(deliveries)
       .set({ ...values, updatedAt: timestamp(), version: row.version + 1 })
@@ -299,7 +307,7 @@ export function createMessaging(
       if (!prepared) return;
       // The first-attempt marker commits before any provider I/O. If that commit
       // is uncertain it propagates unchanged and no request is made.
-      let outcome: Outcome = { state: "ambiguous", category: "acceptance_unknown" };
+      let outcome: Outcome | { state: "not_started" } = { state: "not_started" };
       // Reserve a separate five-second private receipt COMMIT plus statement
       // headroom; the queue has already reserved its own completion budget.
       const requestBudgetMs = Math.min(4000, Math.floor(execution.remainingMs() - 6000));
@@ -325,6 +333,24 @@ export function createMessaging(
             category: null,
             ciphertext: null,
             nextAttemptAt: null,
+          });
+        } else if (outcome.state === "not_started") {
+          const next = now().getTime() + 1000,
+            canRetry =
+              row.attempts < 5 &&
+              retryWindow(row) &&
+              next < Date.parse(row.expiresAt) &&
+              next < Date.parse(row.firstAttemptAt ?? timestamp()) + 23 * 3600000;
+          delay = canRetry ? 1000 : null;
+          await change(tx, row, {
+            state: canRetry ? "retryable" : "failed",
+            category: canRetry
+              ? "not_started"
+              : row.attempts >= 5
+                ? "attempts_exhausted"
+                : "idempotency_expired",
+            nextAttemptAt: canRetry ? new Date(next).toISOString() : null,
+            ...(!canRetry ? { ciphertext: null } : {}),
           });
         } else if (outcome.state === "ambiguous") {
           await change(tx, row, {
@@ -358,6 +384,10 @@ export function createMessaging(
           if (!canRetry) delay = null;
         }
       });
+      if (outcome.state === "not_started") {
+        if (delay !== null) throw new ExternalNotStartedError();
+        throw new ExternalRejectedError();
+      }
       if (delay !== null) throw new ExternalRetryError(delay);
       if (outcome.state === "ambiguous") throw new ExternalAmbiguityError();
       if (outcome.state === "rejected") throw new ExternalRejectedError();
@@ -401,6 +431,7 @@ export function createMessaging(
           mode: config.mode,
           templateVersion: 1,
           fingerprint,
+          payloadExpiresAt: input.expiresAt,
           ciphertext: crypto.seal(id, {
             intent: input,
             request: render(input, config.sender, config.origin),
@@ -483,6 +514,7 @@ export function createMessaging(
           .update(deliveries)
           .set({
             ciphertext: null,
+            payloadExpiresAt: null,
             updatedAt: timestamp(),
             version: sql`${deliveries.version} + 1`,
             state: sql`IF(${deliveries.state} IN ('accepted','simulated'), ${deliveries.state}, 'suppressed')`,
@@ -528,6 +560,7 @@ export function createMessaging(
         .update(deliveries)
         .set({
           ciphertext: null,
+          payloadExpiresAt: null,
           updatedAt: timestamp(),
           version: sql`${deliveries.version} + 1`,
           state: sql`IF(${deliveries.state} IN ('accepted','simulated'), ${deliveries.state}, 'suppressed')`,
@@ -569,6 +602,7 @@ export function createMessaging(
             "monthly_quota",
             "authentication",
             "provider_unavailable",
+            "not_started",
           ].includes(row.category ?? "") ||
           (row.nextAttemptAt && Date.parse(row.nextAttemptAt) > now().getTime())
         )
@@ -577,15 +611,15 @@ export function createMessaging(
         if (!(await valid(tx, row, payload.intent.stage))) throw identityError(409);
         // Reopen only known rejected requests, preserving the original job/key,
         // attempt counter, expiry and frozen payload. Ambiguity is never reopened.
-        await change(tx, row, { state: "queued", nextAttemptAt: null });
-        if (row.state === "failed") {
-          try {
-            await queue.reopenRejected(tx, handler.consumer, id);
-          } catch (error) {
-            if (error instanceof JobReopenDeniedError) throw identityError(409);
-            throw error;
-          }
+        try {
+          // The mail outcome and queue retry acknowledgement commit separately.
+          // Always lock/check the authoritative job before recording success.
+          await queue.retryRejected(tx, handler.consumer, id, { deliveryId: id });
+        } catch (error) {
+          if (error instanceof JobReopenDeniedError) throw identityError(409);
+          throw error;
         }
+        await change(tx, row, { state: "queued", nextAttemptAt: null });
         await client(tx)
           .insert(mailCommands)
           .values({

@@ -19,6 +19,7 @@ CREATE TABLE `mail_deliveries` (
 	`template_version` int NOT NULL,
 	`fingerprint` varbinary(32) NOT NULL,
 	`ciphertext` mediumtext,
+	`payload_expires_at` datetime(3),
 	`state` enum('queued','attempting','retryable','accepted','simulated','suppressed','failed','ambiguous') NOT NULL,
 	`category` varchar(32),
 	`version` int NOT NULL,
@@ -36,4 +37,4 @@ CREATE TABLE `mail_deliveries` (
 ALTER TABLE `mail_commands` ADD CONSTRAINT `mail_commands_delivery_id_mail_deliveries_id_fk` FOREIGN KEY (`delivery_id`) REFERENCES `mail_deliveries`(`id`) ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `mail_command_expiry_idx` ON `mail_commands` (`created_at`);--> statement-breakpoint
 CREATE INDEX `mail_user_idx` ON `mail_deliveries` (`user_id`,`id`);--> statement-breakpoint
-CREATE INDEX `mail_expiry_idx` ON `mail_deliveries` (`expires_at`,`id`);
+CREATE INDEX `mail_payload_expiry_idx` ON `mail_deliveries` (`payload_expires_at`,`id`);

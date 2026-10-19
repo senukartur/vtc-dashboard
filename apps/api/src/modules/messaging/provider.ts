@@ -17,6 +17,7 @@ export const categories = [
   "attempts_exhausted",
   "provider_changed",
   "worker_configuration",
+  "not_started",
 ] as const;
 export type Category = (typeof categories)[number];
 export type Outcome =

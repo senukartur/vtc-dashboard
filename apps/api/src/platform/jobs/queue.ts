@@ -85,7 +85,7 @@ export function externalExecutionBudget(
     );
   const budget = remainingMs();
   if (!Number.isFinite(budget) || budget <= 0 || upstream.aborted)
-    throw new ExternalAmbiguityError();
+    throw new ExternalNotStartedError();
   return { remainingMs, signal: AbortSignal.any([upstream, AbortSignal.timeout(budget)]) };
 }
 export interface Subscription {
@@ -109,6 +109,13 @@ export class ExternalRetryError extends Error {
     super("EXTERNAL_RETRY_SAFE");
     if (!Number.isInteger(delayMs) || delayMs < 1000 || delayMs > 86400000)
       throw new Error("INVALID_EXTERNAL_RETRY_DELAY");
+  }
+}
+// This classification is valid only when the callback/provider was never invoked.
+// Once invocation is possible, cancellation must preserve external uncertainty.
+export class ExternalNotStartedError extends ExternalRetryError {
+  constructor() {
+    super(1000);
   }
 }
 export class LeaseLostError extends Error {
@@ -339,27 +346,59 @@ export function createQueue(
     async effectState(tx: TxContext, consumer: string, effectKey: string) {
       const [row] = await unit
         .client(tx)
-        .select({ state: jobs.state, failure: jobs.failure })
+        .select({
+          state: jobs.state,
+          failure: jobs.failure,
+          kind: jobs.kind,
+          expired: sql<number>`${jobs.leaseUntil} <= UTC_TIMESTAMP(3)`,
+        })
         .from(jobs)
-        .where(and(eq(jobs.consumer, name(consumer)), eq(jobs.effectKey, effect(effectKey))));
-      return row ?? null;
+        .where(and(eq(jobs.consumer, name(consumer)), eq(jobs.effectKey, effect(effectKey))))
+        .for("share");
+      if (!row) return null;
+      return row.state === "running" &&
+        Number(row.expired) === 1 &&
+        registry.get(row.kind.toString())?.mode === "external"
+        ? { state: "failed" as const, failure: "external_ambiguity" as const }
+        : { state: row.state, failure: row.failure };
     },
-    async reopenRejected(tx: TxContext, consumer: string, effectKey: string): Promise<void> {
+    async retryRejected(
+      tx: TxContext,
+      consumer: string,
+      effectKey: string,
+      expectedReference: unknown,
+    ): Promise<void> {
       const c = unit.client(tx);
       const [saved] = await c
         .select()
         .from(jobs)
         .where(and(eq(jobs.consumer, name(consumer)), eq(jobs.effectKey, effect(effectKey))))
         .for("update");
+      const handler = saved && registry.get(saved.kind.toString());
       if (
-        saved?.state !== "failed" ||
-        saved.failure !== "handler_failed" ||
+        !saved ||
+        !(
+          (saved.state === "failed" && saved.failure === "handler_failed") ||
+          (saved.state === "ready" && saved.failure === "retryable")
+        ) ||
         saved.attempts >= saved.maxAttempts ||
         saved.leaseToken ||
         saved.leaseUntil ||
-        registry.get(saved.kind.toString())?.mode !== "external"
+        handler?.mode !== "external" ||
+        handler.consumer !== consumer ||
+        handler.version !== saved.schemaVersion
       )
         throw new JobReopenDeniedError();
+      try {
+        if (
+          !fingerprint(handler.validate(saved.reference)).equals(
+            fingerprint(handler.validate(expectedReference)),
+          )
+        )
+          throw new JobReopenDeniedError();
+      } catch {
+        throw new JobReopenDeniedError();
+      }
       const [receipt] = await c
         .select()
         .from(effectReceipts)
@@ -373,7 +412,8 @@ export function createQueue(
       if (receipt) throw new JobReopenDeniedError();
       await c
         .update(jobs)
-        .set({ state: "ready", failure: null, availableAt: sql`UTC_TIMESTAMP(3)` })
+        // Keep the original due time: a command cannot shorten provider backoff.
+        .set({ state: "ready", failure: null })
         .where(eq(jobs.id, saved.id));
     },
     async receipt(consumer: string, effectKey: string): Promise<{ jobId: string } | null> {

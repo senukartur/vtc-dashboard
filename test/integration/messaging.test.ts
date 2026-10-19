@@ -11,7 +11,7 @@ import { eq, mailCommands, mailDeliveries, sql } from "@vtc/db/messaging-schema"
 import { durableJobs } from "@vtc/db/platform-schema";
 import { company, membership, roles } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
 import { mailCrypto, type MailIntent } from "../../apps/api/src/modules/messaging/content.ts";
@@ -23,6 +23,7 @@ import {
 import {
   createMessaging,
   cleanupMail,
+  mailExpirySweep,
   type MailOwners,
   type Messaging,
   type MessagingConfig,
@@ -152,6 +153,14 @@ afterAll(async () => {
   await unit?.close();
   await control?.end();
 });
+afterEach(async () =>
+  safe(async () => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) count FROM mail_deliveries WHERE (ciphertext IS NULL) <> (payload_expires_at IS NULL) OR payload_expires_at <> expires_at",
+    );
+    expect(Number(rows[0]?.count)).toBe(0);
+  }),
+);
 
 test("domain/private intent/safe job commit and rollback atomically; concurrent identical replay retains one identity", async () =>
   safe(async () => {
@@ -197,6 +206,7 @@ test("fictional recipient follows encrypted/template/local worker path, preserve
       recovery: null,
     });
     expect((await delivery(id))?.ciphertext).toBeNull();
+    expect((await delivery(id))?.payloadExpiresAt).toBeNull();
     expect(JSON.stringify(await mail.inspect(actor, id)).includes(intent.recipient)).toBe(false);
     await expect(
       mail.resend(actor, id, newId(), required(await delivery(id)).version),
@@ -363,6 +373,10 @@ test("known rejection becomes failed job; authorized concurrent resend reopens e
     expect(row.state).toBe("failed");
     expect((await mail.queue.inspect()).failures[0]?.failure).toBe("handler_failed");
     const commandKey = newId();
+    const [beforeRetry] = await control.execute<RowDataPacket[]>(
+      "SELECT available_at FROM durable_jobs WHERE effect_key=?",
+      [Buffer.from(id)],
+    );
     const results = await Promise.allSettled(
       [1, 2].map(() => mail.resend(actor, id, commandKey, row.version)),
     );
@@ -372,6 +386,15 @@ test("known rejection becomes failed job; authorized concurrent resend reopens e
     await expect(mail.resend(actor, id, commandKey, row.version + 1)).rejects.toMatchObject({
       statusCode: 409,
     });
+    const [afterRetry] = await control.execute<RowDataPacket[]>(
+      "SELECT available_at FROM durable_jobs WHERE effect_key=?",
+      [Buffer.from(id)],
+    );
+    expect(afterRetry[0]?.available_at).toEqual(beforeRetry[0]?.available_at);
+    await control.execute(
+      "UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3) WHERE effect_key=?",
+      [Buffer.from(id)],
+    );
     succeed = true;
     await execute(mail);
     expect(calls).toBe(2);
@@ -411,6 +434,104 @@ test("safe retries use frozen request/key after recreation and configuration cha
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(calls[1]);
     expect((await delivery(id))?.state).toBe("accepted");
+  }));
+
+test("resend checks the current authoritative queue after retry acknowledgement failure or lease loss", async () =>
+  safe(async () => {
+    for (const scenario of [
+      "before_commit",
+      "after_commit",
+      "failed_write",
+      "lost_lease",
+    ] as const) {
+      instant = Date.now();
+      let calls = 0,
+        transactions = 0;
+      const requests: { request: unknown; key: string }[] = [];
+      const provider: MailProvider = {
+        mode: "resend",
+        scope: "synthetic-credential-v1",
+        async send(request, key) {
+          requests.push({ request, key });
+          calls++;
+          if (calls > 1) return { state: "accepted", receipt: "synthetic" };
+          if (scenario === "lost_lease")
+            await control.query(
+              "UPDATE durable_jobs SET lease_until=UTC_TIMESTAMP(3)-INTERVAL 1 SECOND WHERE state='running'",
+            );
+          return { state: "rejected", category: "rate_limit", retryAfterMs: 60000 };
+        },
+      };
+      const mail = service(provider),
+        id = await seed(mail);
+      const uncertainty = new TransactionCommitOutcomeUnknownError(
+          new Error("SYNTHETIC_RETRY_ACK_LOSS"),
+        ),
+        failedWrite = new Error("SYNTHETIC_RETRY_WRITE_FAILURE");
+      const faulty: UnitOfWork = {
+        client: (tx) => unit.client(tx),
+        close: async () => {},
+        run: async (command) => {
+          transactions++;
+          if (transactions === 7 && scenario === "before_commit") throw uncertainty;
+          if (transactions === 7 && scenario === "failed_write") throw failedWrite;
+          const result = await unit.run(command);
+          if (transactions === 7 && scenario === "after_commit") throw uncertainty;
+          return result;
+        },
+      };
+      const worker = service(provider, faulty),
+        claim = required(await worker.queue.claim());
+      if (scenario === "lost_lease")
+        await expect(worker.queue.execute(claim)).rejects.toBeInstanceOf(LeaseLostError);
+      else
+        await expect(worker.queue.execute(claim)).rejects.toBe(
+          scenario === "failed_write" ? failedWrite : uncertainty,
+        );
+      const row = required(await delivery(id));
+      expect(row.state).toBe("retryable");
+      instant += 60001;
+      const key = newId();
+      if (scenario === "after_commit") {
+        // The retry really committed despite acknowledgement loss. The current
+        // locking read may safely preserve that runnable job and its original due time.
+        await control.execute("UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3) WHERE id=?", [
+          Buffer.from(claim.id),
+        ]);
+        await mail.resend(actor, id, key, row.version);
+        await execute(mail);
+        expect(calls).toBe(2);
+        expect(requests[1]).toEqual(requests[0]);
+        expect((await delivery(id))?.state).toBe("accepted");
+      } else {
+        expect(await mail.inspect(actor, id)).toMatchObject({
+          state: scenario === "lost_lease" ? "ambiguous" : "retryable",
+        });
+        await expect(mail.resend(actor, id, key, row.version)).rejects.toMatchObject({
+          statusCode: 409,
+        });
+        await control.execute(
+          "UPDATE durable_jobs SET lease_until=UTC_TIMESTAMP(3)-INTERVAL 1 SECOND WHERE id=?",
+          [Buffer.from(claim.id)],
+        );
+        expect(await mail.queue.claim()).toBeNull();
+        expect(await mail.inspect(actor, id)).toMatchObject({
+          state: "ambiguous",
+          recovery: "acceptance_unknown",
+        });
+        await expect(mail.resend(actor, id, key, row.version)).rejects.toMatchObject({
+          statusCode: 409,
+        });
+        expect((await delivery(id))?.version).toBe(row.version);
+        expect((await delivery(id))?.state).toBe("retryable");
+        expect(calls).toBe(1);
+        const [commands] = await control.execute<RowDataPacket[]>(
+          "SELECT COUNT(*) count FROM mail_commands WHERE actor_id=? AND command_key=?",
+          [Buffer.from(actor.userId), Buffer.from(key)],
+        );
+        expect(Number(commands[0]?.count)).toBe(0);
+      }
+    }
   }));
 test("unknown provider acceptance and abandoned claim never permit blind resend or another provider call", async () =>
   safe(async () => {
@@ -549,8 +670,18 @@ test("delayed pre-fence COMMIT receipt consumes the lease budget before any prov
     await worker.queue.execute(claim);
     expect(sends).toBe(0);
     expect(await mail.inspect(actor, id)).toMatchObject({
-      state: "ambiguous",
-      recovery: "acceptance_unknown",
+      state: "retryable",
+      recovery: "not_started",
+    });
+    const before = required(await delivery(id));
+    instant += 1001;
+    await control.query("UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3)");
+    await execute(mail);
+    expect(sends).toBe(1);
+    expect(await mail.inspect(actor, id)).toMatchObject({
+      state: "accepted",
+      attempts: 2,
+      expiresAt: before.expiresAt,
     });
   }));
 
@@ -575,9 +706,105 @@ test("insufficient authoritative DB lease prevents external callback entry witho
     expect(sends).toBe(0);
     expect((await delivery(id))?.attempts).toBe(0);
     expect(await mail.inspect(actor, id)).toMatchObject({
-      state: "ambiguous",
-      recovery: "acceptance_unknown",
+      state: "queued",
+      recovery: null,
     });
+    await control.query("UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3)");
+    await execute(mail);
+    expect(sends).toBe(1);
+    expect(await mail.inspect(actor, id)).toMatchObject({ state: "accepted", attempts: 1 });
+  }));
+
+test("abort before callback or provider invocation defers the same immutable delivery and recovers", async () =>
+  safe(async () => {
+    for (const beforeCallback of [true, false]) {
+      instant = Date.now();
+      const abort = new AbortController();
+      let transactions = 0;
+      const calls: { request: unknown; key: string }[] = [];
+      const provider: MailProvider = {
+        mode: "resend",
+        scope: "synthetic-credential-v1",
+        async send(request, key) {
+          calls.push({ request, key });
+          return { state: "accepted", receipt: "synthetic" };
+        },
+      };
+      const mail = service(provider),
+        id = await seed(mail),
+        original = required(await delivery(id));
+      const frozen = mailCrypto(config.key).open(id, required(original.ciphertext));
+      const interrupted: UnitOfWork = {
+        client: (tx) => unit.client(tx),
+        close: async () => {},
+        run: async (command) => {
+          const result = await unit.run(command);
+          if (++transactions === 5 && !beforeCallback) abort.abort();
+          return result;
+        },
+      };
+      const worker = service(provider, interrupted),
+        claim = required(await worker.queue.claim());
+      if (beforeCallback) abort.abort();
+      await worker.queue.execute(claim, abort.signal);
+      expect(calls).toHaveLength(0);
+      expect((await delivery(id))?.ciphertext).toBe(original.ciphertext);
+      instant += 1001;
+      await control.query("UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3)");
+      await execute(mail);
+      expect(calls).toEqual([{ request: frozen.request, key: `messaging.mail:${id}` }]);
+      expect((await delivery(id))?.expiresAt).toBe(original.expiresAt);
+      expect((await delivery(id))?.state).toBe("accepted");
+    }
+  }));
+
+test("known no-call retry stops at original expiry, provider window and attempt bounds", async () =>
+  safe(async () => {
+    for (const boundary of ["expiry", "window", "attempts"] as const) {
+      instant = Date.now();
+      let sends = 0,
+        transactions = 0;
+      const abort = new AbortController(),
+        provider: MailProvider = {
+          mode: "resend",
+          scope: "synthetic-credential-v1",
+          async send() {
+            sends++;
+            return { state: "accepted", receipt: "synthetic" };
+          },
+        };
+      const mail = service(provider),
+        id = await seed(mail);
+      if (boundary === "attempts")
+        await control.execute("UPDATE mail_deliveries SET attempts=4 WHERE id=?", [
+          Buffer.from(id),
+        ]);
+      if (boundary === "window")
+        await control.execute("UPDATE mail_deliveries SET first_attempt_at=? WHERE id=?", [
+          new Date(instant - 23 * 3600000 + 500).toISOString().slice(0, 23).replace("T", " "),
+          Buffer.from(id),
+        ]);
+      const interrupted: UnitOfWork = {
+        client: (tx) => unit.client(tx),
+        close: async () => {},
+        run: async (command) => {
+          const result = await unit.run(command);
+          if (++transactions === 5) {
+            if (boundary === "expiry") instant += 599500;
+            abort.abort();
+          }
+          return result;
+        },
+      };
+      const worker = service(provider, interrupted),
+        claim = required(await worker.queue.claim());
+      await worker.queue.execute(claim, abort.signal);
+      expect(sends).toBe(0);
+      expect((await delivery(id))?.state).toBe("failed");
+      expect((await delivery(id))?.ciphertext).toBeNull();
+      expect((await delivery(id))?.nextAttemptAt).toBeNull();
+      expect(await mail.queue.claim()).toBeNull();
+    }
   }));
 test("corrupt ciphertext, wrong key and delivery substitution fail closed without provider I/O", async () =>
   safe(async () => {
@@ -629,6 +856,7 @@ test("representative delivery inspection and actor-command lookups use their exa
             generationId: newId(),
             userId: newId(),
             ciphertext: null,
+            payloadExpiresAt: null,
             state: "accepted" as const,
           })),
         );
@@ -666,6 +894,100 @@ test("representative delivery inspection and actor-command lookups use their exa
       expect(rows[0]?.key).toBe(expected);
     }
   }));
+
+test(
+  "actual keyless cleanup uses bounded indexed eligibility through substantial cleared history and an empty eligible range",
+  { timeout: 30000 },
+  async () =>
+    safe(async () => {
+      const mail = service(),
+        ids = await Promise.all([1, 2, 3].map(() => seed(mail))),
+        template = required(await delivery(required(ids[0])));
+      for (let offset = 0; offset < 5000; offset += 500)
+        await unit.run((tx) =>
+          unit
+            .client(tx)
+            .insert(mailDeliveries)
+            .values(
+              Array.from({ length: 500 }, () => ({
+                ...template,
+                id: newId(),
+                generationId: newId(),
+                ciphertext: null,
+                payloadExpiresAt: null,
+                state: "accepted" as const,
+              })),
+            ),
+        );
+      instant += 600001;
+      await control.query("ANALYZE TABLE mail_deliveries");
+      const reads = [
+        "Handler_read_first",
+        "Handler_read_key",
+        "Handler_read_next",
+        "Handler_read_prev",
+        "Handler_read_rnd",
+        "Handler_read_rnd_next",
+      ];
+      for (const eligibleRows of [3, 0]) {
+        const query = await unit.run(async (tx) =>
+          mailExpirySweep(unit, tx, now().toISOString()).toSQL(),
+        );
+        const [plan] = await control.query<RowDataPacket[]>(`EXPLAIN ${query.sql}`, query.params);
+        let examinedReads = -1;
+        const measured: UnitOfWork = {
+          client: (tx) => unit.client(tx),
+          close: async () => {},
+          run: (command) =>
+            unit.run(async (tx) => {
+              const stats = async () => {
+                const [rows] = await unit
+                  .client(tx)
+                  .execute(sql`SHOW SESSION STATUS LIKE 'Handler_read%'`);
+                return Object.fromEntries(
+                  (rows as unknown as RowDataPacket[]).map((row) => [
+                    String(row.Variable_name),
+                    Number(row.Value),
+                  ]),
+                );
+              };
+              const before = await stats(),
+                result = await command(tx),
+                after = await stats();
+              examinedReads = reads.reduce(
+                (total, key) => total + Number(after[key]) - Number(before[key]),
+                0,
+              );
+              return result;
+            }),
+        };
+        expect(await cleanupMail(measured, false, now)).toBe("completed");
+        console.log(
+          JSON.stringify({
+            event: "mail_cleanup_work",
+            shape: eligibleRows ? "eligible" : "empty",
+            key: plan[0]?.key,
+            access: plan[0]?.type,
+            historyRows: 5000,
+            eligibleRows,
+            examinedReads,
+          }),
+        );
+        expect(plan[0]?.key).toBe("mail_payload_expiry_idx");
+        expect(plan[0]?.type).toBe("range");
+        expect(examinedReads).toBeGreaterThanOrEqual(0);
+        expect(examinedReads).toBeLessThanOrEqual(120);
+        for (const id of ids) {
+          expect((await delivery(id))?.ciphertext).toBeNull();
+          expect((await delivery(id))?.payloadExpiresAt).toBeNull();
+        }
+      }
+      const [retained] = await control.query<RowDataPacket[]>(
+        "SELECT COUNT(*) count FROM mail_deliveries",
+      );
+      expect(Number(retained[0]?.count)).toBe(5003);
+    }),
+);
 
 test("safe job reference and encrypted intent metadata cannot be substituted under another delivery key", async () =>
   safe(async () => {
