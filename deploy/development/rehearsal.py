@@ -23,6 +23,7 @@ import zipfile
 base = pathlib.Path('/opt/vtc-development')
 subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
 subprocess.run(['python3', '/source/test_activation.py'], check=True, timeout=30)
+subprocess.run(['python3', '/source/test_acceptance_containers.py'], check=True, timeout=30)
 project = os.environ['REHEARSAL_PROJECT']
 revision = os.environ['REHEARSAL_REVISION']
 volume = os.environ['REHEARSAL_VOLUME']
@@ -346,12 +347,47 @@ acceptance_input = base / 'private/acceptance-input.env'
 acceptance_input.write_text('VTC_ACCEPTANCE_RECIPIENT=synthetic@example.invalid\n')
 os.chmod(acceptance_input, 0o600)
 with ops.lock():
+    # No pre-existing derived role name is adoptable, even with the requested run label.
+    for role in ['runtime', 'jobs', 'migrator']:
+        for matching_label in [True, False]:
+            preexisting_run = str(uuid.uuid4())
+            preexisting_suffix = preexisting_run.replace('-', '')[:16]
+            preexisting_name = f'{project}-identity-{preexisting_suffix}-{role}'
+            fixture_id = ops.run(['docker', 'run', '-d', '--name', preexisting_name,
+                                 '--label', f'vtc011.rehearsal={project}', '--label',
+                                 f'vtc.identity-acceptance={preexisting_run if matching_label else uuid.uuid4()}',
+                                 '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                                 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
+            expect_failure(lambda: ops.identity_acceptance.operation(ops, revision, image_id,
+                           'prepare', preexisting_run, local_fixture=True))
+            retained = json.loads(ops.run(['docker', 'inspect', fixture_id]))[0]
+            assert retained['Id'] == fixture_id and retained['State']['Running']
+            assert not (base / 'state/identity-acceptance').exists()
+            assert not (base / f'private/acceptance-{preexisting_run}').exists()
+            assert sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vtc_accept_{preexisting_suffix}';").strip() == b'0'
+            assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User IN ('vtc_ar_{preexisting_suffix}','vtc_aw_{preexisting_suffix}','vtc_am_{preexisting_suffix}');").strip() == b'0'
+            ops.run(['docker', 'rm', '-f', fixture_id], timeout=20)
+    print('Acceptance name preflight: existing runtime/jobs/migrator IDs and running state preserved for same/wrong run labels before allocation', flush=True)
     activation_run = str(uuid.uuid4())
     invoke = lambda mode, identity=activation_run: ops.identity_acceptance.operation(ops, revision, image_id, mode, identity, local_fixture=True)
     invoke('prepare')
     expect_failure(lambda: invoke('prepare'))
     expect_failure(lambda: invoke('inspect', str(uuid.uuid4())))
     expect_failure(lambda: ops.jobs_locked(revision, image_id))
+    runtime_fixture = base / f'private/acceptance-{activation_run}/runtime.env'
+    runtime_fixture_bytes = runtime_fixture.read_bytes()
+    runtime_fixture.write_text('\n'.join(line for line in runtime_fixture_bytes.decode().splitlines()
+                                        if not line.startswith('VTC_ACCEPTANCE_RECIPIENT=')) + '\n')
+    try:
+        expect_failure(lambda: invoke('produce'))
+        failed_producer = json.loads((base / 'state/identity-acceptance').read_text())
+        runtime_name = f"{project}-identity-{activation_run.replace('-', '')[:16]}-runtime"
+        assert failed_producer['phase'] == 'prepared'
+        assert failed_producer['containers'][runtime_name]['phase'] == 'removed'
+        assert not ops.run(['docker', 'ps', '-aq', '--filter',
+                           f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
+    finally:
+        runtime_fixture.write_bytes(runtime_fixture_bytes)
     invoke('produce')
     expect_failure(lambda: invoke('produce'))
     invoke('inspect')
@@ -396,6 +432,54 @@ with ops.lock():
     # Only this harness created the conflicting fixture; the acceptance wrapper refused it.
     ops.run(['docker', 'rm', '-f', owned_collision_id], timeout=20)
     invoke('cleanup', collision_run)
+    # Inject an actual Docker name collision after preflight but immediately before create.
+    # The migrator case specifically exercises failed creation during allocating/finally.
+    for role in ['runtime', 'jobs', 'migrator']:
+        for matching_label in [True, False]:
+            race_run = str(uuid.uuid4())
+            race_suffix = race_run.replace('-', '')[:16]
+            race_name = f'{project}-identity-{race_suffix}-{role}'
+            race_invoke = lambda mode: invoke(mode, race_run)
+            if role != 'migrator':
+                race_invoke('prepare')
+                if role == 'jobs':
+                    race_invoke('produce')
+            original_run = ops.run
+            race_ids = []
+            def create_race(args, **kwargs):
+                if args[:2] == ['docker', 'create'] and '--name' in args and args[args.index('--name') + 1] == race_name:
+                    assert not race_ids
+                    race_ids.append(original_run(['docker', 'run', '-d', '--name', race_name,
+                        '--label', f'vtc011.rehearsal={project}', '--label',
+                        f'vtc.identity-acceptance={race_run if matching_label else uuid.uuid4()}',
+                        '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                        'node', '-e', 'setInterval(()=>{},1000)']).decode().strip())
+                return original_run(args, **kwargs)
+            ops.run = create_race
+            try:
+                expect_failure(lambda: race_invoke('prepare' if role == 'migrator' else
+                                                  'worker' if role == 'jobs' else 'produce'))
+            finally:
+                ops.run = original_run
+            assert len(race_ids) == 1
+            race_state = json.loads((base / 'state/identity-acceptance').read_text())
+            intent = race_state['containers'][race_name]
+            assert intent['phase'] == 'creating' and 'id' not in intent
+            expect_failure(lambda: race_invoke('cleanup'))
+            retained = json.loads(ops.run(['docker', 'inspect', race_ids[0]]))[0]
+            assert retained['Id'] == race_ids[0] and retained['State']['Running']
+            ops.run(['docker', 'rm', '-f', race_ids[0]], timeout=20)
+            expect_failure(lambda: race_invoke('cleanup'))
+            # Test-only root investigation: the harness created and removed the foreign
+            # object, observed create rejection, and verifies no CID receipt/unknown object.
+            # The operator has no automatic uncertain-creation reconciliation command.
+            receipt = base / race_state['directory'] / intent['receipt']
+            assert not receipt.exists() or receipt.read_text().strip() == ''
+            assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
+            race_state['containers'].pop(race_name)
+            ops.atomic_json(base / 'state/identity-acceptance', race_state)
+            race_invoke('cleanup')
+    print('Acceptance create races: same/wrong-run runtime/jobs/migrator IDs and state preserved, failed migrator create never cleans a collision, uncertain markers retained', flush=True)
     ops.jobs_locked(revision, image_id)
 print('Identity durable acceptance rehearsal: restricted native bootstrap/login/challenge, terminated producer, ordinary separate worker, purge, duplicate pass and owned cleanup passed; no provider call', flush=True)
 with ops.lock():
