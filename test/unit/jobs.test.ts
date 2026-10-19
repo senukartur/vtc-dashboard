@@ -2,7 +2,7 @@ import { newId, TransactionCommitOutcomeUnknownError, type UnitOfWork } from "@v
 import { expect, test } from "vitest";
 import { fixtureReference } from "../../apps/api/src/platform/jobs/acceptance.ts";
 import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
-import { retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
+import { LeaseLostError, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { accessEvent } from "../../apps/api/src/platform/outbox/events.ts";
 
@@ -77,4 +77,20 @@ test("runner cleanup cannot hide an unknown COMMIT outcome", async () => {
     },
   } as unknown as Queue;
   await expect(runPass(queue, new AbortController().signal)).rejects.toBe(uncertain);
+});
+
+test("wrapped lost lease takes precedence over a transient-looking database code", async () => {
+  let attempts = 0;
+  const failure = Object.assign(
+    new Error("SYNTHETIC_WRAPPED_LEASE", { cause: new LeaseLostError() }),
+    { code: "ER_LOCK_DEADLOCK" },
+  );
+  const unit = {
+    run: async () => {
+      attempts++;
+      throw failure;
+    },
+  } as unknown as UnitOfWork;
+  await expect(retryTransaction(unit, async () => {})).rejects.toBe(failure);
+  expect(attempts).toBe(1);
 });

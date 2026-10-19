@@ -24,6 +24,7 @@ SHA = re.compile(r'^[a-f0-9]{40}$')
 HASH = re.compile(r'^[a-f0-9]{64}$')
 PROJECT = 'vtc-development'
 READINESS_ATTEMPTS = 30
+WORKER_CONTROL_TIMEOUT = 10
 
 
 def require(condition, code):
@@ -65,9 +66,9 @@ def accepted_image_id(revision):
     raise RuntimeError('ACCEPTED_IMAGE_REQUIRED')
 
 
-def validate_image(image_id, revision):
+def validate_image(image_id, revision, *, timeout=180):
     require(re.fullmatch(r'sha256:[a-f0-9]{64}', image_id), 'IMAGE_ID_INVALID')
-    image = json.loads(run(['docker', 'image', 'inspect', image_id]))[0]
+    image = json.loads(run(['docker', 'image', 'inspect', image_id], timeout=timeout))[0]
     require(image['Id'] == image_id and
             image['Config']['Labels'].get('org.opencontainers.image.revision') == revision and
             f'VTC_REVISION={revision}' in image['Config']['Env'], 'IMAGE_REVISION_MISMATCH')
@@ -181,20 +182,30 @@ def fenced(revision, image_id=None):
 def stop_owned_jobs(revision, image_id=None):
     """A Docker client timeout does not stop its container. Keep recovery fenced on failure."""
     try:
-        for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']:
-            container = f'{PROJECT}-{suffix}'
-            ids = run(['docker', 'ps', '-aq', '--filter', f'name=^/{container}$']).decode().split()
-            for identity in ids:
-                info = json.loads(run(['docker', 'inspect', identity]))[0]
+        names = {f'/{PROJECT}-{suffix}': 'heartbeat' if suffix == 'heartbeat' else 'jobs'
+                 for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']}
+        inventory = ['docker', 'ps', '-aq', '--filter',
+                     'name=^/(' + '|'.join(re.escape(name[1:]) for name in names) + ')$']
+        ids = run(inventory, timeout=WORKER_CONTROL_TIMEOUT).decode().split()
+        require(len(ids) <= len(names) and len(set(ids)) == len(ids) and
+                all(re.fullmatch(r'[a-f0-9]{12,64}', identity) for identity in ids),
+                'WORKER_INVENTORY_INVALID')
+        if ids:
+            inspected = json.loads(run(['docker', 'inspect', *ids], timeout=WORKER_CONTROL_TIMEOUT))
+            require(len(inspected) == len(ids), 'WORKER_OWNERSHIP_INVALID')
+            seen = set()
+            for identity, info in zip(ids, inspected):
                 labels = info['Config'].get('Labels') or {}
-                require(info['Name'] == '/' + container and
+                require(info['Id'].startswith(identity) and info['Name'] in names and
+                        info['Name'] not in seen and
                         labels.get('com.docker.compose.project') == PROJECT and
-                        labels.get('com.docker.compose.service') == ('heartbeat' if suffix == 'heartbeat' else 'jobs'), 'WORKER_OWNERSHIP_INVALID')
-                # The root-owned Compose name/project/service tuple identifies this one-off;
-                # stale accepted images must also be stoppable before migration/restore.
-                run(['docker', 'rm', '-f', identity], timeout=20)
-            require(not run(['docker', 'ps', '-aq', '--filter', f'name=^/{container}$']).strip(),
-                    'WORKER_STILL_PRESENT')
+                        labels.get('com.docker.compose.service') == names[info['Name']],
+                        'WORKER_OWNERSHIP_INVALID')
+                seen.add(info['Name'])
+            # Validate every name/project/service tuple before removing any container.
+            # Stale accepted images must also be stoppable before migration/restore.
+            run(['docker', 'rm', '-f', *ids], timeout=20)
+        require(not run(inventory, timeout=WORKER_CONTROL_TIMEOUT).strip(), 'WORKER_STILL_PRESENT')
     except BaseException:
         maintenance(True)
         recovery_intent()
@@ -203,7 +214,7 @@ def stop_owned_jobs(revision, image_id=None):
 
 def jobs_locked(revision, image_id):
     require(not (BASE / 'state/jobs-acceptance').exists(), 'ACCEPTANCE_WINDOW')
-    validate_image(image_id, revision)
+    validate_image(image_id, revision, timeout=WORKER_CONTROL_TIMEOUT)
     stop_owned_jobs(revision, image_id)
     try:
         output = compose(['run', '--rm', '--name', f'{PROJECT}-jobs', '--no-deps', 'jobs'],
@@ -219,15 +230,67 @@ def jobs_locked(revision, image_id):
 
 
 def tick_locked(revision, image_id):
-    """One nonblocking minute lock, bounded sequential jobs+heartbeat, no queued ticks."""
+    """Attempt heartbeat first; report each step without crossing a new safety fence."""
     require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
     require(not (BASE / 'state/recovery-required').exists(), 'RECOVERY_REQUIRED')
-    acceptance = (BASE / 'state/jobs-acceptance').exists()
-    if not acceptance:
-        jobs_locked(revision, image_id)
-    heartbeat_locked(revision, image_id, timeout=5)
-    atomic_json(BASE / 'state/tick-last.json', {'revision': revision, 'imageId': image_id,
-                'completedUtc': int(time.time()), 'jobs': 'acceptance_window' if acceptance else 'completed'})
+    path = BASE / 'state/tick-last.json'
+    value = {'revision': revision, 'imageId': image_id, 'attemptedUtc': int(time.time()),
+             'status': 'running', 'steps': {name: {'status': 'not_attempted'}
+                                           for name in ['validation', 'heartbeat', 'jobs']}}
+    atomic_json(path, value)
+
+    def safety_fenced():
+        return ((BASE / 'private/maintenance/enabled').exists() or
+                (BASE / 'state/recovery-required').exists())
+
+    def attempt(name, operation):
+        step = value['steps'][name]
+        step.update(status='running', attemptedUtc=int(time.time()))
+        atomic_json(path, value)
+        started = time.monotonic()
+        ordinary_failure = False
+        try:
+            operation()
+            step['status'] = 'completed'
+        except Exception as error:
+            # Classify fixed outcomes only. Exception text may contain private child data.
+            step['status'] = 'failed'
+            if safety_fenced():
+                step['category'] = 'safety_fence'
+            elif isinstance(error, subprocess.TimeoutExpired):
+                step['category'] = 'client_timeout'
+                ordinary_failure = True
+            elif isinstance(error, RuntimeError) and error.args == ('OPERATION_CHILD_FAILED',):
+                step['category'] = 'client_failed'
+                ordinary_failure = True
+            else:
+                step['category'] = 'control_failed'
+        step['durationMs'] = max(0, int((time.monotonic() - started) * 1000))
+        atomic_json(path, value)
+        return step['status'] == 'completed' or ordinary_failure
+
+    valid = attempt('validation', lambda: validate_image(image_id, revision,
+                                                        timeout=WORKER_CONTROL_TIMEOUT))
+    # A failed image check never authorizes a writer, even if its client failure is ordinary.
+    if valid and value['steps']['validation']['status'] == 'completed':
+        may_continue = attempt('heartbeat', lambda: heartbeat_locked(revision, image_id, timeout=30))
+        if safety_fenced():
+            value['steps']['jobs']['status'] = 'skipped_safety_fence'
+        elif not may_continue:
+            value['steps']['jobs']['status'] = 'skipped_control_failure'
+        elif (BASE / 'state/jobs-acceptance').exists():
+            value['steps']['jobs']['status'] = 'skipped_acceptance_window'
+        else:
+            attempt('jobs', lambda: jobs_locked(revision, image_id))
+    failed = any(step['status'] not in ['completed', 'skipped_acceptance_window']
+                 for step in value['steps'].values())
+    value['status'] = ('failed' if failed else 'completed_with_skips'
+                       if value['steps']['jobs']['status'] == 'skipped_acceptance_window' else 'completed')
+    value['finishedUtc'] = int(time.time())
+    if not failed:
+        value['completedUtc'] = value['finishedUtc']
+    atomic_json(path, value)
+    require(not failed, 'TICK_FAILED')
 
 
 def heartbeat_locked(revision, image_id, timeout=30):

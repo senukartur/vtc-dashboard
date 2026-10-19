@@ -87,6 +87,24 @@ export function causes(error: unknown): object[] {
 export function unknownCommit(error: unknown): boolean {
   return causes(error).some((e) => e instanceof TransactionCommitOutcomeUnknownError);
 }
+function retryableLocalDatabaseFailure(error: unknown): boolean {
+  // Called only after UnitOfWork rolled back/discarded the local effect transaction.
+  // Connection failures get durable backoff, never an immediate callback replay.
+  return causes(error).some(
+    (e) =>
+      "code" in e &&
+      [
+        "ER_LOCK_DEADLOCK",
+        "ER_LOCK_WAIT_TIMEOUT",
+        "PROTOCOL_SEQUENCE_TIMEOUT",
+        "ETIMEDOUT",
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "PROTOCOL_CONNECTION_LOST",
+        "EPIPE",
+      ].includes(String(e.code)),
+  );
+}
 export async function retryTransaction<T>(
   unit: UnitOfWork,
   command: (tx: TxContext) => Promise<T>,
@@ -97,6 +115,7 @@ export async function retryTransaction<T>(
     } catch (error) {
       if (
         unknownCommit(error) ||
+        causes(error).some((e) => e instanceof LeaseLostError) ||
         attempt >= bounds.transactionAttempts ||
         !causes(error).some(
           (e) =>
@@ -485,12 +504,13 @@ export function createQueue(
           });
         }
       } catch (error) {
-        if (unknownCommit(error) || error instanceof LeaseLostError) throw error;
+        if (unknownCommit(error) || causes(error).some((e) => e instanceof LeaseLostError))
+          throw error;
         await this.fail(
           claim,
           h.mode === "external"
             ? "external_ambiguity"
-            : error instanceof RetryableJobError
+            : error instanceof RetryableJobError || retryableLocalDatabaseFailure(error)
               ? "retryable"
               : "handler_failed",
         );

@@ -456,6 +456,165 @@ test("actual MySQL deadlock and lockwait roll back before bounded whole-transact
     await cleanup();
   }));
 
+test("exhausted local transaction retries use durable backoff, recover once and respect final attempt exhaustion", async () =>
+  safe(async () => {
+    let calls = 0;
+    const queue = createQueue(unit, [
+      {
+        kind: "acceptance.counter",
+        consumer: "acceptance.counter",
+        version: 1,
+        mode: "local",
+        validate: fixtureReference,
+        local: async (tx, input) => {
+          calls++;
+          const reference = fixtureReference(input);
+          await unit.client(tx).execute(sql`SET SESSION innodb_lock_wait_timeout=1`);
+          await unit
+            .client(tx)
+            .execute(
+              sql`INSERT INTO synthetic_job_counter VALUES (${Buffer.from(runId)}, ${reference.sequence}, 1, 1)`,
+            );
+          await unit
+            .client(tx)
+            .execute(
+              sql`UPDATE synthetic_job_counter SET touches=touches+1 WHERE run_id=${Buffer.from(runId)} AND sequence=999`,
+            );
+        },
+      },
+    ]);
+    await control.execute("INSERT INTO synthetic_job_counter VALUES (?,999,1,0)", [
+      Buffer.from(runId),
+    ]);
+    async function blockEffect(sequence: number, maxAttempts: number) {
+      await unit.run((tx) => queue.enqueue(tx, { ...job(sequence), maxAttempts }));
+      const claim = required(await queue.claim());
+      await control.beginTransaction();
+      try {
+        await control.execute(
+          "SELECT * FROM synthetic_job_counter WHERE run_id=? AND sequence=999 FOR UPDATE",
+          [Buffer.from(runId)],
+        );
+        await queue.execute(claim);
+      } finally {
+        await control.commit();
+      }
+      return claim;
+    }
+    const first = await blockEffect(1, 2);
+    expect(calls).toBe(3);
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT state,failure,attempts,lease_token,lease_until,TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(3),available_at) remaining FROM durable_jobs",
+    );
+    expect(rows[0]).toMatchObject({
+      state: "ready",
+      failure: "retryable",
+      attempts: 1,
+      lease_token: null,
+      lease_until: null,
+    });
+    expect(Number(rows[0]?.remaining)).toBeGreaterThan(0);
+    expect(Number(rows[0]?.remaining)).toBeLessThanOrEqual(1000000);
+    expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toBeNull();
+    const [effects] = await control.query<RowDataPacket[]>(
+      "SELECT sequence,touches FROM synthetic_job_counter",
+    );
+    expect(effects.map((row) => [row.sequence, row.touches])).toEqual([[999, 0]]);
+    expect(await queue.claim()).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const recovered = required(await queue.claim());
+    expect(recovered.id).toBe(first.id);
+    expect(recovered.attempts).toBe(2);
+    await queue.execute(recovered);
+    expect(calls).toBe(4);
+    expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toEqual({
+      jobId: first.id,
+    });
+    await blockEffect(2, 1);
+    expect(calls).toBe(7);
+    expect((await queue.inspect()).failures[0]?.failure).toBe("exhausted");
+    expect(await queue.receipt("acceptance.counter", job(2).effectKey)).toBeNull();
+    const [final] = await control.query<RowDataPacket[]>(
+      "SELECT sequence,touches FROM synthetic_job_counter ORDER BY sequence",
+    );
+    expect(final.map((row) => [row.sequence, row.touches])).toEqual([
+      [1, 1],
+      [999, 1],
+    ]);
+    await cleanup();
+  }));
+
+test("pre-COMMIT connection loss backs off local work without replaying external callbacks or arbitrary failures", async () =>
+  safe(async () => {
+    for (const mode of ["local", "external"] as const) {
+      let calls = 0;
+      const work = async (tx?: TxContext) => {
+        calls++;
+        if (tx) {
+          await unit
+            .client(tx)
+            .execute(
+              sql`INSERT INTO synthetic_job_counter VALUES (${Buffer.from(runId)}, 1, 1, 1)`,
+            );
+          const [result] = await unit.client(tx).execute(sql`SELECT CONNECTION_ID() id`);
+          const identity = Number((result as unknown as { id: number }[])[0]?.id);
+          expect(Number.isSafeInteger(identity) && identity > 0).toBe(true);
+          await Promise.all([
+            unit.client(tx).execute(sql`SELECT SLEEP(3)`),
+            (async () => {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+              await control.query(`KILL CONNECTION ${identity}`);
+            })(),
+          ]);
+        } else
+          throw Object.assign(new Error("SYNTHETIC_TRANSPORT_FAILURE"), { code: "ECONNRESET" });
+      };
+      const queue = createQueue(unit, [
+        {
+          kind: "acceptance.counter",
+          consumer: "acceptance.counter",
+          version: 1,
+          mode,
+          validate: fixtureReference,
+          ...(mode === "local" ? { local: work } : { external: async () => work() }),
+        },
+      ]);
+      await unit.run((tx) => queue.enqueue(tx, job(1)));
+      await queue.execute(required(await queue.claim()));
+      expect(calls).toBe(1);
+      const [rows] = await control.query<RowDataPacket[]>(
+        "SELECT state,failure,lease_token FROM durable_jobs",
+      );
+      expect(rows[0]).toMatchObject({
+        state: mode === "local" ? "ready" : "failed",
+        failure: mode === "local" ? "retryable" : "external_ambiguity",
+        lease_token: null,
+      });
+      expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toBeNull();
+      const [effects] = await control.query<RowDataPacket[]>(
+        "SELECT COUNT(*) count FROM synthetic_job_counter",
+      );
+      expect(Number(effects[0]?.count)).toBe(0);
+      await cleanup();
+    }
+    const queue = createQueue(unit, [
+      {
+        kind: "acceptance.counter",
+        consumer: "acceptance.counter",
+        version: 1,
+        mode: "local",
+        validate: fixtureReference,
+        local: async () => {
+          throw Object.assign(new Error("SYNTHETIC_SQL_FAILURE"), { code: "ER_BAD_FIELD_ERROR" });
+        },
+      },
+    ]);
+    await unit.run((tx) => queue.enqueue(tx, job(1)));
+    await queue.execute(required(await queue.claim()));
+    expect((await queue.inspect()).failures[0]?.failure).toBe("handler_failed");
+    await cleanup();
+  }));
+
 function child(mode: string) {
   const proc = spawn(process.execPath, ["apps/api/dist/jobs-acceptance.js", mode, runId], {
     env: { ...process.env, VTC_JOBS_ACCEPTANCE: "synthetic-only", TZ: "Pacific/Honolulu" },
@@ -585,32 +744,65 @@ test("real process crash after claim/after effect recovers without loss or dupli
     await cleanup();
   }));
 
-test("representative indexed claim EXPLAIN and millisecond UTC survive a different process timezone", async () =>
-  safe(async () => {
-    const queue = createAcceptanceQueue(unit);
-    for (let sequence = 1; sequence <= 150; sequence++)
-      await unit.run((tx) => queue.enqueue(tx, job(sequence)));
-    for (const field of ["available_at", "lease_until"]) {
-      const [rows] = await control.query<RowDataPacket[]>(
-        `EXPLAIN SELECT * FROM durable_jobs WHERE state='${field === "available_at" ? "ready" : "running"}' AND ${field}<=UTC_TIMESTAMP(3) ORDER BY ${field},id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+test(
+  "mixed retained-history full-row claim EXPLAIN and millisecond UTC survive a different process timezone",
+  { timeout: 30000 },
+  async () =>
+    safe(async () => {
+      const queue = createAcceptanceQueue(unit);
+      await unit.run(async (tx) => {
+        for (let sequence = 1; sequence <= 900; sequence++) await queue.enqueue(tx, job(sequence));
+      });
+      // Technical optimizer fixture, not a company retention/capacity policy.
+      await control.query(
+        "UPDATE durable_jobs SET state='completed',attempts=1,completed_at=UTC_TIMESTAMP(3) WHERE reference->>'$.sequence' <= 800",
       );
+      await control.query(
+        "UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3)+INTERVAL 1 DAY WHERE reference->>'$.sequence' BETWEEN 801 AND 880",
+      );
+      await control.execute(
+        "UPDATE durable_jobs SET state='running',attempts=1,lease_token=?,lease_until=IF(reference->>'$.sequence'>895,UTC_TIMESTAMP(3)-INTERVAL 1 SECOND,UTC_TIMESTAMP(3)+INTERVAL 1 DAY) WHERE reference->>'$.sequence'>885",
+        [Buffer.from(newId())],
+      );
+      const [distribution] = await control.query<RowDataPacket[]>(
+        "SELECT SUM(state='completed') completed,SUM(state='ready' AND available_at<=UTC_TIMESTAMP(3)) readyDue,SUM(state='ready' AND available_at>UTC_TIMESTAMP(3)) readyFuture,SUM(state='running' AND lease_until<=UTC_TIMESTAMP(3)) runningExpired,SUM(state='running' AND lease_until>UTC_TIMESTAMP(3)) runningFuture FROM durable_jobs",
+      );
+      const counts = Object.fromEntries(
+        Object.entries(distribution[0] ?? {}).map(([key, value]) => [key, Number(value)]),
+      );
+      expect(counts).toEqual({
+        completed: 800,
+        readyDue: 5,
+        readyFuture: 80,
+        runningExpired: 5,
+        runningFuture: 10,
+      });
+      await control.query("ANALYZE TABLE durable_jobs");
       console.log(
-        JSON.stringify({
-          event: "jobs_explain",
-          shape: field === "available_at" ? "ready" : "expired",
-          access: rows[0]?.type,
-          key: rows[0]?.key,
-          estimatedRows: rows[0]?.rows,
-          extra: rows[0]?.Extra,
-        }),
+        JSON.stringify({ event: "jobs_explain_fixture", ...counts, statistics: "analyzed" }),
       );
-      expect(rows[0]?.key).toBe(field === "available_at" ? "jobs_ready_idx" : "jobs_expired_idx");
-    }
-    const e = envelope();
-    e.occurredAt = "2026-02-01T00:59:59.999+01:00";
-    await unit.run((tx) => createOutbox(unit).append(tx, e));
-    expect(
-      (await unit.run((tx) => unit.client(tx).select().from(outboxEvents)))[0]?.occurredAt,
-    ).toBe("2026-01-31T23:59:59.999Z");
-    await cleanup();
-  }));
+      for (const field of ["available_at", "lease_until"]) {
+        const [rows] = await control.query<RowDataPacket[]>(
+          `EXPLAIN SELECT * FROM durable_jobs WHERE state='${field === "available_at" ? "ready" : "running"}' AND ${field}<=UTC_TIMESTAMP(3) ORDER BY ${field},id LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        );
+        console.log(
+          JSON.stringify({
+            event: "jobs_explain",
+            shape: field === "available_at" ? "ready" : "expired",
+            access: rows[0]?.type,
+            key: rows[0]?.key,
+            estimatedRows: rows[0]?.rows,
+            extra: rows[0]?.Extra,
+          }),
+        );
+        expect(rows[0]?.key).toBe(field === "available_at" ? "jobs_ready_idx" : "jobs_expired_idx");
+      }
+      const e = envelope();
+      e.occurredAt = "2026-02-01T00:59:59.999+01:00";
+      await unit.run((tx) => createOutbox(unit).append(tx, e));
+      expect(
+        (await unit.run((tx) => unit.client(tx).select().from(outboxEvents)))[0]?.occurredAt,
+      ).toBe("2026-01-31T23:59:59.999Z");
+      await cleanup();
+    }),
+);
