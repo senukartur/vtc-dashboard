@@ -10,9 +10,11 @@ import {
   screenshotInventory,
 } from "../test/support/browser-artifacts.ts";
 import { bounded } from "../test/support/concurrency.ts";
+import { browserFailureProof } from "../test/support/browser-failure-proof.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
 import { eventLine } from "./ci-result.mjs";
+import { browserFailureLine } from "./browser-diagnostics.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
@@ -222,6 +224,7 @@ async function proveFailures() {
     const identity = probeIdentity(name);
     if (!isDeliberateFailure(name, result))
       throw new Error(`FAILURE_PROBE_INVALID_${name.toUpperCase()}`);
+    if (name === "e2e") browserFailureProof(result.output);
     console.log(`PROBE ${identity}: identified assertion, exit 1 (expected)`);
   }
   const guarded = await execute("integration", true, true, true);
@@ -359,6 +362,9 @@ try {
     const started = Date.now();
     const result = await execute(lane, true, true);
     if (!isDeliberateFailure(lane, result)) throw new Error("FAILURE_PROBE_INVALID");
+    if (lane === "e2e")
+      for (const failure of browserFailureProof(result.output))
+        console.log(browserFailureLine(failure));
     console.log(eventLine(lane, 1, Date.now() - started));
     process.exitCode = 1;
   } else if (lane === "failure-reporting") await proveFailures();

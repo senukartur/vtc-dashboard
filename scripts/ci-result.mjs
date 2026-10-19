@@ -1,3 +1,5 @@
+import { browserFailurePrefix, safeBrowserFailure } from "./browser-diagnostics.mjs";
+
 // Public diagnostics are reconstructed from fixed values; raw child output is never retained.
 export const stages = [
   "build-image",
@@ -55,10 +57,12 @@ export function eventLine(stage, exitCode, durationMs) {
 }
 export function collectEvents() {
   const events = [];
+  const browserFailures = [];
   let pending = "";
   let oversized = false;
   return {
     events,
+    browserFailures,
     push(chunk) {
       for (const part of String(chunk).split(/(\n)/)) {
         if (part === "\n") {
@@ -68,6 +72,16 @@ export function collectEvents() {
               if (event && events.length < 64) events.push(event);
             } catch {
               /* Unstructured diagnostics remain private. */
+            }
+          }
+          if (!oversized && pending.startsWith(browserFailurePrefix)) {
+            try {
+              const failure = safeBrowserFailure(
+                JSON.parse(pending.slice(browserFailurePrefix.length)),
+              );
+              if (failure && browserFailures.length < 32) browserFailures.push(failure);
+            } catch {
+              /* Unstructured browser diagnostics remain private. */
             }
           }
           pending = "";
@@ -83,7 +97,13 @@ export function collectEvents() {
     },
   };
 }
-export function qualityReport(exitCode, durationMs, events, probe) {
+export function qualityReport(exitCode, durationMs, events, probe, browserFailures = []) {
+  const failures = browserFailures.map(safeBrowserFailure).filter(Boolean).slice(0, 32);
+  if (
+    !failures.length &&
+    events.some((event) => event.stage === "e2e" && event.status === "failure")
+  )
+    failures.push({ kind: "global", category: "unreported-runner-failure", status: "failed" });
   const failedProbe =
     probe && events.some((event) => event.stage === probe && event.status === "failure");
   return {
@@ -100,5 +120,6 @@ export function qualityReport(exitCode, durationMs, events, probe) {
     durationMs,
     ...(failedProbe ? { probeIdentity: `VTC008_${probe.toUpperCase()}_ASSERTION_PROBE` } : {}),
     stages: events.map(safeEvent).filter(Boolean).slice(0, 64),
+    browserFailures: failures,
   };
 }
