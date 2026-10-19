@@ -4,7 +4,7 @@
 
 ## Entry points and composition
 
-- `/` retains the real, cancellable `/health/ready` request. Only matching HTTP 200/`ready` and HTTP 503/`not_ready` responses are accepted. Invalid responses and transport failures show a safe translated error; retry stays disabled during a request. No failure falls back to synthetic success.
+- `/status` retains the real, cancellable `/health/ready` request. Only matching HTTP 200/`ready` and HTTP 503/`not_ready` responses are accepted. Invalid responses and transport failures show a safe translated error; retry stays disabled during a request. No failure falls back to synthetic success.
 - `/foundation` is a public presentation shell with explicitly fictional examples.
 - `/foundation/member` demonstrates member composition, visibly labeled as a synthetic preview. It grants no access and makes no session/permission claim. VTC-013 and feature owners must integrate authoritative identity and permissions before live use.
 
@@ -47,3 +47,7 @@ The dark shell and font-license link bring that same entry-plus-preload measurem
 The reusable AppLayout composes public horizontal navigation or a member sidebar/topbar/content shell. The desktop sidebar contains only the three implemented routes; at tablet/phone widths it becomes the existing keyboard-accessible navigation dialog. It contains no invented account, role, notification or production data. Dedicated screenshots capture keyboard skip, form-error, dialog and navigation focus; browser checks measure computed text/placeholder/primary/disabled contrast and sidebar placement, supplementing actual rendered review.
 
 Onest is bundled unmodified from google/fonts commit 4c1db3aec83c67dd223dd82a68c039cab30917a9, source [Onest variable font](https://github.com/google/fonts/blob/4c1db3aec83c67dd223dd82a68c039cab30917a9/ofl/onest/Onest%5Bwght%5D.ttf). The 193056-byte font SHA-256 is 966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31. Its verbatim [SIL OFL 1.1 copyright/license](../../third_party/onest/OFL.txt), SHA-256 071195d8806e226faeee60259c28ca67b458227af5195a73f5cfcab06e3003bc, accompanies the source and is imported as a separate Vite asset linked in the localized footer, so the complete notice accompanies built/deployed font bytes. CSS uses font-display: swap and a system fallback. Runtime font requests stay on the application origin; no external font service or new package is used. Browser checks verify actual Onest loading/Cyrillic content, exact deployed license bytes, and usable Cyrillic fallback after a controlled failed font download. Existing conservative font/license caching remains unchanged.
+
+## Public landing composition
+
+[VTC-016](public-landing.md) adds the real RU/EN public company content at `/` and `/en`, with the membership form and narrow initial-HTML indexing. The real connection page moves to `/status`; `/foundation` and `/foundation/member` remain synthetic previews with their existing navigation. Public navigation links to the company sections, application, contacts and honest events/login boundary pages.

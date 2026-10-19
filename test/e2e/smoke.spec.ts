@@ -5,7 +5,7 @@ test("built SPA connects to real MySQL, switches RU/EN, retries and navigates", 
 }) => {
   const errors: string[] = [];
   page.on("pageerror", () => errors.push("page error"));
-  await page.goto("/");
+  await page.goto("/status");
   await expect(page.getByRole("heading", { name: "VTC Dashboard" })).toBeVisible();
   await expect(
     page.getByText("Приложение и база данных подключены", { exact: true }),
@@ -32,6 +32,8 @@ test("built SPA connects to real MySQL, switches RU/EN, retries and navigates", 
   await page.goto("/synthetic-unknown-route");
   await expect(page.getByRole("heading", { name: "Этой страницы пока нет" })).toBeVisible();
   await page.getByRole("link", { name: "На главную" }).click();
+  await expect(page.getByRole("heading", { name: "Своя компания. Общая дорога." })).toBeVisible();
+  await page.goto("/status");
   await expect(page.getByRole("heading", { name: "VTC Dashboard" })).toBeVisible();
   await expect(
     page.getByText("Приложение и база данных подключены", { exact: true }),

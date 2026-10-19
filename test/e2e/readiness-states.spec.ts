@@ -14,7 +14,7 @@ test("supplemental controlled readiness pending, 503 and retry recovery", async 
     });
   });
   try {
-    await page.goto("/");
+    await page.goto("/status");
     await expect(page.getByText("Проверяем подключение…", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Проверить снова", exact: true })).toBeDisabled();
     release();
@@ -57,7 +57,7 @@ for (const failure of [
         await route.fulfill({ status: 503, json: { status: "ready" } });
       else await route.fulfill({ status: 500, json: { status: "ready" } });
     });
-    await page.goto("/");
+    await page.goto("/status");
     await expect(
       page.getByText("Не удалось связаться с приложением", { exact: true }),
     ).toBeVisible();

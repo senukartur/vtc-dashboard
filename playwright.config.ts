@@ -7,7 +7,7 @@ export default defineConfig({
     process.env.VTC_FAILURE_PROBE === "assertion"
       ? ".local/testing/browser-probe-results"
       : ".local/testing/browser-results",
-  reporter: "list",
+  reporter: [["list"], ["./test/support/safe-browser-reporter.ts"]],
   fullyParallel: false,
   workers: 1,
   retries: 0,

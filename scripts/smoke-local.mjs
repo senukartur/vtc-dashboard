@@ -20,7 +20,7 @@ assert.deepEqual(await live.json(), { status: "ok" });
 const ready = await request("/health/ready");
 assert.equal(ready.status, expectReady ? 200 : 503);
 assert.deepEqual(await ready.json(), { status: expectReady ? "ready" : "not_ready" });
-const page = await request("/", { accept: "text/html" });
+const page = await request("/status", { accept: "text/html" });
 assert.equal(page.status, 200);
 const html = await page.text();
 const modules = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)];

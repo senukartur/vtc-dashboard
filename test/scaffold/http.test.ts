@@ -195,6 +195,14 @@ test("wire parameters decode schema types while body and response validation sta
 test("production SPA fallback never replaces API, evidence or missing-asset errors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "vtc006-http-"));
   await writeFile(join(directory, "index.html"), "<!doctype html><title>Fixture shell</title>");
+  await writeFile(
+    join(directory, "public-ru.html"),
+    "<!doctype html><title>Public RU fixture</title>",
+  );
+  await writeFile(
+    join(directory, "public-en.html"),
+    "<!doctype html><title>Public EN fixture</title>",
+  );
   await mkdir(join(directory, "assets"));
   await writeFile(join(directory, "assets", "index-Ab12cd34.js"), "export default 1;");
   await writeFile(join(directory, "assets", "unversioned.js"), "export default 2;");
@@ -224,6 +232,19 @@ test("production SPA fallback never replaces API, evidence or missing-asset erro
       (await app.inject({ url: "/members", headers: { accept: "text/html" } })).statusCode,
       200,
     );
+    assert.ok((await app.inject("/")).body.includes("Public RU fixture"));
+    assert.ok((await app.inject("/en")).body.includes("Public EN fixture"));
+    for (const url of [
+      "/?token=NONFUNCTIONAL_FIXTURE",
+      "/en?token=NONFUNCTIONAL_FIXTURE",
+      "/unknown",
+      "/invitation?token=NONFUNCTIONAL_FIXTURE",
+    ]) {
+      const result = await app.inject({ url, headers: { accept: "text/html" } });
+      assert.ok(result.body.includes("Fixture shell"));
+      assert.equal(result.headers["x-robots-tag"], "noindex, nofollow");
+      assert.ok(!result.body.includes("NONFUNCTIONAL_FIXTURE"));
+    }
     for (const url of [
       "/api/v1/me",
       "/api/telemetry/v1/connection",

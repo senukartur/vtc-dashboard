@@ -332,7 +332,7 @@ test("dark public and member shells retain readable controls, bundled font/licen
       await sidebar
         .getByRole("link")
         .evaluateAll((links) => links.map((link) => link.getAttribute("href"))),
-    ).toEqual(["/", "/", "/foundation", "/foundation/member"]);
+    ).toEqual(["/", "/status", "/foundation", "/foundation/member"]);
   } else {
     await expect(sidebar).toBeHidden();
     await expect(
@@ -374,7 +374,7 @@ test("dark public and member shells retain readable controls, bundled font/licen
   await page.goto("/foundation");
   await expect(sidebar).toBeHidden();
   await noOverflow(page);
-  await page.goto("/");
+  await page.goto("/status");
   const previewLink = page
     .getByRole("main")
     .getByRole("link", { name: "Публичный пример", exact: true });

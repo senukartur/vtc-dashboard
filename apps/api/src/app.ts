@@ -49,7 +49,8 @@ export async function createApp(options: AppOptions) {
     trustProxy: ingressTrust(options.proxyAddress),
   });
   installSchemaCompilers(app);
-  app.addHook("onSend", async (_request, reply) => {
+  app.addHook("onSend", async (request, reply) => {
+    if (!["/", "/en"].includes(request.url)) reply.header("X-Robots-Tag", "noindex, nofollow");
     reply.header("X-Content-Type-Options", "nosniff");
     if (
       ![200, 206, 304].includes(reply.statusCode) ||
@@ -128,7 +129,16 @@ export async function createApp(options: AppOptions) {
           response.header("Cache-Control", assetCache);
       },
     });
-    app.get("/", async (_request, reply) => reply.type("text/html").sendFile("index.html"));
+    for (const [path, file] of [
+      ["/", "public-ru.html"],
+      ["/en", "public-en.html"],
+    ] as const) {
+      app.get(path, async (request, reply) => {
+        // Query-bearing/token URLs use the nonindexable shell and never reflect input.
+        const selected = request.url === path ? file : "index.html";
+        return reply.type("text/html").sendFile(selected);
+      });
+    }
   }
   app.setNotFoundHandler((request, reply) => {
     let path = request.url.split("?")[0] ?? "/";

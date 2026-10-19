@@ -11,6 +11,8 @@ import {
   useMatch,
 } from "react-router-dom";
 import { Button, Card } from "../shared/ui/primitives.js";
+import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { publicContent } from "../features/landing/content.js";
 import { AppLayout } from "./AppLayout.js";
 import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
@@ -28,8 +30,36 @@ function Shell() {
   const location = useLocation();
   const memberMatch = useMatch(memberPath);
   useEffect(() => {
-    document.documentElement.lang = i18n.resolvedLanguage ?? "en";
-  }, [i18n.resolvedLanguage]);
+    if (["#about", "#apply", "#contacts"].includes(location.hash))
+      document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
+  }, [location.hash]);
+  useEffect(() => {
+    const locale =
+      location.pathname === "/en"
+        ? "en"
+        : location.pathname === "/"
+          ? "ru"
+          : i18n.resolvedLanguage === "en"
+            ? "en"
+            : "ru";
+    if (i18n.resolvedLanguage !== locale) void i18n.changeLanguage(locale);
+    document.documentElement.lang = locale;
+    const publicPage = ["/", "/en"].includes(location.pathname) && !location.search;
+    document.title = publicPage ? publicContent[locale].title : "Yukon Union";
+    document
+      .querySelector('meta[name="robots"]')
+      ?.setAttribute("content", publicPage ? "index, follow" : "noindex, nofollow");
+    let description = document.querySelector('meta[name="description"]');
+    if (!description) {
+      description = document.createElement("meta");
+      description.setAttribute("name", "description");
+      document.head.append(description);
+    }
+    description.setAttribute(
+      "content",
+      publicPage ? publicContent[locale].description : "Yukon Union",
+    );
+  }, [i18n, i18n.resolvedLanguage, location.pathname, location.search]);
   if (memberMatch && location.pathname !== memberPath)
     return (
       <Navigate
@@ -40,7 +70,7 @@ function Shell() {
   return (
     <AppLayout member={memberMatch !== null}>
       <RouteErrorBoundary
-        key={location.pathname}
+        key={["/", "/en"].includes(location.pathname) ? "public-landing" : location.pathname}
         fallbackTitle={t("renderError")}
         recoverLabel={t("recover")}
       >
@@ -52,7 +82,11 @@ function Shell() {
           }
         >
           <Routes>
-            <Route path="/" element={<ReadinessPage />} />
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/en" element={<LandingPage />} />
+            <Route path="/status" element={<ReadinessPage />} />
+            <Route path="/events" element={<PublicBoundaryPage kind="events" />} />
+            <Route path="/login" element={<PublicBoundaryPage kind="login" />} />
             <Route path="/foundation" element={<FoundationPage key="public" />} />
             <Route path={memberPath} element={<FoundationPage key="member" member />} />
             <Route

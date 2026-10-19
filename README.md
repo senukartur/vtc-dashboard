@@ -35,3 +35,5 @@ The selected database is MySQL. Develop/test with maintained MySQL 8.4 LTS and N
 ## Code review
 
 GitHub Copilot code review is disabled. An advisory Claude Sonnet 5.5 workflow is configured for pull requests. Inspect available review comments before merge, require green **Required CI** and resolved conversations, and retain independent review appropriate to risk. AI comments do not replace CI or independent review.
+
+The [public landing and membership application](docs/development/public-landing.md) use `/` (RU) and `/en` (EN). The real application/MySQL connection screen is at `/status`; live admissions activation remains separately controlled and disabled by default.

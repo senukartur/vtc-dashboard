@@ -117,7 +117,7 @@ export function FoundationPage({
                 {t("fallbackProbe")}
               </p>
               <DialogClose asChild>
-                <Link className="button button-ghost" to="/">
+                <Link className="button button-ghost" to="/status">
                   {core("readiness")}
                 </Link>
               </DialogClose>
