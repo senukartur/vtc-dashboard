@@ -57,6 +57,11 @@ export async function testConnection(): Promise<Connection> {
 export async function reset(connection: Connection) {
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   for (const name of [
+    "job_effect_receipts",
+    "durable_jobs",
+    "outbox_events",
+    "job_runner_leases",
+    "synthetic_job_counter",
     "identity_command_results",
     "identity_limits",
     "identity_challenges",
@@ -91,8 +96,11 @@ export async function auditOnlyFolder(): Promise<string> {
 export async function identityFoundationFolder(): Promise<string> {
   return publishedPrefixFolder(2);
 }
+export async function jobsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(3);
+}
 
-async function publishedPrefixFolder(count: 1 | 2): Promise<string> {
+async function publishedPrefixFolder(count: 1 | 2 | 3): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -105,6 +113,8 @@ async function publishedPrefixFolder(count: 1 | 2): Promise<string> {
   const entries = production.entries.slice(0, count);
   if (count === 2 && entries[1]?.tag !== "0001_mean_masked_marvel")
     throw new Error("PUBLISHED_IDENTITY_PREFIX_REQUIRED");
+  if (count === 3 && entries[2]?.tag !== "0002_acoustic_starfox")
+    throw new Error("PUBLISHED_EMAIL_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
