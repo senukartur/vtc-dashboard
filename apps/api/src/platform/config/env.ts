@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import { z } from "zod";
-import { exactProxyAddress } from "../http/ingress.js";
+import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
-import { validateMessagingConfig, type MessagingConfig } from "../../modules/messaging/service.js";
+import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
+import { exactProxyAddress } from "../http/ingress.js";
 
 const port = z.coerce.number().int().min(1).max(65535);
 const settings = z.object({
@@ -83,6 +84,32 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let admissions: AdmissionsConfig | undefined;
+  if (
+    input.ADMISSIONS_ENABLED !== undefined &&
+    !["true", "false"].includes(input.ADMISSIONS_ENABLED)
+  )
+    throw new Error("Invalid environment fields: ADMISSIONS_ENABLED");
+  if (input.ADMISSIONS_ENABLED === "true") {
+    try {
+      if (!identity) throw new Error();
+      admissions = { key: input.ADMISSIONS_ENCRYPTION_KEY ?? "", origin: identity.origin };
+      admissionsSecurity(admissions);
+      if (
+        admissions.key === input.MAIL_ENCRYPTION_KEY ||
+        admissions.key === identity.secret ||
+        Buffer.from(admissions.key, "base64url").equals(Buffer.from(identity.secret, "hex")) ||
+        Buffer.from(admissions.key, "base64url").equals(
+          Buffer.from(input.MAIL_ENCRYPTION_KEY ?? "", "hex"),
+        )
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: ADMISSIONS_ENABLED, ADMISSIONS_ENCRYPTION_KEY, IDENTITY_ENABLED",
+      );
+    }
+  }
   return {
     environment: env.NODE_ENV,
     host: env.API_HOST,
@@ -92,6 +119,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     proxyAddress,
     identity,
     mail,
+    admissions,
     database: {
       host: env.MYSQL_HOST,
       port: env.MYSQL_PORT,

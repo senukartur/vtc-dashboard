@@ -10,6 +10,8 @@ import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 import { ingressTrust } from "./platform/http/ingress.js";
+import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
+import type { Admissions } from "./modules/admissions/service.js";
 
 const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
@@ -32,6 +34,7 @@ const errorCodes: Readonly<Record<number, string>> = {
 export interface AppOptions {
   identity?: Identity;
   messaging?: Messaging;
+  admissions?: Admissions;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -111,6 +114,8 @@ export async function createApp(options: AppOptions) {
   if (options.identity) await registerIdentityRoutes(app, options.identity);
   if (options.identity && options.messaging)
     await registerMessagingRoutes(app, options.identity, options.messaging);
+  if (options.identity && options.admissions)
+    await registerAdmissionsRoutes(app, options.identity, options.admissions);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

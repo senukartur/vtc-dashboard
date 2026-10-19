@@ -172,7 +172,7 @@ for name, value in config['services'].items():
     if name in ['app', 'jobs']:
         # Keep the shared file live while role-specific DB settings remain synthetic/resolved.
         value['env_file'] = [str(base / 'private/identity-mail.env')]
-        for key in ['IDENTITY_ENABLED', 'MAIL_MODE']:
+        for key in ['IDENTITY_ENABLED', 'MAIL_MODE', 'ADMISSIONS_ENABLED']:
             value['environment'].pop(key, None)
 for name, value in config['volumes'].items():
     value['name'] = f'{project}_{name}'
@@ -267,6 +267,9 @@ ops.run(['docker', 'run', '--rm', '--network', 'none', '--user', '1000', '--moun
          'node', '-e', "require('node:fs').writeFileSync('/app/private-evidence/sentinel.txt','fictional-evidence-sentinel-vtc011\\n')"])
 runtime_negative = """const mysql=require('mysql2/promise'); const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'}); for(const sql of ['CREATE TABLE forbidden (id INT)','SET GLOBAL max_connections=99','SELECT * FROM mysql.user','SELECT * FROM _vtc_migrations','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','DELETE FROM identity_verifications','UPDATE _vtc_migrations SET state=\\'applying\\'']) {let denied=false;try{await c.query(sql)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
 compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_negative.replace("const mysql=require('mysql2/promise');", "import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');")], revision=revision)
+runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
+compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_admissions_limits], revision=revision)
+print('Admissions restricted runtime: rate-row insert/read and bounded100-row deletion passed with rollback', flush=True)
 ops.maintenance(False)
 ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
 proxy_id = compose(['ps', '-q', 'proxy'], revision=revision).decode().strip()

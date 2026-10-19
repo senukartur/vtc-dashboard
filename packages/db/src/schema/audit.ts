@@ -7,6 +7,11 @@ export const auditOperations = [
   "report.reviewed",
   "leadership.transferred",
   "catalog.published",
+  "application.submitted",
+  "application.reviewed",
+  "invitation.reissued",
+  "invitation.copied",
+  "invitation.redeemed",
 ] as const;
 export const auditReasons = [
   "operator_request",
@@ -14,7 +19,14 @@ export const auditReasons = [
   "initial_setup",
   "catalog_update",
 ] as const;
-export const auditSubjects = ["company", "user", "trip", "catalog"] as const;
+export const auditSubjects = [
+  "company",
+  "user",
+  "trip",
+  "catalog",
+  "application",
+  "invitation",
+] as const;
 
 export const auditEntries = mysqlTable(
   "audit_entries",

@@ -29,7 +29,10 @@ for (const role of ["runtime", "migrator", "probe", "heartbeat", "jobs"]) {
   );
 }
 await save("operator.env", `OPERATOR_TOKEN=${keys.operator}\n`);
-await save("identity-mail.env", "IDENTITY_ENABLED=false\nMAIL_MODE=disabled\n");
+await save(
+  "identity-mail.env",
+  "IDENTITY_ENABLED=false\nMAIL_MODE=disabled\nADMISSIONS_ENABLED=false\n",
+);
 await save(
   "proxy.env",
   "STAGING_DOMAIN=staging.example.invalid\nTLS_EMAIL=operator@example.invalid\n",

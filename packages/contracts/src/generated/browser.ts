@@ -51,6 +51,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/applications/{applicationId}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List retained applications for the same normalized email */
+        get: operations["listApplicationHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/audit": {
         parameters: {
             query?: never;
@@ -1993,6 +2010,7 @@ export interface components {
             toDateExclusive: string;
         };
         Application: {
+            decision: components["schemas"]["ApplicationDecision"] | null;
             decisionReason: string | null;
             fields: components["schemas"]["ApplicationInput"];
             /** Format: uuid */
@@ -2004,6 +2022,19 @@ export interface components {
             submittedAt: string;
             version: number;
         };
+        ApplicationDecision: {
+            applicationVersion: number;
+            /** Format: date-time */
+            decidedAt: string;
+            deliveryId: string | null;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            outcome: "approve" | "reject";
+            reason: string | null;
+            /** Format: uuid */
+            reviewerId: string;
+        };
         ApplicationDecisionInput: {
             /** @constant */
             decision: "approve";
@@ -2013,11 +2044,11 @@ export interface components {
             reason: string;
         };
         ApplicationInput: {
-            discord: string | null;
+            discord?: string | null;
             /** Format: email */
             email: string;
             games: ("ets2" | "ats")[];
-            introduction: string | null;
+            introduction?: string | null;
             nickname: string;
             /** Format: uri */
             steamProfileUrl: string;
@@ -2695,8 +2726,12 @@ export interface components {
         Invitation: {
             /** Format: uuid */
             applicationId: string;
-            /** @enum {string} */
-            emailDelivery: "queued" | "sent" | "failed" | "not_requested";
+            deliveryId: string | null;
+            /**
+             * @description Current safe delivery state from the messaging owner; not_requested means mail was disabled, unavailable means its adapter is not currently configured. Provider acceptance or local simulation never means inbox delivery.
+             * @enum {string}
+             */
+            emailDelivery: "queued" | "attempting" | "retryable" | "accepted" | "simulated" | "suppressed" | "failed" | "ambiguous" | "not_requested" | "unavailable";
             /** Format: date-time */
             expiresAt: string;
             /** Format: uuid */
@@ -3467,6 +3502,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeApplication"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listApplicationHistory: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                applicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListApplication"];
                 };
             };
             default: components["responses"]["Error"];
@@ -5947,6 +6008,8 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                /** @description A leading ru language range selects Russian transactional mail; otherwise English. The selected locale is retained as transport metadata. */
+                "Accept-Language"?: string;
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path?: never;

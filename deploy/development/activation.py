@@ -9,7 +9,8 @@ import stat
 import struct
 
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
-               'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED'}
+               'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
+               'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY'}
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
                  'identity_acceptance.py', 'ingress_probe.py', 'receive.sh'}

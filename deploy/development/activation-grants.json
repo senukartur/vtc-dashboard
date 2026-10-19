@@ -14,7 +14,13 @@
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
     "job_effect_receipts": ["SELECT"],
     "mail_deliveries": ["SELECT", "INSERT", "UPDATE"],
-    "mail_commands": ["SELECT", "INSERT", "DELETE"]
+    "mail_commands": ["SELECT", "INSERT", "DELETE"],
+    "admissions_applications": ["SELECT", "INSERT", "UPDATE"],
+    "admissions_decisions": ["SELECT", "INSERT", "UPDATE"],
+    "admissions_invitations": ["SELECT", "INSERT", "UPDATE"],
+    "admissions_command_results": ["SELECT", "INSERT", "DELETE"],
+    "admissions_limits": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "qualification_initial_assignments": ["SELECT", "INSERT"]
   },
   "jobs": {
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
@@ -26,6 +32,10 @@
     "identity_company": ["SELECT"],
     "identity_memberships": ["SELECT"],
     "identity_users": ["SELECT"],
-    "identity_challenges": ["SELECT"]
+    "identity_challenges": ["SELECT"],
+    "admissions_applications": ["SELECT"],
+    "admissions_decisions": ["SELECT"],
+    "admissions_invitations": ["SELECT", "UPDATE"],
+    "admissions_command_results": ["SELECT", "DELETE"]
   }
 }

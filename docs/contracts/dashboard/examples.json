@@ -95,7 +95,7 @@
       "request": {
         "nickname": "Fixture Driver",
         "email": "fixture@example.invalid",
-        "steamProfileUrl": "https://example.invalid/nonfunctional",
+        "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
         "games": [
           "ets2"
         ],
@@ -714,7 +714,7 @@
               "fields": {
                 "nickname": "Fixture Driver",
                 "email": "fixture@example.invalid",
-                "steamProfileUrl": "https://example.invalid/nonfunctional",
+                "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
                 "games": [
                   "ets2"
                 ],
@@ -722,7 +722,8 @@
                 "introduction": null
               },
               "decisionReason": null,
-              "invitationId": null
+              "invitationId": null,
+              "decision": null
             }
           ],
           "nextCursor": null
@@ -759,7 +760,7 @@
           "fields": {
             "nickname": "Fixture Driver",
             "email": "fixture@example.invalid",
-            "steamProfileUrl": "https://example.invalid/nonfunctional",
+            "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
             "games": [
               "ets2"
             ],
@@ -767,7 +768,8 @@
             "introduction": null
           },
           "decisionReason": null,
-          "invitationId": null
+          "invitationId": null,
+          "decision": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -787,7 +789,7 @@
           "fields": {
             "nickname": "Fixture Driver",
             "email": "fixture@example.invalid",
-            "steamProfileUrl": "https://example.invalid/nonfunctional",
+            "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
             "games": [
               "ets2"
             ],
@@ -795,7 +797,8 @@
             "introduction": null
           },
           "decisionReason": null,
-          "invitationId": null
+          "invitationId": null,
+          "decision": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -816,7 +819,8 @@
           "applicationId": "41000000-0000-4000-8000-000000000001",
           "expiresAt": "2026-10-17T12:00:00.000Z",
           "state": "active",
-          "emailDelivery": "queued"
+          "emailDelivery": "queued",
+          "deliveryId": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -849,7 +853,8 @@
           "applicationId": "41000000-0000-4000-8000-000000000001",
           "expiresAt": "2026-10-17T12:00:00.000Z",
           "state": "active",
-          "emailDelivery": "queued"
+          "emailDelivery": "queued",
+          "deliveryId": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -3593,6 +3598,62 @@
         "meta": {
           "requestId": "synthetic-request-mail"
         }
+      }
+    },
+    {
+      "id": "listApplicationHistory:success",
+      "operationId": "listApplicationHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "status": "submitted",
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "nickname": "Fixture Driver",
+                "email": "fixture@example.invalid",
+                "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
+                "games": [
+                  "ets2"
+                ],
+                "discord": null,
+                "introduction": null
+              },
+              "decisionReason": null,
+              "invitationId": null,
+              "decision": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "submitApplication:optional-omitted",
+      "operationId": "submitApplication",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "nickname": "Fixture Driver",
+        "email": "fixture@example.invalid",
+        "steamProfileUrl": "https://steamcommunity.com/id/fictional-driver",
+        "games": [
+          "ets2"
+        ]
       }
     }
   ]

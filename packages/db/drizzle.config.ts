@@ -7,6 +7,8 @@ export default defineConfig({
     "./src/schema/identity/index.ts",
     "./src/schema/platform.ts",
     "./src/schema/messaging.ts",
+    "./src/schema/admissions/index.ts",
+    "./src/schema/qualifications/index.ts",
   ],
   out: "./migrations",
   strict: true,
