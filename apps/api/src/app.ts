@@ -12,6 +12,8 @@ import { installSchemaCompilers } from "./platform/http/schemas.js";
 import { ingressTrust } from "./platform/http/ingress.js";
 import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
 import type { Admissions } from "./modules/admissions/service.js";
+import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
+import type { ExternalIdentities } from "./modules/external-identities/service.js";
 
 const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
@@ -35,6 +37,7 @@ export interface AppOptions {
   identity?: Identity;
   messaging?: Messaging;
   admissions?: Admissions;
+  externalIdentities?: ExternalIdentities;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -118,6 +121,8 @@ export async function createApp(options: AppOptions) {
     await registerMessagingRoutes(app, options.identity, options.messaging);
   if (options.identity && options.admissions)
     await registerAdmissionsRoutes(app, options.identity, options.admissions);
+  if (options.identity && options.externalIdentities)
+    await registerExternalIdentityRoutes(app, options.identity, options.externalIdentities);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

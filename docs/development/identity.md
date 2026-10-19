@@ -1,5 +1,7 @@
 # VTC-013 identity foundation
 
+VTC-018 adds [verified external identities](external-identities.md), the injected `/me` Steam projection, same-transaction authorization/epoch/event facades and the synchronous credential eligibility handoff. Steam remains separate from email/password login; actual telemetry-token consumers remain VTC-023.
+
 [VTC-013](https://trello.com/c/dkwyHN2B) implements the project-owned identity facade and the existing auth/me browser contract. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD), wire shapes in the [browser contract](../contracts/dashboard/README.md). This is backend identity infrastructure; account screens (VTC-017), admissions (VTC-015), mail (VTC-014), durable job delivery (VTC-021), Steam (VTC-018), personal telemetry credentials (VTC-023), qualifications (VTC-028) and administration HTTP/UI composition (VTC-038) keep their own integration gates.
 
 ## Auth engine and persistence

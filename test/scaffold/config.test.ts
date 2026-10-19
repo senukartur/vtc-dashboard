@@ -65,3 +65,24 @@ test("shared runtime baseline matches local/container versions and MySQL configu
   );
   assert.deepEqual(new Set(runtime.mysqlSqlMode.split(",")), new Set(requiredSqlModes));
 });
+test("external identities activation is explicit and requires valid identity configuration", () => {
+  assert.equal(readConfig(fixture).externalIdentities, false);
+  assert.throws(
+    () => readConfig({ ...fixture, EXTERNAL_IDENTITIES_ENABLED: "yes" }),
+    /EXTERNAL_IDENTITIES_ENABLED/,
+  );
+  assert.throws(
+    () => readConfig({ ...fixture, EXTERNAL_IDENTITIES_ENABLED: "true" }),
+    /IDENTITY_ENABLED/,
+  );
+  assert.equal(
+    readConfig({
+      ...fixture,
+      IDENTITY_ENABLED: "true",
+      IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+      IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+      EXTERNAL_IDENTITIES_ENABLED: "true",
+    }).externalIdentities,
+    true,
+  );
+});

@@ -120,6 +120,18 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     identity,
     mail,
     admissions,
+    externalIdentities: (() => {
+      if (
+        input.EXTERNAL_IDENTITIES_ENABLED !== undefined &&
+        !["true", "false"].includes(input.EXTERNAL_IDENTITIES_ENABLED)
+      )
+        throw new Error("Invalid environment fields: EXTERNAL_IDENTITIES_ENABLED");
+      if (input.EXTERNAL_IDENTITIES_ENABLED === "true" && !identity)
+        throw new Error(
+          "Invalid environment fields: EXTERNAL_IDENTITIES_ENABLED, IDENTITY_ENABLED",
+        );
+      return input.EXTERNAL_IDENTITIES_ENABLED === "true";
+    })(),
     database: {
       host: env.MYSQL_HOST,
       port: env.MYSQL_PORT,

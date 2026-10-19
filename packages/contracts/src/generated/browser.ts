@@ -2711,8 +2711,19 @@ export interface components {
             truckersMp: {
                 checkedAt: string | null;
                 displayName: string | null;
+                failure: ("transport" | "timeout" | "rate_limited" | "unavailable" | "invalid_response") | null;
+                found: boolean | null;
+                lastAttemptAt: string | null;
+                playerId: string | null;
                 /** @enum {string} */
                 status: "available" | "stale" | "unavailable" | "not_linked";
+                vtc: {
+                    id: string | null;
+                    inVtc: boolean;
+                    memberId: string | null;
+                    name: string | null;
+                    tag: string | null;
+                } | null;
             };
         };
         IdentityVerification: {

@@ -83,6 +83,10 @@ VTC-014 adds GET /mail-deliveries/{deliveryId} and bodyless POST /mail-deliverie
 
 Mail reserves same-origin /password-reset?token=... and /invitation?token=... entry URLs for the VTC-017 UI flows. The current package renders links but supplies no redemption page. That UI owner must consume tokens through the reviewed POST contracts, remove secrets from browser history/referrers and avoid URL/body logging; a GET link never mutates account state.
 
+## Implemented external identities contract
+
+VTC-018 implements the existing Steam request/proof/replacement and `/me/identity` routes, with an additive basic TruckersMP projection (`found`, exact player/VTC/member IDs, last attempt and fixed failure category). Successful player absence, no VTC and provider failure remain distinct. The dedicated signed GET callback and clean completion transport are documented in [external identities](../../development/external-identities.md#browser-and-callback-flow); they are outside the ordinary JSON/Origin/CSRF contract. Safe proof reads expose no assertion/state/nonce, and a staff replacement takes its candidate only from the member-owned verified request. `/me` reflects the current verified link. Steam does not replace email/password login or grant provider facts authority over local access/discipline. Telemetry consumers and account UI retain their own gates.
+
 ## Implemented admissions contract
 
 VTC-015 implements the explicit admissions routes and adds `GET /admin/applications/{applicationId}/history`, returning the same bounded application page for retained applications sharing the normalized email. Optional Discord/introduction may be omitted or null and are normalized to null in staff DTOs. Application decisions expose immutable reviewer/time/version/outcome/reason metadata and safe delivery ID. Invitation status exposes current safe mail state and delivery ID, with disabled mail `not_requested` and currently absent adapter `unavailable`; `accepted`/`simulated` never claim inbox delivery. The transport's leading RU `Accept-Language` range selects Russian mail, otherwise English.

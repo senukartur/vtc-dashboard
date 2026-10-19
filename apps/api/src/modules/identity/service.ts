@@ -15,6 +15,8 @@ import {
   commandResults,
   company,
   eq,
+  gt,
+  inArray,
   limits,
   lt,
   membership,
@@ -62,6 +64,7 @@ export interface PrivateChallenge {
   emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
+  steamProjection?: (tx: TxContext, userId: string) => Promise<boolean>;
   // Implementations must persist on this tx and perform network delivery after commit.
   delivery?: {
     enqueue(tx: TxContext, input: PrivateChallenge): Promise<void>;
@@ -297,6 +300,7 @@ export function createIdentity(
     const [identity] = await client(tx).select().from(user).where(eq(user.id, id));
     if (!row || !identity || row.status !== "active") throw identityError(401);
     const assigned = await memberRoles(tx, id, current);
+    const steamVerified = (await ports.steamProjection?.(tx, id)) ?? false;
     return {
       version: row.version,
       data: {
@@ -305,9 +309,9 @@ export function createIdentity(
         emailVerified: identity.emailVerified,
         capabilities: capabilities(assigned),
         preferences: { locale: row.locale, displayTimezone: row.displayTimezone },
-        steamVerified: false,
+        steamVerified,
         identityEpoch: row.identityEpoch,
-        missingSetup: ["steam", "company_reporting_timezone"],
+        missingSetup: [...(steamVerified ? [] : ["steam"]), "company_reporting_timezone"],
       },
     };
   }
@@ -316,7 +320,11 @@ export function createIdentity(
     actorId: string | null,
     id: string,
     current: Company,
-    operation: "membership.changed" | "leadership.transferred" = "membership.changed",
+    operation:
+      | "membership.changed"
+      | "leadership.transferred"
+      | "steam.linked"
+      | "steam.replaced" = "membership.changed",
   ) {
     if (!ports.accessEvents) throw identityError(503);
     const [member] = await client(tx).select().from(membership).where(eq(membership.userId, id));
@@ -522,6 +530,92 @@ export function createIdentity(
   return {
     config,
     prepareCredential,
+    // External identities participates in this transaction host and established failure policy.
+    transaction: run,
+    externalCommand: once,
+    async externalContext(tx: TxContext, actor: Actor, targetId = actor.userId, staff = false) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [actor.userId, targetId]);
+      await checkActor(tx, actor, current, locked.get(actor.userId));
+      if (staff) requireCapability(actor, "members.manage");
+      else if (targetId !== actor.userId) throw identityError(404);
+      const target = locked.get(targetId);
+      if (!target) throw identityError(404);
+      return { ...target, directorUserId: current.directorUserId };
+    },
+    async externalSessionCurrent(
+      tx: TxContext,
+      input: {
+        userId: string;
+        sessionId: string;
+        accessEpoch: number;
+        credentialEpoch: number;
+        identityEpoch: number;
+        emailEpoch: number;
+      },
+    ) {
+      const row = (await lockMembers(tx, [input.userId])).get(input.userId);
+      const [found] = await client(tx)
+        .select()
+        .from(session)
+        .where(and(eq(session.id, input.sessionId), eq(session.userId, input.userId)))
+        .for("update");
+      return (
+        !!row &&
+        row.status === "active" &&
+        row.accessEpoch === input.accessEpoch &&
+        row.identityEpoch === input.identityEpoch &&
+        row.credentialEpoch === input.credentialEpoch &&
+        row.emailEpoch === input.emailEpoch &&
+        !!found &&
+        found.expiresAt > now() &&
+        found.accessEpoch === row.accessEpoch &&
+        found.credentialEpoch === row.credentialEpoch
+      );
+    },
+    async externalValidSessions(
+      tx: TxContext,
+      target: { userId: string; accessEpoch: number; credentialEpoch: number },
+      sessionIds: readonly string[],
+    ) {
+      const ids = [...new Set(sessionIds)];
+      if (ids.length > 100) throw new Error("EXTERNAL_PROOF_PAGE_BOUND_EXCEEDED");
+      if (!ids.length) return new Set<string>();
+      const rows = await client(tx)
+        .select({ id: session.id })
+        .from(session)
+        .where(
+          and(
+            eq(session.userId, target.userId),
+            eq(session.accessEpoch, target.accessEpoch),
+            eq(session.credentialEpoch, target.credentialEpoch),
+            gt(session.expiresAt, now()),
+            inArray(session.id, ids),
+          ),
+        );
+      return new Set(rows.map((row) => row.id));
+    },
+    async externalChanged(
+      tx: TxContext,
+      actorId: string,
+      userId: string,
+      operation: "steam.linked" | "steam.replaced",
+    ) {
+      const current = await lockCompany(tx);
+      const member = (await lockMembers(tx, [userId])).get(userId);
+      if (member?.status !== "active") throw identityError(409);
+      await ports.delivery?.invalidate?.(tx, { userId });
+      await client(tx)
+        .update(challenges)
+        .set({ consumed: true })
+        .where(eq(challenges.userId, userId));
+      await client(tx)
+        .update(membership)
+        .set({ identityEpoch: member.identityEpoch + 1, version: member.version + 1 })
+        .where(eq(membership.userId, userId));
+      await changed(tx, actorId, userId, current, operation);
+      return { version: member.version + 1, identityEpoch: member.identityEpoch + 1 };
+    },
     // Admissions locks the company before its own rows; no identity table access leaks.
     async onboardingCompany(tx: TxContext, shared = false) {
       if (!shared) return { id: (await lockCompany(tx)).id };

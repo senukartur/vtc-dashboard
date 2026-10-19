@@ -11,12 +11,17 @@ import {
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import { admissionsEvents, identityAccessEvents } from "../platform/outbox/events.js";
+import {
+  createExternalIdentities,
+  steamProjection,
+} from "../modules/external-identities/service.js";
 
 export function composeIdentity(
   unit: UnitOfWork,
   identityConfig: IdentityConfig,
   mail?: MessagingConfig & { apiKey?: string },
   admissionsConfig?: AdmissionsConfig,
+  externalEnabled = false,
 ) {
   let identity: Identity;
   let admissions: Admissions | undefined;
@@ -41,6 +46,7 @@ export function composeIdentity(
     : undefined;
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    ...(externalEnabled ? { steamProjection: steamProjection(unit) } : {}),
     ...(messaging ? { delivery: messaging.delivery } : {}),
   });
   if (admissionsConfig)
@@ -58,5 +64,10 @@ export function composeIdentity(
           }
         : {}),
     });
-  return { identity, ...(messaging ? { messaging } : {}), ...(admissions ? { admissions } : {}) };
+  return {
+    identity,
+    ...(externalEnabled ? { externalIdentities: createExternalIdentities(unit, identity) } : {}),
+    ...(messaging ? { messaging } : {}),
+    ...(admissions ? { admissions } : {}),
+  };
 }

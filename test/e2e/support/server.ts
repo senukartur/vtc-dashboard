@@ -38,12 +38,28 @@ try {
     name: "Synthetic Browser Member",
     password,
   });
+  for (const project of ["desktop", "tablet", "mobile"]) {
+    const credential = await identity.prepareCredential(
+      createHmac("sha256", guardedAllocation().token)
+        .update(`browser-steam-${project}`)
+        .digest("base64url"),
+    );
+    await unit.run((tx) =>
+      identity.insertWithCredential(tx, {
+        userId: crypto.randomUUID(),
+        email: `browser-steam-${project}@example.invalid`,
+        name: "Synthetic Browser Steam Member",
+        roles: ["driver"],
+        ...credential,
+      }),
+    );
+  }
 } catch {
   throw new Error("SYNTHETIC_BROWSER_IDENTITY_SETUP_FAILED");
 } finally {
   await unit.close();
 }
-const app = spawn(process.execPath, ["apps/api/dist/server.js"], {
+const app = spawn(process.execPath, ["--import", "tsx", "test/e2e/support/runtime.ts"], {
   stdio: "inherit",
   env: {
     ...safeChildEnvironment(),
@@ -53,6 +69,9 @@ const app = spawn(process.execPath, ["apps/api/dist/server.js"], {
     IDENTITY_ENABLED: "true",
     IDENTITY_SECRET: secret,
     IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    EXTERNAL_IDENTITIES_ENABLED: "true",
+    VTC_TEST_CONFIG: process.env.VTC_TEST_CONFIG,
+    DB_TEST_RESET_ACK: process.env.DB_TEST_RESET_ACK,
     ADMISSIONS_ENABLED: "true",
     ADMISSIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
     MAIL_MODE: "local",

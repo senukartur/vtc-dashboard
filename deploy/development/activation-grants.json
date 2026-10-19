@@ -20,7 +20,13 @@
     "admissions_invitations": ["SELECT", "INSERT", "UPDATE"],
     "admissions_command_results": ["SELECT", "INSERT", "DELETE"],
     "admissions_limits": ["SELECT", "INSERT", "UPDATE", "DELETE"],
-    "qualification_initial_assignments": ["SELECT", "INSERT"]
+    "qualification_initial_assignments": ["SELECT", "INSERT"],
+    "external_steam_accounts": ["SELECT", "INSERT"],
+    "external_steam_changes": ["SELECT", "INSERT"],
+    "external_steam_links": ["SELECT", "INSERT", "UPDATE"],
+    "external_steam_proofs": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "external_steam_nonces": ["SELECT", "INSERT", "DELETE"],
+    "external_truckers_cache": ["SELECT", "INSERT", "UPDATE", "DELETE"]
   },
   "jobs": {
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],
