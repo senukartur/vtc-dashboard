@@ -19,7 +19,7 @@
     "admissions_decisions": ["SELECT", "INSERT", "UPDATE"],
     "admissions_invitations": ["SELECT", "INSERT", "UPDATE"],
     "admissions_command_results": ["SELECT", "INSERT", "DELETE"],
-    "admissions_limits": ["SELECT", "INSERT", "UPDATE"],
+    "admissions_limits": ["SELECT", "INSERT", "UPDATE", "DELETE"],
     "qualification_initial_assignments": ["SELECT", "INSERT"]
   },
   "jobs": {

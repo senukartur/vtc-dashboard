@@ -18,6 +18,7 @@ export async function registerAdmissionsRoutes(
   admissions: Admissions,
 ) {
   const csrf = csrfProtection(identity.config);
+  const authenticated = new WeakMap<FastifyRequest, Actor>();
   const owned = (route: string) =>
     route === "/api/v1/public/applications" ||
     route === "/api/v1/public/invitation-redemptions" ||
@@ -26,15 +27,17 @@ export async function registerAdmissionsRoutes(
   app.addHook("onRequest", async (request) => {
     const route = request.routeOptions.url;
     if (!route || !owned(route)) return;
-    await admissions.rateLimit(
-      route === "/api/v1/public/applications"
-        ? "submit"
-        : route === "/api/v1/public/invitation-redemptions"
-          ? "redeem"
-          : request.method === "GET"
-            ? "staff_read"
-            : "staff_command",
-      request.ip,
+    if (
+      route === "/api/v1/public/applications" ||
+      route === "/api/v1/public/invitation-redemptions"
+    ) {
+      await admissions.rateLimit(route.endsWith("applications") ? "submit" : "redeem", request.ip);
+      return;
+    }
+    if (!request.headers.cookie) throw identityError(401);
+    await admissions.admitStaff(
+      await actor(request),
+      request.method === "GET" ? "staff_read" : "staff_command",
     );
   });
   app.addHook("preValidation", async (request) => {
@@ -48,10 +51,15 @@ export async function registerAdmissionsRoutes(
     if ((route.endsWith("/copy-link") || route.endsWith("/reissue")) && request.body !== undefined)
       throw identityError(422);
   });
-  const actor = (request: FastifyRequest) =>
-    identity.authenticate(
+  const actor = async (request: FastifyRequest) => {
+    const cached = authenticated.get(request);
+    if (cached) return cached;
+    const current = await identity.authenticate(
       new Headers(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
     );
+    authenticated.set(request, current);
+    return current;
+  };
   async function publicScope(request: FastifyRequest) {
     let current: Actor | undefined;
     try {

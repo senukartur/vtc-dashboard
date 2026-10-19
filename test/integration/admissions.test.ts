@@ -17,8 +17,8 @@ import {
 import { account, membership } from "@vtc/db/identity-schema";
 import { mailDeliveries } from "@vtc/db/messaging-schema";
 import { initialQualifications } from "@vtc/db/qualifications-schema";
-import type { Connection, RowDataPacket } from "mysql2/promise";
 import { getTableName } from "drizzle-orm";
+import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
@@ -30,6 +30,7 @@ import {
   type AdmissionsPorts,
   createAdmissions,
 } from "../../apps/api/src/modules/admissions/service.ts";
+import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
   type Actor,
   createIdentity,
@@ -764,7 +765,7 @@ test("bounded persistent rate categories isolate public submission/redemption an
   for (let n = 0; n < 5; n++)
     expect(await status(harness().admissions.rateLimit("submit", source))).toBe(429);
   await admissions.rateLimit("redeem", source);
-  await admissions.rateLimit("staff_read", source);
+  await admissions.admitStaff(director, "staff_read");
   const [global] = await control.query<RowDataPacket[]>(
     "SELECT count FROM admissions_limits WHERE bucket='global:submit'",
   );
@@ -773,7 +774,7 @@ test("bounded persistent rate categories isolate public submission/redemption an
   let distinct = "synthetic-other";
   while (admissionsSecurity(config).digest("source", distinct)[0] === sourceSlot) distinct += "x";
   await admissions.rateLimit("submit", distinct);
-  expect(await count("admissions_limits")).toBeLessThanOrEqual(1028);
+  expect(await count("admissions_limits")).toBeLessThanOrEqual(1026);
   await control.query("DELETE FROM admissions_limits");
   for (let n = 0; n < 20; n++) await admissions.rateLimit("redeem", "127.0.0.1");
   const app = await createApp({ identity, admissions, checkReadiness: async () => true }),
@@ -798,6 +799,245 @@ test("bounded persistent rate categories isolate public submission/redemption an
   instant += 60000;
   await admissions.rateLimit("submit", source);
   instant = saved;
+});
+
+test("anonymous and unauthorized HTTP floods cannot charge staff quotas; current staff quotas follow users across sessions and recreation", async () => {
+  const prepared = await identity.prepareCredential(password);
+  async function signedIn(roles: ("trainee" | "driver" | "dispatcher" | "deputy_director")[]) {
+    const userId = newId(),
+      email = `${userId}@example.invalid`;
+    await unit.run((tx) =>
+      identity.insertWithCredential(tx, {
+        userId,
+        email,
+        name: "Fictional Admission Guard",
+        roles,
+        ...prepared,
+      }),
+    );
+    const login = await identity.login(email, password);
+    const cookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+    return { cookie, actor: await identity.authenticate(new Headers({ cookie })) };
+  }
+  const unauthorized = [
+    await signedIn(["trainee"]),
+    await signedIn(["driver"]),
+    await signedIn(["dispatcher"]),
+    await signedIn([]),
+  ];
+  const stale = await signedIn(["deputy_director"]),
+    inactive = await signedIn(["deputy_director"]);
+  await control.execute(
+    "UPDATE identity_memberships SET access_epoch=access_epoch+1 WHERE user_id=?",
+    [stale.actor.userId],
+  );
+  await control.execute("UPDATE identity_memberships SET status='inactive' WHERE user_id=?", [
+    inactive.actor.userId,
+  ]);
+  const deputy = await signedIn(["deputy_director"]),
+    fixture = await approved();
+  const app = await createApp({ identity, admissions, checkReadiness: async () => true });
+  const auth = vi.spyOn(identity, "authenticate");
+  try {
+    for (let i = 0; i < 205; i++) {
+      for (const method of ["GET", "POST"] as const) {
+        const response = await app.inject({
+          method,
+          remoteAddress: `192.0.2.${(i % 254) + 1}`,
+          url:
+            method === "GET"
+              ? "/api/v1/admin/applications"
+              : `/api/v1/admin/invitations/${fixture.invitationId}/copy-link`,
+          ...(method === "POST"
+            ? { headers: { "content-type": "application/json" }, payload: "{" }
+            : {}),
+        });
+        expect(response.statusCode).toBe(401);
+      }
+    }
+    expect(auth.mock.calls.length).toBe(0);
+    for (let i = 0; i < 205; i++)
+      expect(
+        (
+          await app.inject({
+            url: "/api/v1/admin/applications",
+            remoteAddress: `198.51.100.${i + 1}`,
+            headers: { cookie: "vtc_dev_session=nonfunctional-invalid-signature" },
+          })
+        ).statusCode,
+      ).toBe(401);
+    for (const [i, current] of [...unauthorized, stale, inactive].entries()) {
+      for (let request = 0; request < 35; request++) {
+        for (const method of ["GET", "POST"] as const) {
+          const response = await app.inject({
+            method,
+            url:
+              method === "GET"
+                ? "/api/v1/admin/applications"
+                : `/api/v1/admin/invitations/${fixture.invitationId}/copy-link`,
+            headers: { cookie: current.cookie, "content-type": "application/json" },
+            ...(method === "POST" ? { payload: "{" } : {}),
+          });
+          expect(response.statusCode).toBe(i < unauthorized.length ? 403 : 401);
+        }
+      }
+    }
+    expect(await count("admissions_limits")).toBe(0);
+    const cookies = await Promise.all(
+      [0, 1].map(async () => {
+        const login = await identity.login("admissions-director@example.invalid", password);
+        return login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+      }),
+    );
+    const directorActors = await Promise.all(
+      cookies.map((cookie) => identity.authenticate(new Headers({ cookie }))),
+    );
+    const directorActor = directorActors[0] as Actor;
+    const command = (cookie: string, actor: Actor) =>
+      app.inject({
+        method: "POST",
+        url: `/api/v1/admin/invitations/${fixture.invitationId}/copy-link`,
+        headers: {
+          cookie,
+          origin,
+          "x-csrf-token": csrfProtection(identityConfig).issue({}, actor).token,
+          "if-match": '"v1"',
+        },
+      });
+    for (let n = 0; n < 20; n++) {
+      auth.mockClear();
+      expect(
+        (
+          await app.inject({
+            url: "/api/v1/admin/applications",
+            headers: { cookie: cookies[n % 2] as string },
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(auth.mock.calls.length).toBe(1);
+      auth.mockClear();
+      expect(
+        (await command(cookies[n % 2] as string, directorActors[n % 2] as Actor)).statusCode,
+      ).toBe(200);
+      expect(auth.mock.calls.length).toBe(1);
+    }
+    expect(
+      (
+        await app.inject({
+          url: "/api/v1/admin/applications",
+          headers: { cookie: cookies[1] as string },
+        })
+      ).statusCode,
+    ).toBe(429);
+    expect((await command(cookies[0] as string, directorActor)).statusCode).toBe(429);
+    expect(await status(harness().admissions.admitStaff(directorActor, "staff_read"))).toBe(429);
+    expect(
+      (await app.inject({ url: "/api/v1/admin/applications", headers: { cookie: deputy.cookie } }))
+        .statusCode,
+    ).toBe(200);
+    expect((await command(deputy.cookie, deputy.actor)).statusCode).toBe(200);
+    expect(await count("admissions_limits")).toBe(4);
+    const [buckets] = await control.query<RowDataPacket[]>("SELECT bucket FROM admissions_limits");
+    expect(buckets.every((r) => /^staff_(read|command):[0-9a-f]{16}$/.test(String(r.bucket)))).toBe(
+      true,
+    );
+  } finally {
+    auth.mockRestore();
+    await app.close();
+  }
+});
+
+test("staff rate allocation and bounded old-window cleanup stay atomic at the strict per-category cap", async () => {
+  const security = admissionsSecurity(config),
+    window = Math.floor(instant / 60000);
+  const bucket = `staff_read:${security.digest("staff-actor", director.userId).subarray(0, 8).toString("hex")}`;
+  for (const category of ["staff_read", "staff_command"] as const)
+    await control.query("INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?", [
+      Array.from({ length: 256 }, (_, i) => [
+        `${category}:${i.toString(16).padStart(16, "0")}`,
+        window,
+        1,
+      ]),
+    ]);
+  await control.query("INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?", [
+    ["submit", "redeem"].flatMap((category) => [
+      ...Array.from({ length: 256 }, (_, i) => [`${category}:${i}`, window, 0]),
+      [`global:${category}`, window, 0],
+    ]),
+  ]);
+  expect(await count("admissions_limits")).toBe(1026);
+  expect(await status(admissions.admitStaff(director, "staff_read"))).toBe(429);
+  expect(await status(admissions.admitStaff(director, "staff_command"))).toBe(429);
+  expect(await count("admissions_limits")).toBe(1026);
+  await control.execute("DELETE FROM admissions_limits WHERE bucket='staff_read:0000000000000000'");
+  for (let batch = 0; batch < 4; batch++) {
+    const outcomes = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        status(harness().admissions.admitStaff(director, "staff_read")),
+      ),
+    );
+    expect(outcomes.every((code) => code === 200)).toBe(true);
+  }
+  expect(await count("admissions_limits")).toBe(1026);
+  const [charged] = await control.execute<RowDataPacket[]>(
+    "SELECT count FROM admissions_limits WHERE bucket=?",
+    [bucket],
+  );
+  expect(Number(charged[0]?.count)).toBe(8);
+  const userId = newId(),
+    sessionId = newId();
+  await unit.run((tx) =>
+    identity.insertWithCredential(tx, {
+      userId,
+      email: `${userId}@example.invalid`,
+      name: "Fictional Slot Competitor",
+      roles: ["deputy_director"],
+      passwordHash: "nonfunctional-test-hash",
+    }),
+  );
+  await control.execute(
+    "INSERT INTO identity_sessions(id,token,user_id,expires_at,created_at,updated_at,access_epoch,credential_epoch) VALUES (?,?,?,UTC_TIMESTAMP(3)+INTERVAL 1 DAY,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3),1,1)",
+    [sessionId, newId(), userId],
+  );
+  const competitor: Actor = {
+    userId,
+    sessionId,
+    accessEpoch: 1,
+    credentialEpoch: 1,
+    capabilities: [],
+  };
+  await control.execute("DELETE FROM admissions_limits WHERE bucket=?", [bucket]);
+  const contenders = [director, competitor];
+  const race = await Promise.all(
+    contenders.map((actor) => status(harness().admissions.admitStaff(actor, "staff_read"))),
+  );
+  expect([...race].sort()).toEqual([200, 429]);
+  expect(await count("admissions_limits")).toBe(1026);
+  const winner = contenders[race.indexOf(200)] as Actor;
+  const winnerBucket = `staff_read:${security.digest("staff-actor", winner.userId).subarray(0, 8).toString("hex")}`;
+  const saved = instant;
+  instant += 60000;
+  try {
+    // Keep this actor current while measuring exactly100 old rows removed per pass.
+    await control.execute("UPDATE admissions_limits SET `window`=?,count=0 WHERE bucket=?", [
+      window + 1,
+      winnerBucket,
+    ]);
+    await admissions.admitStaff(winner, "staff_read");
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'staff_read:%'")).toBe(156);
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'staff_command:%'")).toBe(256);
+    const [fresh] = await control.execute<RowDataPacket[]>(
+      "SELECT count FROM admissions_limits WHERE bucket=?",
+      [winnerBucket],
+    );
+    expect(Number(fresh[0]?.count)).toBe(1);
+    await harness().admissions.admitStaff(winner, "staff_read");
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'staff_read:%'")).toBe(56);
+    await admissions.admitStaff(winner, "staff_read");
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'staff_read:%'")).toBe(1);
+  } finally {
+    instant = saved;
+  }
 });
 test("strict HTTP optional fields, invalid facts, Origin/CSRF, bounded query and no-store/no-session contracts", async () => {
   const app = await createApp({
@@ -876,9 +1116,17 @@ test("strict HTTP optional fields, invalid facts, Origin/CSRF, bounded query and
       payload: "fictional",
     });
     expect(unsupported.statusCode).toBe(415);
-    expect((await app.inject({ url: "/api/v1/admin/applications?limit=101" })).statusCode).toBe(
-      422,
-    );
+    const staffLogin = await identity.login("admissions-director@example.invalid", password);
+    expect(
+      (
+        await app.inject({
+          url: "/api/v1/admin/applications?limit=101",
+          headers: {
+            cookie: staffLogin.cookies.map((c) => c.split(";", 1)[0]).join("; "),
+          },
+        })
+      ).statusCode,
+    ).toBe(422);
   } finally {
     await app.close();
   }
@@ -1046,25 +1294,28 @@ test("result expiry uses its selective index with substantial retained history a
         ),
     );
   await control.query("ANALYZE TABLE admissions_command_results");
-  for (const shape of ["eligible", "empty"] as const) {
-    const [plan] = await control.execute<RowDataPacket[]>(
-      "EXPLAIN DELETE FROM admissions_command_results WHERE expires_at<=? LIMIT 100",
-      [time().toISOString()],
-    );
-    expect(plan.length > 0).toBe(true);
-    expect(plan[0]?.key === "admissions_result_expiry").toBe(true);
-    console.log(
-      JSON.stringify({
-        event: "admissions_query_plan",
-        shape: `result_expiry_${shape}`,
-        access: String(plan[0]?.type),
-        index: String(plan[0]?.key),
-        rows: Number(plan[0]?.rows ?? 0),
-        retainedRows: 5000,
-      }),
-    );
-    await admissions.purge();
-  }
+  const [eligible] = await control.execute<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM admissions_command_results WHERE expires_at<=?",
+    [time().toISOString()],
+  );
+  expect(Number(eligible[0]?.n)).toBe(0);
+  const [plan] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN DELETE FROM admissions_command_results WHERE expires_at<=? LIMIT 100",
+    [time().toISOString()],
+  );
+  expect(plan.length > 0).toBe(true);
+  expect(plan[0]?.key === "admissions_result_expiry").toBe(true);
+  console.log(
+    JSON.stringify({
+      event: "admissions_query_plan",
+      shape: "result_expiry_empty",
+      access: String(plan[0]?.type),
+      index: String(plan[0]?.key),
+      rows: Number(plan[0]?.rows ?? 0),
+      retainedRows: 5000,
+    }),
+  );
+  await admissions.purge();
   const [remaining] = await control.execute<RowDataPacket[]>(
     "SELECT COUNT(*) n FROM admissions_command_results WHERE expires_at>?",
     [time().toISOString()],

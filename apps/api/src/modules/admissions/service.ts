@@ -12,6 +12,7 @@ import {
   lt,
   lte,
   or,
+  sql,
 } from "@vtc/db/admissions-schema";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
@@ -349,31 +350,56 @@ export function createAdmissions(
   async function purge() {
     await cleanupAdmissions(unit, true, now);
   }
+  async function charge(tx: TxContext, bucket: string, maximum: number) {
+    const window = Math.floor(now().getTime() / 60000);
+    await client(tx)
+      .insert(limits)
+      .values({ bucket, window, count: 0 })
+      .onDuplicateKeyUpdate({ set: { bucket } });
+    const [row] = await client(tx)
+      .select()
+      .from(limits)
+      .where(eq(limits.bucket, bucket))
+      .for("update");
+    if (!row) throw identityError(503);
+    const count = row.window === window ? Math.min(row.count + 1, maximum + 1) : 1;
+    await client(tx).update(limits).set({ window, count }).where(eq(limits.bucket, bucket));
+    return count <= maximum;
+  }
   return {
     config,
-    async rateLimit(
-      category: "submit" | "redeem" | "staff_read" | "staff_command",
-      source: string,
-    ) {
+    async rateLimit(category: "submit" | "redeem", source: string) {
       const allowed = await run(async (tx) => {
-        const charge = async (bucket: string, maximum: number) => {
-          const window = Math.floor(now().getTime() / 60000);
-          await client(tx)
-            .insert(limits)
-            .values({ bucket, window, count: 0 })
-            .onDuplicateKeyUpdate({ set: { bucket } });
-          const [row] = await client(tx)
-            .select()
+        if (!(await charge(tx, `${category}:${crypto.digest("source", source)[0]}`, 20)))
+          return false;
+        return charge(tx, `global:${category}`, 200);
+      });
+      if (!allowed) throw identityError(429);
+    },
+    async admitStaff(actor: Actor, category: "staff_read" | "staff_command") {
+      const allowed = await run(async (tx) => {
+        // Current authority precedes quota mutation; the company lock serializes slot allocation.
+        await authority(tx, actor);
+        const window = Math.floor(now().getTime() / 60000),
+          owned = sql`${limits.bucket} LIKE ${`${category}:%`}`,
+          bucket = `${category}:${crypto.digest("staff-actor", actor.userId).subarray(0, 8).toString("hex")}`;
+        await client(tx)
+          .delete(limits)
+          .where(and(owned, lt(limits.window, window)))
+          .limit(100);
+        const [existing] = await client(tx)
+          .select({ bucket: limits.bucket })
+          .from(limits)
+          .where(eq(limits.bucket, bucket));
+        if (!existing) {
+          const occupied = await client(tx)
+            .select({ bucket: limits.bucket })
             .from(limits)
-            .where(eq(limits.bucket, bucket))
-            .for("update");
-          if (!row) throw identityError(503);
-          const count = row.window === window ? Math.min(row.count + 1, maximum + 1) : 1;
-          await client(tx).update(limits).set({ window, count }).where(eq(limits.bucket, bucket));
-          return count <= maximum;
-        };
-        if (!(await charge(`${category}:${crypto.digest("source", source)[0]}`, 20))) return false;
-        return charge(`global:${category}`, 200);
+            .where(owned)
+            .limit(256);
+          if (occupied.length >= 256) return false;
+        }
+        return charge(tx, bucket, 20);
       });
       if (!allowed) throw identityError(429);
     },
