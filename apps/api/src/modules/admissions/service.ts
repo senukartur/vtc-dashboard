@@ -350,8 +350,12 @@ export function createAdmissions(
   async function purge() {
     await cleanupAdmissions(unit, true, now);
   }
-  async function charge(tx: TxContext, bucket: string, maximum: number) {
-    const window = Math.floor(now().getTime() / 60000);
+  async function charge(
+    tx: TxContext,
+    bucket: string,
+    maximum: number,
+    window = Math.floor(now().getTime() / 60000),
+  ) {
     await client(tx)
       .insert(limits)
       .values({ bucket, window, count: 0 })
@@ -370,9 +374,46 @@ export function createAdmissions(
     config,
     async rateLimit(category: "submit" | "redeem", source: string) {
       const allowed = await run(async (tx) => {
-        if (!(await charge(tx, `${category}:${crypto.digest("source", source)[0]}`, 20)))
-          return false;
-        return charge(tx, `global:${category}`, 200);
+        const globalBucket = `global:${category}`,
+          owned = sql`${limits.bucket} LIKE ${`${category}:%`}`,
+          bucket = `${category}:${crypto.digest("source", source).subarray(0, 8).toString("hex")}`;
+        // Public allocation locks only its category guard, before every source row.
+        await client(tx)
+          .insert(limits)
+          .values({ bucket: globalBucket, window: 0, count: 0 })
+          .onDuplicateKeyUpdate({ set: { bucket: globalBucket } });
+        const [global] = await client(tx)
+          .select()
+          .from(limits)
+          .where(eq(limits.bucket, globalBucket))
+          .for("update");
+        if (!global) throw identityError(503);
+        const window = Math.floor(now().getTime() / 60000);
+        const globalCount = global.window === window ? global.count : 0;
+        // Saturated aggregate admission never allocates an unknown source.
+        if (globalCount >= 200) return false;
+        await client(tx)
+          .delete(limits)
+          .where(and(owned, lt(limits.window, window)))
+          .limit(100);
+        const [existing] = await client(tx)
+          .select({ bucket: limits.bucket })
+          .from(limits)
+          .where(eq(limits.bucket, bucket));
+        if (!existing) {
+          const occupied = await client(tx)
+            .select({ bucket: limits.bucket })
+            .from(limits)
+            .where(owned)
+            .limit(256);
+          if (occupied.length >= 256) return false;
+        }
+        if (!(await charge(tx, bucket, 20, window))) return false;
+        await client(tx)
+          .update(limits)
+          .set({ window, count: globalCount + 1 })
+          .where(eq(limits.bucket, globalBucket));
+        return true;
       });
       if (!allowed) throw identityError(429);
     },
@@ -399,7 +440,7 @@ export function createAdmissions(
             .limit(256);
           if (occupied.length >= 256) return false;
         }
-        return charge(tx, bucket, 20);
+        return charge(tx, bucket, 20, window);
       });
       if (!allowed) throw identityError(429);
     },

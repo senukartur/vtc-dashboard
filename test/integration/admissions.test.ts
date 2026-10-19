@@ -762,7 +762,7 @@ test("worker current validity suppresses mail replaced/consumed before its fence
 test("bounded persistent rate categories isolate public submission/redemption and deny before parsing/auth/password work", async () => {
   const source = "synthetic-flood";
   for (let n = 0; n < 20; n++) await admissions.rateLimit("submit", source);
-  for (let n = 0; n < 5; n++)
+  for (let n = 0; n < 205; n++)
     expect(await status(harness().admissions.rateLimit("submit", source))).toBe(429);
   await admissions.rateLimit("redeem", source);
   await admissions.admitStaff(director, "staff_read");
@@ -770,10 +770,29 @@ test("bounded persistent rate categories isolate public submission/redemption an
     "SELECT count FROM admissions_limits WHERE bucket='global:submit'",
   );
   expect(Number(global[0]?.count)).toBe(20);
-  const sourceSlot = admissionsSecurity(config).digest("source", source)[0];
-  let distinct = "synthetic-other";
-  while (admissionsSecurity(config).digest("source", distinct)[0] === sourceSlot) distinct += "x";
-  await admissions.rateLimit("submit", distinct);
+  const security = admissionsSecurity(config),
+    sourceSlot = security.digest("source", source)[0];
+  let distinct = "";
+  for (let i = 0; i < 20000; i++) {
+    const candidate = `synthetic-old-byte-collision:${i}`;
+    if (security.digest("source", candidate)[0] === sourceSlot) {
+      distinct = candidate;
+      break;
+    }
+  }
+  expect(Boolean(distinct)).toBe(true);
+  expect(
+    security
+      .digest("source", distinct)
+      .subarray(0, 8)
+      .equals(security.digest("source", source).subarray(0, 8)),
+  ).toBe(false);
+  for (let n = 0; n < 20; n++) await admissions.rateLimit("submit", distinct);
+  expect(await status(admissions.rateLimit("submit", distinct))).toBe(429);
+  const [afterCollision] = await control.query<RowDataPacket[]>(
+    "SELECT count FROM admissions_limits WHERE bucket='global:submit'",
+  );
+  expect(Number(afterCollision[0]?.count)).toBe(40);
   expect(await count("admissions_limits")).toBeLessThanOrEqual(1026);
   await control.query("DELETE FROM admissions_limits");
   for (let n = 0; n < 20; n++) await admissions.rateLimit("redeem", "127.0.0.1");
@@ -799,6 +818,128 @@ test("bounded persistent rate categories isolate public submission/redemption an
   instant += 60000;
   await admissions.rateLimit("submit", source);
   instant = saved;
+});
+
+test("public aggregate denial stays early and bounded for thousands of unknown sources without spending staff budgets", async () => {
+  for (let i = 0; i < 200; i++) await admissions.rateLimit("redeem", `synthetic-distributed:${i}`);
+  expect(await count("admissions_limits")).toBe(201);
+  const recreated = harness().admissions;
+  for (let i = 0; i < 2000; i++)
+    expect(await status(recreated.rateLimit("redeem", `synthetic-global-denied:${i}`))).toBe(429);
+  expect(await count("admissions_limits")).toBe(201);
+  const [aggregate] = await control.query<RowDataPacket[]>(
+    "SELECT count FROM admissions_limits WHERE bucket='global:redeem'",
+  );
+  expect(Number(aggregate[0]?.count)).toBe(200);
+  const app = await createApp({
+    identity,
+    admissions: recreated,
+    checkReadiness: async () => true,
+  });
+  const auth = vi.spyOn(identity, "authenticate"),
+    credential = vi.spyOn(identity, "prepareCredential");
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/public/invitation-redemptions",
+      remoteAddress: "203.0.113.100",
+      headers: { "content-type": "application/json" },
+      payload: "{",
+    });
+    expect(response.statusCode).toBe(429);
+    expect(auth.mock.calls.length).toBe(0);
+    expect(credential.mock.calls.length).toBe(0);
+    expect(await count("admissions_limits")).toBe(201);
+    await admissions.admitStaff(director, "staff_read");
+    await admissions.rateLimit("submit", "synthetic-independent-submit");
+  } finally {
+    auth.mockRestore();
+    credential.mockRestore();
+    await app.close();
+  }
+});
+
+test("public source allocation has a strict cap, atomic last-slot races and bounded category-local window cleanup", async () => {
+  const security = admissionsSecurity(config),
+    window = Math.floor(instant / 60000);
+  await control.query("INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?", [
+    ["submit", "redeem"].flatMap((category) => [
+      ...Array.from({ length: 256 }, (_, i) => [
+        `${category}:${i.toString(16).padStart(16, "0")}`,
+        window,
+        0,
+      ]),
+      [`global:${category}`, window, 0],
+    ]),
+  ]);
+  expect(await count("admissions_limits")).toBe(514);
+  expect(await status(admissions.rateLimit("submit", "synthetic-no-capacity"))).toBe(429);
+  expect(await count("admissions_limits")).toBe(514);
+  await control.execute("DELETE FROM admissions_limits WHERE bucket='submit:0000000000000000'");
+  const contenders = ["synthetic-last-slot-a", "synthetic-last-slot-b"];
+  const race = await Promise.all(
+    contenders.map((source) => status(harness().admissions.rateLimit("submit", source))),
+  );
+  expect([...race].sort()).toEqual([200, 429]);
+  expect(await count("admissions_limits")).toBe(514);
+  const winner = contenders[race.indexOf(200)] as string;
+  await harness().admissions.rateLimit("submit", winner);
+  const bucket = `submit:${security.digest("source", winner).subarray(0, 8).toString("hex")}`;
+  const [charged] = await control.execute<RowDataPacket[]>(
+    "SELECT count FROM admissions_limits WHERE bucket=?",
+    [bucket],
+  );
+  expect(Number(charged[0]?.count)).toBe(2);
+  const saved = instant;
+  instant += 60000;
+  try {
+    await control.execute("UPDATE admissions_limits SET `window`=?,count=0 WHERE bucket=?", [
+      window + 1,
+      bucket,
+    ]);
+    await admissions.rateLimit("submit", winner);
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'submit:%'")).toBe(156);
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'redeem:%'")).toBe(256);
+    const [global] = await control.query<RowDataPacket[]>(
+      "SELECT count FROM admissions_limits WHERE bucket='global:submit'",
+    );
+    expect(Number(global[0]?.count)).toBe(1);
+    await harness().admissions.rateLimit("submit", winner);
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'submit:%'")).toBe(56);
+    await admissions.rateLimit("submit", winner);
+    expect(await count("admissions_limits", "WHERE bucket LIKE 'submit:%'")).toBe(1);
+  } finally {
+    instant = saved;
+  }
+});
+
+test("public category guards proceed while company authority is locked and coexist with staff admission", async () => {
+  const entered = deferred<void>(),
+    release = deferred<void>();
+  const holding = unit.run(async (tx) => {
+    await identity.onboardingCompany(tx);
+    entered.resolve();
+    await release.promise;
+  });
+  await bounded(entered.promise, "public_admission_company_locked");
+  try {
+    await bounded(
+      Promise.all([
+        admissions.rateLimit("submit", "synthetic-company-independent"),
+        admissions.rateLimit("redeem", "synthetic-company-independent"),
+      ]),
+      "public_admission_without_company_lock",
+    );
+  } finally {
+    release.resolve();
+    await holding;
+  }
+  await Promise.all([
+    admissions.rateLimit("submit", "synthetic-cross-category"),
+    admissions.rateLimit("redeem", "synthetic-cross-category"),
+    admissions.admitStaff(director, "staff_read"),
+  ]);
+  expect(await count("admissions_limits")).toBe(7);
 });
 
 test("anonymous and unauthorized HTTP floods cannot charge staff quotas; current staff quotas follow users across sessions and recreation", async () => {
@@ -961,7 +1102,11 @@ test("staff rate allocation and bounded old-window cleanup stay atomic at the st
     ]);
   await control.query("INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?", [
     ["submit", "redeem"].flatMap((category) => [
-      ...Array.from({ length: 256 }, (_, i) => [`${category}:${i}`, window, 0]),
+      ...Array.from({ length: 256 }, (_, i) => [
+        `${category}:${i.toString(16).padStart(16, "0")}`,
+        window,
+        0,
+      ]),
       [`global:${category}`, window, 0],
     ]),
   ]);
