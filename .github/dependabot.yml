@@ -14,6 +14,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: node
+        versions: ["< 24", ">= 25"]
+      - dependency-name: mysql
+        versions: ["< 8.4", ">= 8.5"]
   - package-ecosystem: docker-compose
     directories:
       - /
@@ -22,5 +27,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: node
+        versions: ["< 24", ">= 25"]
+      - dependency-name: mysql
+        versions: ["< 8.4", ">= 8.5"]
 # Root pnpm 12 hosted lockfile updating remains unverified; weekly manual coverage
 # and the dated removal condition are documented in docs/development/review.md.
