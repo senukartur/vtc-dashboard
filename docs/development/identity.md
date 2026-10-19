@@ -81,3 +81,5 @@ The default server now composes the [messaging adapter](../operations/email.md) 
 ## Admissions integration
 
 VTC-015 implements the [admissions coordinator](admissions.md) using identity-owned current-company/authority, normalized-email-existence, prepared-credential, same-transaction provisioning and access-event facades. No admissions repository reaches through identity tables. Invitation redemption supplies the same transaction for account, active Trainee membership and selected-game initial assignments, never issues an automatic session and retains unverified email. Existing active/inactive identities are rejected rather than adopted; former-member reinstatement remains the identity workflow. Identity defaults and protected director flows remain unchanged. See the admissions guide for current generation/mail fencing, opt-in key handling and exact-candidate verification gates.
+
+[VTC-017 account screens](account.md) now consume these existing routes, including current-email verification, protected password change and reloadable two-proof email replacement. This browser integration does not change identity policy or activate a hosted service.

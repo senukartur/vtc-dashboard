@@ -52,6 +52,7 @@ export async function createApp(options: AppOptions) {
   app.addHook("onSend", async (request, reply) => {
     if (!["/", "/en"].includes(request.url)) reply.header("X-Robots-Tag", "noindex, nofollow");
     reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
     if (
       ![200, 206, 304].includes(reply.statusCode) ||
       reply.getHeader("cache-control") !== assetCache

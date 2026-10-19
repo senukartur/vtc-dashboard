@@ -18,7 +18,7 @@ Enabled input, select and outline-button boundaries use a separate neutral #7C87
 
 ## Locale, identity and exact values
 
-Core messages live in `i18n/core/resources.ts`; feature messages live beside the feature in `translations.ts`. Initialization uses explicit `core` and `foundation` namespaces, Russian by default and English fallback. `html.lang` follows the selected language. The preview intentionally includes one missing Russian namespace key in its explanatory dialog to exercise fallback. Preferences are memory-only; future authenticated preference storage belongs to its feature.
+Core messages live in `i18n/core/resources.ts`; feature messages live beside the feature in `translations.ts`. Initialization uses explicit `core` and `foundation` namespaces, Russian by default and English fallback. `html.lang` follows the selected language. The preview intentionally includes one missing Russian namespace key in its explanatory dialog to exercise fallback. Foundation-preview preferences remain memory-only. [VTC-017 account preferences](account.md) use the authenticated identity API.
 
 `shared/formatting.ts` converts canonical nonnegative decimal strings by shifting base-10 digits, formats integer parts with `BigInt`, and keeps every fractional digit. It never converts canonical distance/mass to JavaScript Number for display. Meters become kilometers and kilograms become tonnes; `null` is unavailable and `"0"` is zero. Invalid decimals fail closed. ISO UTC instants require a supplied display timezone; invalid dates/timezones show unavailable. Chart Number conversion is separately bounded and used only for approximate geometry; exact accessible values remain strings.
 
@@ -50,4 +50,4 @@ Onest is bundled unmodified from google/fonts commit 4c1db3aec83c67dd223dd82a68c
 
 ## Public landing composition
 
-[VTC-016](public-landing.md) adds the real RU/EN public company content at `/` and `/en`, with the membership form and narrow initial-HTML indexing. The real connection page moves to `/status`; `/foundation` and `/foundation/member` remain synthetic previews with their existing navigation. Public navigation links to the company sections, application, contacts and honest events/login boundary pages.
+[VTC-016](public-landing.md) adds the real RU/EN public company content at `/` and `/en`, with the membership form and narrow initial-HTML indexing. The real connection page moves to `/status`; `/foundation` and `/foundation/member` remain synthetic previews with their existing navigation. Public navigation links to the company sections, application, contacts and the events boundary and [account login](account.md).

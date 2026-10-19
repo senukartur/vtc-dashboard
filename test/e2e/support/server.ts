@@ -5,6 +5,7 @@ import { sql } from "@vtc/db/identity-schema";
 import { createIdentity } from "../../../apps/api/src/modules/identity/service.ts";
 import { guardedSettings, testConnection } from "../../persistence/support.ts";
 import { guardedAllocation, safeChildEnvironment } from "../../support/environment.ts";
+import { accountSecret } from "./account.ts";
 
 const settings = guardedSettings();
 const ownership = await testConnection();
@@ -13,7 +14,7 @@ await ownership.query(
 );
 await ownership.end();
 await runMigrations(settings);
-const secret = randomBytes(32).toString("hex");
+const secret = accountSecret("identity");
 const password = createHmac("sha256", guardedAllocation().token)
   .update("browser-identity-password")
   .digest("base64url");
@@ -55,7 +56,7 @@ const app = spawn(process.execPath, ["apps/api/dist/server.js"], {
     ADMISSIONS_ENABLED: "true",
     ADMISSIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
     MAIL_MODE: "local",
-    MAIL_ENCRYPTION_KEY: randomBytes(32).toString("hex"),
+    MAIL_ENCRYPTION_KEY: accountSecret("mail"),
     MAIL_SENDER: "sender@example.invalid",
     MYSQL_HOST: settings.host,
     MYSQL_PORT: String(settings.port),

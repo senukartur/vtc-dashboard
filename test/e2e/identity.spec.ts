@@ -3,7 +3,7 @@ import { guardedAllocation } from "../support/environment.ts";
 import { expect, test } from "./support/fixtures.ts";
 
 // Auth traces contain generated credentials/cookies; keep them out of artifact uploads.
-test.use({ trace: "off" });
+test.use({ trace: "off", screenshot: "off", video: "off" });
 test("built server accepts provisioned credential with browser cookies and rotates CSRF through logout", async ({
   context,
 }) => {

@@ -1,5 +1,5 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BrowserRouter,
@@ -16,8 +16,13 @@ import { publicContent } from "../features/landing/content.js";
 import { AppLayout } from "./AppLayout.js";
 import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
+import { SessionProvider, ProtectedAccount } from "./Session.js";
+import { AuthPage } from "../features/account/AuthPage.js";
+import { AccountPage } from "../features/account/AccountPage.js";
+import type { LinkHandoff } from "../features/account/link.js";
+import { createAppQueryClient } from "./session-cache.js";
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+const queryClient = createAppQueryClient();
 const memberPath = "/foundation/member";
 const FoundationPage = lazy(() =>
   import("../features/foundation/FoundationPage.js").then((module) => ({
@@ -25,10 +30,17 @@ const FoundationPage = lazy(() =>
   })),
 );
 
-function Shell() {
+function Shell({ handoff }: { handoff: LinkHandoff }) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
   const memberMatch = useMatch(memberPath);
+  const accountMatch = useMatch("/account/*");
+  const previousPath = useRef(location.pathname);
+  useEffect(() => {
+    if (previousPath.current !== location.pathname && !location.hash)
+      document.getElementById("main-content")?.focus();
+    previousPath.current = location.pathname;
+  }, [location.pathname, location.hash]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
       document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
@@ -68,7 +80,7 @@ function Shell() {
       />
     );
   return (
-    <AppLayout member={memberMatch !== null}>
+    <AppLayout member={memberMatch !== null || accountMatch !== null}>
       <RouteErrorBoundary
         key={["/", "/en"].includes(location.pathname) ? "public-landing" : location.pathname}
         fallbackTitle={t("renderError")}
@@ -86,7 +98,39 @@ function Shell() {
             <Route path="/en" element={<LandingPage />} />
             <Route path="/status" element={<ReadinessPage />} />
             <Route path="/events" element={<PublicBoundaryPage kind="events" />} />
-            <Route path="/login" element={<PublicBoundaryPage kind="login" />} />
+            <Route path="/login" element={<AuthPage key="login" kind="login" />} />
+            <Route
+              path="/password-recovery"
+              element={<AuthPage key="recovery" kind="recovery" />}
+            />
+            <Route
+              path="/password-reset"
+              element={
+                <AuthPage
+                  key="reset"
+                  kind="reset"
+                  handoff={handoff.path === "/password-reset" ? handoff : undefined}
+                />
+              }
+            />
+            <Route
+              path="/invitation"
+              element={
+                <AuthPage
+                  key="invitation"
+                  kind="invitation"
+                  handoff={handoff.path === "/invitation" ? handoff : undefined}
+                />
+              }
+            />
+            <Route
+              path="/account"
+              element={
+                <ProtectedAccount>
+                  <AccountPage />
+                </ProtectedAccount>
+              }
+            />
             <Route path="/foundation" element={<FoundationPage key="public" />} />
             <Route path={memberPath} element={<FoundationPage key="member" member />} />
             <Route
@@ -107,11 +151,13 @@ function Shell() {
   );
 }
 
-export function App() {
+export function App({ handoff }: { handoff: LinkHandoff }) {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Shell />
+        <SessionProvider>
+          <Shell handoff={handoff} />
+        </SessionProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

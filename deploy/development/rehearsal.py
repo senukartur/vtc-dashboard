@@ -298,6 +298,25 @@ def get(path, bearer=None, expected=200):
 get('/_operations/release', expected=401)
 get('/_operations/release', 'incorrect', expected=401)
 assert json.loads(get('/_operations/release', token))['revision'] == revision
+# Verify packaged account entry points without claiming hosted identity activation.
+for path in ['/login', '/account', '/password-recovery', '/password-reset?token=NONFUNCTIONAL_FIXTURE', '/invitation?token=NONFUNCTIONAL_FIXTURE']:
+    request = urllib.request.Request(f'https://proxy{path}', headers={'Accept': 'text/html'})
+    with urllib.request.urlopen(request, context=context, timeout=5) as response:
+        shell = response.read(65536).decode('utf-8')
+        assert response.status == 200, 'ACCOUNT_SHELL_STATUS_FAILED'
+        assert response.headers.get('Referrer-Policy') == 'no-referrer', 'ACCOUNT_REFERRER_HEADER_FAILED'
+        assert response.headers.get('X-Robots-Tag') == 'noindex, nofollow', 'ACCOUNT_NOINDEX_HEADER_FAILED'
+        assert response.headers.get('Cache-Control') == 'no-store', 'ACCOUNT_CACHE_HEADER_FAILED'
+    assert 'content="noindex, nofollow"' in shell, 'ACCOUNT_NOINDEX_META_FAILED'
+    assert 'name="referrer" content="no-referrer"' in shell, 'ACCOUNT_REFERRER_META_FAILED'
+    assert shell.index('history.replaceState') < shell.index('type="module"'), 'ACCOUNT_EARLY_INGRESS_FAILED'
+    assert 'NONFUNCTIONAL_FIXTURE' not in shell, 'ACCOUNT_INPUT_REFLECTION_FAILED'
+    import re
+    assets = re.findall(r'(?:src|href)="(/assets/[^" ]+\.(?:js|css))"', shell)
+    assert assets, 'ACCOUNT_ASSET_REFERENCES_MISSING'
+    for asset in assets:
+        get(asset)
+print('Packaged account shells: deep links, assets, referrer, noindex and no-store passed', flush=True)
 for path in ['/evidence/sentinel.txt', '/evidence%2fsentinel.txt', '/private-evidence/sentinel.txt', '/.env', '/uploads/sentinel.txt', '/%65vidence/sentinel.txt']:
     get(path, expected=404)
 compose(['stop', 'db'], revision=revision)
