@@ -1,32 +1,32 @@
-import { applicationId, newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import { performance } from "node:perf_hooks";
+import { applicationId, newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   and,
+  mailDeliveries as deliveries,
   eq,
   lte,
   mailCommands,
-  mailDeliveries as deliveries,
   sql,
 } from "@vtc/db/messaging-schema";
-import { type Actor, identityError, type PrivateChallenge } from "../identity/service.js";
 import {
-  createQueue,
   causes,
-  unknownCommit,
+  createQueue,
   ExternalAmbiguityError,
+  ExternalNotStartedError,
   ExternalRejectedError,
   ExternalRetryError,
-  ExternalNotStartedError,
-  JobReopenDeniedError,
   type Handler,
+  JobReopenDeniedError,
   retryTransaction,
+  unknownCommit,
 } from "../../platform/jobs/queue.js";
 import { closed, duplicateKey } from "../../platform/outbox/events.js";
+import { type Actor, identityError, type PrivateChallenge } from "../identity/service.js";
 import {
-  mailCrypto,
   type MailIntent,
-  type PrivateMail,
   mailbox,
+  mailCrypto,
+  type PrivateMail,
   render,
   validateIntent,
 } from "./content.js";
@@ -132,6 +132,33 @@ export async function cleanupMail(
   }
 }
 
+// Invalidation needs no provider or encryption key, including after mail is disabled.
+export async function invalidateAdmissionsMail(
+  unit: UnitOfWork,
+  tx: TxContext,
+  generationId: string,
+  now: () => Date = () => new Date(),
+) {
+  await unit
+    .client(tx)
+    .update(deliveries)
+    .set({
+      ciphertext: null,
+      payloadExpiresAt: null,
+      updatedAt: now().toISOString(),
+      version: sql`${deliveries.version} + 1`,
+      state: sql`IF(${deliveries.state} IN ('accepted','simulated'), ${deliveries.state}, 'suppressed')`,
+      category: sql`IF(${deliveries.state} IN ('accepted','simulated'), NULL, 'obsolete')`,
+      nextAttemptAt: null,
+    })
+    .where(
+      and(
+        eq(deliveries.owner, "admissions"),
+        eq(deliveries.generationId, applicationId(generationId)),
+        sql`${deliveries.ciphertext} IS NOT NULL`,
+      ),
+    );
+}
 export function createMessaging(
   unit: UnitOfWork,
   config: MessagingConfig,
@@ -394,6 +421,25 @@ export function createMessaging(
     },
   };
   const queue = createQueue(unit, [handler]);
+  async function statusWithJob(tx: TxContext, row: Row) {
+    const result = status(row),
+      job = await queue.effectState(tx, handler.consumer, row.id);
+    if (
+      !["accepted", "simulated", "suppressed"].includes(row.state) &&
+      job?.state === "failed" &&
+      (["missing_handler", "invalid_input", "exhausted"].includes(job.failure ?? "") ||
+        (job.failure === "handler_failed" && row.state === "queued"))
+    )
+      return {
+        ...result,
+        state: "failed" as const,
+        recovery: job.failure === "exhausted" ? "attempts_exhausted" : "worker_configuration",
+      };
+    return job?.failure === "external_ambiguity" &&
+      !["accepted", "simulated", "suppressed"].includes(row.state)
+      ? { ...result, state: "ambiguous" as const, recovery: "acceptance_unknown" }
+      : result;
+  }
   async function enqueue(tx: TxContext, raw: MailIntent): Promise<string> {
     const input = validateIntent(raw, config.origin);
     if (
@@ -474,9 +520,13 @@ export function createMessaging(
   async function authorize(tx: TxContext, actor: Actor, id: string) {
     // Authorize current session before looking up an inaccessible delivery.
     await owners.authorize(tx, actor, "own");
-    const row = await get(tx, id);
-    if (row.owner === "identity") {
-      if (row.userId !== actor.userId) throw identityError(404);
+    const [reference] = await client(tx)
+      .select()
+      .from(deliveries)
+      .where(eq(deliveries.id, applicationId(id)));
+    if (!reference) throw identityError(404);
+    if (reference.owner === "identity") {
+      if (reference.userId !== actor.userId) throw identityError(404);
     } else {
       try {
         await owners.authorize(tx, actor, "admissions");
@@ -485,8 +535,14 @@ export function createMessaging(
           throw identityError(404);
         throw error;
       }
+      // Admission owner locks precede the delivery lock for inspect/resend too.
+      if (reference.kind === "invitation" || reference.kind === "rejection")
+        await owners.admissionsValid?.(tx, {
+          generationId: reference.generationId,
+          kind: reference.kind,
+        });
     }
-    return row;
+    return get(tx, id);
   }
   return {
     queue,
@@ -534,46 +590,18 @@ export function createMessaging(
     },
     async inspect(actor: Actor, id: string) {
       return run(async (tx) => {
-        const row = await authorize(tx, actor, id),
-          result = status(row);
-        const job = await queue.effectState(tx, handler.consumer, id);
-        if (
-          !["accepted", "simulated", "suppressed"].includes(row.state) &&
-          job?.state === "failed" &&
-          (["missing_handler", "invalid_input", "exhausted"].includes(job.failure ?? "") ||
-            (job.failure === "handler_failed" && row.state === "queued"))
-        )
-          return {
-            ...result,
-            state: "failed" as const,
-            recovery: job.failure === "exhausted" ? "attempts_exhausted" : "worker_configuration",
-          };
-        return job?.failure === "external_ambiguity" &&
-          !["accepted", "simulated", "suppressed"].includes(row.state)
-          ? { ...result, state: "ambiguous" as const, recovery: "acceptance_unknown" }
-          : result;
+        return statusWithJob(tx, await authorize(tx, actor, id));
       });
+    },
+    // Owning admissions DTOs use safe evidence on their transaction, never mail tables.
+    async admissionsStatus(tx: TxContext, id: string) {
+      const row = await get(tx, id);
+      if (row.owner !== "admissions") throw identityError(404);
+      return (await statusWithJob(tx, row)).state;
     },
     async invalidateAdmissions(tx: TxContext, generationId: string) {
       if (!owners.admissionsValid) throw identityError(503);
-      await client(tx)
-        .update(deliveries)
-        .set({
-          ciphertext: null,
-          payloadExpiresAt: null,
-          updatedAt: timestamp(),
-          version: sql`${deliveries.version} + 1`,
-          state: sql`IF(${deliveries.state} IN ('accepted','simulated'), ${deliveries.state}, 'suppressed')`,
-          category: sql`IF(${deliveries.state} IN ('accepted','simulated'), NULL, 'obsolete')`,
-          nextAttemptAt: null,
-        })
-        .where(
-          and(
-            eq(deliveries.owner, "admissions"),
-            eq(deliveries.generationId, applicationId(generationId)),
-            sql`${deliveries.ciphertext} IS NOT NULL`,
-          ),
-        );
+      await invalidateAdmissionsMail(unit, tx, generationId, now);
     },
     async resend(actor: Actor, id: string, key: string, expectedVersion: number) {
       applicationId(key);

@@ -535,15 +535,19 @@
         "nickname": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 128,
+          "pattern": "\\S"
         },
         "email": {
           "type": "string",
-          "format": "email"
+          "format": "email",
+          "maxLength": 254
         },
         "steamProfileUrl": {
           "type": "string",
-          "format": "uri"
+          "format": "uri",
+          "maxLength": 512,
+          "pattern": "^https://steamcommunity\\.com/(?:profiles/[0-9]{17}|id/[A-Za-z0-9_-]+)/?$"
         },
         "games": {
           "type": "array",
@@ -555,7 +559,8 @@
             ]
           },
           "minItems": 1,
-          "uniqueItems": true
+          "uniqueItems": true,
+          "maxItems": 2
         },
         "discord": {
           "anyOf": [
@@ -586,9 +591,7 @@
         "nickname",
         "email",
         "steamProfileUrl",
-        "games",
-        "discord",
-        "introduction"
+        "games"
       ],
       "additionalProperties": false
     },
@@ -644,6 +647,16 @@
               "type": "null"
             }
           ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApplicationDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -653,7 +666,8 @@
         "submittedAt",
         "fields",
         "decisionReason",
-        "invitationId"
+        "invitationId",
+        "decision"
       ],
       "additionalProperties": false
     },
@@ -680,7 +694,8 @@
             "reason": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 2048
+              "maxLength": 2048,
+              "pattern": "\\S"
             }
           },
           "required": [
@@ -728,9 +743,28 @@
           "type": "string",
           "enum": [
             "queued",
-            "sent",
+            "attempting",
+            "retryable",
+            "accepted",
+            "simulated",
+            "suppressed",
             "failed",
-            "not_requested"
+            "ambiguous",
+            "not_requested",
+            "unavailable"
+          ],
+          "description": "Current safe delivery state from the messaging owner; not_requested means mail was disabled, unavailable means its adapter is not currently configured. Provider acceptance or local simulation never means inbox delivery."
+        },
+        "deliveryId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -740,7 +774,8 @@
         "applicationId",
         "expiresAt",
         "state",
-        "emailDelivery"
+        "emailDelivery",
+        "deliveryId"
       ],
       "additionalProperties": false
     },
@@ -779,8 +814,8 @@
         },
         "password": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 1024
+          "minLength": 12,
+          "maxLength": 128
         }
       },
       "required": [
@@ -6955,6 +6990,72 @@
       "required": [
         "data",
         "meta"
+      ],
+      "additionalProperties": false
+    },
+    "ApplicationDecision": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "approve",
+            "reject"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewerId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "applicationVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "deliveryId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "outcome",
+        "reason",
+        "reviewerId",
+        "decidedAt",
+        "applicationVersion",
+        "deliveryId"
       ],
       "additionalProperties": false
     }

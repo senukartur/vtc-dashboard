@@ -127,3 +127,5 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/operations/{operationId}` | `getOperation` | `session` | VTC-021 |
 | `GET /api/v1/mail-deliveries/{deliveryId}` | `getMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `POST /api/v1/mail-deliveries/{deliveryId}/resends` | `resendMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
+
+VTC-015 adds the permission-filtered `GET /api/v1/admin/applications/{applicationId}/history` with the existing default-25/max-100 signed cursor page contract. It pages retained applications for the referenced application's normalized email and requires current `applications.manage`. See the [admissions implementation](../../development/admissions.md) and authoritative OpenAPI operation `listApplicationHistory`.

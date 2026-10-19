@@ -1,4 +1,5 @@
 import { cleanupMail } from "./modules/messaging/service.js";
+import { cleanupAdmissions } from "./modules/admissions/service.js";
 import { createUnitOfWork } from "@vtc/db";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
@@ -22,10 +23,16 @@ await ownedCli(async () => {
       throw new Error("INVALID_JOBS_MODE");
     const config = readConfig();
     unit = createUnitOfWork(config.database);
-    const messaging =
-      config.identity && config.mail
-        ? composeIdentity(unit, config.identity, config.mail).messaging
-        : undefined;
+    const composed = config.identity
+      ? composeIdentity(unit, config.identity, config.mail, config.admissions)
+      : undefined;
+    const messaging = composed?.messaging;
+    const admissionsCleanup =
+      mode === "run" ? await cleanupAdmissions(unit, !!composed?.admissions) : "not_run";
+    if (admissionsCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "admissions_cleanup_pending", category: "worker_configuration" }),
+      );
     const mailCleanup = mode === "run" ? await cleanupMail(unit, !!messaging) : "not_run";
     if (mailCleanup === "configuration_pending")
       console.error(
@@ -38,6 +45,7 @@ await ownedCli(async () => {
         event: "jobs_result",
         mailMode: config.mail?.mode ?? "disabled",
         mailCleanup,
+        admissionsCleanup,
         ...result,
       }),
     );

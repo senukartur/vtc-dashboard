@@ -522,6 +522,28 @@ export function createIdentity(
   return {
     config,
     prepareCredential,
+    // Admissions locks the company before its own rows; no identity table access leaks.
+    async onboardingCompany(tx: TxContext, shared = false) {
+      if (!shared) return { id: (await lockCompany(tx)).id };
+      const [current] = await client(tx)
+        .select()
+        .from(company)
+        .where(eq(company.singleton, 1))
+        .for("share");
+      if (!current) throw identityError(409, "SETUP_REQUIRED");
+      return { id: current.id };
+    },
+    async emailExists(tx: TxContext, email: string) {
+      const [existing] = await client(tx)
+        .select({ id: user.id })
+        .from(user)
+        .where(eq(user.email, normalizedEmail(email)))
+        .for("share");
+      return !!existing;
+    },
+    async onboardingChanged(tx: TxContext, userId: string) {
+      await changed(tx, null, userId, await lockCompany(tx));
+    },
     async rateLimit(
       category: "csrf" | "login" | "challenge" | "command" | "read",
       source: string,

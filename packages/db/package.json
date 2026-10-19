@@ -4,6 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./admissions-schema": {
+      "types": "./dist/schema/admissions/index.d.ts",
+      "default": "./dist/schema/admissions/index.js"
+    },
+    "./qualifications-schema": {
+      "types": "./dist/schema/qualifications/index.d.ts",
+      "default": "./dist/schema/qualifications/index.js"
+    },
     "./platform-schema": {
       "types": "./dist/schema/platform.d.ts",
       "default": "./dist/schema/platform.js"

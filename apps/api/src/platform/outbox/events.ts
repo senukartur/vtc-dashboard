@@ -53,6 +53,61 @@ export interface AccessEvent {
   causationId: string | null;
   data: { userId: string; accessEpoch: number; identityEpoch: number };
 }
+export interface AdmissionsEvent {
+  eventId: string;
+  type:
+    | "application.submitted"
+    | "application.decided"
+    | "invitation.reissued"
+    | "invitation.redeemed";
+  schemaVersion: 1;
+  aggregate: { kind: "application"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { applicationId: string };
+}
+export function admissionsEvent(value: unknown): AdmissionsEvent {
+  const e = closed(value, [
+    "eventId",
+    "type",
+    "schemaVersion",
+    "aggregate",
+    "occurredAt",
+    "correlationId",
+    "causationId",
+    "data",
+  ]);
+  const a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["applicationId"]);
+  if (
+    ![
+      "application.submitted",
+      "application.decided",
+      "invitation.reissued",
+      "invitation.redeemed",
+    ].includes(e.type as string) ||
+    e.schemaVersion !== 1 ||
+    a.kind !== "application" ||
+    a.id !== d.applicationId ||
+    typeof e.occurredAt !== "string"
+  )
+    throw new Error("UNSUPPORTED_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: e.type as AdmissionsEvent["type"],
+    schemaVersion: 1,
+    aggregate: {
+      kind: "application",
+      id: applicationId(a.id as string),
+      version: positive(a.version),
+    },
+    occurredAt: utcIso(utcDateTime(e.occurredAt)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: { applicationId: applicationId(d.applicationId as string) },
+  };
+}
 export function accessEvent(value: unknown): AccessEvent {
   const e = closed(value, [
     "eventId",
@@ -91,9 +146,10 @@ export function accessEvent(value: unknown): AccessEvent {
 }
 export function createOutbox(unit: UnitOfWork) {
   return {
-    async append(tx: TxContext, input: AccessEvent): Promise<void> {
+    async append(tx: TxContext, input: AccessEvent | AdmissionsEvent): Promise<void> {
       const client = unit.client(tx);
-      const e = accessEvent(input);
+      const e =
+        input.type === "member.access_changed" ? accessEvent(input) : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
@@ -121,6 +177,32 @@ export function createOutbox(unit: UnitOfWork) {
         .where(eq(outboxEvents.id, e.eventId))
         .for("share");
       if (!saved?.fingerprint.equals(hash)) throw new Error("EVENT_IDENTITY_CONFLICT");
+    },
+  };
+}
+export function admissionsEvents(unit: UnitOfWork) {
+  const outbox = createOutbox(unit);
+  return {
+    async append(
+      tx: TxContext,
+      e: {
+        eventId: string;
+        type: AdmissionsEvent["type"];
+        applicationId: string;
+        version: number;
+        occurredAt: string;
+      },
+    ) {
+      await outbox.append(tx, {
+        eventId: e.eventId,
+        type: e.type,
+        schemaVersion: 1,
+        aggregate: { kind: "application", id: e.applicationId, version: e.version },
+        occurredAt: e.occurredAt,
+        correlationId: e.eventId,
+        causationId: null,
+        data: { applicationId: e.applicationId },
+      });
     },
   };
 }

@@ -172,7 +172,7 @@ for name, value in config['services'].items():
     if name in ['app', 'jobs']:
         # Keep the shared file live while role-specific DB settings remain synthetic/resolved.
         value['env_file'] = [str(base / 'private/identity-mail.env')]
-        for key in ['IDENTITY_ENABLED', 'MAIL_MODE']:
+        for key in ['IDENTITY_ENABLED', 'MAIL_MODE', 'ADMISSIONS_ENABLED']:
             value['environment'].pop(key, None)
 for name, value in config['volumes'].items():
     value['name'] = f'{project}_{name}'

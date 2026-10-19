@@ -57,6 +57,12 @@ export async function testConnection(): Promise<Connection> {
 export async function reset(connection: Connection) {
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   for (const name of [
+    "admissions_command_results",
+    "admissions_limits",
+    "admissions_decisions",
+    "admissions_invitations",
+    "admissions_applications",
+    "qualification_initial_assignments",
     "mail_commands",
     "mail_deliveries",
     "job_effect_receipts",
@@ -105,8 +111,11 @@ export async function jobsPriorFolder(): Promise<string> {
 export async function messagingPriorFolder(): Promise<string> {
   return publishedPrefixFolder(4);
 }
+export async function admissionsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(5);
+}
 
-async function publishedPrefixFolder(count: 1 | 2 | 3 | 4): Promise<string> {
+async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -123,6 +132,8 @@ async function publishedPrefixFolder(count: 1 | 2 | 3 | 4): Promise<string> {
     throw new Error("PUBLISHED_EMAIL_PREFIX_REQUIRED");
   if (count === 4 && entries[3]?.tag !== "0003_windy_jackal")
     throw new Error("PUBLISHED_JOBS_PREFIX_REQUIRED");
+  if (count === 5 && entries[4]?.tag !== "0004_windy_ravenous")
+    throw new Error("PUBLISHED_MESSAGING_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
