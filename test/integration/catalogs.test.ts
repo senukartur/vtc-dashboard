@@ -312,6 +312,94 @@ test("same names across game/map/region resolve only with sufficient context", a
     await catalogs.resolve(resolveInput(ets, { game: "ets2", label: "Shared" })),
   ).toMatchObject({ status: "resolved" });
 });
+test("region selectors filter identical labels before pagination and bind filter cursors", async () => {
+  const data = artifact("ats", [
+    entity("region_north", { kind: "region" }),
+    entity("region_south", { kind: "region" }),
+    ...Array.from({ length: 32 }, (_, i) =>
+      entity(`north_${i}`, { regionKey: "region_north", labels: { en: "Shared", ru: "Общий" } }),
+    ),
+    entity("south_city", { regionKey: "region_south", labels: { en: "Shared", ru: null } }),
+    entity("retired_city", {
+      regionKey: "region_north",
+      retired: true,
+      labels: { en: "Shared", ru: null },
+    }),
+  ]);
+  const id = await candidate(data);
+  await publish(id);
+  const regions = (
+    await catalogs.entities(director, { revisionId: id, kind: "region", locale: "en" })
+  ).items;
+  const north = regions.find((r) => r.display.label === "Fictional region_north")?.id as string;
+  const south = regions.find((r) => r.id !== north)?.id as string;
+  const options = {
+    revisionId: id,
+    kind: "city",
+    locale: "en" as const,
+    regionId: north,
+    search: "Sha",
+    limit: 25,
+  };
+  const page = await catalogs.entities(director, options);
+  expect(page.items).toHaveLength(25);
+  expect(page.nextCursor).not.toBeNull();
+  expect(page.items.every((e) => e.relatedEntityIds.includes(north) && !e.display.retired)).toBe(
+    true,
+  );
+  expect(
+    (await catalogs.entities(director, { ...options, cursor: page.nextCursor as string })).items,
+  ).toHaveLength(7);
+  expect(
+    await status(
+      catalogs.entities(director, {
+        ...options,
+        regionId: south,
+        cursor: page.nextCursor as string,
+      }),
+    ),
+  ).toBe(409);
+  expect(
+    (await catalogs.entities(director, { ...options, locale: "ru", search: "Об" })).items,
+  ).toHaveLength(25);
+  expect((await catalogs.entities(director, { ...options, regionId: newId() })).items).toEqual([]);
+  const other = await candidate(artifact("ets2", [entity("other_region", { kind: "region" })]));
+  await publish(other);
+  const foreign = (
+    await catalogs.entities(director, { revisionId: other, kind: "region", locale: "en" })
+  ).items[0]?.id;
+  expect(
+    (await catalogs.entities(director, { ...options, regionId: foreign as string })).items,
+  ).toEqual([]);
+  const [plan] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN SELECT entity_id FROM catalog_facts WHERE revision_id=? AND kind='city' AND region_id=? AND retired=0 ORDER BY entity_id DESC LIMIT 26",
+    [id, north],
+  );
+  expect(plan[0]?.possible_keys).toContain("catalog_selection_page");
+  console.log(
+    JSON.stringify({
+      event: "catalog_query_plan",
+      shape: "region_selector",
+      access: plan[0]?.type,
+      index: plan[0]?.key,
+      rows: plan[0]?.rows,
+    }),
+  );
+  const absentRegionRevision = await candidate(
+    artifact("ats", [...data.entities, entity("later_region", { kind: "region" })]),
+  );
+  await publish(absentRegionRevision);
+  const laterRegion = (
+    await catalogs.entities(director, {
+      revisionId: absentRegionRevision,
+      kind: "region",
+      locale: "en",
+    })
+  ).items.find((e) => e.display.label === "Fictional later_region")?.id;
+  expect(
+    (await catalogs.entities(director, { ...options, regionId: laterRegion as string })).items,
+  ).toEqual([]);
+});
 test("DLC additions and explicit retirement preserve historical facts; missing sources never retire implicitly", async () => {
   const a = artifact(),
     first = await candidate(a);

@@ -449,7 +449,13 @@ export function createCatalogs(
     },
     async entities(
       actor: Actor,
-      options: Page & { revisionId: string; kind: string; locale: "en" | "ru"; search?: string },
+      options: Page & {
+        revisionId: string;
+        kind: string;
+        locale: "en" | "ru";
+        search?: string;
+        regionId?: string;
+      },
     ) {
       return run(async (tx) => {
         await authority(tx, actor, false);
@@ -458,7 +464,14 @@ export function createCatalogs(
         if (!(kinds as readonly string[]).includes(options.kind)) throw identityError(422);
         const p = pageOptions(
           actor,
-          ["entities", r.id, options.kind, options.locale, options.search ?? null],
+          [
+            "entities",
+            r.id,
+            options.kind,
+            options.locale,
+            options.search ?? null,
+            options.regionId ?? null,
+          ],
           options,
         );
         const display =
@@ -474,6 +487,9 @@ export function createCatalogs(
               eq(catalogFacts.revisionId, r.id),
               eq(catalogFacts.kind, options.kind as Kind),
               eq(catalogFacts.retired, false),
+              options.regionId
+                ? eq(catalogFacts.regionId, applicationId(options.regionId))
+                : undefined,
               p.after ? lt(catalogFacts.entityId, p.after) : undefined,
               escaped ? sql`${display} LIKE ${`${escaped}%`}` : undefined,
             ),

@@ -1,6 +1,8 @@
 export const browserFiles = {
   "test/e2e/account.spec.ts": "account",
   "test/e2e/account-real.spec.ts": "account-real",
+  "test/e2e/catalogs.spec.ts": "catalogs",
+  "test/e2e/catalogs-real.spec.ts": "catalogs-real",
   "test/e2e/admissions.spec.ts": "admissions",
   "test/e2e/foundation.spec.ts": "foundation",
   "test/e2e/identity.spec.ts": "identity",
