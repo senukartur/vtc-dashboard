@@ -108,11 +108,93 @@ test("real catalog upload, durable import, review, publication, localized select
     ).toHaveCount(1);
     await expect(page.getByText("Fictional Browser City", { exact: true })).toBeVisible();
     phase = "RELOAD";
+    const recoveryUrl = new URL(page.url()),
+      candidate = recoveryUrl.searchParams.get("candidate"),
+      operation = recoveryUrl.searchParams.get("operation");
+    if (!candidate || !operation) throw new Error();
+    const previousRequests = new Set(inFlight);
+    const recoveryResponse = (label: string, path: string, params: Record<string, string> = {}) =>
+      page
+        .waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            !previousRequests.has(response.request()) &&
+            response.request().method() === "GET" &&
+            url.pathname === `/api/v1${path}` &&
+            Object.entries(params).every(([key, value]) => url.searchParams.get(key) === value)
+          );
+        })
+        .then(
+          async (response) => {
+            let responsePhase = `RELOAD_${label}_STATUS`;
+            try {
+              expect(response.status()).toBe(200);
+              responsePhase = `RELOAD_${label}_FINISHED`;
+              expect(await response.finished()).toBeNull();
+              responsePhase = `RELOAD_${label}_BODY`;
+              await response.body();
+              return null;
+            } catch {
+              return responsePhase;
+            }
+          },
+          () => `RELOAD_${label}_MISSING`,
+        );
+    // Register before navigation, including reads enabled by the recovered publication/review.
+    const recoveryResponses = Promise.all([
+      recoveryResponse("SESSION", "/me"),
+      recoveryResponse("POLICY", "/admin/catalog-import-policy"),
+      recoveryResponse("OPERATION", `/operations/${operation}`),
+      recoveryResponse("CANDIDATE", `/admin/catalog-revisions/${candidate}`),
+      recoveryResponse("REVIEW", `/admin/catalog-revisions/${candidate}/review`),
+      recoveryResponse("DIFF", `/admin/catalog-revisions/${candidate}/diff`),
+      recoveryResponse("PUBLICATIONS", "/catalogs/revisions", { game: "ats" }),
+      recoveryResponse("REGIONS", "/catalogs/entities", {
+        revisionId: candidate,
+        kind: "region",
+        locale: "en",
+      }),
+      recoveryResponse("CITIES", "/catalogs/entities", {
+        revisionId: candidate,
+        kind: "city",
+        locale: "en",
+      }),
+    ]);
     await page.reload();
     await catalogLanguage(page);
+    phase = "RELOAD_RESPONSES";
+    const failedRecovery = (await recoveryResponses).find((failure) => failure !== null);
+    if (failedRecovery) {
+      phase = failedRecovery;
+      throw new Error();
+    }
+    phase = "RELOAD_REVIEW_HEADING";
     await expect(
       page.getByRole("heading", { name: "Candidate review", exact: true }),
     ).toBeVisible();
+    phase = "RELOAD_PUBLISHED_CANDIDATE";
+    await expect(page.getByText(`${candidate} · Published`, { exact: true })).toBeVisible();
+    phase = "RELOAD_BUILD";
+    await expect(page.getByText("synthetic-build", { exact: true })).toBeVisible();
+    phase = "RELOAD_COMPLETED_OPERATION";
+    await expect(page.getByText("Import completed", { exact: true })).toBeVisible();
+    phase = "RELOAD_RETIRED_ENTITY";
+    await expect(page.getByRole("heading", { name: chosen, exact: true })).toBeVisible();
+    phase = "RELOAD_RETIRED_CHANGE";
+    await expect(page.getByText("Before: false → After: true", { exact: true })).toBeVisible();
+    phase = "RELOAD_PUBLICATION";
+    const publication = page.getByRole("combobox", { name: "Published revision", exact: true });
+    await expect(publication).toHaveValue(candidate);
+    await expect(publication.locator("option").first()).toHaveText(
+      `Current publication · ${candidate}`,
+    );
+    phase = "RELOAD_SELECTION";
+    await expect(page.getByRole("combobox", { name: "Region filter", exact: true })).toBeEnabled();
+    await expect(city).toBeEnabled();
+    await expect(city).toHaveValue("");
+    await expect(city.locator("option")).toHaveCount(1);
+    await expect(page.getByText("No matching active values.", { exact: true })).toBeVisible();
+    phase = "RELOAD";
     expect(unavailableResponses).toBe(0);
   } catch {
     throw new Error(`CATALOG_REAL_${phase}_FAILED`);
