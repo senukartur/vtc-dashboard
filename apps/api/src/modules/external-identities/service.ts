@@ -589,7 +589,7 @@ export function createExternalIdentities(
       });
     },
     async list(actor: Actor, targetId: string, page: { limit?: number; cursor?: string }) {
-      const limit = page.limit ?? 50;
+      const limit = page.limit ?? 25;
       if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
       const scope = `cursor:${actor.userId}:${actor.sessionId}:${id(targetId)}:${limit}`;
       let after: string | undefined;

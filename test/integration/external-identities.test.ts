@@ -307,6 +307,56 @@ test("proof pages bind cursors to actor/session/member/limit and logout invalida
     apply(director, (await signIn(m.email)).actor, next.request.id),
   ).rejects.toMatchObject({ statusCode: 409 });
 });
+
+test("retained proof pages default to 25 and share cursor scope with explicit 25 only", async () => {
+  const m = await member(),
+    service = external(),
+    proofIds = Array.from({ length: 52 }, () => newId()).sort();
+  const linked = await initial(m.actor);
+  await unit.run(async (tx) => {
+    const target = await owner().externalContext(tx, m.actor);
+    await unit
+      .client(tx)
+      .insert(steamProofs)
+      .values(
+        proofIds.map((id) => ({
+          id,
+          userId: m.userId,
+          sessionId: m.actor.sessionId,
+          purpose: "replacement" as const,
+          state: "invalidated" as const,
+          identityEpoch: target.identityEpoch,
+          accessEpoch: target.accessEpoch,
+          credentialEpoch: target.credentialEpoch,
+          emailEpoch: target.emailEpoch,
+          previousSteamId: linked.candidate,
+          createdAt: now(),
+          expiresAt: new Date(instant + 600000),
+        })),
+      );
+  });
+  const first = await safe(service.list(director, m.userId, {}));
+  expect(first.items.map((proof) => proof.id)).toEqual(proofIds.slice(0, 25));
+  expect(typeof first.nextCursor).toBe("string");
+  expect(await safe(service.list(director, m.userId, { limit: 25 }))).toEqual(first);
+  const cursor = first.nextCursor ?? "";
+  const second = await safe(service.list(director, m.userId, { cursor }));
+  expect(second.items.map((proof) => proof.id)).toEqual(proofIds.slice(25, 50));
+  expect(typeof second.nextCursor).toBe("string");
+  expect(await safe(service.list(director, m.userId, { cursor, limit: 25 }))).toEqual(second);
+  await expect(safe(service.list(director, m.userId, { cursor, limit: 50 }))).rejects.toMatchObject(
+    { statusCode: 422 },
+  );
+  const finalCursor = second.nextCursor ?? "";
+  const last = await safe(service.list(director, m.userId, { cursor: finalCursor, limit: 25 }));
+  expect(await safe(service.list(director, m.userId, { cursor: finalCursor }))).toEqual(last);
+  expect(last.items.map((proof) => proof.id)).toEqual(proofIds.slice(50));
+  expect(last.nextCursor).toBe(null);
+  const received = [...first.items, ...second.items, ...last.items].map((proof) => proof.id);
+  expect(received).toEqual(proofIds);
+  expect(new Set(received).size).toBe(52);
+});
+
 test("competing owners cannot claim the same exact Steam ID, including a released historical ID", async () => {
   const first = await member(),
     second = await member(),
