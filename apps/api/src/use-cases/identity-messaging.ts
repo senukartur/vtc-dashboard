@@ -16,6 +16,7 @@ import {
   type MessagingConfig,
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
+import { createTrips, type TripsConfig } from "../modules/trips/service.js";
 import { createQueue } from "../platform/jobs/queue.js";
 import {
   admissionsEvents,
@@ -30,6 +31,7 @@ export function composeIdentity(
   admissionsConfig?: AdmissionsConfig,
   externalEnabled = false,
   catalogConfig?: CatalogConfig,
+  tripsConfig?: TripsConfig,
 ) {
   let identity: Identity;
   let admissions: Admissions | undefined;
@@ -84,6 +86,9 @@ export function composeIdentity(
   );
   return {
     identity,
+    ...(tripsConfig
+      ? { trips: createTrips(unit, tripsConfig, { identity, ...(catalogs ? { catalogs } : {}) }) }
+      : {}),
     ...(externalEnabled ? { externalIdentities: createExternalIdentities(unit, identity) } : {}),
     jobsQueue,
     ...(catalogs ? { catalogs } : {}),

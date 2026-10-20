@@ -57,6 +57,13 @@
       "when": 1792458401025,
       "tag": "0007_nice_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1792515275810,
+      "tag": "0008_stale_prowler",
+      "breakpoints": true
     }
   ]
 }

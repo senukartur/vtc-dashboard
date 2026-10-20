@@ -11,6 +11,7 @@ export default defineConfig({
     "./src/schema/qualifications/index.ts",
     "./src/schema/external-identities/index.ts",
     "./src/schema/catalogs/index.ts",
+    "./src/schema/trips/index.ts",
   ],
   out: "./migrations",
   strict: true,

@@ -77,6 +77,59 @@ export interface CatalogEvent {
   causationId: string | null;
   data: { catalogRevisionId: string };
 }
+export interface TripEvent {
+  eventId: string;
+  type: "source.snapshot_stored" | "trip.lifecycle_changed" | "trip.facts_changed";
+  schemaVersion: 1;
+  aggregate: { kind: "source" | "trip"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { sourceRecordId: string; tripId: string; factRevisionId: string };
+}
+export function tripEvent(value: unknown): TripEvent {
+  const e = closed(value, [
+    "eventId",
+    "type",
+    "schemaVersion",
+    "aggregate",
+    "occurredAt",
+    "correlationId",
+    "causationId",
+    "data",
+  ]);
+  const a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["sourceRecordId", "tripId", "factRevisionId"]);
+  const source = e.type === "source.snapshot_stored";
+  if (
+    !["source.snapshot_stored", "trip.lifecycle_changed", "trip.facts_changed"].includes(
+      e.type as string,
+    ) ||
+    e.schemaVersion !== 1 ||
+    a.kind !== (source ? "source" : "trip") ||
+    a.id !== (source ? d.sourceRecordId : d.tripId) ||
+    typeof e.occurredAt !== "string"
+  )
+    throw new Error("UNSUPPORTED_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: e.type as TripEvent["type"],
+    schemaVersion: 1,
+    aggregate: {
+      kind: source ? "source" : "trip",
+      id: applicationId(a.id as string),
+      version: positive(a.version),
+    },
+    occurredAt: utcIso(utcDateTime(e.occurredAt)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      sourceRecordId: applicationId(d.sourceRecordId as string),
+      tripId: applicationId(d.tripId as string),
+      factRevisionId: applicationId(d.factRevisionId as string),
+    },
+  };
+}
 export function catalogEvent(value: unknown): CatalogEvent {
   const e = closed(value, [
       "eventId",
@@ -190,7 +243,7 @@ export function createOutbox(unit: UnitOfWork) {
   return {
     async append(
       tx: TxContext,
-      input: AccessEvent | AdmissionsEvent | CatalogEvent,
+      input: AccessEvent | AdmissionsEvent | CatalogEvent | TripEvent,
     ): Promise<void> {
       const client = unit.client(tx);
       const e =
@@ -198,7 +251,11 @@ export function createOutbox(unit: UnitOfWork) {
           ? accessEvent(input)
           : input.type === "catalog.published"
             ? catalogEvent(input)
-            : admissionsEvent(input);
+            : ["source.snapshot_stored", "trip.lifecycle_changed", "trip.facts_changed"].includes(
+                  input.type,
+                )
+              ? tripEvent(input)
+              : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
