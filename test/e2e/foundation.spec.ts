@@ -429,6 +429,118 @@ test("VTC019 ordering regression: mobile route closure has one focus owner and o
   }
 });
 
+test("current-route menu selection and Escape restore the trigger while ordinary navigation focuses main", async ({
+  page,
+}) => {
+  await page.goto("/foundation/member");
+  await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Member workspace composition");
+  const menu = page.getByRole("button", { name: "Open navigation", exact: true });
+  const hasMenu = await menu.isVisible();
+  if (hasMenu) {
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+    await navigation.getByRole("link", { name: "Member preview", exact: true }).click();
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(navigation).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toBeFocused();
+  }
+  await page.getByRole("link", { name: "Yukon Union", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("main")).toBeFocused();
+});
+
+test("an immediate menu activation after a history commit retains focus ownership across pending origin effects", async ({
+  page,
+}) => {
+  await page.goto("/foundation");
+  await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+  const menu = page.getByRole("button", { name: "Open navigation", exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await page
+    .getByRole("navigation")
+    .getByRole("link", { name: "Member preview", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Member workspace composition");
+  if (!(await menu.isVisible())) {
+    await expect(page.getByRole("main")).toBeFocused();
+    await page.goBack();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "A shared language for the road",
+    );
+    await expect(page.getByRole("main")).toBeFocused();
+    return;
+  }
+  await menu.click();
+  const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+  await expect(navigation).toBeVisible();
+  const observation = await page.evaluateHandle(
+    () =>
+      new Promise<{ counts: { before: number; after: number }; stop: () => void }>(
+        (resolve, reject) => {
+          const main = document.querySelector("main");
+          if (!main) throw new Error("SYNTHETIC_MAIN_MISSING");
+          const counts = { before: 0, after: 0 };
+          let activated = false;
+          const onFocus = (event: FocusEvent) => {
+            if (event.target === main) counts[activated ? "after" : "before"]++;
+          };
+          document.addEventListener("focusin", onFocus, true);
+          const observer = new MutationObserver(() => {
+            if (
+              location.pathname !== "/foundation" ||
+              main.querySelector("h1")?.textContent !== "A shared language for the road"
+            )
+              return;
+            observer.disconnect();
+            const retainedLink = document.querySelector(
+              '[role="dialog"] nav a[href="/foundation/member"]',
+            );
+            if (!(retainedLink instanceof HTMLAnchorElement)) {
+              document.removeEventListener("focusin", onFocus, true);
+              reject(new Error("SYNTHETIC_RETAINED_MENU_LINK_MISSING"));
+              return;
+            }
+            activated = true;
+            retainedLink.click();
+            resolve({
+              counts,
+              stop: () => document.removeEventListener("focusin", onFocus, true),
+            });
+          });
+          observer.observe(main, { childList: true, subtree: true, characterData: true });
+          history.back();
+        },
+      ),
+  );
+  try {
+    await expect(page).toHaveURL(/\/foundation\/member$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Member workspace composition",
+    );
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toBeFocused();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    expect(await observation.evaluate(({ counts }) => counts)).toEqual({ before: 0, after: 0 });
+  } finally {
+    await observation.evaluate(({ stop }) => stop());
+    await observation.dispose();
+  }
+  await page.getByRole("link", { name: "Yukon Union", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("main")).toBeFocused();
+});
+
 for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
   test(`direct member variant ${path} preserves its location and member navigation`, async ({
     page,

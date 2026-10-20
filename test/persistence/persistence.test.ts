@@ -193,6 +193,7 @@ function publishedUpgrade(name: string, command: (context: MigrationContext) => 
 
 // Destructive upgrades share the allocated schema, so every case runs sequentially.
 // Each published prefix has its own finite budget and connection/pool lifecycle.
+// Isolation replaces the former aggregate 180-second allowance; SQL deadlines stay unchanged.
 await describe("published-prefix migration upgrades", { concurrency: false }, () => {
   publishedUpgrade(
     "email stage migration preserves old identity rows and invalidates outstanding proof epochs",

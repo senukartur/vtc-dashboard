@@ -36,23 +36,28 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
   const previousPath = useRef(location.pathname);
-  const mobileFocus = useRef<{ destination: string; trigger: HTMLButtonElement | null } | null>(
-    null,
-  );
+  const mobileFocus = useRef<{
+    origin: typeof location;
+    destination: string;
+    trigger: HTMLButtonElement | null;
+  } | null>(null);
   useEffect(() => {
     const { pathname, search, hash } = location;
     const intent = mobileFocus.current;
-    // Consume even same-path/hash navigation; it cannot affect a later route.
-    mobileFocus.current = null;
-    const mobileClose = intent?.destination === `${pathname}${search}${hash}`;
+    // A menu action can precede its origin commit's passive effect.
+    const isOrigin = intent?.origin === location;
+    const mobileClose = !isOrigin && intent?.destination === `${pathname}${search}${hash}`;
     const restoreTrigger =
       mobileClose && intent.trigger?.isConnected && intent.trigger.getClientRects().length > 0;
     if (
       !hash &&
+      !isOrigin &&
       ((previousPath.current !== pathname && !restoreTrigger) || (mobileClose && !restoreTrigger))
     )
       document.getElementById("main-content")?.focus();
     previousPath.current = pathname;
+    // Consume even same-path/hash destinations after the origin effect has passed.
+    if (!isOrigin) mobileFocus.current = null;
   }, [location]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
@@ -98,6 +103,7 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
       onMobileNavigate={(href, trigger) => {
         const destination = new URL(href, window.location.href);
         mobileFocus.current = {
+          origin: location,
           destination: `${destination.pathname}${destination.search}${destination.hash}`,
           trigger,
         };
