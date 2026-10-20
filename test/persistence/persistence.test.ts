@@ -156,9 +156,9 @@ async function cooperatingMigrations(
   });
 }
 
-// The seven-migration upgrade matrix alone measured about 60s sequentially before
-// value/concurrency checks. Bound the aggregate suite without changing SQL/lock/control deadlines.
-test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
+// The eight-migration serial fixture prefix measured about 116s before the final contention case.
+// Allow bounded aggregate headroom; SQL/lock/control deadlines remain unchanged.
+test("real MySQL persistence foundations", { timeout: 180000 }, async (t) => {
   const settings = guardedSettings();
   const connection = await testConnection();
   const unit = createUnitOfWork(settings);
