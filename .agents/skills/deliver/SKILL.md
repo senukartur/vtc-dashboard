@@ -7,7 +7,7 @@ description: Deliver one VTCDashboard task through planning, implementation, ver
 
 Invoke with `$deliver VTC-023`, `$deliver VTC-023 --review-plan`, or `$deliver <task description>`. Take the task from the owner's message. Creating or editing this skill is not an instruction to run delivery. Remove `--review-plan` from the brief and preserve it as a planning-approval flag.
 
-Read and execute the [shared delivery workflow](references/workflow.md) and [role instructions](references/roles.md), including their task-data/trusted-decision distinction. They own sequencing, state, budgets, recovery and publication gates; keep these rules common to the [Claude entrypoint](../../../.claude/skills/deliver/SKILL.md).
+Read and execute the [shared delivery workflow](references/workflow.md) and [role instructions](references/roles.md), including their task-data/trusted-decision distinction. They own sequencing, state, evidence-led continuation, recovery and publication gates; keep these rules common to the [Claude entrypoint](../../../.claude/skills/deliver/SKILL.md). Delivery fixes, independent-review passes and justified verification reruns have no numerical cap; retain every attempt and continue within authorized scope until the gates pass or a concrete blocker needs resolution.
 
 Use the host's available subagent tools, for example `collaboration.spawn_agent` with `fork_turns: "none"`. Inherit the session's model settings unless the owner requests otherwise. Supply complete shared/role instructions from the pinned runtime bundle; do not depend on native role definitions or relative paths at the task base. Use the supported follow-up tool for the same implementer/reviewer within a session. Wait for each complete report before continuing.
 
