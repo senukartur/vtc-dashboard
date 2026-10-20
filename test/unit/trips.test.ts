@@ -206,6 +206,52 @@ test("time regression and out-of-storage-range instants remain uncertain evidenc
   expect(uncertain.start.utc).toBeNull();
   expect(uncertain.start.verifiedActual).toBe(false);
 });
+
+test("valid same-outcome revisions may report unknown times or a changed verified time without losing source evidence", async () => {
+  for (const field of ["start", "end"] as const) {
+    const missing = input();
+    missing.snapshot[field] = { utcMs: null, basis: "unknown", eventSeq: null };
+    missing.snapshot.evidence[field === "start" ? "startObserved" : "endObserved"] = false;
+    missing.snapshot.recordingCompleteness = "partial";
+    const uncertain = await telemetryAdapter.normalize(missing, context());
+    expect(uncertain.outcome).toBe("delivered");
+    expect(uncertain[field]).toEqual({ utc: null, basis: "unknown", verifiedActual: false });
+    expect(uncertain[field === "start" ? "end" : "start"].verifiedActual).toBe(true);
+    const changed = input(),
+      time = changed.snapshot[field];
+    if (!time || time.utcMs === null) throw new Error("SYNTHETIC_TIME_EXPECTED");
+    time.utcMs += 1000;
+    const verified = await telemetryAdapter.normalize(changed, context());
+    expect(verified[field]).toMatchObject({
+      utc: new Date(time.utcMs).toISOString(),
+      verifiedActual: true,
+    });
+  }
+});
+
+test("valid terminal distance uncertainty remains separate from unchanged verified source times", async () => {
+  for (const field of ["actualDistanceM", "deliveredDistanceM"] as const) {
+    const p = input();
+    if (field === "actualDistanceM") p.snapshot.recordingCompleteness = "partial";
+    else
+      Object.assign(p.snapshot, {
+        deliveredDistance: { available: false, reason: "not-observed", unit: "m" },
+      });
+    const fact = await telemetryAdapter.normalize(p, context());
+    expect(fact[field].status).toBe("unknown");
+    expect(
+      fact[field === "actualDistanceM" ? "deliveredDistanceM" : "actualDistanceM"],
+    ).toMatchObject({ status: "known", value: "123400" });
+    expect(fact.start).toMatchObject({
+      utc: new Date(p.snapshot.start.utcMs as number).toISOString(),
+      verifiedActual: true,
+    });
+    expect(fact.end).toMatchObject({
+      utc: new Date(p.snapshot.end?.utcMs as number).toISOString(),
+      verifiedActual: true,
+    });
+  }
+});
 test("catalog normalization pins a single publication, uses exact IDs, keeps ambiguous and missing mappings unknown", async () => {
   const revisionId = newId(),
     entityId = newId(),

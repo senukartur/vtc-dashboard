@@ -99,17 +99,16 @@ function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidenc
     for (const field of ["actualDistanceM", "deliveredDistanceM"] as const) {
       const a = previous[field],
         b = next[field];
+      if (a.status === "known" && b.status === "unknown") reasons.push(`${field}_became_unknown`);
       if (a.status === "known" && b.status === "known" && a.value !== b.value)
         reasons.push(`${field}_conflict`);
     }
   }
-  for (const field of ["start", "end"] as const)
-    if (
-      previous[field].verifiedActual &&
-      next[field].verifiedActual &&
-      previous[field].utc !== next[field].utc
-    )
-      reasons.push(`${field}_time_conflict`);
+  for (const field of ["start", "end"] as const) {
+    if (!previous[field].verifiedActual) continue;
+    if (!next[field].verifiedActual) reasons.push(`${field}_time_became_unverified`);
+    else if (previous[field].utc !== next[field].utc) reasons.push(`${field}_time_conflict`);
+  }
   const trailerIds = (f: NormalizedTripEvidence) =>
     f.trailers.items.map((item) => (item.status === "known" ? item.value.entityId : null));
   if (

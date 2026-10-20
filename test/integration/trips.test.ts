@@ -7,6 +7,7 @@ import {
   sourcePayloads,
   tripFacts,
   tripFactTrailers,
+  tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
@@ -248,6 +249,286 @@ test("higher contradictory outcome, attempted reopen and factual correction reta
   );
   expect((await totals()).facts).toBe(4);
 });
+
+async function projectionConflict(p: Telemetry, next: Telemetry, reasons: string[]) {
+  const first = await receive(p),
+    before = await state(first.tripId);
+  if (!before) throw new Error("SYNTHETIC_TRIP_EXPECTED");
+  expect(before.actualStart).not.toBeNull();
+  if (p.snapshot.outcome !== "open") {
+    expect(before.actualEnd).not.toBeNull();
+    expect(before.reportingAt).toBe(before.actualEnd);
+  }
+  const receipt = await receive(next),
+    after = await state(first.tripId);
+  expect(receipt.tripId).toBe(first.tripId);
+  expect(after).toMatchObject({
+    currentFactId: before.currentFactId,
+    actualStart: before.actualStart,
+    actualEnd: before.actualEnd,
+    reportingAt: before.reportingAt,
+    actualDistanceM: before.actualDistanceM,
+    outcome: before.outcome,
+    recording: before.recording,
+    decision: "unassessed",
+    version: before.version + 1,
+    reviewHold: true,
+    correctionPending: false,
+    reviewReasons: expect.arrayContaining(reasons),
+  });
+  const evidence = await unit.run((tx) =>
+    service.sourceEvidenceInTransaction(tx, receipt.sourceRecordId),
+  );
+  if (!evidence) throw new Error("SYNTHETIC_EVIDENCE_EXPECTED");
+  expect(evidence.factRevisionId).not.toBe(before.currentFactId);
+  expect(evidence.reasonCodes).toEqual(expect.arrayContaining(reasons));
+  const [history] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(tripHistory)
+      .where(eq(tripHistory.factId, evidence.factRevisionId)),
+  );
+  expect(history).toMatchObject({
+    tripId: first.tripId,
+    version: before.version + 1,
+    outcome: before.outcome,
+    reasons: expect.arrayContaining(reasons),
+  });
+  const [payload] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(sourcePayloads)
+      .where(eq(sourcePayloads.messageId, receipt.sourceRecordId)),
+  );
+  expect(payload?.content).toBe(canonicalJson(next));
+  const detail = await service.detail(owner, first.tripId);
+  if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(detail.reviewReasonCodes).toEqual(expect.arrayContaining(reasons));
+  expect(detail.summary.reportingAt).toBe(before.reportingAt);
+  expect(await totals()).toEqual({
+    trips: 1,
+    sources: 1,
+    messages: 2,
+    facts: 2,
+    history: 2,
+    events: 4,
+  });
+  const [events] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(type AS CHAR) type,COUNT(*) n FROM outbox_events GROUP BY type",
+  );
+  expect(Number(events.find((row) => row.type === "source.snapshot_stored")?.n)).toBe(2);
+  expect(Number(events.find((row) => row.type === "trip.lifecycle_changed")?.n)).toBe(1);
+  expect(Number(events.find((row) => row.type === "trip.facts_changed")?.n)).toBe(1);
+  expect((await receive(next)).duplicate).toBe(true);
+  expect(await state(first.tripId)).toEqual(after);
+  expect(await totals()).toEqual({
+    trips: 1,
+    sources: 1,
+    messages: 2,
+    facts: 2,
+    history: 2,
+    events: 4,
+  });
+  return evidence;
+}
+
+test.each(["started", "completed"] as const)(
+  "higher same-outcome %s evidence losing clock verification preserves canonical timing and records a review conflict",
+  async (kind) => {
+    const p = fixture(kind),
+      next = structuredClone(p);
+    next.eventId = newId();
+    next.revision = p.revision + 1;
+    next.snapshot.evidence.clockAnomaly = true;
+    const reasons = [
+      "start_time_became_unverified",
+      ...(kind === "completed" ? ["end_time_became_unverified"] : []),
+    ];
+    const evidence = await projectionConflict(p, next, reasons);
+    expect(evidence.start).toMatchObject({
+      verifiedActual: false,
+      utc: new Date(p.snapshot.start.utcMs as number).toISOString(),
+    });
+    expect(evidence.end.verifiedActual).toBe(false);
+  },
+);
+
+test.each(["start", "end"] as const)(
+  "higher terminal evidence with unknown %s time retains all canonical timestamps",
+  async (field) => {
+    const p = fixture(),
+      next = structuredClone(p);
+    next.eventId = newId();
+    next.revision = p.revision + 1;
+    next.snapshot[field] = { utcMs: null, basis: "unknown", eventSeq: null };
+    next.snapshot.evidence[field === "start" ? "startObserved" : "endObserved"] = false;
+    next.snapshot.recordingCompleteness = "partial";
+    const evidence = await projectionConflict(p, next, [`${field}_time_became_unverified`]);
+    expect(evidence[field]).toEqual({ utc: null, basis: "unknown", verifiedActual: false });
+    expect(evidence[field === "start" ? "end" : "start"].verifiedActual).toBe(true);
+  },
+);
+
+test.each(["start", "end"] as const)(
+  "changed verified terminal %s time remains a review conflict",
+  async (field) => {
+    const p = fixture(),
+      next = structuredClone(p);
+    next.eventId = newId();
+    next.revision = p.revision + 1;
+    const changed = next.snapshot[field];
+    if (!changed || changed.utcMs === null) throw new Error("SYNTHETIC_TIME_EXPECTED");
+    changed.utcMs += 1000;
+    const evidence = await projectionConflict(p, next, [`${field}_time_conflict`]);
+    expect(evidence[field]).toMatchObject({
+      verifiedActual: true,
+      utc: new Date(changed.utcMs).toISOString(),
+    });
+  },
+);
+
+test("unknown times can improve to verified times and unchanged verified revisions refresh without timing conflicts", async () => {
+  const p = fixture();
+  p.snapshot.evidence.clockAnomaly = true;
+  const first = await receive(p),
+    before = await state(first.tripId);
+  expect(before).toMatchObject({
+    actualStart: null,
+    actualEnd: null,
+    reportingAt: null,
+    reviewHold: false,
+  });
+  p.eventId = newId();
+  p.revision++;
+  p.snapshot.evidence.clockAnomaly = false;
+  await receive(p);
+  const current = await state(first.tripId);
+  expect(current).toMatchObject({
+    actualStart: new Date(p.snapshot.start.utcMs as number).toISOString(),
+    actualEnd: new Date(p.snapshot.end?.utcMs as number).toISOString(),
+    reportingAt: new Date(p.snapshot.end?.utcMs as number).toISOString(),
+    reviewHold: false,
+    version: 2,
+  });
+  expect(current?.currentFactId).not.toBe(before?.currentFactId);
+  p.eventId = newId();
+  p.revision++;
+  await receive(p);
+  const refreshed = await state(first.tripId);
+  expect(refreshed).toMatchObject({
+    actualStart: current?.actualStart,
+    actualEnd: current?.actualEnd,
+    reportingAt: current?.reportingAt,
+    reviewHold: false,
+    version: 3,
+  });
+  expect(refreshed?.currentFactId).not.toBe(current?.currentFactId);
+  expect(refreshed?.reviewReasons.some((reason) => reason.includes("_time_"))).toBe(false);
+  expect((await receive(p)).duplicate).toBe(true);
+  expect(await totals()).toEqual({
+    trips: 1,
+    sources: 1,
+    messages: 3,
+    facts: 3,
+    history: 3,
+    events: 6,
+  });
+});
+
+test.each(["actualDistanceM", "deliveredDistanceM"] as const)(
+  "higher terminal evidence losing only %s retains the canonical projection under review",
+  async (field) => {
+    const p = fixture(),
+      next = structuredClone(p);
+    next.eventId = newId();
+    next.revision = p.revision + 1;
+    if (field === "actualDistanceM") next.snapshot.recordingCompleteness = "partial";
+    else
+      Object.assign(next.snapshot, {
+        deliveredDistance: { available: false, reason: "not-observed", unit: "m" },
+      });
+    const evidence = await projectionConflict(p, next, [`${field}_became_unknown`]);
+    expect(evidence[field].status).toBe("unknown");
+    expect(
+      evidence[field === "actualDistanceM" ? "deliveredDistanceM" : "actualDistanceM"],
+    ).toMatchObject({ status: "known", value: "123400" });
+    expect(evidence.start).toEqual({
+      utc: new Date(p.snapshot.start.utcMs as number).toISOString(),
+      basis: "event",
+      verifiedActual: true,
+    });
+    expect(evidence.end).toEqual({
+      utc: new Date(p.snapshot.end?.utcMs as number).toISOString(),
+      basis: "event",
+      verifiedActual: true,
+    });
+    expect(evidence.reasonCodes.some((reason) => reason.includes("_time_"))).toBe(false);
+  },
+);
+
+test("unknown terminal distances can improve and refresh while verified times remain unchanged", async () => {
+  const p = fixture();
+  p.snapshot.recordingCompleteness = "partial";
+  Object.assign(p.snapshot, {
+    deliveredDistance: { available: false, reason: "not-observed", unit: "m" },
+  });
+  const first = await receive(p),
+    before = await state(first.tripId);
+  expect(before?.actualStart).not.toBeNull();
+  expect(before?.actualEnd).not.toBeNull();
+  expect(before?.actualDistanceM).toBeNull();
+  const prior = await unit.run((tx) =>
+    service.sourceEvidenceInTransaction(tx, first.sourceRecordId),
+  );
+  expect(prior?.actualDistanceM.status).toBe("unknown");
+  expect(prior?.deliveredDistanceM.status).toBe("unknown");
+  p.eventId = newId();
+  p.revision++;
+  p.snapshot.recordingCompleteness = "complete";
+  Object.assign(p.snapshot, { deliveredDistance: { available: true, value: 123400, unit: "m" } });
+  const improved = await receive(p),
+    current = await state(first.tripId);
+  expect(current).toMatchObject({
+    actualStart: before?.actualStart,
+    actualEnd: before?.actualEnd,
+    reportingAt: before?.reportingAt,
+    actualDistanceM: "123400.000000000000000000",
+    reviewHold: false,
+    version: 2,
+  });
+  expect(current?.currentFactId).not.toBe(before?.currentFactId);
+  const evidence = await unit.run((tx) =>
+    service.sourceEvidenceInTransaction(tx, improved.sourceRecordId),
+  );
+  expect(evidence?.actualDistanceM).toMatchObject({ status: "known", value: "123400" });
+  expect(evidence?.deliveredDistanceM).toMatchObject({ status: "known", value: "123400" });
+  p.eventId = newId();
+  p.revision++;
+  await receive(p);
+  const refreshed = await state(first.tripId);
+  expect(refreshed).toMatchObject({
+    actualStart: before?.actualStart,
+    actualEnd: before?.actualEnd,
+    reportingAt: before?.reportingAt,
+    actualDistanceM: "123400.000000000000000000",
+    reviewHold: false,
+    version: 3,
+  });
+  expect(refreshed?.currentFactId).not.toBe(current?.currentFactId);
+  expect(refreshed?.reviewReasons).not.toContain("actualDistanceM_became_unknown");
+  expect(refreshed?.reviewReasons).not.toContain("deliveredDistanceM_became_unknown");
+  expect((await receive(p)).duplicate).toBe(true);
+  expect(await totals()).toEqual({
+    trips: 1,
+    sources: 1,
+    messages: 3,
+    facts: 3,
+    history: 3,
+    events: 6,
+  });
+});
 test("safe maximum provider revision is preserved independently of application event versions", async () => {
   const p = fixture();
   p.revision = Number.MAX_SAFE_INTEGER;
@@ -409,10 +690,14 @@ test("confirmed projection remains fixed while later evidence records correction
   p.eventId = newId();
   p.revision = 3;
   Object.assign(p.snapshot.observedDistance, { value: 999 });
+  p.snapshot.evidence.clockAnomaly = true;
   await receive(p);
   const current = await state(result.tripId);
   expect(current?.currentFactId).toBe(original?.currentFactId);
   expect(current?.actualDistanceM).toBe(original?.actualDistanceM);
+  expect(current?.actualStart).toBe(original?.actualStart);
+  expect(current?.actualEnd).toBe(original?.actualEnd);
+  expect(current?.reportingAt).toBe(original?.reportingAt);
   expect(current?.decision).toBe("accepted");
   expect(current?.correctionPending).toBe(true);
 });
@@ -862,6 +1147,50 @@ test("manual internal adapter uses published canonical selections, evidence port
   expect(mixed.summary.sourceKinds.sort()).toEqual(["ets2telemetry", "manual"]);
   expect(mixed.summary.actualDistanceM).toBe("1234.5");
   expect((await totals()).trips).toBe(1);
+  const reverse = structuredClone(telemetry);
+  reverse.eventId = newId();
+  reverse.source.tripId = newId();
+  Object.assign(reverse.snapshot, {
+    plannedDistance: { available: false, reason: "not-observed", unit: "m" },
+    deliveredDistance: { available: false, reason: "not-observed", unit: "m" },
+  });
+  const telemetryFirst = await receive(reverse, manual),
+    timing = await state(telemetryFirst.tripId);
+  if (!timing) throw new Error("SYNTHETIC_TRIP_EXPECTED");
+  expect(timing.actualStart).not.toBeNull();
+  expect(timing.actualEnd).not.toBeNull();
+  const manualAttachment = await unit.run((tx) =>
+    manual.storeInTransaction(
+      tx,
+      "manual",
+      { ...p, reportId: newId(), revisionId: newId() },
+      { ...context(), canonical: { tripId: telemetryFirst.tripId, expectedVersion: 1 } },
+    ),
+  );
+  const held = await state(telemetryFirst.tripId);
+  expect(held).toMatchObject({
+    currentFactId: timing.currentFactId,
+    actualStart: timing.actualStart,
+    actualEnd: timing.actualEnd,
+    reportingAt: timing.reportingAt,
+    reviewHold: true,
+    version: 2,
+    reviewReasons: expect.arrayContaining([
+      "start_time_became_unverified",
+      "end_time_became_unverified",
+    ]),
+  });
+  expect(
+    held?.reviewReasons.filter(
+      (reason) => reason.includes("_became_") || reason.endsWith("_conflict"),
+    ),
+  ).toEqual(["end_time_became_unverified", "start_time_became_unverified"]);
+  const manualEvidence = await unit.run((tx) =>
+    manual.sourceEvidenceInTransaction(tx, manualAttachment.sourceRecordId),
+  );
+  expect(manualEvidence?.provider).toBe("manual");
+  expect(manualEvidence?.start).toEqual({ utc: null, basis: "unknown", verifiedActual: false });
+  expect(manualEvidence?.end).toEqual({ utc: null, basis: "unknown", verifiedActual: false });
   await unit.run((tx) =>
     unit
       .client(tx)
