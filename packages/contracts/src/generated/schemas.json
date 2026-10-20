@@ -1066,12 +1066,137 @@
                   "type": "null"
                 }
               ]
+            },
+            "found": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "playerId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]{0,19}$",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "vtc": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "inVtc": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,19}$",
+                          "maxLength": 20
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tag": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 128
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "memberId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]{0,19}$",
+                          "maxLength": 20
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "inVtc",
+                    "id",
+                    "name",
+                    "tag",
+                    "memberId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lastAttemptAt": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failure": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "transport",
+                    "timeout",
+                    "rate_limited",
+                    "unavailable",
+                    "invalid_response"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
             "status",
             "displayName",
-            "checkedAt"
+            "checkedAt",
+            "found",
+            "playerId",
+            "vtc",
+            "lastAttemptAt",
+            "failure"
           ],
           "additionalProperties": false
         }

@@ -18,7 +18,7 @@ import {
 import { idColumn, opaqueColumn } from "../../core/values.js";
 
 // Keep module queries on the same Drizzle type identity as the transaction host.
-export { and, eq, lt, sql } from "drizzle-orm";
+export { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 
 // Better Auth receives Date values; ordinary utcColumn intentionally receives ISO strings.
 const instant = (name: string) => datetime(name, { mode: "date", fsp: 3 });

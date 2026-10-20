@@ -4,6 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "exports": {
+    "./external-identities-schema": {
+      "types": "./dist/schema/external-identities/index.d.ts",
+      "default": "./dist/schema/external-identities/index.js"
+    },
     "./admissions-schema": {
       "types": "./dist/schema/admissions/index.d.ts",
       "default": "./dist/schema/admissions/index.js"

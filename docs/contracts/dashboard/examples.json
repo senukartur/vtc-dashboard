@@ -349,9 +349,14 @@
           "pendingReplacementId": null,
           "identityEpoch": 1,
           "truckersMp": {
-            "status": "available",
+            "status": "not_linked",
             "displayName": null,
-            "checkedAt": null
+            "checkedAt": null,
+            "found": null,
+            "playerId": null,
+            "vtc": null,
+            "lastAttemptAt": null,
+            "failure": null
           }
         },
         "meta": {
