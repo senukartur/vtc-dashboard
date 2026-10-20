@@ -1,4 +1,4 @@
-import { type MouseEventHandler, useState } from "react";
+import { type MouseEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { publicContent, publicPath } from "../features/landing/content.js";
@@ -13,12 +13,13 @@ import {
 import { Button } from "../shared/ui/primitives.js";
 import { useSession } from "./Session.js";
 
+export type MobileNavigate = (href: string, trigger: HTMLButtonElement | null) => void;
 export function Navigation({
   variant = "public",
-  onMenuNavigate,
+  onMobileNavigate,
 }: {
   variant?: "public" | "sidebar" | "mobile";
-  onMenuNavigate?: (pathname: string) => void;
+  onMobileNavigate?: MobileNavigate;
 }) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
@@ -27,12 +28,13 @@ export function Navigation({
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const c = publicContent[locale];
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const items = [
     { to: "/status", label: "readiness" },
     { to: "/foundation", label: "public" },
     { to: "/foundation/member", label: "member" },
   ];
-  function links(close?: MouseEventHandler<HTMLAnchorElement>) {
+  function links(close?: (event: MouseEvent<HTMLAnchorElement>) => void) {
     if (!preview && location.pathname.startsWith("/account"))
       return (
         <>
@@ -97,7 +99,9 @@ export function Navigation({
         <div className="mobile-navigation">
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline">{t("menu")}</Button>
+              <Button variant="outline" ref={trigger}>
+                {t("menu")}
+              </Button>
             </DialogTrigger>
             <DialogContent className="navigation-dialog">
               <DialogTitle>{t("navigation")}</DialogTitle>
@@ -106,14 +110,14 @@ export function Navigation({
                 {links((event) => {
                   if (
                     !event.defaultPrevented &&
-                    event.currentTarget.pathname !== location.pathname &&
                     event.button === 0 &&
-                    !event.metaKey &&
                     !event.ctrlKey &&
+                    !event.metaKey &&
                     !event.shiftKey &&
-                    !event.altKey
+                    !event.altKey &&
+                    (!event.currentTarget.target || event.currentTarget.target === "_self")
                   )
-                    onMenuNavigate?.(event.currentTarget.pathname);
+                    onMobileNavigate?.(event.currentTarget.href, trigger.current);
                   setOpen(false);
                 })}
               </nav>

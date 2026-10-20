@@ -12,10 +12,17 @@ export function LocalForm() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<{ note: string }>({ defaultValues: { note: "" } });
+  } = useForm<{ note: string }>({
+    defaultValues: { note: "" },
+    shouldFocusError: false,
+  });
   const [fail, setFail] = useState(false);
   const [result, setResult] = useState<"failed" | "confirmed" | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const note = useRef<HTMLInputElement | null>(null);
+  const noteRegistration = register("note", {
+    validate: (value) => noteSchema.safeParse(value).success || "required",
+  });
   useEffect(() => () => controller.current?.abort(), []);
   async function submit() {
     setResult(null);
@@ -38,7 +45,11 @@ export function LocalForm() {
     <Card aria-labelledby="form-title">
       <h2 id="form-title">{t("formTitle")}</h2>
       <p className="muted">{t("formHelp")}</p>
-      <form onSubmit={handleSubmit(submit)} noValidate className="stack">
+      <form
+        onSubmit={handleSubmit(submit, () => note.current?.focus())}
+        noValidate
+        className="stack"
+      >
         <div className="field">
           <Label htmlFor="preview-note">{t("note")}</Label>
           <Input
@@ -46,9 +57,11 @@ export function LocalForm() {
             placeholder={t("notePlaceholder")}
             aria-invalid={Boolean(errors.note)}
             aria-describedby={errors.note ? "note-error" : undefined}
-            {...register("note", {
-              validate: (value) => noteSchema.safeParse(value).success || "required",
-            })}
+            {...noteRegistration}
+            ref={(element) => {
+              noteRegistration.ref(element);
+              note.current = element;
+            }}
           />
           <FieldError id="note-error">{errors.note ? t("required") : undefined}</FieldError>
         </div>

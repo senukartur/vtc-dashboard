@@ -114,7 +114,7 @@ Follow the [review and dependency guide](docs/development/review.md). [CODEOWNER
 
 ## Agent task delivery
 
-Repository-local manual delivery entrypoints are available for [Codex](.agents/skills/deliver/SKILL.md) and [Claude Code](.claude/skills/deliver/SKILL.md). Follow the relevant entrypoint for invocation and host setup; the [shared workflow](.agents/skills/deliver/references/workflow.md) owns execution, trust, recovery, budgets and publication rules, with [shared role instructions](.agents/skills/deliver/references/roles.md).
+Repository-local manual delivery entrypoints are available for [Codex](.agents/skills/deliver/SKILL.md) and [Claude Code](.claude/skills/deliver/SKILL.md). Follow the relevant entrypoint for invocation and host setup; the [shared workflow](.agents/skills/deliver/references/workflow.md) owns execution, trust, recovery, evidence-led continuation and publication rules, with [shared role instructions](.agents/skills/deliver/references/roles.md). Delivery fixes, review passes and justified verification reruns have no numerical cap; retain attempt history and exact-current-candidate acceptance gates.
 
 The explicit human standing completion scope in [AGENTS.md](AGENTS.md#branches-collaboration-and-review) permits one card at a time through verified review/fixes, normal merge and Trello Done. It does not grant paid setup, deployment, production changes or skipped gates. Without that explicit human authority, the delivery workflow ends at a draft PR.
 

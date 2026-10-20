@@ -1,6 +1,7 @@
 import type { Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { expect, test } from "./support/fixtures.ts";
+
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 2 }, meta };
 const challenge = {
@@ -316,6 +317,179 @@ test("challenge replacement clears old confirmation fields while wrong-code retr
   for (const label of ["Email code", "New password", "Repeat new password"])
     await expect(form.getByLabel(label, { exact: true })).toHaveValue("");
 });
+
+for (const readFailure of [false, true]) {
+  test(`VTC019 ordering regression: email replacement fences command and pending read${readFailure ? " with recovery" : ""}`, async ({
+    page,
+  }) => {
+    await mocks(page);
+    const self = accountFixture();
+    self.data.emailVerified = true;
+    const replacementId = "41000000-0000-4000-8000-000000000071";
+    const proposedId = "41000000-0000-4000-8000-000000000072";
+    let pending = {
+      id: fixtureId,
+      stage: "current_email",
+      proposedEmail: "replacement@example.invalid",
+      expiresAt: challenge.data.expiresAt,
+    };
+    let releaseCommand = () => {},
+      releaseRead = () => {},
+      releaseStage = () => {},
+      commandEntered = () => {},
+      readEntered = () => {},
+      stageEntered = () => {};
+    const commandGate = new Promise<void>((resolve) => {
+      releaseCommand = resolve;
+    });
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const commandStarted = new Promise<void>((resolve) => {
+      commandEntered = resolve;
+    });
+    const readStarted = new Promise<void>((resolve) => {
+      readEntered = resolve;
+    });
+    const stageGate = new Promise<void>((resolve) => {
+      releaseStage = resolve;
+    });
+    const stageStarted = new Promise<void>((resolve) => {
+      stageEntered = resolve;
+    });
+    let replacementIssued = false,
+      readHeld = false,
+      stageHeld = false,
+      failCommand = readFailure,
+      confirmations = 0,
+      matchingGeneration = false;
+    let phase = "DISCOVERY";
+    await page.route("**/api/v1/me", (route) =>
+      route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
+    );
+    await page.route("**/api/v1/me/email-change", async (route) => {
+      if (replacementIssued && !readHeld) {
+        readHeld = true;
+        readEntered();
+        await readGate;
+        if (readFailure) return route.fulfill(error(503));
+      }
+      if (pending.stage === "proposed_email" && !stageHeld) {
+        stageHeld = true;
+        stageEntered();
+        await stageGate;
+      }
+      return route.fulfill({ json: { data: { pending }, meta } });
+    });
+    await page.route("**/api/v1/me/credential-challenges", async (route) => {
+      if (failCommand) {
+        failCommand = false;
+        return route.fulfill(error(503));
+      }
+      commandEntered();
+      await commandGate;
+      replacementIssued = true;
+      pending = { ...pending, id: replacementId };
+      return route.fulfill({
+        status: 202,
+        json: { ...challenge, data: { ...challenge.data, id: replacementId } },
+      });
+    });
+    await page.route("**/api/v1/me/credential-changes", (route) => {
+      confirmations++;
+      const body = route.request().postDataJSON();
+      matchingGeneration = body.challengeId === replacementId;
+      if (body.code !== "NONFUNCTIONAL_NEW_CODE") return route.fulfill(error(401));
+      pending = { ...pending, id: proposedId, stage: "proposed_email" };
+      return route.fulfill({
+        status: 202,
+        json: { ...challenge, data: { ...challenge.data, id: proposedId } },
+      });
+    });
+    try {
+      await page.goto("/account");
+      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      const request = page.getByRole("form", { name: "Request email change", exact: true });
+      const confirm = page.getByRole("form", {
+        name: "Confirm email replacement stage",
+        exact: true,
+      });
+      const code = confirm.getByLabel("Email code", { exact: true });
+      await code.fill("NONFUNCTIONAL_OLD_CODE");
+      await request.getByLabel("Proposed email", { exact: true }).fill(pending.proposedEmail);
+      phase = "COMMAND_PENDING";
+      if (readFailure) {
+        await request
+          .getByRole("button", { name: "Replace pending email request", exact: true })
+          .click();
+        await expect(request.getByRole("alert")).toBeVisible();
+        await expect(code).toBeEnabled();
+        await expect(code).toHaveValue("NONFUNCTIONAL_OLD_CODE");
+      }
+      await request
+        .getByRole("button", {
+          name: readFailure ? "Retry this action" : "Replace pending email request",
+          exact: true,
+        })
+        .click();
+      await commandStarted;
+      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+      const commandBlockedConfirmation = await code.isDisabled();
+      releaseCommand();
+      await readStarted;
+      phase = "PENDING_FENCE";
+      await expect(code).toBeDisabled();
+      await expect(
+        confirm.getByRole("button", { name: /^(Please wait…|Confirm this email code)$/ }),
+      ).toBeDisabled();
+      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "Refresh pending request", exact: true }),
+      ).toBeDisabled();
+      expect(confirmations).toBe(0);
+      releaseRead();
+      if (readFailure) {
+        phase = "READ_RECOVERY";
+        await expect(
+          page.getByText("Pending email replacement could not be checked.", { exact: true }),
+        ).toBeVisible();
+        await expect(confirm).toHaveCount(0);
+        await expect(request.getByLabel("Proposed email", { exact: true })).toHaveValue(
+          pending.proposedEmail,
+        );
+        await page.getByRole("button", { name: "Check again", exact: true }).click();
+      }
+      phase = "GENERATION_READY";
+      await expect(code).toBeEnabled();
+      await expect(code).toHaveValue("");
+      expect(commandBlockedConfirmation).toBe(true);
+      phase = "WRONG_CODE";
+      await code.fill("NONFUNCTIONAL_WRONG_CODE");
+      await confirm.getByRole("button", { name: "Confirm this email code", exact: true }).click();
+      await expect(confirm.getByRole("alert")).toBeVisible();
+      await expect(code).toHaveValue("NONFUNCTIONAL_WRONG_CODE");
+      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      phase = "NEW_STAGE";
+      await code.fill("NONFUNCTIONAL_NEW_CODE");
+      await confirm.getByRole("button", { name: "Retry this action", exact: true }).click();
+      await stageStarted;
+      await expect(code).toBeDisabled();
+      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+      releaseStage();
+      await expect(page.getByText(/Current email confirmed/)).toBeVisible();
+      await expect(code).toHaveValue("");
+      expect(matchingGeneration).toBe(true);
+      expect(confirmations).toBe(2);
+      await expect(page.locator(".account-address")).toHaveText(self.data.email);
+    } catch {
+      throw new Error(`VTC019_EMAIL_${readFailure ? "RECOVERY" : "SUCCESS"}_${phase}_FAILED`);
+    } finally {
+      releaseCommand();
+      releaseRead();
+      releaseStage();
+    }
+  });
+}
 test("controlled account preferences conflict requires refresh/review, wrong codes preserve session, outage and revoked access hide private content", async ({
   page,
 }, info) => {
