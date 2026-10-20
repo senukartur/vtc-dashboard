@@ -37,20 +37,25 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
   const previousPath = useRef(location.pathname);
-  const menuDestination = useRef<{ origin: typeof location; pathname: string } | null>(null);
+  const mobileFocus = useRef<{
+    origin: typeof location;
+    destination: string;
+    trigger: HTMLButtonElement | null;
+  } | null>(null);
   useEffect(() => {
-    const intent = menuDestination.current;
-    // A menu action can run before its origin commit's passive effect.
+    const { pathname, search, hash } = location;
+    const intent = mobileFocus.current;
+    // A menu action can precede its origin commit's passive effect.
     const isOrigin = intent?.origin === location;
-    if (
-      previousPath.current !== location.pathname &&
-      !location.hash &&
-      !isOrigin &&
-      intent?.pathname !== location.pathname
-    )
+    const mobileClose = !isOrigin && intent?.destination === `${pathname}${search}${hash}`;
+    const trigger = mobileClose ? intent.trigger : null;
+    if (trigger?.isConnected && trigger.getClientRects().length > 0)
+      trigger.focus({ preventScroll: true });
+    else if (!hash && !isOrigin && (previousPath.current !== pathname || mobileClose))
       document.getElementById("main-content")?.focus();
-    previousPath.current = location.pathname;
-    if (!isOrigin) menuDestination.current = null;
+    previousPath.current = pathname;
+    // Consume even same-path/hash destinations after the origin effect has passed.
+    if (!isOrigin) mobileFocus.current = null;
   }, [location]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
@@ -93,8 +98,13 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   return (
     <AppLayout
       member={memberMatch !== null || accountMatch !== null}
-      onMenuNavigate={(pathname) => {
-        menuDestination.current = { origin: location, pathname };
+      onMobileNavigate={(href, trigger) => {
+        const destination = new URL(href, window.location.href);
+        mobileFocus.current = {
+          origin: location,
+          destination: `${destination.pathname}${destination.search}${destination.hash}`,
+          trigger,
+        };
       }}
     >
       <RouteErrorBoundary

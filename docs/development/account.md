@@ -28,6 +28,8 @@ Verification requests show queued feedback, not a sent/delivered claim. The curr
 
 Email replacement follows both proof stages. Confirming the current-channel code returns **202 pending**; the original login address remains authoritative. `/me/email-change` discovers either stage after reload, with its current ID, proposed address and explicit expiry display. A new request replaces either stage. Only committed proposed-address confirmation completes replacement and ends sessions. Wrong, expired, replaced and taken-target proofs have generic feedback without address-availability disclosure. The UI has no administrative bypass.
 
+Email request, confirmation and explicit refresh share a local interaction fence through the authoritative pending read. Both forms remain unavailable while a replacement command or its follow-up read is unresolved. An uncertain request also refreshes pending state before another proof can be submitted. A changed challenge ID clears the previous code; a recoverable wrong proof for the same ID preserves input for explicit retry. Read failures retain recovery controls without treating cached challenge data as current authority.
+
 Connections distinguish a confirmed local session, authoritative `steamVerified`, and outstanding `missingSetup`. Steam linking/TruckersMP and telemetry-token controls are unavailable pending their owning modules. No provider endpoint is fabricated.
 
 ## Verification and limits

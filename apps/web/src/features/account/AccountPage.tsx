@@ -3,10 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { Button, Card } from "../../shared/ui/primitives.js";
 import { formatUtc } from "../../shared/formatting.js";
-import { Form, codeValid, emailValid, newPasswordValid, type AccountField } from "./Form.js";
-import { AccountFailure, readPending, type DTO } from "./transport.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
+import { type AccountField, codeValid, emailValid, Form, newPasswordValid } from "./Form.js";
+import { AccountFailure, type DTO, readPending } from "./transport.js";
 import { useCommand } from "./useCommand.js";
 
 const codeField: AccountField = {
@@ -242,6 +242,20 @@ function EmailChange({ verified }: { verified: boolean }) {
     enabled: verified,
   });
   const current = pending.data?.data.data.pending;
+  const interaction = useRef(false);
+  const [coordinating, setCoordinating] = useState(false);
+  const busy = coordinating || request.pending || confirm.pending || pending.isFetching;
+  async function coordinate(action: () => Promise<unknown>) {
+    if (interaction.current || pending.isFetching) return;
+    interaction.current = true;
+    setCoordinating(true);
+    try {
+      await action();
+    } finally {
+      interaction.current = false;
+      setCoordinating(false);
+    }
+  }
   const endSession = session.end;
   useEffect(() => {
     // This authenticated read has no code-validation 401; it signals session loss.
@@ -268,24 +282,32 @@ function EmailChange({ verified }: { verified: boolean }) {
               },
             ]}
             {...request}
+            pending={busy}
             action={current ? "replaceRequest" : "requestEmailCode"}
-            submit={async (values) => {
-              const result = await request.run("challenge", {
-                purpose: "email_change",
-                newEmail: values.email ?? "",
-              });
-              if (result) {
-                confirm.reset();
+            submit={(values) =>
+              coordinate(async () => {
+                const result = await request.run("challenge", {
+                  purpose: "email_change",
+                  newEmail: values.email ?? "",
+                });
+                if (result) {
+                  confirm.reset();
+                } else await recheck();
+                // An uncertain command may have committed a new generation too.
                 await pending.refetch();
-              } else await recheck();
-            }}
+              })
+            }
           />
           {pending.isPending ? (
             <p role="status">{t("checking")}</p>
           ) : pending.isError ? (
             <>
               <p role="alert">{t("pendingUnavailable")}</p>
-              <Button variant="outline" onClick={() => void pending.refetch()}>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => void coordinate(() => pending.refetch())}
+              >
                 {t("refresh")}
               </Button>
             </>
@@ -310,31 +332,38 @@ function EmailChange({ verified }: { verified: boolean }) {
                 id="emailConfirm"
                 fields={[codeField]}
                 {...confirm}
+                pending={busy}
                 action="confirmEmail"
-                submit={async (values) => {
-                  const result =
-                    current.stage === "current_email"
-                      ? await confirm.run("emailCurrent", {
-                          kind: "email_change",
-                          challengeId: current.id,
-                          code: values.code ?? "",
-                        })
-                      : await confirm.run("emailProposed", {
-                          challengeId: current.id,
-                          code: values.code ?? "",
-                        });
-                  if (result) {
-                    if (current.stage === "current_email") await pending.refetch();
-                    else {
-                      session.end();
-                      navigate("/login", { replace: true });
+                submit={(values) =>
+                  coordinate(async () => {
+                    const result =
+                      current.stage === "current_email"
+                        ? await confirm.run("emailCurrent", {
+                            kind: "email_change",
+                            challengeId: current.id,
+                            code: values.code ?? "",
+                          })
+                        : await confirm.run("emailProposed", {
+                            challengeId: current.id,
+                            code: values.code ?? "",
+                          });
+                    if (result) {
+                      if (current.stage === "current_email") await pending.refetch();
+                      else {
+                        session.end();
+                        navigate("/login", { replace: true });
+                      }
+                    } else {
+                      await recheck();
                     }
-                  } else {
-                    await recheck();
-                  }
-                }}
+                  })
+                }
               />
-              <Button variant="ghost" onClick={() => void pending.refetch()}>
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => void coordinate(() => pending.refetch())}
+              >
                 {t("refreshPending")}
               </Button>
             </>

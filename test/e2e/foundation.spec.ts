@@ -189,6 +189,56 @@ test("synthetic local form preserves input, prevents duplicate pending submissio
   await expect(note).toHaveValue("Synthetic route inspection");
 });
 
+test("synthetic local form retains keyboard progress when validation timers run", async ({
+  page,
+}) => {
+  let phase = "DISCOVERY";
+  await page.clock.install({ time: new Date("2026-10-20T12:00:00Z") });
+  try {
+    await page.goto("/foundation");
+    await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+    const submit = page.getByRole("button", { name: "Preview confirmation", exact: true });
+    const note = page.getByRole("textbox", { name: "Example note", exact: true });
+    const checkbox = page.getByRole("checkbox", { name: "Simulate a recoverable failure" });
+    await expect(note).toBeVisible();
+    await page.clock.pauseAt(new Date("2026-10-20T13:00:00Z"));
+    phase = "INVALID";
+    await submit.click();
+    await expect(page.getByRole("alert")).toHaveText("Enter a note");
+    await expect(note).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(checkbox).toBeFocused();
+    phase = "DEFERRED_FOCUS";
+    // Run queued zero-delay validation work after keyboard progress, without sleeping.
+    await page.clock.runFor(0);
+    await expect(checkbox).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(note).toBeFocused();
+    await page.clock.resume();
+    phase = "RECOVERY";
+    await note.fill("Synthetic route inspection");
+    await checkbox.check();
+    await submit.click();
+    const pending = page.getByRole("button", { name: "Preparing preview…", exact: true });
+    await expect(pending).toBeDisabled();
+    await expect(checkbox).toBeDisabled();
+    await expect(page.getByRole("alert")).toHaveText(
+      "The synthetic attempt failed. Your note is preserved; try again.",
+    );
+    await expect(note).toHaveValue("Synthetic route inspection");
+    await checkbox.uncheck();
+    await submit.click();
+    await expect(page.getByRole("status")).toHaveText(
+      "Preview confirmed locally. No company action was submitted.",
+    );
+    await expect(note).toHaveValue("Synthetic route inspection");
+  } catch {
+    throw new Error(`LOCAL_FORM_CLOCK_${phase}_FAILED`);
+  } finally {
+    await page.clock.resume();
+  }
+});
+
 test("synthetic keyboard dialogs, skip link, navigation and locale preserve canonical selection", async ({
   page,
 }, info) => {
@@ -222,7 +272,8 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
   const menu = page.getByRole("button", { name: "Open navigation", exact: true });
-  if (await menu.isVisible()) {
+  const mobileNavigation = await menu.isVisible();
+  if (mobileNavigation) {
     await menu.focus();
     await page.keyboard.press("Enter");
     const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
@@ -238,7 +289,8 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
       .click();
   }
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Member workspace composition");
-  if (await menu.isVisible()) {
+  const memberMobileNavigation = await menu.isVisible();
+  if (memberMobileNavigation) {
     await menu.focus();
     await page.keyboard.press("Enter");
     await page.keyboard.press("Tab");
@@ -248,9 +300,132 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
     "aria-current",
     "page",
   );
-  if (await menu.isVisible()) {
+  if (memberMobileNavigation) {
     await page.keyboard.press("Escape");
     await expect(menu).toBeFocused();
+  }
+});
+
+test("VTC019 ordering regression: mobile route closure has one focus owner and ordinary navigation still focuses main", async ({
+  page,
+}) => {
+  let phase = "DISCOVERY";
+  try {
+    await page.goto("/foundation");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+    const menu = page.getByRole("button", { name: /^(Open navigation|Открыть навигацию)$/ });
+    const mobileNavigation = await menu.isVisible();
+    const main = page.getByRole("main");
+    await main.evaluate((element) => {
+      element.dataset.orderingFocusCount = "0";
+      element.addEventListener("focus", () => {
+        element.dataset.orderingFocusCount = String(Number(element.dataset.orderingFocusCount) + 1);
+      });
+    });
+    if (mobileNavigation) {
+      phase = "MOBILE_ROUTE";
+      await menu.click();
+      const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+      await navigation.getByRole("link", { name: "Member preview", exact: true }).click();
+      await expect(navigation).toHaveCount(0);
+      await expect(menu).toBeFocused();
+    } else {
+      phase = "DESKTOP_ROUTE";
+      await page
+        .getByRole("navigation")
+        .getByRole("link", { name: "Member preview", exact: true })
+        .click();
+      await expect(main).toBeFocused();
+    }
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Member workspace composition",
+    );
+    phase = "ROUTE_FOCUS";
+    await expect(main).toHaveAttribute("data-ordering-focus-count", mobileNavigation ? "0" : "1");
+    const memberMobileNavigation = await menu.isVisible();
+    if (memberMobileNavigation) {
+      phase = "SAME_PATH";
+      await main.evaluate((element) => {
+        element.dataset.orderingFocusCount = "0";
+      });
+      await menu.click();
+      const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+      await navigation.getByRole("link", { name: "Member preview", exact: true }).click();
+      await expect(navigation).toHaveCount(0);
+      await expect(menu).toBeFocused();
+      await expect(main).toHaveAttribute("data-ordering-focus-count", "0");
+      await menu.click();
+      await navigation.getByRole("link", { name: "Public preview", exact: true }).click();
+      await expect(navigation).toHaveCount(0);
+      await expect(page).toHaveURL(/\/foundation$/);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "A shared language for the road",
+      );
+      if (await menu.isVisible()) {
+        await expect(menu).toBeFocused();
+        await expect(main).toHaveAttribute("data-ordering-focus-count", "0");
+      } else {
+        await expect(main).toBeFocused();
+        await expect(main).toHaveAttribute("data-ordering-focus-count", "1");
+      }
+    }
+    if (mobileNavigation) {
+      phase = "MODIFIED_CLICK";
+      await menu.click();
+      const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+      await main.evaluate((element) => {
+        element.dataset.orderingModifiedClick = "false";
+        // Cancel native opening after React handles the real modified click.
+        document.addEventListener(
+          "click",
+          (event) => {
+            if (event.ctrlKey || event.metaKey) {
+              element.dataset.orderingModifiedClick = "true";
+              event.preventDefault();
+            }
+          },
+          { once: true },
+        );
+      });
+      await navigation
+        .getByRole("link", { name: "Connection", exact: true })
+        .click({ modifiers: ["ControlOrMeta"] });
+      await expect(main).toHaveAttribute("data-ordering-modified-click", "true");
+      await expect(navigation).toHaveCount(0);
+      await expect(menu).toBeFocused();
+      await page.getByRole("button", { name: "About this preview", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "About this preview", exact: true })
+        .getByRole("link", { name: "Connection", exact: true })
+        .click();
+      await expect(page).toHaveURL(/\/status$/);
+      await expect(main).toBeFocused();
+    }
+    phase = "NORMAL_ROUTE";
+    await page.getByRole("link", { name: "Yukon Union", exact: true }).click();
+    await expect(main).toBeFocused();
+    if (mobileNavigation) {
+      phase = "HASH_ROUTE";
+      const publicMenu = page.getByRole("button", { name: "Открыть навигацию", exact: true });
+      await main.evaluate((element) => {
+        element.dataset.orderingFocusCount = "0";
+      });
+      await publicMenu.click();
+      const navigation = page.getByRole("dialog", { name: "Навигация", exact: true });
+      await navigation.getByRole("link", { name: "О компании", exact: true }).click();
+      await expect(navigation).toHaveCount(0);
+      await expect(publicMenu).toBeFocused();
+      await expect(main).toHaveAttribute("data-ordering-focus-count", "0");
+      phase = "AFTER_HASH";
+      await main.getByRole("link", { name: "Публичные события", exact: true }).click();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "Публичные события ещё готовятся",
+      );
+      await expect(main).toBeFocused();
+    }
+  } catch {
+    throw new Error(`VTC019_FOCUS_${phase}_FAILED`);
   }
 });
 
@@ -380,6 +555,7 @@ for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
       exact: true,
     });
     const menu = page.getByRole("button", { name: "Открыть навигацию", exact: true });
+    const mobileNavigation = await menu.isVisible();
     if ((page.viewportSize()?.width ?? 0) > 1050) {
       await expect(sidebar).toBeVisible();
     } else {
@@ -397,7 +573,7 @@ for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
     ).not.toHaveAttribute("aria-current", "page");
     await noOverflow(page);
     await capture(page, info, "canonical-member-navigation");
-    if (await menu.isVisible()) {
+    if (mobileNavigation) {
       await page.keyboard.press("Escape");
       await expect(menu).toBeFocused();
     }
