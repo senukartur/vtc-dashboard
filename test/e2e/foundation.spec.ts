@@ -189,6 +189,56 @@ test("synthetic local form preserves input, prevents duplicate pending submissio
   await expect(note).toHaveValue("Synthetic route inspection");
 });
 
+test("synthetic local form retains keyboard progress when validation timers run", async ({
+  page,
+}) => {
+  let phase = "DISCOVERY";
+  await page.clock.install({ time: new Date("2026-10-20T12:00:00Z") });
+  try {
+    await page.goto("/foundation");
+    await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+    const submit = page.getByRole("button", { name: "Preview confirmation", exact: true });
+    const note = page.getByRole("textbox", { name: "Example note", exact: true });
+    const checkbox = page.getByRole("checkbox", { name: "Simulate a recoverable failure" });
+    await expect(note).toBeVisible();
+    await page.clock.pauseAt(new Date("2026-10-20T13:00:00Z"));
+    phase = "INVALID";
+    await submit.click();
+    await expect(page.getByRole("alert")).toHaveText("Enter a note");
+    await expect(note).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(checkbox).toBeFocused();
+    phase = "DEFERRED_FOCUS";
+    // Run queued zero-delay validation work after keyboard progress, without sleeping.
+    await page.clock.runFor(0);
+    await expect(checkbox).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(note).toBeFocused();
+    await page.clock.resume();
+    phase = "RECOVERY";
+    await note.fill("Synthetic route inspection");
+    await checkbox.check();
+    await submit.click();
+    const pending = page.getByRole("button", { name: "Preparing preview…", exact: true });
+    await expect(pending).toBeDisabled();
+    await expect(checkbox).toBeDisabled();
+    await expect(page.getByRole("alert")).toHaveText(
+      "The synthetic attempt failed. Your note is preserved; try again.",
+    );
+    await expect(note).toHaveValue("Synthetic route inspection");
+    await checkbox.uncheck();
+    await submit.click();
+    await expect(page.getByRole("status")).toHaveText(
+      "Preview confirmed locally. No company action was submitted.",
+    );
+    await expect(note).toHaveValue("Synthetic route inspection");
+  } catch {
+    throw new Error(`LOCAL_FORM_CLOCK_${phase}_FAILED`);
+  } finally {
+    await page.clock.resume();
+  }
+});
+
 test("synthetic keyboard dialogs, skip link, navigation and locale preserve canonical selection", async ({
   page,
 }, info) => {

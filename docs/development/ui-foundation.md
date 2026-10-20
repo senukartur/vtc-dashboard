@@ -32,6 +32,8 @@ Display timezone changes timestamps only. Company bucket dates and `reportingTim
 
 The content selector explicitly exercises loading, empty, error, forbidden, partial and available states. Forbidden removes all previously displayed example rows/catalog/analytics. Retry and reset have safe local behavior. The local note form uses React Hook Form and Zod validation, preserves input after a simulated recoverable failure, prevents duplicate pending submissions and reports a local-only confirmation. It sends no request and performs no company command. Its delay is only a presentation exercise.
 
+Invalid submission focuses the note once through the form's invalid-submit handler. Automatic error focus is disabled so delayed validation work cannot interrupt subsequent Tab/Shift+Tab progress. A browser regression advances queued zero-delay validation work after Tab, then checks focus and the ordinary input/pending/failure/retry/success flow; the original natural keyboard journey remains separate.
+
 Future feature owners replace the example seam with reviewed contract transport/query flows, pass cancellation signals, partition query keys by effective inputs/access scope, and clear sensitive caches when access changes. Server queries must filter unauthorized data; hiding UI is not permission enforcement. Do not reuse local confirmation as evidence that a server command committed.
 
 ## Provenance and checks
