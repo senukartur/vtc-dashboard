@@ -1,19 +1,20 @@
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
-import { expect, test } from "./support/fixtures.ts";
 import {
   accountSecret,
   approveInvitation,
   createInvitation,
+  deactivateFixtureMember,
+  expireFixtureInvitation,
   origin,
   privateMail,
   resetAccountLimits,
   staffContext,
   write,
-  deactivateFixtureMember,
-  expireFixtureInvitation,
 } from "./support/account.ts";
+import { expect, test } from "./support/fixtures.ts";
+
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeEach(resetAccountLimits);
 async function english(page: Page) {
@@ -22,6 +23,40 @@ async function english(page: Page) {
     .getByRole("combobox", { name: /^(Language|Язык)$/ })
     .selectOption("en");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
+}
+async function replacePendingEmail(page: Page) {
+  const confirmation = page.getByRole("form", {
+    name: "Confirm email replacement stage",
+    exact: true,
+  });
+  await confirmation.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_REPLACED_INPUT");
+  const command = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/v1/me/credential-challenges") &&
+      response.request().method() === "POST",
+  );
+  const pending = page.waitForResponse(async (response) => {
+    if (
+      !response.url().endsWith("/api/v1/me/email-change") ||
+      response.request().method() !== "GET" ||
+      response.status() !== 200
+    )
+      return false;
+    const issued = await command;
+    if (issued.status() !== 202) return false;
+    return (await response.json()).data.pending?.id === (await issued.json()).data.id;
+  });
+  await page
+    .getByRole("form", { name: "Request email change", exact: true })
+    .getByRole("button", { name: "Replace pending email request", exact: true })
+    .click();
+  const issued = await command;
+  expect(issued.status()).toBe(202);
+  const challengeId = (await issued.json()).data.id as string;
+  await pending;
+  await expect(confirmation.getByLabel("Email code", { exact: true })).toBeEnabled();
+  await expect(confirmation.getByLabel("Email code", { exact: true })).toHaveValue("");
+  return challengeId;
 }
 async function redeem(page: Page, link: string, password: string, uncertain = false) {
   await page.goto(link);
@@ -241,13 +276,12 @@ test("real recoverable two-proof email replacement reloads both stages, replaces
     await expect(page.getByText(/First enter the code sent to your current email/)).toBeVisible();
     request = page.getByRole("form", { name: "Request email change", exact: true });
     await request.getByLabel("Proposed email", { exact: true }).fill(proposed);
-    await request
-      .getByRole("button", { name: "Replace pending email request", exact: true })
-      .click();
+    const replacementId = await replacePendingEmail(page);
     await expect
-      .poll(
-        async () => (await privateMail(userId, "email_change", "current_email")).id !== first.id,
-      )
+      .poll(async () => {
+        const mail = await privateMail(userId, "email_change", "current_email");
+        return mail.id === replacementId && mail.id !== first.id;
+      })
       .toBe(true);
     const current = await privateMail(userId, "email_change", "current_email");
     phase = "CURRENT_PROOF";
@@ -264,10 +298,13 @@ test("real recoverable two-proof email replacement reloads both stages, replaces
     phase = "REISSUE_PROPOSED";
     request = page.getByRole("form", { name: "Request email change", exact: true });
     await request.getByLabel("Proposed email", { exact: true }).fill(proposed);
-    await request
-      .getByRole("button", { name: "Replace pending email request", exact: true })
-      .click();
+    const renewedId = await replacePendingEmail(page);
     await expect(page.getByText(/First enter the code sent to your current email/)).toBeVisible();
+    await expect
+      .poll(
+        async () => (await privateMail(userId, "email_change", "current_email")).id === renewedId,
+      )
+      .toBe(true);
     const renewed = await privateMail(userId, "email_change", "current_email");
     form = page.getByRole("form", { name: "Confirm email replacement stage", exact: true });
     await form.getByLabel("Email code", { exact: true }).fill(renewed.code);

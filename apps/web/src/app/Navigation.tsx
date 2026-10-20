@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { type MouseEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, useLocation } from "react-router-dom";
+import { publicContent, publicPath } from "../features/landing/content.js";
 import {
   Dialog,
   DialogClose,
@@ -9,11 +10,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../shared/ui/dialog.js";
-import { publicContent, publicPath } from "../features/landing/content.js";
 import { Button } from "../shared/ui/primitives.js";
 import { useSession } from "./Session.js";
 
-export function Navigation({ variant = "public" }: { variant?: "public" | "sidebar" | "mobile" }) {
+export type MobileNavigate = (href: string, trigger: HTMLButtonElement | null) => void;
+export function Navigation({
+  variant = "public",
+  onMobileNavigate,
+}: {
+  variant?: "public" | "sidebar" | "mobile";
+  onMobileNavigate?: MobileNavigate;
+}) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
   const session = useSession();
@@ -21,12 +28,13 @@ export function Navigation({ variant = "public" }: { variant?: "public" | "sideb
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const c = publicContent[locale];
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const items = [
     { to: "/status", label: "readiness" },
     { to: "/foundation", label: "public" },
     { to: "/foundation/member", label: "member" },
   ];
-  function links(close?: () => void) {
+  function links(close?: (event: MouseEvent<HTMLAnchorElement>) => void) {
     if (!preview && location.pathname.startsWith("/account"))
       return (
         <>
@@ -86,12 +94,28 @@ export function Navigation({ variant = "public" }: { variant?: "public" | "sideb
         <div className="mobile-navigation">
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline">{t("menu")}</Button>
+              <Button variant="outline" ref={trigger}>
+                {t("menu")}
+              </Button>
             </DialogTrigger>
             <DialogContent className="navigation-dialog">
               <DialogTitle>{t("navigation")}</DialogTitle>
               <DialogDescription>Yukon Union</DialogDescription>
-              <nav aria-label={t("navigation")}>{links(() => setOpen(false))}</nav>
+              <nav aria-label={t("navigation")}>
+                {links((event) => {
+                  if (
+                    !event.defaultPrevented &&
+                    event.button === 0 &&
+                    !event.ctrlKey &&
+                    !event.metaKey &&
+                    !event.shiftKey &&
+                    !event.altKey &&
+                    (!event.currentTarget.target || event.currentTarget.target === "_self")
+                  )
+                    onMobileNavigate?.(event.currentTarget.href, trigger.current);
+                  setOpen(false);
+                })}
+              </nav>
               <DialogClose asChild>
                 <Button variant="outline">{t("close")}</Button>
               </DialogClose>

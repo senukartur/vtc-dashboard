@@ -2,10 +2,18 @@ import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
-import { Navigation } from "./Navigation.js";
+import { type MobileNavigate, Navigation } from "./Navigation.js";
 
 /** Shared landmarks with public navigation or a presentation-only member sidebar/topbar. */
-export function AppLayout({ member, children }: { member: boolean; children: ReactNode }) {
+export function AppLayout({
+  member,
+  children,
+  onMobileNavigate,
+}: {
+  member: boolean;
+  children: ReactNode;
+  onMobileNavigate: MobileNavigate;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation("core");
@@ -36,7 +44,7 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
           Yukon Union
         </Link>
         <p className="member-context">{preview ? t("member") : t("account:account")}</p>
-        <Navigation variant={member ? "mobile" : "public"} />
+        <Navigation variant={member ? "mobile" : "public"} onMobileNavigate={onMobileNavigate} />
         <label className="language-picker">
           {t("language")}
           <select

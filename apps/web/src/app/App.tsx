@@ -10,16 +10,16 @@ import {
   useLocation,
   useMatch,
 } from "react-router-dom";
-import { Button, Card } from "../shared/ui/primitives.js";
-import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { AccountPage } from "../features/account/AccountPage.js";
+import { AuthPage } from "../features/account/AuthPage.js";
+import type { LinkHandoff } from "../features/account/link.js";
 import { publicContent } from "../features/landing/content.js";
+import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
 import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
-import { SessionProvider, ProtectedAccount } from "./Session.js";
-import { AuthPage } from "../features/account/AuthPage.js";
-import { AccountPage } from "../features/account/AccountPage.js";
-import type { LinkHandoff } from "../features/account/link.js";
+import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
 
 const queryClient = createAppQueryClient();
@@ -36,11 +36,24 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
   const previousPath = useRef(location.pathname);
+  const mobileFocus = useRef<{ destination: string; trigger: HTMLButtonElement | null } | null>(
+    null,
+  );
   useEffect(() => {
-    if (previousPath.current !== location.pathname && !location.hash)
+    const { pathname, search, hash } = location;
+    const intent = mobileFocus.current;
+    // Consume even same-path/hash navigation; it cannot affect a later route.
+    mobileFocus.current = null;
+    const mobileClose = intent?.destination === `${pathname}${search}${hash}`;
+    const restoreTrigger =
+      mobileClose && intent.trigger?.isConnected && intent.trigger.getClientRects().length > 0;
+    if (
+      !hash &&
+      ((previousPath.current !== pathname && !restoreTrigger) || (mobileClose && !restoreTrigger))
+    )
       document.getElementById("main-content")?.focus();
-    previousPath.current = location.pathname;
-  }, [location.pathname, location.hash]);
+    previousPath.current = pathname;
+  }, [location]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
       document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
@@ -80,7 +93,16 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
       />
     );
   return (
-    <AppLayout member={memberMatch !== null || accountMatch !== null}>
+    <AppLayout
+      member={memberMatch !== null || accountMatch !== null}
+      onMobileNavigate={(href, trigger) => {
+        const destination = new URL(href, window.location.href);
+        mobileFocus.current = {
+          destination: `${destination.pathname}${destination.search}${destination.hash}`,
+          trigger,
+        };
+      }}
+    >
       <RouteErrorBoundary
         key={["/", "/en"].includes(location.pathname) ? "public-landing" : location.pathname}
         fallbackTitle={t("renderError")}
