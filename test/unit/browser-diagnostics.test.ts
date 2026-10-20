@@ -19,6 +19,11 @@ const valid = {
   status: "failed",
 };
 const privateText = "SYNTHETIC_PRIVATE_TOKEN=never-publish";
+test("catalog browser failures retain only allowlisted file identifiers", () => {
+  for (const file of ["catalogs", "catalogs-real"]) {
+    expect(safeBrowserFailure({ ...valid, file })).toEqual({ ...valid, file });
+  }
+});
 function record(value: unknown) {
   return `${browserFailurePrefix}${JSON.stringify(value)}\n`;
 }

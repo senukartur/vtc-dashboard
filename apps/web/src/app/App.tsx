@@ -10,16 +10,17 @@ import {
   useLocation,
   useMatch,
 } from "react-router-dom";
-import { Button, Card } from "../shared/ui/primitives.js";
-import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { AccountPage } from "../features/account/AccountPage.js";
+import { AuthPage } from "../features/account/AuthPage.js";
+import type { LinkHandoff } from "../features/account/link.js";
+import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
+import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
 import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
-import { SessionProvider, ProtectedAccount } from "./Session.js";
-import { AuthPage } from "../features/account/AuthPage.js";
-import { AccountPage } from "../features/account/AccountPage.js";
-import type { LinkHandoff } from "../features/account/link.js";
+import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
 
 const queryClient = createAppQueryClient();
@@ -143,6 +144,14 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <AccountPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/catalogs"
+              element={
+                <ProtectedAccount>
+                  <CatalogsPage />
                 </ProtectedAccount>
               }
             />
