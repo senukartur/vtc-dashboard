@@ -36,10 +36,16 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
   const previousPath = useRef(location.pathname);
+  const menuDestination = useRef<string | null>(null);
   useEffect(() => {
-    if (previousPath.current !== location.pathname && !location.hash)
+    if (
+      previousPath.current !== location.pathname &&
+      !location.hash &&
+      menuDestination.current !== location.pathname
+    )
       document.getElementById("main-content")?.focus();
     previousPath.current = location.pathname;
+    menuDestination.current = null;
   }, [location.pathname, location.hash]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
@@ -80,7 +86,12 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
       />
     );
   return (
-    <AppLayout member={memberMatch !== null || accountMatch !== null}>
+    <AppLayout
+      member={memberMatch !== null || accountMatch !== null}
+      onMenuNavigate={(pathname) => {
+        menuDestination.current = pathname;
+      }}
+    >
       <RouteErrorBoundary
         key={["/", "/en"].includes(location.pathname) ? "public-landing" : location.pathname}
         fallbackTitle={t("renderError")}

@@ -254,6 +254,32 @@ test("synthetic keyboard dialogs, skip link, navigation and locale preserve cano
   }
 });
 
+test("current-route menu selection and Escape restore the trigger while ordinary navigation focuses main", async ({
+  page,
+}) => {
+  await page.goto("/foundation/member");
+  await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption("en");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Member workspace composition");
+  const menu = page.getByRole("button", { name: "Open navigation", exact: true });
+  const hasMenu = await menu.isVisible();
+  if (hasMenu) {
+    await menu.focus();
+    await page.keyboard.press("Enter");
+    const navigation = page.getByRole("dialog", { name: "Navigation", exact: true });
+    await navigation.getByRole("link", { name: "Member preview", exact: true }).click();
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(navigation).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(navigation).toHaveCount(0);
+    await expect(menu).toBeFocused();
+  }
+  await page.getByRole("link", { name: "Yukon Union", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("main")).toBeFocused();
+});
+
 for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
   test(`direct member variant ${path} preserves its location and member navigation`, async ({
     page,
