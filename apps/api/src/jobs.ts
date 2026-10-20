@@ -1,6 +1,7 @@
-import { cleanupMail } from "./modules/messaging/service.js";
-import { cleanupAdmissions } from "./modules/admissions/service.js";
 import { createUnitOfWork } from "@vtc/db";
+import { cleanupAdmissions } from "./modules/admissions/service.js";
+import { cleanupCatalogs } from "./modules/catalogs/service.js";
+import { cleanupMail } from "./modules/messaging/service.js";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
@@ -24,7 +25,14 @@ await ownedCli(async () => {
     const config = readConfig();
     unit = createUnitOfWork(config.database);
     const composed = config.identity
-      ? composeIdentity(unit, config.identity, config.mail, config.admissions)
+      ? composeIdentity(
+          unit,
+          config.identity,
+          config.mail,
+          config.admissions,
+          config.externalIdentities,
+          config.catalogs,
+        )
       : undefined;
     const messaging = composed?.messaging;
     const admissionsCleanup =
@@ -38,7 +46,10 @@ await ownedCli(async () => {
       console.error(
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
-    const queue = messaging?.queue ?? createQueue(unit, [], [], undefined, ["mail.deliver"]);
+    if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
+    const queue =
+      composed?.jobsQueue ??
+      createQueue(unit, [], [], undefined, ["mail.deliver", "catalog.import"]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(
       JSON.stringify({

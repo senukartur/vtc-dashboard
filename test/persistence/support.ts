@@ -11,6 +11,9 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
+// Full isolated reset/migrations now include the additive catalog tables. Behavior bounds stay unchanged.
+export const SCHEMA_SETUP_TIMEOUT_MS = 30000;
+
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const fixtureRoot = join(root, "test/fixtures/persistence");
 
@@ -63,6 +66,20 @@ export async function reset(connection: Connection) {
     "external_steam_proofs",
     "external_steam_nonces",
     "external_steam_accounts",
+    "catalog_mapping_reviews",
+    "catalog_mapping_issues",
+    "catalog_aliases",
+    "catalog_relations",
+    "catalog_mappings",
+    "catalog_changes",
+    "catalog_coverage",
+    "catalog_facts",
+    "catalog_entities",
+    "catalog_publications",
+    "catalog_revisions",
+    "catalog_operations",
+    "catalog_commands",
+    "catalog_artifacts",
     "admissions_command_results",
     "admissions_limits",
     "admissions_decisions",
@@ -124,7 +141,11 @@ export async function externalIdentitiesPriorFolder(): Promise<string> {
   return publishedPrefixFolder(6);
 }
 
-async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6): Promise<string> {
+export async function catalogsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(7);
+}
+
+async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -145,6 +166,8 @@ async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6): Promise<stri
     throw new Error("PUBLISHED_MESSAGING_PREFIX_REQUIRED");
   if (count === 6 && entries[5]?.tag !== "0005_admissions")
     throw new Error("PUBLISHED_ADMISSIONS_PREFIX_REQUIRED");
+  if (count === 7 && entries[6]?.tag !== "0006_nervous_daredevil")
+    throw new Error("PUBLISHED_EXTERNAL_IDENTITIES_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));

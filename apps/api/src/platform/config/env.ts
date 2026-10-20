@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
+import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
 import { exactProxyAddress } from "../http/ingress.js";
@@ -110,6 +112,33 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let catalogs: CatalogConfig | undefined;
+  if (input.CATALOGS_ENABLED !== undefined && !["true", "false"].includes(input.CATALOGS_ENABLED))
+    throw new Error("Invalid environment fields: CATALOGS_ENABLED");
+  if (input.CATALOGS_ENABLED === "true") {
+    try {
+      if (!identity || ![undefined, "true", "false"].includes(input.CATALOGS_SYNTHETIC))
+        throw new Error();
+      const evidenceBytes = input.CATALOGS_EVIDENCE_FILE
+        ? readFileSync(input.CATALOGS_EVIDENCE_FILE)
+        : undefined;
+      if (evidenceBytes && evidenceBytes.length > 1024 * 1024) throw new Error();
+      catalogs = {
+        production: env.NODE_ENV === "production",
+        synthetic: input.CATALOGS_SYNTHETIC === "true",
+        cursorKey: input.CATALOGS_CURSOR_KEY ?? "",
+        maxFileBytes: Number(input.CATALOGS_MAX_FILE_BYTES),
+        artifactTtlMs: Number(input.CATALOGS_ARTIFACT_TTL_MS),
+        policyRevision: Number(input.CATALOGS_POLICY_REVISION),
+        evidence: evidenceBytes ? JSON.parse(evidenceBytes.toString()) : [],
+      };
+      validateCatalogConfig(catalogs);
+    } catch {
+      throw new Error(
+        "Invalid environment fields: CATALOGS_ENABLED, CATALOGS_SYNTHETIC, CATALOGS_CURSOR_KEY, CATALOGS_MAX_FILE_BYTES, CATALOGS_ARTIFACT_TTL_MS, CATALOGS_POLICY_REVISION, CATALOGS_EVIDENCE_FILE",
+      );
+    }
+  }
   return {
     environment: env.NODE_ENV,
     host: env.API_HOST,
@@ -132,6 +161,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
         );
       return input.EXTERNAL_IDENTITIES_ENABLED === "true";
     })(),
+    catalogs,
     database: {
       host: env.MYSQL_HOST,
       port: env.MYSQL_PORT,

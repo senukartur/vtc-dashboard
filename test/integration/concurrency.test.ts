@@ -3,7 +3,13 @@ import { createAudit, createUnitOfWork, dedicatedConnection, runMigrations } fro
 import { sql } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { guardedSettings, hasCode, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  hasCode,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { clock, idGenerator } from "../support/builders.ts";
 import { barrier, bounded, connections, deferred, transaction } from "../support/concurrency.ts";
 
@@ -23,7 +29,7 @@ beforeAll(async () => {
       "CREATE TABLE synthetic_jobs (id INT PRIMARY KEY, token VARCHAR(36), lease_until DATETIME(3), done BOOLEAN NOT NULL DEFAULT FALSE) ENGINE=InnoDB",
     ),
   );
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 afterAll(async () => {
   await control?.end();
 });

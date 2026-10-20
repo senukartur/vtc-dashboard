@@ -4,17 +4,21 @@ import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createDatabase, dedicatedConnection } from "@vtc/db";
 import { type Connection, createConnection } from "mysql2/promise";
-import { cleanupAllocation, type OwnedAllocation } from "../test/support/allocation-cleanup.ts";
+import {
+  cleanupAllocation,
+  type OwnedAllocation,
+  SCHEMA_DROP_QUERY_TIMEOUT_MS,
+} from "../test/support/allocation-cleanup.ts";
 import {
   assertScreenshotsRetained,
   screenshotInventory,
 } from "../test/support/browser-artifacts.ts";
-import { bounded } from "../test/support/concurrency.ts";
 import { browserFailureProof } from "../test/support/browser-failure-proof.ts";
+import { bounded } from "../test/support/concurrency.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
-import { eventLine } from "./ci-result.mjs";
 import { browserFailureLine } from "./browser-diagnostics.mjs";
+import { eventLine } from "./ci-result.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
@@ -119,7 +123,10 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
         if (lock) destroyTransport(lock);
       },
       schema: async () => {
-        await admin.query({ sql: `DROP DATABASE \`${database}\``, timeout: 2000 });
+        await admin.query({
+          sql: `DROP DATABASE \`${database}\``,
+          timeout: SCHEMA_DROP_QUERY_TIMEOUT_MS,
+        });
       },
       user: async () => {
         await admin.query({ sql: "DROP USER ?@'%'", values: [user], timeout: 2000 });

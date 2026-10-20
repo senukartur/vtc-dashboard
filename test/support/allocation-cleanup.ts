@@ -1,5 +1,8 @@
 import { bounded } from "./concurrency.ts";
 
+export const SCHEMA_DROP_QUERY_TIMEOUT_MS = 10000;
+export const SCHEMA_CLEANUP_TIMEOUT_MS = 12000;
+
 export interface OwnedAllocation {
   schema: boolean;
   user: boolean;
@@ -23,7 +26,11 @@ export async function cleanupAllocation(
   for (const step of ["lock", "schema", "user", "file", "admin"] as const) {
     if (step !== "lock" && step !== "admin" && !owned[step]) continue;
     try {
-      await bounded(operations[step](), `cleanup_${step}`, 3000);
+      await bounded(
+        operations[step](),
+        `cleanup_${step}`,
+        step === "schema" ? SCHEMA_CLEANUP_TIMEOUT_MS : 3000,
+      );
     } catch {
       // Never expose driver diagnostics or credentials through cleanup errors.
       failures.push(step.toUpperCase());

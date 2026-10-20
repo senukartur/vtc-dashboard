@@ -1,6 +1,12 @@
 import type { UnitOfWork } from "@vtc/db";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
+import type { CatalogConfig } from "../modules/catalogs/artifact.js";
+import { createCatalogs } from "../modules/catalogs/service.js";
+import {
+  createExternalIdentities,
+  steamProjection,
+} from "../modules/external-identities/service.js";
 import type { IdentityConfig } from "../modules/identity/engine.js";
 import { createIdentity, type Identity } from "../modules/identity/service.js";
 import { localProvider, resendProvider } from "../modules/messaging/provider.js";
@@ -10,11 +16,12 @@ import {
   type MessagingConfig,
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
-import { admissionsEvents, identityAccessEvents } from "../platform/outbox/events.js";
+import { createQueue } from "../platform/jobs/queue.js";
 import {
-  createExternalIdentities,
-  steamProjection,
-} from "../modules/external-identities/service.js";
+  admissionsEvents,
+  catalogEvents,
+  identityAccessEvents,
+} from "../platform/outbox/events.js";
 
 export function composeIdentity(
   unit: UnitOfWork,
@@ -22,6 +29,7 @@ export function composeIdentity(
   mail?: MessagingConfig & { apiKey?: string },
   admissionsConfig?: AdmissionsConfig,
   externalEnabled = false,
+  catalogConfig?: CatalogConfig,
 ) {
   let identity: Identity;
   let admissions: Admissions | undefined;
@@ -64,9 +72,21 @@ export function composeIdentity(
           }
         : {}),
     });
+  const catalogs = catalogConfig
+    ? createCatalogs(unit, catalogConfig, { identity, published: catalogEvents(unit).append })
+    : undefined;
+  const jobsQueue = createQueue(
+    unit,
+    [...(messaging ? [messaging.handler] : []), ...(catalogs ? [catalogs.handler] : [])],
+    [],
+    undefined,
+    [...(!messaging ? ["mail.deliver"] : []), ...(!catalogs ? ["catalog.import"] : [])],
+  );
   return {
     identity,
     ...(externalEnabled ? { externalIdentities: createExternalIdentities(unit, identity) } : {}),
+    jobsQueue,
+    ...(catalogs ? { catalogs } : {}),
     ...(messaging ? { messaging } : {}),
     ...(admissions ? { admissions } : {}),
   };

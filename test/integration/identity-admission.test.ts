@@ -15,7 +15,12 @@ import {
   createIdentity,
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 
 const config = {
@@ -176,7 +181,7 @@ beforeAll(async () => {
   } catch {
     throw new Error("SYNTHETIC_ADMISSION_SETUP_FAILED");
   }
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   await safe(control.query("DELETE FROM identity_limits"));
 });

@@ -30,7 +30,12 @@ import {
 } from "../../apps/api/src/modules/messaging/service.ts";
 import { createQueue, LeaseLostError } from "../../apps/api/src/platform/jobs/queue.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
 
 let control: Connection, unit: UnitOfWork;
@@ -125,16 +130,18 @@ async function execute(mail: Messaging) {
   return claim;
 }
 const rejected: Outcome = { state: "rejected", category: "authentication", retryAfterMs: null };
-beforeAll(async () =>
-  safe(async () => {
-    control = await testConnection();
-    await reset(control);
-    await runMigrations(guardedSettings());
-    await control.query(
-      "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
-    );
-    unit = createUnitOfWork(guardedSettings());
-  }),
+beforeAll(
+  async () =>
+    safe(async () => {
+      control = await testConnection();
+      await reset(control);
+      await runMigrations(guardedSettings());
+      await control.query(
+        "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
+      );
+      unit = createUnitOfWork(guardedSettings());
+    }),
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 beforeEach(async () =>
   safe(async () => {
