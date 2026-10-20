@@ -4865,6 +4865,8 @@ export interface operations {
                 kind: string;
                 limit?: components["parameters"]["Limit"];
                 locale: "en" | "ru";
+                /** @description Canonical region in this published revision. Filters before pagination; foreign or absent regions return no matches. Bound into the signed cursor. */
+                regionId?: string;
                 revisionId: string;
                 search?: string;
             };

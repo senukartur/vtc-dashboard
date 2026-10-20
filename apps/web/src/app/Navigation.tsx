@@ -38,9 +38,14 @@ export function Navigation({
     if (!preview && location.pathname.startsWith("/account"))
       return (
         <>
-          <NavLink to="/account" onClick={close}>
+          <NavLink to="/account" end onClick={close}>
             {t("account:account")}
           </NavLink>
+          {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/catalogs" onClick={close}>
+              {t("catalogs:title")}
+            </NavLink>
+          )}
           <Link to={publicPath(locale)} onClick={close}>
             {t("home")}
           </Link>

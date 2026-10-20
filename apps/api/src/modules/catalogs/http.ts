@@ -145,6 +145,7 @@ export async function registerCatalogRoutes(
       kind: string;
       locale: "en" | "ru";
       search?: string;
+      regionId?: string;
       limit?: number;
       cursor?: string;
     };
@@ -158,6 +159,7 @@ export async function registerCatalogRoutes(
             revisionId: id,
             kind: { type: "string", enum: kinds },
             locale,
+            regionId: id,
             search: { type: "string", minLength: 1, maxLength: 128 },
           },
           ["revisionId", "kind", "locale"],

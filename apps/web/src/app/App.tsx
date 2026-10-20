@@ -13,6 +13,7 @@ import {
 import { AccountPage } from "../features/account/AccountPage.js";
 import { AuthPage } from "../features/account/AuthPage.js";
 import type { LinkHandoff } from "../features/account/link.js";
+import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
 import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
 import { Button, Card } from "../shared/ui/primitives.js";
@@ -47,13 +48,10 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
     // A menu action can precede its origin commit's passive effect.
     const isOrigin = intent?.origin === location;
     const mobileClose = !isOrigin && intent?.destination === `${pathname}${search}${hash}`;
-    const restoreTrigger =
-      mobileClose && intent.trigger?.isConnected && intent.trigger.getClientRects().length > 0;
-    if (
-      !hash &&
-      !isOrigin &&
-      ((previousPath.current !== pathname && !restoreTrigger) || (mobileClose && !restoreTrigger))
-    )
+    const trigger = mobileClose ? intent.trigger : null;
+    if (trigger?.isConnected && trigger.getClientRects().length > 0)
+      trigger.focus({ preventScroll: true });
+    else if (!hash && !isOrigin && (previousPath.current !== pathname || mobileClose))
       document.getElementById("main-content")?.focus();
     previousPath.current = pathname;
     // Consume even same-path/hash destinations after the origin effect has passed.
@@ -156,6 +154,14 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <AccountPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/catalogs"
+              element={
+                <ProtectedAccount>
+                  <CatalogsPage />
                 </ProtectedAccount>
               }
             />
