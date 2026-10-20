@@ -12,6 +12,7 @@ export default defineConfig({
     "./src/schema/external-identities/index.ts",
     "./src/schema/catalogs/index.ts",
     "./src/schema/trips/index.ts",
+    "./src/schema/telemetry/index.ts",
   ],
   out: "./migrations",
   strict: true,

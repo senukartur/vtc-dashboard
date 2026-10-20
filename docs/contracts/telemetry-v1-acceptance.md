@@ -56,3 +56,18 @@
 ## VTC-003 completion versus later work
 
 Discovery specifies the owner-agreed contract and implementation gaps without building an uploader/server. Agreement follows the owner's conditional authorization and recorded review corrections, not source reading or an invented separate maintainer approval. VTC-003 still requires final independent review and merge evidence. VTC-023/024/040/042 own implementation, regression and release acceptance; all integration checks above remain incomplete. VTC-110 retains server-to-client restore; full sample synchronization is excluded.
+
+## Server implementation allocation (VTC-023)
+
+The opt-in [server implementation](../development/telemetry.md) and its synthetic MySQL/built-server tests provide the server allocation below. This is a scope/evidence map, not a claim that all client/server or hosted scenarios passed; actual commands and candidate SHA belong to the delivery record. The frozen wire contract remains unchanged.
+
+| Matrix cases | Server responsibility and remaining owner |
+| --- | --- |
+| 001, 007–012 | Preserve lifecycle snapshots, unknown/partial facts, terminal-before-start, lower revisions, historical time and confirmed freeze. Company credit/decisions remain VTC-026/028/029; notifications VTC-036. |
+| 003–006, 029 | Stable committed/lost-reply receipt, uniqueness, conflicts, races and initial/live overlap idempotency. Actual desktop retry/enumeration remains VTC-024. |
+| 013–017, 030 | Rotation/bindings, distinct accounts, irrevocable epochs, revoked/inactive replay denial, forged ownership rejection and permanent source owner. Desktop/account-copy behavior remains VTC-024; reconciliation VTC-026. |
+| 018–027, 033, 036 | Closed bounded raw transport, versions/errors/rates, exact money and source identities, unknown availability, mass/distances/mode/time provenance and no direct live toast. Real projection/game measurements remain VTC-024, catalog/rule decisions VTC-019/027/029, analytics VTC-032 and notifications VTC-036. |
+| 002, 028, 031, 034, 035 | Desktop recording/queue/storage/restore behavior remains VTC-024; server-to-client restoration VTC-110. |
+| 032 | Reviewed manual/telemetry reconciliation remains VTC-026/029. |
+
+Real uploader/ETS2/ATS sessions, crash/queue recovery, OS-protected secret storage and hosted TLS/redaction/capacity/latency remain visibly pending VTC-024/039/040/041/042 gates. No telemetry-repository or live-provider action is included in VTC-023.

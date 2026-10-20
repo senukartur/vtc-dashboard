@@ -39,6 +39,10 @@
     "./trips-schema": {
       "types": "./dist/schema/trips/index.d.ts",
       "default": "./dist/schema/trips/index.js"
+    },
+    "./telemetry-schema": {
+      "types": "./dist/schema/telemetry/index.d.ts",
+      "default": "./dist/schema/telemetry/index.js"
     }
   },
   "files": [

@@ -64,6 +64,13 @@
       "when": 1792515275810,
       "tag": "0008_stale_prowler",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1792538170921,
+      "tag": "0009_slimy_exiles",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,8 @@ import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
+import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
+import type { TelemetryService } from "./modules/telemetry/service.js";
 import { registerTripRoutes } from "./modules/trips/http.js";
 import type { Trips } from "./modules/trips/service.js";
 import { ingressTrust } from "./platform/http/ingress.js";
@@ -44,6 +46,7 @@ export interface AppOptions {
   externalIdentities?: ExternalIdentities;
   catalogs?: Catalogs;
   trips?: Trips;
+  telemetry?: TelemetryService;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -81,6 +84,7 @@ export async function createApp(options: AppOptions) {
       typeof suppliedCode === "string" &&
       [
         "SETUP_REQUIRED",
+        "SECRET_ALREADY_ISSUED",
         "VERSION_CONFLICT",
         "IDEMPOTENCY_CONFLICT",
         "SELF_REVIEW_FORBIDDEN",
@@ -91,7 +95,18 @@ export async function createApp(options: AppOptions) {
     if (status >= 500)
       console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));
     reply.code(status).send({
-      error: { code, messageKey: `errors.${code.toLowerCase()}`, retryable: status === 503 },
+      error: {
+        code,
+        messageKey: `errors.${code.toLowerCase()}`,
+        retryable: status === 503,
+        ...(code === "SECRET_ALREADY_ISSUED" &&
+        "ownResourceId" in httpError &&
+        typeof httpError.ownResourceId === "string"
+          ? {
+              details: [{ field: "idempotency-key", code, ownResourceId: httpError.ownResourceId }],
+            }
+          : {}),
+      },
       meta: { requestId: request.id },
     });
   });
@@ -133,6 +148,8 @@ export async function createApp(options: AppOptions) {
     await registerCatalogRoutes(app, options.identity, options.catalogs);
   if (options.identity && options.trips)
     await registerTripRoutes(app, options.identity, options.trips);
+  if (options.identity && options.telemetry)
+    await registerTelemetryRoutes(app, options.identity, options.telemetry);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

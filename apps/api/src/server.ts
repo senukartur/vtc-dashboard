@@ -24,6 +24,7 @@ try {
             config.externalIdentities,
             config.catalogs,
             config.trips,
+            config.telemetry,
           ),
         }
       : {}),
