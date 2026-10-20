@@ -6,9 +6,12 @@ import { parseRegistries } from "./registry.mjs";
 // is private preparation evidence, never a publishable catalog or English-label guess.
 export async function prepare(input, output) {
   const manifest = JSON.parse(await readFile(input, "utf8"));
-  if (Object.keys(manifest).some((k) => k !== "layers"))
+  if (Object.keys(manifest).some((k) => !["layers", "resolution"].includes(k)))
     throw new Error("INVALID_PREPARATION_MANIFEST");
-  const result = await parseRegistries(manifest.layers);
+  const result = await parseRegistries(
+    manifest.layers,
+    manifest.resolution === undefined ? {} : { resolution: manifest.resolution },
+  );
   await writeFile(output, JSON.stringify(result, null, 2), { flag: "wx", mode: 0o600 });
   return {
     files: result.manifest.length,

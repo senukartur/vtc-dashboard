@@ -1,4 +1,5 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { Readable } from "node:stream";
 import {
   createUnitOfWork,
   newId,
@@ -909,6 +910,118 @@ test("HTTP uses the existing ETag/envelopes and bounded strict multipart; unsupp
     await app.close();
   }
 });
+test("large multipart preserves exact bytes and replay while enforcing streamed framing and file limits", async () => {
+  const app = await createApp({ identity, catalogs, checkReadiness: async () => true });
+  const csrf = csrfProtection(identityConfig).issue({}, director).token;
+  const raw = Buffer.from(
+    JSON.stringify(
+      artifact(
+        "ats",
+        Array.from({ length: 400 }, (_, i) => entity(`fictional_large_${i}`)),
+      ),
+    ),
+  );
+  expect(raw.length).toBeGreaterThan(65536);
+  expect(raw.length).toBeLessThan(config.maxFileBytes);
+  const sha256 = createHash("sha256").update(raw).digest("hex");
+  const body = (bytes: Buffer) =>
+    Buffer.concat([
+      Buffer.from(
+        '--synthetic-large\r\nContent-Disposition: form-data; name="file"; filename="fictional.json"\r\nContent-Type: application/json\r\n\r\n',
+      ),
+      bytes,
+      Buffer.from("\r\n--synthetic-large--\r\n"),
+    ]);
+  const headers = (key: string) => ({
+    cookie,
+    origin,
+    "x-csrf-token": csrf,
+    "idempotency-key": key,
+    "content-type": "multipart/form-data; boundary=synthetic-large",
+  });
+  try {
+    const key = newId(),
+      request = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/admin/catalog-import-artifacts",
+          headers: headers(key),
+          payload: body(raw),
+          signal: AbortSignal.timeout(12000),
+        });
+    const first = await request(),
+      replay = await request();
+    expect(first.statusCode).toBe(202);
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json().data).toEqual(first.json().data);
+    expect(first.json().data).toMatchObject({ sha256, byteLength: raw.length });
+    const concurrentKey = newId(),
+      simultaneous = await Promise.all(
+        [0, 1].map(() =>
+          app.inject({
+            method: "POST",
+            url: "/api/v1/admin/catalog-import-artifacts",
+            headers: headers(concurrentKey),
+            payload: body(raw),
+            signal: AbortSignal.timeout(12000),
+          }),
+        ),
+      );
+    expect(simultaneous.map((r) => r.statusCode)).toEqual([202, 202]);
+    expect(simultaneous[0]?.json().data).toEqual(simultaneous[1]?.json().data);
+    expect(simultaneous[0]?.json().data).toMatchObject({ sha256, byteLength: raw.length });
+    const retained = await unit.run((tx) => unit.client(tx).select().from(catalogArtifacts));
+    expect(retained.length).toBe(2);
+    expect(
+      retained.every(
+        (row) =>
+          row.content === raw.toString() &&
+          row.sha256.toString("hex") === sha256 &&
+          row.byteLength === raw.length,
+      ),
+    ).toBe(true);
+  } finally {
+    await app.close();
+  }
+  const limit = 32768;
+  const limited = createCatalogs(
+    unit,
+    { ...config, maxFileBytes: limit },
+    { identity, published: catalogEvents(unit).append },
+  );
+  const limitedApp = await createApp({
+    identity,
+    catalogs: limited,
+    checkReadiness: async () => true,
+  });
+  try {
+    const fileLimit = await limitedApp.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog-import-artifacts",
+      headers: headers(newId()),
+      payload: body(Buffer.alloc(limit + 1, 32)),
+      signal: AbortSignal.timeout(12000),
+    });
+    expect(fileLimit.statusCode).toBe(413);
+    // A streamed preamble has no Content-Length and exceeds the aggregate bound
+    // before any valid file. Its bytes are not covered by the per-file limit.
+    const preamble = Buffer.alloc(limit + 16385, 112),
+      valid = body(Buffer.from(JSON.stringify(artifact())));
+    const streamed = await limitedApp.inject({
+      method: "POST",
+      url: "/api/v1/admin/catalog-import-artifacts",
+      headers: { ...headers(newId()), "transfer-encoding": "chunked" },
+      payload: Readable.from([preamble, Buffer.from("\r\n"), valid]),
+      signal: AbortSignal.timeout(12000),
+    });
+    expect(streamed.statusCode).toBe(413);
+    const retained = await unit.run((tx) => unit.client(tx).select().from(catalogArtifacts));
+    expect(retained.length).toBe(2);
+  } finally {
+    await limitedApp.close();
+  }
+});
+
 test("unknown COMMIT is surfaced without callback replay", async () => {
   const id = await candidate(),
     realEvents = catalogEvents(unit);

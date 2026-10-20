@@ -74,6 +74,11 @@ function tokens(source) {
   return out;
 }
 export async function parseRegistries(layers, options = {}) {
+  if (options.resolution === "unique_providers") {
+    const { parseUniqueProviders } = await import("./source-registry.mjs");
+    return parseUniqueProviders(layers, options);
+  }
+  if (options.resolution !== undefined) fail("invalid_resolution");
   if (!Array.isArray(layers) || !layers.length || layers.length > 512) fail("invalid_layers");
   for (const layer of layers) {
     if (

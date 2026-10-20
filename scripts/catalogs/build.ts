@@ -10,7 +10,15 @@ import { parseRegistries } from "./registry.mjs";
 export async function build(sourceManifestPath: string, reviewPath: string, output: string) {
   const source = sourceManifest(JSON.parse(await readFile(sourceManifestPath, "utf8")));
   const parsed = await parseRegistries(
-      source.layers.map((layer) => ({ ...layer, overlay: layer.overlay === true })),
+      source.layers.map(({ root, packId, registries, overlay, sourceId, files }) => ({
+        root,
+        packId,
+        registries,
+        overlay: overlay === true,
+        ...(sourceId !== undefined ? { sourceId } : {}),
+        ...(files !== undefined ? { files } : {}),
+      })),
+      source.resolution ? { resolution: source.resolution } : {},
     ),
     artifact = buildArtifact(parsed, JSON.parse(await readFile(reviewPath, "utf8"))),
     bytes = Buffer.from(JSON.stringify(artifact));

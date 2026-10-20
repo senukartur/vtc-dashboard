@@ -20,13 +20,17 @@ Trucky is an optional comparison/mapping aid and is not required to operate the 
 
 Maintain project-authored translations instead of redistributing a base-game localization corpus. The expanded DLC audit did not attempt deep/raw extraction or decoding of locale archives. A later approved translation source is replaceable behind the same label model.
 
-## Reuse verification result
+## Current implementation hand-off — 2026-10-20
+
+The owner's selected delivery scope is now authoritative in the [owner-approved source-use scope](../../CONCEPT.MD#catalog-source-use-basis). The historical source-provider questions below remain a record of the 2026-10-17 research, not a requirement to obtain a separate reply before this closed non-commercial use. No outreach or provider grant is claimed. Actual full-source preparation, reviewed private artifacts and current acceptance limits are recorded in the [catalog implementation guide](../development/catalogs.md#migration-and-evidence); public Git still excludes the corpus and bulk labels.
+
+## Reuse verification result (historical 2026-10-17 finding)
 
 The official [SCS extraction documentation](https://modding.scssoft.com/wiki/Documentation/Tools/Game_Archive_Extractor) establishes a modding tool, not a specific catalog distribution agreement. The [SCS video-sharing licence](https://www.scssoft.com/video_sharing_licence.pdf) addresses footage and does not establish a metadata/database licence. The SDK's code licence and the separate extractor's GPL-2.0 licence likewise do not settle rights in game-derived datasets. We found no source-specific permission that conclusively settles the planned catalog distribution in the materials inspected; this is not a statement that the use is prohibited.
 
 This PR's deliverables are original code/synthetic examples, public release-title/ID inventory, aggregate observations and documentation. Extracted definitions, entity-label corpora, binaries, models, textures, translations and private diagnostics stay outside public Git. A public source inventory is separate from the actual game-derived catalog.
 
-VTC-019 must record the permitted-use/attribution basis for the selected metadata and delivery model before publishing a bulk derived dataset or enabling production imports. If the existing materials do not establish that basis, the owner must resolve it with the source provider or choose another documented source. This is a named production prerequisite; VTC-002's discovery criterion is to identify and document such constraints rather than assert unverified permission.
+The 2026-10-17 hand-off required a documented use/attribution basis before bulk publication or production imports, and proposed source-provider clarification if that basis remained unresolved. The owner's later selected scope above supersedes the separate-reply prerequisite for this delivery. It does not establish an unverified provider grant or public bulk distribution right.
 
 ## Questions prepared for source verification
 
