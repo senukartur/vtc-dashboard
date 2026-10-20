@@ -595,6 +595,8 @@ Numbers are identifiers, not a strictly sequential schedule. For example, durabl
 
 **Goal:** Serve local game catalogs and resolve provider entities independently of display language.
 
+**Current evidence (2026-10-20):** All 191 installed containers and all 160 currently listed released DLCs have reviewed source/package coverage; private repeatable actual artifacts contain 2,957 entities with reviewed English labels and a complete explicit Russian-fallback queue. The three transferred source gaps are resolved. See [implementation evidence and limits](../development/catalogs.md#migration-and-evidence) and the [owner-approved source-use scope](../../CONCEPT.MD#catalog-source-use-basis). The first bounded actual lifecycle run failed before an upload case closed; its preserved HTTP reproduction and supported stream correction are documented in that guide. Integrated source `513d87d` then passed normal real-mode HTTP import, durable queue staging, review/publication, exact facts/mappings, reimport and immutable history in isolated MySQL, with 12,326 closed passing records and normal owned-resource cleanup. Final-candidate independent verification/review, current-head advisory review, Required CI and normal merge remain pending; this note does not mark the card Done.
+
 **Scope and acceptance checklist**
 
 - [ ] Import reviewed datasets for both base games and all official DLCs at the pinned launch baseline, with per-pack contribution/coverage evidence, provenance, game build, DLC/map scope, localized labels, aliases, external mappings, and publication status. Missing local packs remain coverage gaps, not exclusions from the approved scope.

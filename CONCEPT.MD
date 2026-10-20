@@ -98,6 +98,10 @@ Track game build, DLC/map coverage, provenance, publication version, and additio
 
 The project's technical maintainer prepares updates; the Director or Deputy Director reviews and publishes them. Maintenance is an operational responsibility, not an additional dashboard role. The [VTC-002 source hand-off](docs/research/catalog-source-follow-up.md) records the measured coverage and remaining source/import/release gates.
 
+#### Catalog source use basis
+
+On 2026-10-20 the owner selected closed, non-commercial use of game-derived catalog metadata for this VTC, from the owner-authorized game/DLC installations. A separate SCS permission reply is not a prerequisite for this selected delivery scope. This records the owner's project decision; it does not claim a provider permission grant or authorize public bulk redistribution of extracted definitions, label/localization corpora or game assets. Preserve attribution, exact private provenance and independent dataset review. Public Git contains original machinery, fictional fixtures and aggregate evidence. Production deployment and activation remain separate operational gates.
+
 ### Data, jobs, and application boundaries
 
 - Use InnoDB transactions, foreign/unique keys, utf8mb4 text, explicit exact comparison for opaque IDs/hashes, UTC persistence, normalized metric units, and lossless ID/decimal handling.
