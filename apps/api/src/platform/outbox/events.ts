@@ -67,6 +67,48 @@ export interface AdmissionsEvent {
   causationId: string | null;
   data: { applicationId: string };
 }
+export interface CatalogEvent {
+  eventId: string;
+  type: "catalog.published";
+  schemaVersion: 1;
+  aggregate: { kind: "catalog"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { catalogRevisionId: string };
+}
+export function catalogEvent(value: unknown): CatalogEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["catalogRevisionId"]);
+  if (
+    e.type !== "catalog.published" ||
+    e.schemaVersion !== 1 ||
+    a.kind !== "catalog" ||
+    a.id !== d.catalogRevisionId ||
+    typeof e.occurredAt !== "string"
+  )
+    throw new Error("UNSUPPORTED_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: "catalog.published",
+    schemaVersion: 1,
+    aggregate: { kind: "catalog", id: applicationId(a.id as string), version: positive(a.version) },
+    occurredAt: utcIso(utcDateTime(e.occurredAt)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: { catalogRevisionId: applicationId(d.catalogRevisionId as string) },
+  };
+}
 export function admissionsEvent(value: unknown): AdmissionsEvent {
   const e = closed(value, [
     "eventId",
@@ -146,10 +188,17 @@ export function accessEvent(value: unknown): AccessEvent {
 }
 export function createOutbox(unit: UnitOfWork) {
   return {
-    async append(tx: TxContext, input: AccessEvent | AdmissionsEvent): Promise<void> {
+    async append(
+      tx: TxContext,
+      input: AccessEvent | AdmissionsEvent | CatalogEvent,
+    ): Promise<void> {
       const client = unit.client(tx);
       const e =
-        input.type === "member.access_changed" ? accessEvent(input) : admissionsEvent(input);
+        input.type === "member.access_changed"
+          ? accessEvent(input)
+          : input.type === "catalog.published"
+            ? catalogEvent(input)
+            : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
@@ -177,6 +226,26 @@ export function createOutbox(unit: UnitOfWork) {
         .where(eq(outboxEvents.id, e.eventId))
         .for("share");
       if (!saved?.fingerprint.equals(hash)) throw new Error("EVENT_IDENTITY_CONFLICT");
+    },
+  };
+}
+export function catalogEvents(unit: UnitOfWork) {
+  const outbox = createOutbox(unit);
+  return {
+    async append(
+      tx: TxContext,
+      e: { eventId: string; revisionId: string; version: number; occurredAt: string },
+    ) {
+      await outbox.append(tx, {
+        eventId: e.eventId,
+        type: "catalog.published",
+        schemaVersion: 1,
+        aggregate: { kind: "catalog", id: e.revisionId, version: e.version },
+        occurredAt: e.occurredAt,
+        correlationId: e.eventId,
+        causationId: null,
+        data: { catalogRevisionId: e.revisionId },
+      });
     },
   };
 }

@@ -2,7 +2,14 @@ import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 
-type Fixture = "identity" | "admission" | "availability" | "email" | "reset" | "concurrency";
+type Fixture =
+  | "identity"
+  | "admission"
+  | "availability"
+  | "email"
+  | "reset"
+  | "concurrency"
+  | "external";
 type Phase =
   | "connection"
   | "reset"

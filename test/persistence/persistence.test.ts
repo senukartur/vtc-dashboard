@@ -34,9 +34,11 @@ import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import type { RowDataPacket } from "mysql2/promise";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import {
-  auditOnlyFolder,
   admissionsPriorFolder,
+  auditOnlyFolder,
+  catalogsPriorFolder,
   extendedFixtureFolder,
+  externalIdentitiesPriorFolder,
   fixtureRoot,
   guardedSettings,
   hasCode,
@@ -154,7 +156,9 @@ async function cooperatingMigrations(
   });
 }
 
-test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
+// The seven-migration upgrade matrix alone measured about 60s sequentially before
+// value/concurrency checks. Bound the aggregate suite without changing SQL/lock/control deadlines.
+test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
   const settings = guardedSettings();
   const connection = await testConnection();
   const unit = createUnitOfWork(settings);
@@ -189,7 +193,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         await readiness.close();
       }
       await reset(connection);
-      assert.equal(await runMigrations(settings), 6);
+      assert.equal(await runMigrations(settings), 8);
       assert.equal(await runMigrations(settings), 0);
       const [tables] = await connection.query<RowDataPacket[]>(
         "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
@@ -218,7 +222,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
             "INSERT INTO identity_challenges (id, user_id, purpose, proposed_email, email_epoch, access_epoch, credential_epoch, secret_hash, expires_at) VALUES (?, ?, 'email_change', 'synthetic-new@example.invalid', 1, 1, 1, ?, UTC_TIMESTAMP(3) + INTERVAL 10 MINUTE)",
             [challengeId, id, Buffer.alloc(32)],
           );
-          assert.equal(await runMigrations(settings), 4);
+          assert.equal(await runMigrations(settings), 6);
           assert.equal(await runMigrations(settings), 0);
           const [rows] = await connection.query<RowDataPacket[]>(
             "SELECT u.email_verified, c.proposed_email, c.current_email_confirmed, c.identity_epoch, c.consumed FROM identity_users u JOIN identity_challenges c ON c.user_id=u.id WHERE c.id=?",
@@ -246,7 +250,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           const [before] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version",
           );
-          assert.equal(await runMigrations(settings), 3);
+          assert.equal(await runMigrations(settings), 5);
           assert.equal(await runMigrations(settings), 0);
           const [after] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 3",
@@ -274,7 +278,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           const [before] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version",
           );
-          assert.equal(await runMigrations(settings), 2);
+          assert.equal(await runMigrations(settings), 4);
           assert.equal(await runMigrations(settings), 0);
           const [after] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 4",
@@ -302,10 +306,94 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           const [before] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version",
           );
-          assert.equal(await runMigrations(settings), 1);
+          assert.equal(await runMigrations(settings), 3);
           assert.equal(await runMigrations(settings), 0);
           const [after] = await connection.query<RowDataPacket[]>(
             "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 5",
+          );
+          assert.deepEqual(after, before);
+          const [saved] = await connection.execute<RowDataPacket[]>(
+            "SELECT COUNT(*) count FROM audit_entries WHERE id=?",
+            [Buffer.from(id)],
+          );
+          assert.equal(String(saved[0]?.count), "1");
+        } finally {
+          await rm(folder, { recursive: true });
+        }
+      },
+    );
+    await t.test(
+      "external identities upgrades the exact six-migration prefix without changing members/history",
+      async () => {
+        await reset(connection);
+        const folder = await externalIdentitiesPriorFolder();
+        try {
+          assert.equal(await runMigrations(settings, { folder }), 6);
+          const auditId = await unit.run((tx) => audit.append(tx, auditInput()));
+          const memberId = newId();
+          await connection.execute(
+            "INSERT INTO identity_users (id,name,email,email_verified,created_at,updated_at) VALUES (?, 'Synthetic Upgrade', 'external-upgrade@example.invalid', 1, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))",
+            [memberId],
+          );
+          await connection.execute(
+            "INSERT INTO identity_memberships (user_id,status) VALUES (?, 'active')",
+            [memberId],
+          );
+          const [before] = await connection.query<RowDataPacket[]>(
+            "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+          );
+          assert.equal(await runMigrations(settings), 2);
+          assert.equal(await runMigrations(settings), 0);
+          const [after] = await connection.query<RowDataPacket[]>(
+            "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 6",
+          );
+          assert.deepEqual(after, before);
+          const [saved] = await connection.execute<RowDataPacket[]>(
+            "SELECT COUNT(*) n FROM audit_entries WHERE id=?",
+            [auditId],
+          );
+          assert.equal(String(saved[0]?.n), "1");
+          const [members] = await connection.execute<RowDataPacket[]>(
+            "SELECT m.status,m.version,m.identity_epoch,u.email_verified FROM identity_memberships m JOIN identity_users u ON u.id=m.user_id WHERE m.user_id=?",
+            [memberId],
+          );
+          assert.equal(members[0]?.status, "active");
+          assert.equal(Number(members[0]?.identity_epoch), 1);
+          assert.equal(Number(members[0]?.version), 1);
+          assert.equal(Number(members[0]?.email_verified), 1);
+          const [links] = await connection.query<RowDataPacket[]>(
+            "SELECT COUNT(*) n FROM external_steam_links",
+          );
+          assert.equal(String(links[0]?.n), "0");
+          const [tables] = await connection.query<RowDataPacket[]>(
+            "SELECT ENGINE,TABLE_COLLATION FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'external\\_%'",
+          );
+          assert.equal(tables.length, 6);
+          assert.ok(
+            tables.every(
+              (row) => row.ENGINE === "InnoDB" && row.TABLE_COLLATION === "utf8mb4_0900_ai_ci",
+            ),
+          );
+        } finally {
+          await rm(folder, { recursive: true });
+        }
+      },
+    );
+    await t.test(
+      "catalog migration preserves the exact published external-identities prefix and sentinel",
+      async () => {
+        await reset(connection);
+        const folder = await catalogsPriorFolder();
+        try {
+          assert.equal(await runMigrations(settings, { folder }), 7);
+          const id = await unit.run((tx) => audit.append(tx, auditInput()));
+          const [before] = await connection.query<RowDataPacket[]>(
+            "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+          );
+          assert.equal(await runMigrations(settings), 1);
+          assert.equal(await runMigrations(settings), 0);
+          const [after] = await connection.query<RowDataPacket[]>(
+            "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 7",
           );
           assert.deepEqual(after, before);
           const [saved] = await connection.execute<RowDataPacket[]>(
@@ -324,7 +412,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
       try {
         assert.equal(await runMigrations(settings, { folder }), 1);
         const id = await unit.run((tx) => audit.append(tx, auditInput()));
-        assert.equal(await runMigrations(settings), 5);
+        assert.equal(await runMigrations(settings), 7);
         assert.equal(await runMigrations(settings), 0);
         const [saved] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM audit_entries WHERE id = ?",
@@ -345,7 +433,7 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 6);
+        assert.equal(await runMigrations(settings, { folder: extended }), 8);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -701,13 +789,13 @@ test("real MySQL persistence foundations", { timeout: 60000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        assert.equal(String(history[0]?.count), "7");
+        assert.equal(String(history[0]?.count), "9");
         await reset(connection);
-        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 6]);
+        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 8]);
         const [singleApply] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
         );
-        assert.equal(String(singleApply[0]?.count), "6");
+        assert.equal(String(singleApply[0]?.count), "8");
       },
     );
   } finally {

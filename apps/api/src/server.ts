@@ -16,7 +16,14 @@ try {
     },
     ...(config.identity && unit
       ? {
-          ...composeIdentity(unit, config.identity, config.mail, config.admissions),
+          ...composeIdentity(
+            unit,
+            config.identity,
+            config.mail,
+            config.admissions,
+            config.externalIdentities,
+            config.catalogs,
+          ),
         }
       : {}),
     ...(config.serveWeb ? { webRoot: config.webRoot } : {}),

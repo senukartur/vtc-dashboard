@@ -9,6 +9,8 @@ export default defineConfig({
     "./src/schema/messaging.ts",
     "./src/schema/admissions/index.ts",
     "./src/schema/qualifications/index.ts",
+    "./src/schema/external-identities/index.ts",
+    "./src/schema/catalogs/index.ts",
   ],
   out: "./migrations",
   strict: true,

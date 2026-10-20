@@ -31,7 +31,13 @@ import {
 } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { type AccessEvent, createOutbox } from "../../apps/api/src/platform/outbox/events.ts";
-import { guardedSettings, hasCode, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  hasCode,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { barrier, bounded, deferred, until } from "../support/concurrency.ts";
 import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
 
@@ -74,16 +80,18 @@ async function cleanup() {
   await control.query("DELETE FROM job_runner_leases");
   await control.query("DELETE FROM synthetic_job_counter");
 }
-beforeAll(async () =>
-  safe(async () => {
-    control = await testConnection();
-    await reset(control);
-    await runMigrations(guardedSettings());
-    await control.query(
-      "CREATE TABLE synthetic_job_counter (run_id BINARY(36) NOT NULL, sequence INT NOT NULL, stage INT NOT NULL, touches INT NOT NULL, PRIMARY KEY(run_id,sequence,stage)) ENGINE=InnoDB",
-    );
-    unit = createUnitOfWork(guardedSettings());
-  }),
+beforeAll(
+  async () =>
+    safe(async () => {
+      control = await testConnection();
+      await reset(control);
+      await runMigrations(guardedSettings());
+      await control.query(
+        "CREATE TABLE synthetic_job_counter (run_id BINARY(36) NOT NULL, sequence INT NOT NULL, stage INT NOT NULL, touches INT NOT NULL, PRIMARY KEY(run_id,sequence,stage)) ENGINE=InnoDB",
+      );
+      unit = createUnitOfWork(guardedSettings());
+    }),
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 afterAll(async () => {
   await unit?.close();
