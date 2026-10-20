@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import {
   applicationId,
   newId,
@@ -8,7 +9,6 @@ import {
   utcDateTime,
   utcIso,
 } from "@vtc/db";
-import { performance } from "node:perf_hooks";
 import {
   and,
   asc,
@@ -59,7 +59,8 @@ export interface Handler {
   consumer: string;
   validate(input: unknown): unknown;
   mode: "local" | "external";
-  local?: (tx: TxContext, reference: unknown, claim: Claim) => Promise<void>;
+  prepare?: (reference: unknown, claim: Claim, signal: AbortSignal) => Promise<unknown>;
+  local?: (tx: TxContext, reference: unknown, claim: Claim, prepared?: unknown) => Promise<void>;
   external?: (
     reference: unknown,
     effectKey: string,
@@ -589,6 +590,18 @@ export function createQueue(
       }
       try {
         if (h.mode === "local") {
+          // Bounded immutable-input work happens before acquiring effect/domain locks.
+          // The local effect must recheck its reference; lease fencing still owns commit.
+          let prepared: unknown;
+          if (h.prepare) {
+            const deadline = AbortSignal.any([
+              signal,
+              AbortSignal.timeout(bounds.jobLeaseMs - bounds.externalCompletionHeadroomMs),
+            ]);
+            deadline.throwIfAborted();
+            prepared = await h.prepare(reference, claim, deadline);
+            deadline.throwIfAborted();
+          }
           await run(async (tx) => {
             const saved = await fence(tx, claim);
             const c = unit.client(tx);
@@ -609,7 +622,7 @@ export function createQueue(
                 jobId: saved.id,
                 committedAt: sql`UTC_TIMESTAMP(3)`,
               });
-              await h.local?.(tx, reference, claim);
+              await h.local?.(tx, reference, claim, prepared);
             }
             await finish(tx, claim);
           });

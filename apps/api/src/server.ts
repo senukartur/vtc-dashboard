@@ -22,6 +22,7 @@ try {
             config.mail,
             config.admissions,
             config.externalIdentities,
+            config.catalogs,
           ),
         }
       : {}),

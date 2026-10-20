@@ -16,7 +16,12 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import * as engineModule from "../../apps/api/src/modules/identity/engine.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 
 const config = {
@@ -57,7 +62,7 @@ beforeAll(async () => {
   } catch {
     throw new Error("SYNTHETIC_AVAILABILITY_SETUP_FAILED");
   }
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 afterAll(async () => {
   await unit?.close();
   await control?.end();

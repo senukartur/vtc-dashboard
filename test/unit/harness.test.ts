@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { cleanupAllocation } from "../support/allocation-cleanup.ts";
 import { isDeliberateFailure, probeIdentity } from "../support/failure-proof.ts";
 
@@ -117,4 +117,41 @@ test("user and file cleanup failures still close and force-close the provisioner
   );
   expect(failures).toEqual(["USER", "FILE"]);
   expect(calls).toEqual(["user", "file", "admin", "transport"]);
+});
+
+test("schema cleanup has a separate DDL allowance while other steps keep their three-second bound", async () => {
+  vi.useFakeTimers();
+  const calls: string[] = [];
+  try {
+    const result = cleanupAllocation(
+      { schema: true, user: true, file: true },
+      {
+        lock: async () => {},
+        schema: async () => {
+          calls.push("schema");
+          await new Promise<void>((resolve) => setTimeout(resolve, 4000));
+        },
+        user: async () => {
+          calls.push("user");
+          await new Promise<void>(() => {});
+        },
+        file: async () => {
+          calls.push("file");
+        },
+        admin: async () => {
+          calls.push("admin");
+        },
+        destroyAdmin: () => calls.push("transport"),
+      },
+    );
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(calls).toEqual(["schema", "user"]);
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(calls).toEqual(["schema", "user"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toEqual(["USER"]);
+    expect(calls).toEqual(["schema", "user", "file", "admin", "transport"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

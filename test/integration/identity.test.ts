@@ -28,7 +28,12 @@ import {
 } from "../../apps/api/src/modules/identity/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
 const diagnostic = identityDiagnostics("identity");
@@ -141,7 +146,7 @@ beforeAll(async () => {
   );
   unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
   identity = createIdentity(unit, config, ports(), time);
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 afterAll(async () => {
   await unit?.close();
   await control?.end();

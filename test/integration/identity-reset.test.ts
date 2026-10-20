@@ -9,7 +9,12 @@ import {
   createIdentity,
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 
 const config = {
@@ -153,7 +158,7 @@ beforeAll(async () => {
       }),
     ),
   );
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(() => {
   instant += 60000;
 });

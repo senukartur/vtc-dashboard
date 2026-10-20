@@ -48,7 +48,12 @@ import {
   admissionsEvents,
   identityAccessEvents,
 } from "../../apps/api/src/platform/outbox/events.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  SCHEMA_SETUP_TIMEOUT_MS,
+  guardedSettings,
+  reset,
+  testConnection,
+} from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 
 const origin = "http://127.0.0.1:4173",
@@ -247,7 +252,7 @@ beforeAll(async () => {
     "UPDATE identity_sessions SET expires_at=UTC_TIMESTAMP(3)+INTERVAL 30 DAY WHERE id=?",
     [director.sessionId],
   );
-});
+}, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   instant = Date.now();
   await control.query("DELETE FROM admissions_limits");

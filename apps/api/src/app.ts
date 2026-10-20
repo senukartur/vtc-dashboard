@@ -4,16 +4,18 @@ import { join, relative } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
+import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
+import type { Admissions } from "./modules/admissions/service.js";
+import { registerCatalogRoutes } from "./modules/catalogs/http.js";
+import type { Catalogs } from "./modules/catalogs/service.js";
+import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
+import type { ExternalIdentities } from "./modules/external-identities/service.js";
 import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
-import { installSchemaCompilers } from "./platform/http/schemas.js";
 import { ingressTrust } from "./platform/http/ingress.js";
-import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
-import type { Admissions } from "./modules/admissions/service.js";
-import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
-import type { ExternalIdentities } from "./modules/external-identities/service.js";
+import { installSchemaCompilers } from "./platform/http/schemas.js";
 
 const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
@@ -38,6 +40,7 @@ export interface AppOptions {
   messaging?: Messaging;
   admissions?: Admissions;
   externalIdentities?: ExternalIdentities;
+  catalogs?: Catalogs;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -123,6 +126,8 @@ export async function createApp(options: AppOptions) {
     await registerAdmissionsRoutes(app, options.identity, options.admissions);
   if (options.identity && options.externalIdentities)
     await registerExternalIdentityRoutes(app, options.identity, options.externalIdentities);
+  if (options.identity && options.catalogs)
+    await registerCatalogRoutes(app, options.identity, options.catalogs);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

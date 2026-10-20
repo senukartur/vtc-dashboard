@@ -39,3 +39,7 @@ The implemented identity registry contains `member.access_changed` v1: aggregate
 ## Implemented admissions safe events
 
 VTC-015 registers `application.submitted`, `application.decided`, `invitation.reissued` and `invitation.redeemed`, schema version 1, aggregate `{kind: application, id, version}`, with data containing only `applicationId`. Event/correlation IDs are generated UUIDs; causation is null when no upstream event exists. No email, Steam URL, Discord/introduction, rejection reason, password, token or encrypted payload enters these events. They commit on the same transaction as admission state and remain retained without inventing an unconfigured downstream subscription. Identity's existing access event is additionally appended during atomic member creation. This does not claim delivery of a future notification/projection.
+
+## Implemented catalog publication event
+
+VTC-019 registers `catalog.published` schema version 1 with aggregate `{kind:"catalog",id:revisionId,version:candidateVersion}` and exactly `data:{catalogRevisionId}`. The publication pointer, immutable candidate transition, audit and event commit on the same transaction. Event/correlation UUIDs are generated; causation is null. No labels, source paths, artifact bytes, permission evidence or staff reasons enter this event. No downstream subscription is installed; events remain retained/unbound until a reviewed consumer owns its effects.

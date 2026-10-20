@@ -31,6 +31,10 @@
     "./messaging-schema": {
       "types": "./dist/schema/messaging.d.ts",
       "default": "./dist/schema/messaging.js"
+    },
+    "./catalogs-schema": {
+      "default": "./dist/schema/catalogs/index.js",
+      "types": "./dist/schema/catalogs/index.d.ts"
     }
   },
   "files": [

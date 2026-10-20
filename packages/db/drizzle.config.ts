@@ -10,6 +10,7 @@ export default defineConfig({
     "./src/schema/admissions/index.ts",
     "./src/schema/qualifications/index.ts",
     "./src/schema/external-identities/index.ts",
+    "./src/schema/catalogs/index.ts",
   ],
   out: "./migrations",
   strict: true,

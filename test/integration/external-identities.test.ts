@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations } from "@vtc/db";
-import { eq, steamLinks, steamProofs, steamNonces } from "@vtc/db/external-identities-schema";
+import { eq, steamLinks, steamNonces, steamProofs } from "@vtc/db/external-identities-schema";
 import { membership } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
@@ -16,9 +16,14 @@ import {
   type ExternalCredential,
   steamProjection,
 } from "../../apps/api/src/modules/external-identities/service.ts";
-import { createIdentity, type Actor } from "../../apps/api/src/modules/identity/service.ts";
+import { type Actor, createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
-import { guardedSettings, reset, testConnection } from "../persistence/support.ts";
+import {
+  guardedSettings,
+  reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
+  testConnection,
+} from "../persistence/support.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
 const config = {
@@ -187,9 +192,9 @@ beforeAll(async () => {
     ),
   );
   director = (await signIn("external-director@example.invalid")).actor;
-  // This aggregate setup includes seven complete migrations/reset and native password
+  // This aggregate setup includes eight complete migrations/reset and native password
   // hashing. A focused run measured the old 15s hook deadline; SQL/control bounds stay unchanged.
-}, 30000);
+}, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(() => {
   instant += 60000;
 });
