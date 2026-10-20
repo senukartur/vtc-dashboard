@@ -1,4 +1,3 @@
-import { Transform } from "node:stream";
 import multipart from "@fastify/multipart";
 import type { components } from "@vtc/contracts";
 import { applicationId } from "@vtc/db";
@@ -44,6 +43,7 @@ export async function registerCatalogRoutes(
     },
     throwFileSizeLimit: true,
   });
+  const oversized = new WeakSet<FastifyRequest>();
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
   const owned = (path: string) =>
@@ -75,22 +75,31 @@ export async function registerCatalogRoutes(
       if (length > catalogs.config.maxFileBytes + 16384) throw identityError(413);
     }
   });
-  app.addHook("preParsing", async (request, _reply, payload) => {
+  app.addHook("preParsing", async (request, reply, payload) => {
     if (
       request.routeOptions.url !== "/api/v1/admin/catalog-import-artifacts" ||
       request.method !== "POST"
     )
       return payload;
     let received = 0;
-    const bounded = new Transform({
-      transform(chunk: Buffer, _encoding, callback) {
-        received += chunk.length;
-        if (received > catalogs.config.maxFileBytes + 16384) callback(identityError(413));
-        else callback(null, chunk);
-      },
-    });
-    payload.on("error", (error) => bounded.destroy(error));
-    return payload.pipe(bounded);
+    // Multipart consumes request.raw, not the hook's replacement payload. Observe
+    // that stream without a second pipe, and let its parser start the flow.
+    payload.pause();
+    const count = (chunk: Buffer) => {
+      received += chunk.length;
+      if (received <= catalogs.config.maxFileBytes + 16384 || oversized.has(request)) return;
+      oversized.add(request);
+      payload.pause();
+      // Stop reading immediately, but flush the safe response before closing
+      // the request. The handler also fences retention after an exceeded limit.
+      reply.raw.once("finish", () => payload.destroy());
+      void reply.send(identityError(413));
+    };
+    const cleanup = () => payload.removeListener("data", count);
+    payload.on("data", count);
+    payload.once("end", cleanup);
+    payload.once("close", cleanup);
+    return payload;
   });
   app.addHook("preValidation", async (request) => {
     const path = request.routeOptions.url;
@@ -217,9 +226,11 @@ export async function registerCatalogRoutes(
           if (part.file.truncated) throw identityError(413);
         }
       } catch (error) {
+        if (oversized.has(request)) throw identityError(413);
         if (error && typeof error === "object" && "statusCode" in error) throw error;
         throw identityError(422);
       }
+      if (oversized.has(request)) throw identityError(413);
       if (!bytes) throw identityError(422);
       return reply
         .code(202)
