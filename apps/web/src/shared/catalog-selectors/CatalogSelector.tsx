@@ -67,6 +67,15 @@ export function CatalogSelector({
         maxLength={128}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
+        onKeyDown={(event) => {
+          // Let IME confirmation finish; ordinary search Enter must not submit a consumer form.
+          if (
+            event.key === "Enter" &&
+            !event.nativeEvent.isComposing &&
+            event.nativeEvent.keyCode !== 229
+          )
+            event.preventDefault();
+        }}
         disabled={!revisionId}
       />
       <Label htmlFor={id}>{label}</Label>
@@ -102,7 +111,7 @@ export function CatalogSelector({
           <small>
             {value.entityId} · {value.revisionId}
           </small>
-          <Button variant="ghost" onClick={() => onChange(null)}>
+          <Button type="button" variant="ghost" onClick={() => onChange(null)}>
             {t("clear")}
           </Button>
         </div>
@@ -111,7 +120,7 @@ export function CatalogSelector({
       {query.isError && (
         <p role="alert">
           {t("readError")}{" "}
-          <Button variant="outline" onClick={() => void query.refetch()}>
+          <Button type="button" variant="outline" onClick={() => void query.refetch()}>
             {t("refresh")}
           </Button>
         </p>
@@ -119,6 +128,7 @@ export function CatalogSelector({
       {query.isSuccess && !items.length && <p>{t("empty")}</p>}
       {query.hasNextPage && (
         <Button
+          type="button"
           variant="outline"
           disabled={query.isFetchingNextPage}
           onClick={() => void query.fetchNextPage()}

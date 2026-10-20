@@ -13,6 +13,110 @@ import {
 } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 
+test("selector helpers inside an enclosing consumer form never submit; explicit parent submit remains available", async ({
+  page,
+}) => {
+  await mockCatalogs(page, false);
+  let failSearch = false;
+  await page.route("**/api/v1/catalogs/entities?*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    if (params.get("kind") !== "city") return route.fallback();
+    if (failSearch)
+      return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
+    return route.fulfill({
+      json: list(
+        params.has("cursor")
+          ? []
+          : [
+              {
+                id: entityId,
+                revisionId: catalogId,
+                game: "ets2",
+                kind: "city",
+                mapNamespace: "base",
+                display: {
+                  entityId,
+                  label: "Fictional city",
+                  requestedLocale: "en",
+                  renderedLocale: "en",
+                  englishFallback: false,
+                  retired: false,
+                },
+                relatedEntityIds: [regionId],
+              },
+            ],
+        params.has("cursor") ? null : "synthetic-selector-next",
+      ),
+    });
+  });
+  await page.goto("/account/catalogs");
+  await catalogLanguage(page);
+  const search = page.getByRole("searchbox", { name: "Search Cities", exact: true });
+  await expect(page.getByRole("combobox", { name: "Cities", exact: true })).toBeEnabled();
+  // Reparent only in this browser fixture: native form ownership is the integration contract.
+  await search.evaluate((input) => {
+    const selector = input.closest(".catalog-selector");
+    if (!selector) throw new Error("SYNTHETIC_SELECTOR_MISSING");
+    const form = document.createElement("form"),
+      counter = document.createElement("output"),
+      submit = document.createElement("button");
+    form.setAttribute("aria-label", "Synthetic consumer form");
+    counter.setAttribute("aria-label", "Synthetic parent submissions");
+    counter.value = "0";
+    submit.type = "submit";
+    submit.textContent = "Submit synthetic parent";
+    selector.replaceWith(form);
+    form.append(selector, submit, counter);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      counter.value = String(Number(counter.value) + 1);
+    });
+  });
+  const parent = page.getByRole("form", { name: "Synthetic consumer form", exact: true }),
+    counter = page.getByLabel("Synthetic parent submissions", { exact: true });
+  await search.press("Enter");
+  await expect(counter).toHaveText("0");
+  for (const composition of [
+    { isComposing: true, keyCode: 13 },
+    { isComposing: false, keyCode: 229 },
+  ]) {
+    expect(
+      await search.evaluate((input, { isComposing, keyCode }) => {
+        const event = new KeyboardEvent("keydown", {
+          key: "Enter",
+          bubbles: true,
+          cancelable: true,
+          isComposing,
+        });
+        Object.defineProperty(event, "keyCode", { value: keyCode });
+        return input.dispatchEvent(event);
+      }, composition),
+    ).toBe(true);
+  }
+  const next = page.waitForRequest(
+    (request) => new URL(request.url()).searchParams.get("cursor") === "synthetic-selector-next",
+  );
+  await parent.getByRole("button", { name: "Load more", exact: true }).click();
+  await next;
+  await expect(parent.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
+  await expect(counter).toHaveText("0");
+  await parent.getByRole("combobox", { name: "Cities", exact: true }).selectOption(entityId);
+  await expect(
+    parent.getByText("Selected canonical entity and revision", { exact: true }),
+  ).toBeVisible();
+  await parent.getByRole("button", { name: "Clear selection", exact: true }).click();
+  await expect(counter).toHaveText("0");
+  failSearch = true;
+  await search.fill("failure");
+  await expect(parent.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+  failSearch = false;
+  await parent.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(parent.getByRole("combobox", { name: "Cities", exact: true })).toBeEnabled();
+  await expect(counter).toHaveText("0");
+  await parent.getByRole("button", { name: "Submit synthetic parent", exact: true }).click();
+  await expect(counter).toHaveText("1");
+});
+
 for (const locale of ["en", "ru"] as const) {
   test(`synthetic ${locale} staff review renders changes, coverage, mappings and publication confirmation`, async ({
     page,
