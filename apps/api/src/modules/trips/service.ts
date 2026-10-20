@@ -23,7 +23,7 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
-import { retryTransaction } from "../../platform/jobs/queue.js";
+import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
@@ -136,7 +136,49 @@ export function createTrips(
     ["ets2telemetry", telemetryAdapter],
     ["manual", manualAdapter],
   ]);
-  const run = <T>(fn: (tx: TxContext) => Promise<T>) => retryTransaction(unit, fn);
+  const run = async <T>(fn: (tx: TxContext) => Promise<T>): Promise<T> => {
+    try {
+      return await retryTransaction(unit, fn);
+    } catch (error) {
+      if (
+        unknownCommit(error) ||
+        (error !== null &&
+          typeof error === "object" &&
+          "statusCode" in error &&
+          typeof error.statusCode === "number")
+      )
+        throw error;
+      // Match identity's known availability failures after bounded transaction retries.
+      if (
+        causes(error).some(
+          (cause) =>
+            ("code" in cause &&
+              [
+                "ER_LOCK_WAIT_TIMEOUT",
+                "ER_CON_COUNT_ERROR",
+                "ER_TOO_MANY_USER_CONNECTIONS",
+                "PROTOCOL_SEQUENCE_TIMEOUT",
+                "ETIMEDOUT",
+                "ECONNRESET",
+                "ECONNREFUSED",
+                "PROTOCOL_CONNECTION_LOST",
+                "EPIPE",
+                "EAI_AGAIN",
+                "ENETUNREACH",
+                "EHOSTUNREACH",
+              ].includes(String(cause.code))) ||
+            (cause instanceof Error &&
+              [
+                "No connections available.",
+                "Pool is closed.",
+                "TRANSACTION_CONTROL_TIMEOUT",
+              ].includes(cause.message)),
+        )
+      )
+        throw identityError(503);
+      throw error;
+    }
+  };
   async function authority(tx: TxContext, actor: Actor, review = false) {
     return ports.identity.authorizeInTransaction(
       tx,
