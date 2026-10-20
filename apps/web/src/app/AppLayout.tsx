@@ -5,7 +5,15 @@ import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
 import { Navigation } from "./Navigation.js";
 
 /** Shared landmarks with public navigation or a presentation-only member sidebar/topbar. */
-export function AppLayout({ member, children }: { member: boolean; children: ReactNode }) {
+export function AppLayout({
+  member,
+  children,
+  onMenuNavigate,
+}: {
+  member: boolean;
+  children: ReactNode;
+  onMenuNavigate: (pathname: string) => void;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const { t, i18n } = useTranslation("core");
@@ -36,7 +44,7 @@ export function AppLayout({ member, children }: { member: boolean; children: Rea
           Yukon Union
         </Link>
         <p className="member-context">{preview ? t("member") : t("account:account")}</p>
-        <Navigation variant={member ? "mobile" : "public"} />
+        <Navigation variant={member ? "mobile" : "public"} onMenuNavigate={onMenuNavigate} />
         <label className="language-picker">
           {t("language")}
           <select

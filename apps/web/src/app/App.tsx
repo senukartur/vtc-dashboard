@@ -36,11 +36,21 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
   const previousPath = useRef(location.pathname);
+  const menuDestination = useRef<{ origin: typeof location; pathname: string } | null>(null);
   useEffect(() => {
-    if (previousPath.current !== location.pathname && !location.hash)
+    const intent = menuDestination.current;
+    // A menu action can run before its origin commit's passive effect.
+    const isOrigin = intent?.origin === location;
+    if (
+      previousPath.current !== location.pathname &&
+      !location.hash &&
+      !isOrigin &&
+      intent?.pathname !== location.pathname
+    )
       document.getElementById("main-content")?.focus();
     previousPath.current = location.pathname;
-  }, [location.pathname, location.hash]);
+    if (!isOrigin) menuDestination.current = null;
+  }, [location]);
   useEffect(() => {
     if (["#about", "#apply", "#contacts"].includes(location.hash))
       document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
@@ -80,7 +90,12 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
       />
     );
   return (
-    <AppLayout member={memberMatch !== null || accountMatch !== null}>
+    <AppLayout
+      member={memberMatch !== null || accountMatch !== null}
+      onMenuNavigate={(pathname) => {
+        menuDestination.current = { origin: location, pathname };
+      }}
+    >
       <RouteErrorBoundary
         key={["/", "/en"].includes(location.pathname) ? "public-landing" : location.pathname}
         fallbackTitle={t("renderError")}
