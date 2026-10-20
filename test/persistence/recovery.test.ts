@@ -44,7 +44,7 @@ test("separate disposable partial-DDL and consistent-baseline recovery rehearsal
       "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
     );
     assert.equal(String(empty[0]?.count), "0");
-    assert.equal(await runMigrations(settings), 8);
+    assert.equal(await runMigrations(settings), 9);
     assert.equal(await runMigrations(settings), 0);
     const [recovered] = await connection.query<RowDataPacket[]>(
       "SELECT state, applied_at FROM _vtc_migrations",
@@ -94,7 +94,7 @@ test("real MySQL migration timeout rejects promptly and preserves dirty state de
     assert.equal(unchanged[0]?.state, "applying");
     assert.equal(unchanged[0]?.applied_at, null);
     await reset(connection);
-    assert.equal(await runMigrations(settings), 8);
+    assert.equal(await runMigrations(settings), 9);
     assert.equal(await runMigrations(settings), 0);
   } finally {
     await connection.end();

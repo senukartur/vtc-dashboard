@@ -35,6 +35,10 @@
     "./catalogs-schema": {
       "default": "./dist/schema/catalogs/index.js",
       "types": "./dist/schema/catalogs/index.d.ts"
+    },
+    "./trips-schema": {
+      "types": "./dist/schema/trips/index.d.ts",
+      "default": "./dist/schema/trips/index.js"
     }
   },
   "files": [

@@ -14,6 +14,8 @@ import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
+import { registerTripRoutes } from "./modules/trips/http.js";
+import type { Trips } from "./modules/trips/service.js";
 import { ingressTrust } from "./platform/http/ingress.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 
@@ -41,6 +43,7 @@ export interface AppOptions {
   admissions?: Admissions;
   externalIdentities?: ExternalIdentities;
   catalogs?: Catalogs;
+  trips?: Trips;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -128,6 +131,8 @@ export async function createApp(options: AppOptions) {
     await registerExternalIdentityRoutes(app, options.identity, options.externalIdentities);
   if (options.identity && options.catalogs)
     await registerCatalogRoutes(app, options.identity, options.catalogs);
+  if (options.identity && options.trips)
+    await registerTripRoutes(app, options.identity, options.trips);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

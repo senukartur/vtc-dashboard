@@ -23,6 +23,7 @@ try {
             config.admissions,
             config.externalIdentities,
             config.catalogs,
+            config.trips,
           ),
         }
       : {}),

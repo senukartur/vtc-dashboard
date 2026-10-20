@@ -12,6 +12,24 @@ const fixture = {
   MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
 };
 
+test("trip reads are opt-in and require identity plus a separate cursor key", () => {
+  assert.equal(readConfig(fixture).trips, undefined);
+  assert.throws(() => readConfig({ ...fixture, TRIPS_ENABLED: "yes" }), /TRIPS_ENABLED/);
+  assert.throws(() => readConfig({ ...fixture, TRIPS_ENABLED: "true" }), /IDENTITY_ENABLED/);
+  const input = {
+    ...fixture,
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    TRIPS_ENABLED: "true",
+  };
+  assert.throws(() => readConfig(input), /TRIPS_CURSOR_KEY/);
+  assert.equal(
+    readConfig({ ...input, TRIPS_CURSOR_KEY: "a".repeat(64) }).trips?.cursorKey.length,
+    64,
+  );
+});
+
 test("environment parsing rejects placeholders, invalid ports and unsafe booleans without leaking values", () => {
   assert.equal(readConfig(fixture).database.port, 3307);
   for (const changes of [

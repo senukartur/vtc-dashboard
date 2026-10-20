@@ -119,3 +119,5 @@ Repository-local manual delivery entrypoints are available for [Codex](.agents/s
 The explicit human standing completion scope in [AGENTS.md](AGENTS.md#branches-collaboration-and-review) permits one card at a time through verified review/fixes, normal merge and Trello Done. It does not grant paid setup, deployment, production changes or skipped gates. Without that explicit human authority, the delivery workflow ends at a draft PR.
 
 For first use in Claude Code, start a new session in a checkout containing the native definitions in `.claude/agents/`. Tool enforcement differs by host and is described in the entrypoints; these files do not create a security sandbox.
+
+The [canonical trip foundation](docs/development/trips.md) provides opt-in authorized reads with `TRIPS_ENABLED` and a separate `TRIPS_CURSOR_KEY`. Its source adapters are internal; telemetry transport, manual forms/evidence and acceptance remain later cards. Raw envelopes have no automatic expiry policy.

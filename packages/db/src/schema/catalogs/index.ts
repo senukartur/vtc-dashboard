@@ -158,6 +158,7 @@ export const catalogFacts = mysqlTable(
   },
   (t) => [
     uniqueIndex("catalog_revision_entity").on(t.revisionId, t.entityId),
+    uniqueIndex("catalog_fact_pin").on(t.id, t.revisionId, t.entityId),
     uniqueIndex("catalog_fact_scope").on(t.revisionId, t.entityId, t.kind, t.map),
     foreignKey({
       name: "catalog_fact_revision_game_fk",

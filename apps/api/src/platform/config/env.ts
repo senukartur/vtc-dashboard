@@ -5,6 +5,7 @@ import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissi
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
+import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
 import { exactProxyAddress } from "../http/ingress.js";
 
 const port = z.coerce.number().int().min(1).max(65535);
@@ -139,7 +140,30 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let trips: TripsConfig | undefined;
+  if (input.TRIPS_ENABLED !== undefined && !["true", "false"].includes(input.TRIPS_ENABLED))
+    throw new Error("Invalid environment fields: TRIPS_ENABLED");
+  if (input.TRIPS_ENABLED === "true") {
+    try {
+      if (!identity) throw new Error();
+      trips = { cursorKey: input.TRIPS_CURSOR_KEY ?? "" };
+      validateTripsConfig(trips);
+      if (
+        trips.cursorKey === identity.secret ||
+        trips.cursorKey === catalogs?.cursorKey ||
+        trips.cursorKey === mail?.key ||
+        (admissions &&
+          Buffer.from(trips.cursorKey, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: TRIPS_ENABLED, TRIPS_CURSOR_KEY, IDENTITY_ENABLED",
+      );
+    }
+  }
   return {
+    trips,
     environment: env.NODE_ENV,
     host: env.API_HOST,
     port: env.API_PORT,

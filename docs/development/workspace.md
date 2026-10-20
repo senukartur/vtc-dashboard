@@ -78,3 +78,5 @@ The [identity guide](identity.md) records the pinned auth engine, owned transact
 ## VTC-008 test tooling addition
 
 The [testing guide](testing.md) documents Vitest 5.0.5, Playwright 1.64.1/Chromium, direct root Vite/Ajv dependencies and the isolated Docker command. The Node 24.22.0 / pnpm 12.14.0 / TypeScript 5.9.3 / MySQL 8.4.11 baseline is unchanged. Existing scaffold, persistence and recovery suites stay separately reported; synthetic concurrency probes and the built-app bilingual desktop/mobile smoke add infrastructure evidence without implementing domain workflows. The delivery PR records exact-candidate verification and independent review; [VTC-009 CI](ci.md) now wraps the same isolated runner; hosted green/red evidence, staging and review enforcement remain separately tracked gates.
+
+VTC-022 adds [opt-in trip reads](trips.md). `TRIPS_ENABLED` defaults to false; activation requires identity and a distinct random 32-byte hexadecimal `TRIPS_CURSOR_KEY`, plus explicit migrations. Its internal source adapters do not expose telemetry/manual submission endpoints or install a raw cleanup scheduler.
