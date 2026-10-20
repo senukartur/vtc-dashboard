@@ -1,6 +1,7 @@
 import type { UnitOfWork } from "@vtc/db";
 import type { Connection } from "mysql2/promise";
 import { expect, test, vi } from "vitest";
+import { observeDatabaseOperation } from "../../packages/db/dist/core/operation-context.js";
 import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 
 test("identity fixture diagnostics retain only allowlisted failure facts through bounded cyclic causes", () => {
@@ -105,3 +106,65 @@ test("fixture phase errors are sanitized while transaction diagnostics preserve 
     output.mockRestore();
   }
 });
+
+test.each([
+  ["migration_history_read", 1000],
+  ["migration_statement", 30000],
+] as const)(
+  "admission setup reports the exact %s deadline without private error data",
+  async (operation, wireDeadlineMs) => {
+    const lines: string[] = [];
+    const output = vi.spyOn(console, "log").mockImplementation((value: unknown) => {
+      lines.push(String(value));
+    });
+    const failure = Object.assign(new Error("SYNTHETIC_PRIVATE_QUERY"), {
+      code: "PROTOCOL_SEQUENCE_TIMEOUT",
+      sql: "SYNTHETIC_PRIVATE_SQL",
+      config: { password: "SYNTHETIC_PRIVATE_CREDENTIAL" },
+    });
+    const work = vi.fn(async () => {
+      try {
+        return await observeDatabaseOperation(operation, wireDeadlineMs, async () => {
+          throw failure;
+        });
+      } catch (error) {
+        expect(error).toBe(failure);
+        throw error;
+      }
+    });
+    try {
+      const sanitized = await identityDiagnostics("admission")
+        .phase("migrations", work)
+        .catch((error: unknown) => error);
+      expect(work).toHaveBeenCalledTimes(1);
+      expect(sanitized).not.toBe(failure);
+      expect(sanitized).toMatchObject({
+        message: "IDENTITY_FIXTURE_PHASE_FAILED",
+        codes: ["PROTOCOL_SEQUENCE_TIMEOUT"],
+        category: "unclassified",
+        databaseOperation: { operation, wireDeadlineMs, elapsedMs: expect.any(Number) },
+      });
+      expect(Object.keys(sanitized as object).sort()).toEqual([
+        "category",
+        "codes",
+        "databaseOperation",
+      ]);
+      expect(lines).toHaveLength(2);
+      const facts = lines.map((line) => JSON.parse(line));
+      expect(facts[1]).toEqual({
+        event: "identity_fixture",
+        fixture: "admission",
+        phase: "migrations",
+        state: "failed",
+        durationMs: expect.any(Number),
+        codes: ["PROTOCOL_SEQUENCE_TIMEOUT"],
+        category: "unclassified",
+        databaseOperation: { operation, wireDeadlineMs, elapsedMs: expect.any(Number) },
+      });
+      expect(facts[1].databaseOperation.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(lines.join("\n") + JSON.stringify(sanitized)).not.toContain("SYNTHETIC_PRIVATE");
+    } finally {
+      output.mockRestore();
+    }
+  },
+);

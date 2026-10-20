@@ -55,7 +55,9 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
+const diagnostic = identityDiagnostics("admission");
 const origin = "http://127.0.0.1:4173",
   password = "Synthetic-onboarding-passphrase-42";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
@@ -233,9 +235,9 @@ async function count(table: string, where = "", values: string[] = []) {
   return Number(result[0]?.n);
 }
 beforeAll(async () => {
-  control = await testConnection();
-  await reset(control);
-  await runMigrations(guardedSettings());
+  control = await diagnostic.phase("connection", () => testConnection());
+  await diagnostic.phase("reset", () => reset(control));
+  await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
   unit = createUnitOfWork(guardedSettings());
   ({ identity, admissions, messaging } = harness());
   await identity.bootstrap({
