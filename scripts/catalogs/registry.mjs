@@ -75,6 +75,25 @@ function tokens(source) {
 }
 export async function parseRegistries(layers, options = {}) {
   if (!Array.isArray(layers) || !layers.length || layers.length > 512) fail("invalid_layers");
+  for (const layer of layers) {
+    if (
+      !layer ||
+      typeof layer !== "object" ||
+      Array.isArray(layer) ||
+      Object.keys(layer).some(
+        (key) => !["root", "packId", "registries", "overlay"].includes(key),
+      ) ||
+      typeof layer.root !== "string" ||
+      !layer.root.length ||
+      typeof layer.packId !== "string" ||
+      !/^[a-z][a-z0-9_.-]{0,127}$/.test(layer.packId) ||
+      !Array.isArray(layer.registries) ||
+      !layer.registries.length ||
+      layer.registries.some((registry) => typeof registry !== "string" || !registry.length) ||
+      (Object.hasOwn(layer, "overlay") && typeof layer.overlay !== "boolean")
+    )
+      fail("invalid_layer");
+  }
   const maximumBytes = options.maxBytes ?? 32 * 1024 * 1024;
   const maximumFiles = options.maxFiles ?? 10000;
   let total = 0,
@@ -82,13 +101,6 @@ export async function parseRegistries(layers, options = {}) {
   const units = new Map(),
     origins = [];
   for (const layer of layers) {
-    if (
-      !layer ||
-      !/^[a-z][a-z0-9_.-]{0,127}$/.test(layer.packId) ||
-      !Array.isArray(layer.registries) ||
-      !layer.registries.length
-    )
-      fail("invalid_layer");
     const root = resolve(layer.root);
     if ((await lstat(root)).isSymbolicLink() || (await realpath(root)) !== root)
       fail("symlink_root");
@@ -190,7 +202,7 @@ export async function parseRegistries(layers, options = {}) {
         if (seenUnits.has(key)) fail("duplicate_unit");
         seenUnits.add(key);
         const previous = units.get(key);
-        if (previous && !layer.overlay) fail("unapproved_overlay");
+        if (previous && layer.overlay !== true) fail("unapproved_overlay");
         units.set(key, {
           type,
           id,

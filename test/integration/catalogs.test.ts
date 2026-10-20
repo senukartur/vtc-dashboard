@@ -18,7 +18,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
-import { type CatalogConfig, ordered } from "../../apps/api/src/modules/catalogs/artifact.ts";
+import { type CatalogConfig, hash, ordered } from "../../apps/api/src/modules/catalogs/artifact.ts";
 import {
   type Catalogs,
   cleanupCatalogs,
@@ -443,8 +443,60 @@ test("missing packs, untrusted permission/English review and unresolved mapping 
     reason: "Fictional reviewed source",
   });
   expect((await catalogs.review(director, id)).mappingIssues).toBe(0);
+  expect((await catalogs.review(director, id)).sourceReviewState).toBe("approved");
+  expect((await catalogs.detail(director, id)).sourceReviewComplete).toBe(true);
   expect(await status(catalogs.reviewPage(director, id, "diff", { reviewVersion: 1 }))).toBe(409);
   await publish(id);
+});
+
+test("synthetic-enabled configuration cannot approve mapping edits to a reviewed real artifact", async () => {
+  const real = { ...artifact(), synthetic: false };
+  real.provenance.push({
+    referenceId: newId(),
+    publicSourceUrl: "https://example.invalid/catalog-source",
+    attribution: "Fictional source for an isolated trust-boundary fixture",
+    permittedUseBasis: "Synthetic test evidence only",
+    observedAt: "2026-10-20T00:00:00.000Z",
+  });
+  const owner = createCatalogs(
+    unit,
+    {
+      ...config,
+      evidence: [
+        {
+          artifactSha256: hash(Buffer.from(JSON.stringify(real))),
+          game: real.game,
+          gameBuild: real.gameBuild,
+          releaseInventoryAsOf: real.releaseInventoryAsOf,
+          expectedPacks: real.packs.map((pack) => pack.packId),
+          provenance: real.provenance,
+          englishLabelsReviewed: true,
+        },
+      ],
+    },
+    { identity, published: catalogEvents(unit).append },
+  );
+  const id = await candidate(real, owner);
+  expect((await owner.review(director, id)).sourceReviewState).toBe("approved");
+  expect((await owner.detail(director, id)).sourceReviewComplete).toBe(true);
+  const [fact] = await unit.run((tx) =>
+    unit.client(tx).select().from(catalogFacts).where(eq(catalogFacts.revisionId, id)),
+  );
+  if (!fact) throw new Error("SYNTHETIC_FACT_MISSING");
+  await owner.mapping(director, newId(), {
+    catalogRevisionId: id,
+    provider: "other",
+    game: real.game,
+    mapNamespace: "base",
+    sourceId: "new-unreviewed-mapping",
+    entityId: fact.entityId,
+    reason: "Fictional mapping edit beyond the reviewed artifact",
+  });
+  expect((await owner.review(director, id)).sourceReviewState).toBe("pending");
+  expect((await owner.detail(director, id)).sourceReviewComplete).toBe(false);
+  expect(await status(publish(id, owner))).toBe(409);
+  const [pointer] = await unit.run((tx) => unit.client(tx).select().from(catalogPublications));
+  expect(pointer?.revisionId).toBeNull();
 });
 test("two publishers serialize pointer guards; readers pin one revision and rollback includes pointer/audit/outbox", async () => {
   const one = await candidate(),

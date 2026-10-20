@@ -190,7 +190,8 @@ export function createCatalogs(
       .where(eq(catalogMappingReviews.revisionId, r.id))
       .limit(1);
     const source =
-      trusted(r, coverage) && (!edits.length || (config.synthetic && !config.production));
+      trusted(r, coverage) &&
+      (!edits.length || (r.synthetic && config.synthetic && !config.production));
     return {
       id: r.id,
       version: r.version,
@@ -792,7 +793,7 @@ export function createCatalogs(
             !dto.coverageComplete ||
             !dto.englishLabelsComplete ||
             !dto.sourceReviewComplete ||
-            (mappingEdits.length && !(config.synthetic && !config.production))
+            (mappingEdits.length && !(r.synthetic && config.synthetic && !config.production))
           )
             throw identityError(409);
           await c(tx)

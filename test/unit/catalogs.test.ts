@@ -1,6 +1,9 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import {
   aliasKey,
@@ -19,6 +22,7 @@ import { parseRegistries } from "../../scripts/catalogs/registry.mjs";
 import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
 
 const bytes = (v: unknown) => Buffer.from(JSON.stringify(v));
+const execFileAsync = promisify(execFile);
 const config: CatalogConfig = {
   production: false,
   synthetic: true,
@@ -274,5 +278,71 @@ test("offline active registries preserve ordered overlay/include provenance and 
     ).rejects.toThrow("symlink_path");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("preparation validates every closed layer before source reads and accepts only explicit boolean overlays", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vtc-catalog-manifest-"));
+  const script = fileURLToPath(new URL("../../scripts/catalogs/prepare.mjs", import.meta.url));
+  const source = 'SiiNunit { city_data : city.fictional { city_name: "Fictional" } }';
+  const layer = { root, packId: "base", registries: ["registry.sii"] };
+  try {
+    await writeFile(join(root, "registry.sii"), source);
+    const malformed: unknown[] = [
+      ...["false", "true", 0, 1, null, {}].map((overlay) => ({ ...layer, overlay })),
+      { ...layer, unexpected: true },
+      { ...layer, root: 1 },
+      { ...layer, packId: 1 },
+      { ...layer, registries: "registry.sii" },
+      { ...layer, registries: [1] },
+      { ...layer, registries: [] },
+      null,
+      [],
+    ];
+    for (const [index, invalid] of malformed.entries()) {
+      const input = join(root, `invalid-${index}.json`),
+        output = join(root, `invalid-output-${index}.json`);
+      await writeFile(input, JSON.stringify({ layers: [layer, invalid] }));
+      await expect(execFileAsync(process.execPath, [script, input, output])).rejects.toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: `${JSON.stringify({ event: "catalog_preparation_failed" })}\n`,
+      });
+      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+      const unreadableFirst = { ...layer, root: join(root, "nonexistent-source") };
+      await expect(
+        parseRegistries([unreadableFirst, invalid] as Parameters<typeof parseRegistries>[0]),
+      ).rejects.toThrow("invalid_layer");
+    }
+    const expected = hash(
+      JSON.stringify({
+        layers: [{ packId: "base", overlay: false, registries: ["registry.sii"] }],
+        filesInExpansionOrder: [{ packId: "base", file: "registry.sii", sha256: hash(source) }],
+      }),
+    );
+    for (const [index, valid] of [
+      layer,
+      { ...layer, overlay: false },
+      { ...layer, overlay: true },
+    ].entries()) {
+      const input = join(root, `valid-${index}.json`),
+        output = join(root, `valid-output-${index}.json`);
+      await writeFile(input, JSON.stringify({ layers: [valid] }));
+      const result = await execFileAsync(process.execPath, [script, input, output]);
+      expect(JSON.parse(result.stdout)).toMatchObject({ files: 1, units: 1 });
+      const parsed = JSON.parse(await readFile(output, "utf8"));
+      if (index < 2) expect(parsed.sourceManifestSha256).toBe(expected);
+      else expect(parsed.sourceManifestSha256).not.toBe(expected);
+    }
+    const input = join(root, "override.json"),
+      output = join(root, "override-output.json");
+    await writeFile(
+      input,
+      JSON.stringify({ layers: [layer, { ...layer, packId: "dlc", overlay: true }] }),
+    );
+    await execFileAsync(process.execPath, [script, input, output]);
+    expect(JSON.parse(await readFile(output, "utf8")).units[0].overlays).toHaveLength(1);
+  } finally {
+    await rm(root, { recursive: true });
   }
 });
