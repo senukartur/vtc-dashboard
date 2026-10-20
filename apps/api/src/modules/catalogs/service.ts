@@ -264,6 +264,107 @@ export function createCatalogs(
   }
   const handler = createImportHandler(unit, config, now);
   const producer = createQueue(unit, [handler]);
+  async function resolveInTransaction(
+    tx: TxContext,
+    input: {
+      revisionId: string;
+      game: Game;
+      kind: Kind;
+      mapNamespace: string | null;
+      provider: string;
+      sourceId: string | null;
+      locale: "en" | "ru" | null;
+      label: string | null;
+      regionId: string | null;
+    },
+  ) {
+    const r = await revision(tx, input.revisionId);
+    if (r.state !== "published" || r.game !== input.game)
+      return { status: "unknown" as const, reasonCode: "catalog_unavailable" };
+    let candidates: Fact[];
+    const scope = and(
+      eq(catalogFacts.revisionId, r.id),
+      eq(catalogFacts.game, input.game),
+      eq(catalogFacts.kind, input.kind),
+      input.mapNamespace === null ? undefined : eq(catalogFacts.map, keyBytes(input.mapNamespace)),
+      input.regionId === null
+        ? undefined
+        : eq(catalogFacts.regionId, applicationId(input.regionId)),
+    );
+    if (input.sourceId !== null) {
+      const mappings = await c(tx)
+        .select({ entityId: catalogMappings.entityId })
+        .from(catalogMappings)
+        .where(
+          and(
+            eq(catalogMappings.revisionId, r.id),
+            eq(catalogMappings.game, input.game),
+            eq(catalogMappings.kind, input.kind),
+            eq(catalogMappings.provider, keyBytes(input.provider)),
+            eq(catalogMappings.sourceId, keyBytes(input.sourceId)),
+            input.mapNamespace === null
+              ? undefined
+              : eq(catalogMappings.map, keyBytes(input.mapNamespace)),
+          ),
+        );
+      candidates = mappings.length
+        ? await c(tx)
+            .select()
+            .from(catalogFacts)
+            .where(
+              and(
+                scope,
+                inArray(
+                  catalogFacts.entityId,
+                  mappings.map((m) => m.entityId),
+                ),
+              ),
+            )
+        : [];
+    } else if (input.label !== null) {
+      const aliases = await c(tx)
+        .select({ entityId: catalogAliases.entityId })
+        .from(catalogAliases)
+        .where(
+          and(
+            eq(catalogAliases.revisionId, r.id),
+            eq(catalogAliases.normalized, opaqueUtf8(aliasKey(input.label), 512)),
+            input.locale === null ? undefined : eq(catalogAliases.locale, input.locale),
+            input.regionId === null
+              ? undefined
+              : sql`(${catalogAliases.regionScope} = ${Buffer.from(input.regionId)} OR ${catalogAliases.regionScope} = ${Buffer.from("*")})`,
+          ),
+        );
+      candidates = aliases.length
+        ? await c(tx)
+            .select()
+            .from(catalogFacts)
+            .where(
+              and(
+                scope,
+                inArray(
+                  catalogFacts.entityId,
+                  aliases.map((a) => a.entityId),
+                ),
+              ),
+            )
+        : [];
+    } else candidates = [];
+    const unique = [...new Map(candidates.map((f) => [f.entityId, f])).values()];
+    if (!unique.length)
+      return {
+        status: "unknown" as const,
+        reasonCode: input.sourceId !== null ? "unknown_source_id" : "unknown_alias",
+      };
+    if (unique.length > 1)
+      return {
+        status: "ambiguous" as const,
+        candidateIds: unique.map((f) => f.entityId).sort(),
+      };
+    const fact = unique[0] as Fact;
+    return { status: "resolved" as const, entityId: fact.entityId, factRevisionId: fact.id };
+  }
+
   return {
     config,
     handler,
@@ -876,6 +977,81 @@ export function createCatalogs(
         };
       });
     },
+    resolveInTransaction,
+    async publishedInTransaction(tx: TxContext, game: Game, gameBuild: string) {
+      const [p] = await c(tx)
+        .select()
+        .from(catalogPublications)
+        .where(eq(catalogPublications.game, game));
+      const [r] = p?.revisionId
+        ? await c(tx).select().from(catalogRevisions).where(eq(catalogRevisions.id, p.revisionId))
+        : [];
+      if (r?.complete && r.state === "published" && r.gameBuild === gameBuild) return r.id;
+      const [historical] = await c(tx)
+        .select({ id: catalogRevisions.id })
+        .from(catalogRevisions)
+        .where(
+          and(
+            eq(catalogRevisions.game, game),
+            sql`CAST(${catalogRevisions.gameBuild} AS BINARY) = ${Buffer.from(gameBuild)}`,
+            eq(catalogRevisions.complete, true),
+            eq(catalogRevisions.state, "published"),
+          ),
+        )
+        .orderBy(desc(catalogRevisions.createdAt), desc(catalogRevisions.id))
+        .limit(1);
+      return historical?.id ?? null;
+    },
+    async pinnedInTransaction(tx: TxContext, revisionId: string, entityId: string) {
+      const r = await revision(tx, revisionId);
+      if (r.state !== "published") return null;
+      const [fact] = await c(tx)
+        .select()
+        .from(catalogFacts)
+        .where(
+          and(
+            eq(catalogFacts.revisionId, r.id),
+            eq(catalogFacts.entityId, applicationId(entityId)),
+          ),
+        );
+      return fact ?? null;
+    },
+    async labelsInTransaction(
+      tx: TxContext,
+      pins: { revisionId: string; entityId: string }[],
+      locale: "en" | "ru",
+    ) {
+      if (pins.length > 300) throw new Error("CATALOG_LABEL_BATCH_BOUND_EXCEEDED");
+      if (!pins.length) return new Map<string, S["CatalogLabel"]>();
+      const rows = await c(tx)
+        .select()
+        .from(catalogFacts)
+        .where(
+          or(
+            ...pins.map((pin) =>
+              and(
+                eq(catalogFacts.revisionId, applicationId(pin.revisionId)),
+                eq(catalogFacts.entityId, applicationId(pin.entityId)),
+              ),
+            ),
+          ),
+        );
+      return new Map(
+        rows
+          .filter((f) => f.labelEn)
+          .map((f) => [
+            `${f.revisionId}:${f.entityId}`,
+            {
+              entityId: f.entityId,
+              label: (locale === "ru" ? (f.labelRu ?? f.labelEn) : f.labelEn) as string,
+              requestedLocale: locale,
+              renderedLocale: locale === "ru" && f.labelRu ? ("ru" as const) : ("en" as const),
+              englishFallback: locale === "ru" && !f.labelRu,
+              retired: f.retired,
+            },
+          ]),
+      );
+    },
     async resolve(input: {
       revisionId: string;
       game: Game;
@@ -887,95 +1063,7 @@ export function createCatalogs(
       label: string | null;
       regionId: string | null;
     }) {
-      return run(async (tx) => {
-        const r = await revision(tx, input.revisionId);
-        if (r.state !== "published" || r.game !== input.game)
-          return { status: "unknown" as const, reasonCode: "catalog_unavailable" };
-        let candidates: Fact[];
-        const scope = and(
-          eq(catalogFacts.revisionId, r.id),
-          eq(catalogFacts.game, input.game),
-          eq(catalogFacts.kind, input.kind),
-          input.mapNamespace === null
-            ? undefined
-            : eq(catalogFacts.map, keyBytes(input.mapNamespace)),
-          input.regionId === null
-            ? undefined
-            : eq(catalogFacts.regionId, applicationId(input.regionId)),
-        );
-        if (input.sourceId !== null) {
-          const mappings = await c(tx)
-            .select({ entityId: catalogMappings.entityId })
-            .from(catalogMappings)
-            .where(
-              and(
-                eq(catalogMappings.revisionId, r.id),
-                eq(catalogMappings.game, input.game),
-                eq(catalogMappings.kind, input.kind),
-                eq(catalogMappings.provider, keyBytes(input.provider)),
-                eq(catalogMappings.sourceId, keyBytes(input.sourceId)),
-                input.mapNamespace === null
-                  ? undefined
-                  : eq(catalogMappings.map, keyBytes(input.mapNamespace)),
-              ),
-            );
-          candidates = mappings.length
-            ? await c(tx)
-                .select()
-                .from(catalogFacts)
-                .where(
-                  and(
-                    scope,
-                    inArray(
-                      catalogFacts.entityId,
-                      mappings.map((m) => m.entityId),
-                    ),
-                  ),
-                )
-            : [];
-        } else if (input.label !== null) {
-          const aliases = await c(tx)
-            .select({ entityId: catalogAliases.entityId })
-            .from(catalogAliases)
-            .where(
-              and(
-                eq(catalogAliases.revisionId, r.id),
-                eq(catalogAliases.normalized, opaqueUtf8(aliasKey(input.label), 512)),
-                input.locale === null ? undefined : eq(catalogAliases.locale, input.locale),
-                input.regionId === null
-                  ? undefined
-                  : sql`(${catalogAliases.regionScope} = ${Buffer.from(input.regionId)} OR ${catalogAliases.regionScope} = ${Buffer.from("*")})`,
-              ),
-            );
-          candidates = aliases.length
-            ? await c(tx)
-                .select()
-                .from(catalogFacts)
-                .where(
-                  and(
-                    scope,
-                    inArray(
-                      catalogFacts.entityId,
-                      aliases.map((a) => a.entityId),
-                    ),
-                  ),
-                )
-            : [];
-        } else candidates = [];
-        const unique = [...new Map(candidates.map((f) => [f.entityId, f])).values()];
-        if (!unique.length)
-          return {
-            status: "unknown" as const,
-            reasonCode: input.sourceId !== null ? "unknown_source_id" : "unknown_alias",
-          };
-        if (unique.length > 1)
-          return {
-            status: "ambiguous" as const,
-            candidateIds: unique.map((f) => f.entityId).sort(),
-          };
-        const fact = unique[0] as Fact;
-        return { status: "resolved" as const, entityId: fact.entityId, factRevisionId: fact.id };
-      });
+      return run((tx) => resolveInTransaction(tx, input));
     },
   };
 }

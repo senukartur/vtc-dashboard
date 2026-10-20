@@ -1417,16 +1417,45 @@ export function createIdentity(
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {
       const current = await lockCompany(tx);
-      await checkActor(tx, actor, current);
+      const member = await checkActor(tx, actor, current);
       requireCapability(actor, capability);
-      return { ...actor, capabilities: [...actor.capabilities] };
+      return { ...actor, capabilities: [...actor.capabilities], locale: member.locale };
+    },
+    async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
+      const current = await lockCompany(tx);
+      if (ids.length > 100) throw new Error("MEMBER_SUMMARY_BOUND_EXCEEDED");
+      const unique = [...new Set(ids)].map(applicationId);
+      if (!unique.length) return new Map<string, components["schemas"]["MemberSummary"]>();
+      const rows = await client(tx)
+        .select({ id: user.id, nickname: user.name, status: membership.status })
+        .from(user)
+        .innerJoin(membership, eq(membership.userId, user.id))
+        .where(inArray(user.id, unique));
+      const assigned = await client(tx).select().from(roles).where(inArray(roles.userId, unique));
+      return new Map(
+        rows.map((row) => [
+          row.id,
+          {
+            id: row.id,
+            nickname: row.nickname,
+            formerMember: row.status !== "active",
+            roles: [
+              ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
+              ...(current.directorUserId === row.id ? ["director" as const] : []),
+            ],
+          },
+        ]),
+      );
     },
     async accessState(tx: TxContext, userId: string) {
-      await lockCompany(tx);
+      const current = await lockCompany(tx);
       const row = (await lockMembers(tx, [userId])).get(userId);
       if (!row) throw identityError(404);
       return {
         active: row.status === "active",
+        canSubmitTrips: capabilities(await memberRoles(tx, userId, current)).includes(
+          "trips.submit_own",
+        ),
         accessEpoch: row.accessEpoch,
         identityEpoch: row.identityEpoch,
         credentialEpoch: row.credentialEpoch,

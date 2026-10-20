@@ -38,6 +38,8 @@ export async function runMigrations(
   ) {
     throw new Error("INVALID_MIGRATION_BOUNDS");
   }
+  // Durable journal receipts share a bounded cap; explicit shorter DDL bounds still apply.
+  const journalReceiptTimeoutMs = Math.min(statementTimeout, 5000);
   const migrations = readMigrationFiles({ migrationsFolder: options.folder ?? migrationFolder });
   let last = -1;
   for (const migration of migrations) {
@@ -104,11 +106,11 @@ export async function runMigrations(
     }
     let count = 0;
     for (const migration of migrations.slice(history.length)) {
-      await observeDatabaseOperation("migration_journal_insert", 1000, () =>
+      await observeDatabaseOperation("migration_journal_insert", journalReceiptTimeoutMs, () =>
         connection.query({
           sql: "INSERT INTO _vtc_migrations (version, hash, state, started_at) VALUES (?, ?, 'applying', UTC_TIMESTAMP(3))",
           values: [String(migration.folderMillis), Buffer.from(migration.hash, "ascii")],
-          timeout: 1000,
+          timeout: journalReceiptTimeoutMs,
         }),
       );
       for (const statement of migration.sql) {
@@ -117,11 +119,11 @@ export async function runMigrations(
             connection.query({ sql: statement, timeout: statementTimeout }),
           );
       }
-      await observeDatabaseOperation("migration_journal_finalize", 1000, () =>
+      await observeDatabaseOperation("migration_journal_finalize", journalReceiptTimeoutMs, () =>
         connection.query({
           sql: "UPDATE _vtc_migrations SET state = 'applied', applied_at = UTC_TIMESTAMP(3) WHERE version = ? AND state = 'applying'",
           values: [String(migration.folderMillis)],
-          timeout: 1000,
+          timeout: journalReceiptTimeoutMs,
         }),
       );
       count++;

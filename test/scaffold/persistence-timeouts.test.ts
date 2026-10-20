@@ -34,7 +34,8 @@ type Phase =
   | "rollback-queued"
   | "migration-baseline"
   | "migration-statement"
-  | "migration-journal";
+  | "migration-journal"
+  | `journal-${"insert" | "finalize"}-${"stall" | "delayed" | "late" | "short"}`;
 
 async function peer(phase: Phase) {
   const server = mysql.createServer();
@@ -47,6 +48,8 @@ async function peer(phase: Phase) {
     ends: 0,
     applying: 0,
     applied: 0,
+    finalizations: 0,
+    migrationStatements: 0,
     releaseQueries: 0,
     delayedAcks: 0,
   };
@@ -169,7 +172,31 @@ async function peer(phase: Phase) {
         rows(["version", "hash", "state"], []);
         return;
       }
-      if (query.startsWith("INSERT INTO _vtc_migrations")) counts.applying++;
+      const journalInsert = query.startsWith("INSERT INTO _vtc_migrations");
+      const journalFinalize = query.startsWith("UPDATE _vtc_migrations");
+      if (journalInsert) counts.applying++;
+      if (journalFinalize) counts.finalizations++;
+      if (
+        (journalInsert && counts.applying === 1 && phase.startsWith("journal-insert-")) ||
+        (journalFinalize && counts.finalizations === 1 && phase.startsWith("journal-finalize-"))
+      ) {
+        if (phase.endsWith("-stall")) {
+          counts.stalls++;
+        } else {
+          const timer = setTimeout(
+            () => {
+              acknowledgements.delete(timer);
+              counts.delayedAcks++;
+              connection.writeOk();
+            },
+            phase.endsWith("-late") ? 5600 : 2300,
+          );
+          acknowledgements.add(timer);
+        }
+        return;
+      }
+      if (/^(CREATE|ALTER|INSERT|UPDATE)/.test(query) && !query.includes("_vtc_migrations"))
+        counts.migrationStatements++;
       if (query.startsWith("CREATE TABLE `audit_entries`")) {
         if (phase === "migration-statement") {
           counts.stalls++;
@@ -230,7 +257,10 @@ ${body}
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
           () => reject(new Error("Synthetic child exceeded cleanup deadline")),
-          ["commit", "commit-delayed", "commit-late"].includes(phase) ? 8500 : 3500,
+          ["commit", "commit-delayed", "commit-late"].includes(phase) ||
+            (phase.startsWith("journal-") && !phase.endsWith("-short"))
+            ? 8500
+            : 3500,
         );
       }),
     ]);
@@ -244,8 +274,8 @@ ${body}
           : 1;
     while (fixture.counts.ends < expectedEnds && Date.now() < deadline) await delay(10);
     assert.equal(fixture.counts.ends, expectedEnds, "client sockets disposed before peer cleanup");
-    if (phase === "commit-late") {
-      const lateDeadline = Date.now() + 1500;
+    if (phase === "commit-late" || phase.endsWith("-late") || phase.endsWith("-short")) {
+      const lateDeadline = Date.now() + (phase.endsWith("-short") ? 3000 : 1500);
       while (fixture.counts.delayedAcks === 0 && Date.now() < lateDeadline) await delay(10);
       assert.equal(fixture.counts.delayedAcks, 1, "late response follows natural child exit");
     }
@@ -422,8 +452,8 @@ for (const phase of ["migration-baseline", "migration-statement", "migration-jou
 await assert.rejects(runMigrations(settings, { statementTimeoutMs: 100 }), error => {
   const context = databaseFailureContext(error);
   assert.equal(context?.operation, '${phase === "migration-baseline" ? "migration_baseline" : phase === "migration-statement" ? "migration_statement" : "migration_journal_finalize"}');
-  assert.equal(context.wireDeadlineMs, ${phase === "migration-statement" ? 100 : 1000});
-  assert.ok(context.elapsedMs >= ${phase === "migration-statement" ? 80 : 800});
+  assert.equal(context.wireDeadlineMs, ${phase === "migration-baseline" ? 1000 : 100});
+  assert.ok(context.elapsedMs >= ${phase === "migration-baseline" ? 800 : 80});
   assert.deepEqual(Object.keys(context).sort(), ['elapsedMs', 'operation', 'wireDeadlineMs']);
   return true;
 });
@@ -433,5 +463,50 @@ await assert.rejects(runMigrations(settings, { statementTimeoutMs: 100 }), error
     assert.equal(counts.releaseQueries, 0);
     assert.equal(counts.applying, phase === "migration-baseline" ? 0 : 1);
     assert.equal(counts.applied, 0);
+  });
+}
+
+for (const target of ["insert", "finalize"] as const) {
+  for (const mode of ["stall", "late", "short"] as const) {
+    test(`journal ${target} ${mode} rejects at its receipt bound and never resumes after disposal`, async () => {
+      const deadline = mode === "short" ? 100 : 5000;
+      const counts = await probe(
+        `journal-${target}-${mode}`,
+        `
+const started = performance.now();
+await assert.rejects(runMigrations(settings, ${mode === "short" ? "{ statementTimeoutMs: 100 }" : "{}"}), error => {
+  assert.equal(error.code, 'PROTOCOL_SEQUENCE_TIMEOUT');
+  const context = databaseFailureContext(error);
+  assert.deepEqual(Object.keys(context).sort(), ['elapsedMs', 'operation', 'wireDeadlineMs']);
+  assert.equal(context.operation, 'migration_journal_${target}');
+  assert.equal(context.wireDeadlineMs, ${deadline});
+  assert.ok(context.elapsedMs >= ${mode === "short" ? 80 : 4500});
+  return true;
+});
+assert.ok(performance.now() - started >= ${mode === "short" ? 80 : 4500});
+assert.ok(performance.now() - started < ${mode === "short" ? 1500 : 7000});
+`,
+      );
+      assert.equal(counts.applying, 1, "never retry the INSERT or advance to another migration");
+      assert.equal(counts.finalizations, target === "insert" ? 0 : 1);
+      assert.equal(counts.migrationStatements, target === "insert" ? 0 : 1);
+      assert.equal(counts.releaseQueries, 0, "no cleanup queued behind the unresolved receipt");
+      assert.equal(counts.delayedAcks, mode === "stall" ? 0 : 1);
+    });
+  }
+  test(`journal ${target} accepts a 2.3-second receipt exactly once under its default cap`, async () => {
+    const counts = await probe(
+      `journal-${target}-delayed`,
+      `
+const started = performance.now();
+assert.equal(await runMigrations(settings), 9);
+assert.ok(performance.now() - started >= 2100);
+assert.ok(performance.now() - started < 5000);
+`,
+    );
+    assert.equal(counts.applying, 9);
+    assert.equal(counts.finalizations, 9);
+    assert.equal(counts.delayedAcks, 1);
+    assert.equal(counts.releaseQueries, 0);
   });
 }

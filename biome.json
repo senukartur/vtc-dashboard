@@ -9,7 +9,8 @@
       "!!spikes",
       "!!.local",
       "!!docs",
-      "!!CLAUDE.md"
+      "!!CLAUDE.md",
+      "!!apps/api/src/modules/sources/contracts/telemetry-v1.schema.json"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 100 },
