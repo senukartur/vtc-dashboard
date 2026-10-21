@@ -892,9 +892,10 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        assert.equal(String(history[0]?.count), "10");
+        // The extended fixture retains its synthetic prior entry plus ten current migrations.
+        assert.equal(String(history[0]?.count), "11");
         await reset(connection);
-        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 9]);
+        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 10]);
         const [singleApply] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
         );
