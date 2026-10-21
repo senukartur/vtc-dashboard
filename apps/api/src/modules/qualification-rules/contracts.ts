@@ -30,6 +30,7 @@ export interface ConfirmedEventContext {
   readonly eventId: string;
   readonly eventRevisionId: string;
   readonly attendanceRevisionId: string;
+  readonly attendanceStatus?: "confirmed" | "declined" | "unconfirmed";
   readonly prescribedCargoId: string | null;
   readonly prescribedMassKg: string | null;
   readonly prescribedTrailerTypeId: string | null;
@@ -78,6 +79,9 @@ export interface EventPrescribedLoadMatchResult {
     readonly cargoMatch: boolean;
     readonly massMatch: boolean;
     readonly trailerMatch: boolean;
+    readonly prescribedCargo: boolean;
+    readonly prescribedMass: boolean;
+    readonly prescribedTrailer: boolean;
   };
 }
 
@@ -140,6 +144,7 @@ export const REASON_CODES = {
   COMPANY_ACCEPTANCE_RECORDING_INCOMPLETE: "company_acceptance_recording_incomplete",
   COMPANY_ACCEPTANCE_DISTANCE_NOT_SUPPORTED: "company_acceptance_distance_not_supported",
   COMPANY_ACCEPTANCE_SCREENSHOT_MISSING: "company_acceptance_screenshot_missing",
+  COMPANY_ACCEPTANCE_PROVIDER_UNSUPPORTED: "provider_unsupported",
 
   // Qualification progress
   PROGRESS_CRITERIA_SATISFIED: "progress_criteria_satisfied",

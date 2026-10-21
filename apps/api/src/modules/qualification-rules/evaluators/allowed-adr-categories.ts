@@ -9,14 +9,6 @@ import {
 
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-const NON_ADR_REASON_CODES = new Set([
-  "non_adr",
-  "not_adr",
-  "cargo_not_adr",
-  "not_applicable",
-  "none",
-]);
-
 /**
  * Validates whether the given value strictly conforms to the AllowedAdrCategoriesRule schema.
  */
@@ -78,8 +70,8 @@ export const allowedAdrCategoriesEvaluator: RuleEvaluator<AllowedAdrCategoriesRu
       };
     }
 
-    // 2. Cargo is confirmed non-hazardous (non-ADR)
-    if (NON_ADR_REASON_CODES.has(fact.reasonCode)) {
+    // 2. Cargo is confirmed non-hazardous (contract code "cargo_not_adr")
+    if (fact.reasonCode === "cargo_not_adr") {
       return {
         ruleType: "allowed_adr_categories",
         outcome: "pass",

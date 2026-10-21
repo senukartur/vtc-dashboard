@@ -42,12 +42,13 @@ export function matchEventPrescribedLoad(
     };
   }
 
-  // 1. Attendance confirmation check: attendanceRevisionId must be non-empty
-  if (
-    !event.attendanceRevisionId ||
-    typeof event.attendanceRevisionId !== "string" ||
-    event.attendanceRevisionId.trim() === ""
-  ) {
+  // 1. Attendance confirmation check: attendanceRevisionId must be non-empty and attendanceStatus must not be declined/unconfirmed
+  const attendanceConfirmed =
+    typeof event.attendanceRevisionId === "string" &&
+    event.attendanceRevisionId.trim() !== "" &&
+    (event.attendanceStatus === undefined || event.attendanceStatus === "confirmed");
+
+  if (!attendanceConfirmed) {
     return {
       matches: false,
       reasonCode: REASON_CODES.EVENT_ATTENDANCE_UNCONFIRMED,
@@ -56,6 +57,9 @@ export function matchEventPrescribedLoad(
         cargoMatch: false,
         massMatch: false,
         trailerMatch: false,
+        prescribedCargo: event.prescribedCargoId !== null,
+        prescribedMass: event.prescribedMassKg !== null,
+        prescribedTrailer: event.prescribedTrailerTypeId !== null,
       },
     };
   }
@@ -74,6 +78,9 @@ export function matchEventPrescribedLoad(
         cargoMatch: false,
         massMatch: false,
         trailerMatch: false,
+        prescribedCargo: false,
+        prescribedMass: false,
+        prescribedTrailer: false,
       },
     };
   }
@@ -120,6 +127,9 @@ export function matchEventPrescribedLoad(
       cargoMatch,
       massMatch,
       trailerMatch,
+      prescribedCargo: event.prescribedCargoId !== null,
+      prescribedMass: event.prescribedMassKg !== null,
+      prescribedTrailer: event.prescribedTrailerTypeId !== null,
     },
   };
 }

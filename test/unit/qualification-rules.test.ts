@@ -283,6 +283,15 @@ describe("Qualification Rules Module — VTC-027", () => {
       expect(res.ruleResults[0]?.observed).toBe("non_adr");
     });
 
+    test("returns unknown for loose or uncontracted reason codes (e.g. non_adr, unknown)", () => {
+      const looseTrip = createSyntheticTripEvidence({
+        adrCategory: unknownFact("non_adr"),
+      });
+      const res = evaluateQualificationRules(looseTrip, [traineeAdrRule]);
+      expect(res.outcome).toBe("unknown");
+      expect(res.ruleResults[0]?.reasonCode).toBe(REASON_CODES.RULE_ADR_CATEGORY_UNKNOWN);
+    });
+
     test("passes permitted ADR category", () => {
       const adrGasTrip = createSyntheticTripEvidence({
         adrCategory: pinnedEntityFact(SYNTHETIC_IDS.ADR_GASES_CLASS_2, "adr_category"),
@@ -440,6 +449,118 @@ describe("Qualification Rules Module — VTC-027", () => {
       expect(res.outcome).toBe("fail");
     });
 
+    test("attendanceStatus declined or unconfirmed does not authorize bypass", () => {
+      const declinedContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          attendanceStatus: "declined",
+          prescribedCargoId: SYNTHETIC_IDS.CARGO_PRESCRIBED,
+          prescribedMassKg: "45000",
+          prescribedTrailerTypeId: SYNTHETIC_IDS.TRAILER_HEAVY,
+        },
+      });
+
+      const matchDeclined = matchEventPrescribedLoad(heavyPrescribedLoadTrip, declinedContext);
+      expect(matchDeclined.matches).toBe(false);
+      expect(matchDeclined.reasonCode).toBe(REASON_CODES.EVENT_ATTENDANCE_UNCONFIRMED);
+
+      const unconfirmedStatusContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          attendanceStatus: "unconfirmed",
+          prescribedCargoId: SYNTHETIC_IDS.CARGO_PRESCRIBED,
+          prescribedMassKg: "45000",
+          prescribedTrailerTypeId: SYNTHETIC_IDS.TRAILER_HEAVY,
+        },
+      });
+
+      const matchUnconf = matchEventPrescribedLoad(
+        heavyPrescribedLoadTrip,
+        unconfirmedStatusContext,
+      );
+      expect(matchUnconf.matches).toBe(false);
+      expect(matchUnconf.reasonCode).toBe(REASON_CODES.EVENT_ATTENDANCE_UNCONFIRMED);
+    });
+
+    test("fine-grained bypass: event prescribing only trailer waives trailer rule but NOT mass or ADR rules", () => {
+      // Event prescribes ONLY heavy trailer, but NOT cargo or mass
+      const trailerOnlyEventContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          attendanceStatus: "confirmed",
+          prescribedCargoId: null,
+          prescribedMassKg: null,
+          prescribedTrailerTypeId: SYNTHETIC_IDS.TRAILER_HEAVY,
+        },
+      });
+
+      // Trip has heavy trailer (allowed by event), but mass is 30,000 kg (violates Trainee 20t max_mass)
+      const heavyTrailerTrip = createSyntheticTripEvidence({
+        cargoMassKg: knownFact("30000"),
+        trailers: {
+          complete: true,
+          items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)],
+        },
+      });
+
+      const res = evaluateQualificationRules(
+        heavyTrailerTrip,
+        traineeRules,
+        trailerOnlyEventContext,
+      );
+
+      // Overall outcome should fail because mass rule is NOT waived and failed!
+      expect(res.outcome).toBe("fail");
+      expect(res.bypassedRules).toEqual(["allowed_trailer_types"]);
+      const trailerResult = res.ruleResults.find((r) => r.ruleType === "allowed_trailer_types");
+      const massResult = res.ruleResults.find((r) => r.ruleType === "max_mass");
+      expect(trailerResult?.outcome).toBe("pass");
+      expect(trailerResult?.bypassedByEvent).toBe(true);
+      expect(massResult?.outcome).toBe("fail");
+      expect(massResult?.bypassedByEvent).toBeUndefined();
+    });
+
+    test("fine-grained bypass: event prescribing only mass waives mass rule but NOT trailer rule", () => {
+      // Event prescribes ONLY heavy mass (45t), but NOT trailer
+      const massOnlyEventContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          attendanceStatus: "confirmed",
+          prescribedCargoId: null,
+          prescribedMassKg: "45000",
+          prescribedTrailerTypeId: null,
+        },
+      });
+
+      // Trip has mass 45t (allowed by event), but uses heavy trailer (violates Trainee allowed_trailer_types)
+      const heavyMassTrip = createSyntheticTripEvidence({
+        cargoMassKg: knownFact("45000"),
+        trailers: {
+          complete: true,
+          items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)],
+        },
+      });
+
+      const res = evaluateQualificationRules(heavyMassTrip, traineeRules, massOnlyEventContext);
+
+      expect(res.outcome).toBe("fail");
+      expect(res.bypassedRules).toEqual(["max_mass"]);
+      const massResult = res.ruleResults.find((r) => r.ruleType === "max_mass");
+      const trailerResult = res.ruleResults.find((r) => r.ruleType === "allowed_trailer_types");
+      expect(massResult?.outcome).toBe("pass");
+      expect(massResult?.bypassedByEvent).toBe(true);
+      expect(trailerResult?.outcome).toBe("fail");
+      expect(trailerResult?.bypassedByEvent).toBeUndefined();
+    });
+
     test("event with all null prescribed load fields does not authorize bypass", () => {
       const noPrescribedLoadContext: EvaluationContext = createSyntheticEvaluationContext({
         confirmedEvent: {
@@ -587,6 +708,32 @@ describe("Qualification Rules Module — VTC-027", () => {
       expect(resMissing.outcome).toBe("fail");
       expect(resMissing.reasonCodes).toContain(REASON_CODES.COMPANY_ACCEPTANCE_SCREENSHOT_MISSING);
     });
+
+    test("fails when evidence provider is unhandled / unsupported", () => {
+      // biome-ignore lint/suspicious/noExplicitAny: testing unhandled provider
+      const unsupportedTrip = createSyntheticTripEvidence({ provider: "trucky" as any });
+      const res = evaluateCompanyAcceptance(unsupportedTrip);
+      expect(res.outcome).toBe("fail");
+      expect(res.reasonCodes).toContain(REASON_CODES.COMPANY_ACCEPTANCE_PROVIDER_UNSUPPORTED);
+    });
+
+    test("fails manual reports when screenshot evidenceIds contains empty or invalid strings", () => {
+      const emptyStringScreenshot = createSyntheticManualEvidence({
+        provenance: { evidenceIds: ["   "] },
+      });
+      const resEmpty = evaluateCompanyAcceptance(emptyStringScreenshot);
+      expect(resEmpty.outcome).toBe("fail");
+      expect(resEmpty.reasonCodes).toContain(REASON_CODES.COMPANY_ACCEPTANCE_SCREENSHOT_MISSING);
+
+      const nonStringScreenshot = createSyntheticManualEvidence({
+        provenance: { evidenceIds: [12345] },
+      });
+      const resNonString = evaluateCompanyAcceptance(nonStringScreenshot);
+      expect(resNonString.outcome).toBe("fail");
+      expect(resNonString.reasonCodes).toContain(
+        REASON_CODES.COMPANY_ACCEPTANCE_SCREENSHOT_MISSING,
+      );
+    });
   });
 
   describe("7. Qualification Progress Threshold Evaluator", () => {
@@ -714,6 +861,16 @@ describe("Qualification Rules Module — VTC-027", () => {
 
       expect(registry.evaluate(longTrip, [customRule]).outcome).toBe("pass");
       expect(registry.evaluate(shortTrip, [customRule]).outcome).toBe("fail");
+    });
+
+    test("unregistered rule type returns outcome unknown with reason code RULE_TYPE_UNKNOWN", () => {
+      const registry = createDefaultRegistry();
+      const trip = createSyntheticTripEvidence();
+      // Pass an unregistered rule directly to evaluate (bypassing registry.validateRule)
+      const res = registry.evaluate(trip, [{ type: "unregistered_future_rule", limit: 123 }]);
+      expect(res.outcome).toBe("unknown");
+      expect(res.ruleResults[0]?.reasonCode).toBe(REASON_CODES.RULE_TYPE_UNKNOWN);
+      expect(res.ruleResults[0]?.outcome).toBe("unknown");
     });
   });
 

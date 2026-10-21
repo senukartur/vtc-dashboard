@@ -14,6 +14,20 @@ import { compareDecimal, isValidNonNegativeDecimal } from "./decimal.js";
 export function evaluateCompanyAcceptance(
   evidence: NormalizedTripEvidence,
 ): CompanyAcceptanceResult {
+  // Reject unhandled providers early
+  if (evidence.provider !== "ets2telemetry" && evidence.provider !== "manual") {
+    return {
+      outcome: "fail",
+      reasonCodes: [REASON_CODES.COMPANY_ACCEPTANCE_PROVIDER_UNSUPPORTED],
+      details: {
+        outcomeDelivered: false,
+        recordingComplete: false,
+        distanceSupported: false,
+        screenshotAttached: false,
+      },
+    };
+  }
+
   const reasonCodes: string[] = [];
 
   // 1. Outcome delivered check
@@ -43,12 +57,15 @@ export function evaluateCompanyAcceptance(
     reasonCodes.push(REASON_CODES.COMPANY_ACCEPTANCE_DISTANCE_NOT_SUPPORTED);
   }
 
-  // 4. Screenshot check (manual-only)
+  // 4. Screenshot check (manual-only: requires array of non-empty strings)
   const isManual = evidence.provider === "manual";
   let screenshotAttached = true;
   if (isManual) {
     const prov = evidence.provenance as { evidenceIds?: readonly unknown[] } | undefined;
-    screenshotAttached = Array.isArray(prov?.evidenceIds) && prov.evidenceIds.length > 0;
+    screenshotAttached =
+      Array.isArray(prov?.evidenceIds) &&
+      prov.evidenceIds.length > 0 &&
+      prov.evidenceIds.every((id: unknown) => typeof id === "string" && id.trim().length > 0);
     if (!screenshotAttached) {
       reasonCodes.push(REASON_CODES.COMPANY_ACCEPTANCE_SCREENSHOT_MISSING);
     }

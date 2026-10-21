@@ -97,16 +97,30 @@ export class RuleEvaluatorRegistry {
     context: EvaluationContext = {},
   ): QualificationEvaluationResult {
     const eventMatch = matchEventPrescribedLoad(evidence, context);
-    const eventExceptionApplied = eventMatch.matches;
+    const event = context.confirmedEvent;
 
     const ruleResults: RuleEvaluationDetail[] = [];
     const reasonCodes: string[] = [];
     const bypassedRules: string[] = [];
 
     for (const rule of rules) {
-      // Event-prescribed load bypass: confirmed attendance with matching load
-      // bypasses max_mass, allowed_trailer_types, and allowed_adr_categories
-      if (eventExceptionApplied && isBypassedQualificationRule(rule.type)) {
+      // Fine-grained event-prescribed load bypass:
+      // Only waive a qualification rule when that specific attribute is prescribed by the event and matches
+      let isBypassed = false;
+      if (eventMatch.matches && event && isBypassedQualificationRule(rule.type)) {
+        if (rule.type === "max_mass" && event.prescribedMassKg !== null) {
+          isBypassed = eventMatch.details?.massMatch === true;
+        } else if (
+          rule.type === "allowed_trailer_types" &&
+          event.prescribedTrailerTypeId !== null
+        ) {
+          isBypassed = eventMatch.details?.trailerMatch === true;
+        } else if (rule.type === "allowed_adr_categories" && event.prescribedCargoId !== null) {
+          isBypassed = eventMatch.details?.cargoMatch === true;
+        }
+      }
+
+      if (isBypassed) {
         bypassedRules.push(rule.type);
         ruleResults.push({
           ruleType: rule.type,
@@ -122,9 +136,10 @@ export class RuleEvaluatorRegistry {
 
       const evaluator = this.evaluators.get(rule.type);
       if (!evaluator) {
+        // Unregistered rule type is a deploy/configuration mismatch, returning unknown (not fail)
         ruleResults.push({
           ruleType: rule.type,
-          outcome: "fail",
+          outcome: "unknown",
           observed: null,
           expected: null,
           reasonCode: REASON_CODES.RULE_TYPE_UNKNOWN,
@@ -153,7 +168,7 @@ export class RuleEvaluatorRegistry {
       outcome,
       ruleResults,
       reasonCodes,
-      eventExceptionApplied,
+      eventExceptionApplied: bypassedRules.length > 0,
       bypassedRules,
     };
   }
