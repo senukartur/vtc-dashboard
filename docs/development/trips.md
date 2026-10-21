@@ -49,3 +49,7 @@ Tests cover canonicalization, exact adapter schema/semantics, units/time/unknown
 [VTC-023](telemetry.md) exposes the frozen bearer ingestion boundary and reuses `storeInTransaction` on the authenticated binding transaction. Its receipt ID is the immutable source-message ID; the facade returns persisted first-received time for new and exact duplicate messages even after raw payload expiry. Synchronous normalization/projection and the existing outbox commit before ACK. Acceptance, contributions, statistics and notifications remain separate.
 
 Source commands read the revision guard and the complete current fact/trailer projection using current locking reads after locking the canonical pointer. This prevents a telemetry authentication snapshot opened before a peer commit from missing that newly committed projection under REPEATABLE-READ. Ordinary list/detail reads retain their consistent snapshot behavior.
+
+## VTC-028 contribution register
+
+Trips now owns one monotonic current contribution per canonical trip and immutable replacement history. [Qualifications](qualifications.md) coordinates historical attribution and old/new promotion proof checks through the caller-transaction facade. The register derives acceptance from locked canonical state and actual distance from the pinned current immutable fact; it never consumes a source/browser accepted flag or provider total. Aliases lose credit through a deterministic batch replacement. Real adjudication/merge workflows remain downstream.

@@ -36,6 +36,7 @@ import type {
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createFactRepository } from "./facts.js";
+import { createContributionRegister } from "./contributions.js";
 
 type S = components["schemas"];
 type Trip = typeof trips.$inferSelect;
@@ -566,6 +567,7 @@ export function createTrips(
   }
   return {
     config,
+    contributions: createContributionRegister(unit),
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
     storeInTransaction: store,
     async eventContextInTransaction(tx: TxContext, sourceRecordId: string) {

@@ -3684,14 +3684,15 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Rule"
-          }
+          },
+          "maxItems": 32
         },
         "requiredTrips": {
           "anyOf": [
             {
               "type": "integer",
               "minimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 2147483647
             },
             {
               "type": "null"
@@ -3714,6 +3715,12 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "effectiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
         }
       },
       "required": [
@@ -3760,7 +3767,7 @@
             {
               "type": "integer",
               "minimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 2147483647
             },
             {
               "type": "null"
@@ -3778,6 +3785,11 @@
               "type": "null"
             }
           ]
+        },
+        "effectiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
         }
       },
       "required": [
@@ -3787,7 +3799,8 @@
         "publishedAt",
         "rules",
         "requiredTrips",
-        "requiredDistanceM"
+        "requiredDistanceM",
+        "effectiveAt"
       ],
       "additionalProperties": false
     },
@@ -3912,6 +3925,18 @@
             "historical_resolution",
             "administrative_correction"
           ]
+        },
+        "assignedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "Supported historical interval start, required only for historical_resolution."
+        },
+        "endedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "Supported exclusive historical interval end, required only for historical_resolution."
         }
       },
       "required": [
@@ -3979,7 +4004,17 @@
           "maximum": 9007199254740991
         },
         "projectionPending": {
+          "const": false,
           "type": "boolean"
+        },
+        "reviewReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "promotion_requirements_no_longer_met"
+            ]
+          }
         }
       },
       "required": [
@@ -3992,7 +4027,8 @@
         "reviewRequired",
         "computedAt",
         "projectionVersion",
-        "projectionPending"
+        "projectionPending",
+        "reviewReasonCodes"
       ],
       "additionalProperties": false
     },
@@ -4050,6 +4086,7 @@
           "maximum": 9007199254740991
         },
         "projectionPending": {
+          "const": false,
           "type": "boolean"
         }
       },

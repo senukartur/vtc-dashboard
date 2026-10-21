@@ -19,7 +19,14 @@ import { mailDeliveries } from "@vtc/db/messaging-schema";
 import { initialQualifications } from "@vtc/db/qualifications-schema";
 import { getTableName } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  vi,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
   type ApplicationInput,
@@ -49,13 +56,16 @@ import {
   identityAccessEvents,
 } from "../../apps/api/src/platform/outbox/events.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const diagnostic = identityDiagnostics("admission");
 const origin = "http://127.0.0.1:4173",

@@ -173,3 +173,7 @@ VTC-014 adds encrypted mail migration/configuration and narrow runtime/worker ta
 ## Identity and mail activation follow-up
 
 The separately authorized NO-CARD [identity and mail activation runbook](identity-mail-activation.md) owns exact Caddy ingress trust, private shared API/worker configuration, explicit least-privilege readback, compatible rollback and allocation-owned durable mail acceptance. Updated Compose operations require root-private `ingress.env`; the image remains compatible with old disabled controls until the reviewed package is explicitly applied. Fresh setup no longer grants runtime schema-wide SELECT. Source merge and automatic disabled-image rollout do not enable identity/mail, create an initial director or establish a provider/inbox result.
+
+## Qualification substrate update
+
+VTC-028 prepares additive `0010_qualifications` and new-table runtime grants in `deploy/development/activation-grants.json`. The original onboarding evidence table is retained. Admission initialization and real deactivation use assignment/state storage even with qualification HTTP disabled, so a reviewed release must apply the migration and prepared qualification grants before serving those existing workflows. Read [qualification rollout/history semantics](../development/qualifications.md) and the locked migration/recovery procedure; this source change does not apply grants, migrate live data, enable the API or supply numeric company thresholds. The trips/catalog dependency grants and their own activation gates remain separate.

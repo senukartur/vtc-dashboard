@@ -17,7 +17,13 @@ import {
   eq,
 } from "@vtc/db/catalogs-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { type CatalogConfig, hash, ordered } from "../../apps/api/src/modules/catalogs/artifact.ts";
 import {
@@ -41,6 +47,9 @@ import {
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const origin = "http://127.0.0.1:4173",
   password = "Fictional-catalog-passphrase-42";
@@ -1043,4 +1052,30 @@ test("unknown COMMIT is surfaced without callback replay", async () => {
   ).rejects.toBeInstanceOf(TransactionCommitOutcomeUnknownError);
   expect(attempts).toBe(1);
   expect((await catalogs.detail(director, id)).state).toBe("published");
+});
+
+test("qualification rule references require current published canonical entities of the same game and kind", async () => {
+  const id = await candidate(
+    artifact("ets2", [
+      entity("city"),
+      entity("box", { kind: "trailer_type" }),
+      entity("hazmat", { kind: "adr_category" }),
+      entity("retired_box", { kind: "trailer_type", retired: true }),
+    ]),
+  );
+  await publish(id);
+  const trailer = (
+    await catalogs.entities(director, { revisionId: id, kind: "trailer_type", locale: "en" })
+  ).items.find((row) => row.display.label === "Fictional box")?.id as string;
+  const adr = (
+    await catalogs.entities(director, { revisionId: id, kind: "adr_category", locale: "en" })
+  ).items[0]?.id as string;
+  const check = (game: "ets2" | "ats", kind: "trailer_type" | "adr_category", ids: string[]) =>
+    unit.run((tx) => catalogs.qualificationReferencesInTransaction(tx, game, kind, ids));
+  expect(await check("ets2", "trailer_type", [trailer])).toBe(true);
+  expect(await check("ets2", "adr_category", [adr])).toBe(true);
+  expect(await check("ats", "trailer_type", [trailer])).toBe(false);
+  expect(await check("ets2", "adr_category", [trailer])).toBe(false);
+  expect(await check("ets2", "trailer_type", [newId()])).toBe(false);
+  expect(await check("ets2", "trailer_type", [trailer, trailer])).toBe(false);
 });

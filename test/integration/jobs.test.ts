@@ -17,7 +17,13 @@ import {
   sql,
 } from "@vtc/db/platform-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import {
   createAcceptanceQueue,
   fixtureJob,
@@ -32,14 +38,17 @@ import {
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { type AccessEvent, createOutbox } from "../../apps/api/src/platform/outbox/events.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   hasCode,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { barrier, bounded, deferred, until } from "../support/concurrency.ts";
 import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 let control: Connection;
 let unit: ReturnType<typeof createUnitOfWork>;
