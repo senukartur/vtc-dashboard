@@ -3660,6 +3660,1490 @@
           "ets2"
         ]
       }
+    },
+    {
+      "id": "listMyManualDrafts:success",
+      "operationId": "listMyManualDrafts",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "51000000-0000-4000-8000-000000000010",
+              "version": 1,
+              "state": "editing",
+              "fields": {
+                "game": "ets2",
+                "evidenceIds": []
+              },
+              "targetTrip": null,
+              "createdAt": "2026-10-20T12:00:00.000Z",
+              "updatedAt": "2026-10-20T12:00:00.000Z",
+              "submittedReportId": null
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listMyManualDrafts:empty",
+      "operationId": "listMyManualDrafts",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "createManualDraft:success",
+      "operationId": "createManualDraft",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 1,
+          "state": "editing",
+          "fields": {
+            "game": "ets2",
+            "evidenceIds": []
+          },
+          "targetTrip": null,
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "evidenceIds": []
+        }
+      }
+    },
+    {
+      "id": "getMyManualDraft:success",
+      "operationId": "getMyManualDraft",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 1,
+          "state": "editing",
+          "fields": {
+            "game": "ets2",
+            "evidenceIds": []
+          },
+          "targetTrip": null,
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "replaceManualDraft:success",
+      "operationId": "replaceManualDraft",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 2,
+          "state": "editing",
+          "fields": {},
+          "targetTrip": {
+            "tripId": "51000000-0000-4000-8000-000000000007",
+            "expectedVersion": 2
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {},
+        "targetTrip": {
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "id": "submitManualDraft:success",
+      "operationId": "submitManualDraft",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 1,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 3,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ]
+        }
+      }
+    },
+    {
+      "id": "listMyManualReports:success",
+      "operationId": "listMyManualReports",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "51000000-0000-4000-8000-000000000009",
+              "version": 1,
+              "tripId": "51000000-0000-4000-8000-000000000007",
+              "tripVersion": 3,
+              "currentRevision": {
+                "representation": "extended",
+                "id": "51000000-0000-4000-8000-000000000008",
+                "reportId": "51000000-0000-4000-8000-000000000009",
+                "number": 1,
+                "submittedAt": "2026-10-20T12:00:00.000Z",
+                "fields": {
+                  "game": "ets2",
+                  "origin": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000001",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "destination": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000002",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "cargo": {
+                    "status": "unresolved",
+                    "label": "Fictional cargo",
+                    "reasonCode": "not_listed",
+                    "locale": "en",
+                    "context": null
+                  },
+                  "cargoMassKg": "0",
+                  "trailerType": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000004",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "actualDistanceM": "12500.5",
+                  "evidenceIds": [
+                    "51000000-0000-4000-8000-000000000006"
+                  ],
+                  "eventId": null,
+                  "comment": null
+                }
+              },
+              "createdAt": "2026-10-20T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listMyManualReports:empty",
+      "operationId": "listMyManualReports",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "submitManualReport:success",
+      "operationId": "submitManualReport",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 1,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 3,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ]
+        },
+        "targetTrip": {
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "id": "listTripManualReports:success",
+      "operationId": "listTripManualReports",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "51000000-0000-4000-8000-000000000009",
+              "version": 1,
+              "tripId": "51000000-0000-4000-8000-000000000007",
+              "tripVersion": 3,
+              "currentRevision": {
+                "representation": "extended",
+                "id": "51000000-0000-4000-8000-000000000008",
+                "reportId": "51000000-0000-4000-8000-000000000009",
+                "number": 1,
+                "submittedAt": "2026-10-20T12:00:00.000Z",
+                "fields": {
+                  "game": "ets2",
+                  "origin": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000001",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "destination": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000002",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "cargo": {
+                    "status": "unresolved",
+                    "label": "Fictional cargo",
+                    "reasonCode": "not_listed",
+                    "locale": "en",
+                    "context": null
+                  },
+                  "cargoMassKg": "0",
+                  "trailerType": {
+                    "status": "resolved",
+                    "entityId": "51000000-0000-4000-8000-000000000004",
+                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  },
+                  "actualDistanceM": "12500.5",
+                  "evidenceIds": [
+                    "51000000-0000-4000-8000-000000000006"
+                  ],
+                  "eventId": null,
+                  "comment": null
+                }
+              },
+              "createdAt": "2026-10-20T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listTripManualReports:empty",
+      "operationId": "listTripManualReports",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getManualReport:success",
+      "operationId": "getManualReport",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 1,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 3,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listManualReportRevisions:success",
+      "operationId": "listManualReportRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "representation": "extended",
+              "id": "51000000-0000-4000-8000-000000000008",
+              "reportId": "51000000-0000-4000-8000-000000000009",
+              "number": 1,
+              "submittedAt": "2026-10-20T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "origin": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000001",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "destination": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000002",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "cargo": {
+                  "status": "unresolved",
+                  "label": "Fictional cargo",
+                  "reasonCode": "not_listed",
+                  "locale": "en",
+                  "context": null
+                },
+                "cargoMassKg": "0",
+                "trailerType": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000004",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "51000000-0000-4000-8000-000000000006"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listManualReportRevisions:empty",
+      "operationId": "listManualReportRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "reviseManualReport:success",
+      "operationId": "reviseManualReport",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 2,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 4,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000028",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 2,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004",
+            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ],
+          "eventId": null,
+          "comment": null
+        },
+        "expectedTripVersion": 3
+      }
+    },
+    {
+      "id": "getManualReportRevision:success",
+      "operationId": "getManualReportRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "representation": "extended",
+          "id": "51000000-0000-4000-8000-000000000008",
+          "reportId": "51000000-0000-4000-8000-000000000009",
+          "number": 1,
+          "submittedAt": "2026-10-20T12:00:00.000Z",
+          "fields": {
+            "game": "ets2",
+            "origin": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000001",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "destination": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000002",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "cargo": {
+              "status": "unresolved",
+              "label": "Fictional cargo",
+              "reasonCode": "not_listed",
+              "locale": "en",
+              "context": null
+            },
+            "cargoMassKg": "0",
+            "trailerType": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000004",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "actualDistanceM": "12500.5",
+            "evidenceIds": [
+              "51000000-0000-4000-8000-000000000006"
+            ],
+            "eventId": null,
+            "comment": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listTripCorrectionRequests:success",
+      "operationId": "listTripCorrectionRequests",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "51000000-0000-4000-8000-000000000011",
+              "tripId": "51000000-0000-4000-8000-000000000007",
+              "baseTripVersion": 3,
+              "baseRevisionId": "51000000-0000-4000-8000-000000000008",
+              "reason": "Fictional correction explanation",
+              "requestedAt": "2026-10-20T12:00:00.000Z",
+              "status": "pending",
+              "history": [
+                {
+                  "status": "pending",
+                  "recordedAt": "2026-10-20T12:00:00.000Z",
+                  "reason": null
+                }
+              ]
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listTripCorrectionRequests:empty",
+      "operationId": "listTripCorrectionRequests",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getTripCorrectionRequest:success",
+      "operationId": "getTripCorrectionRequest",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000011",
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "baseTripVersion": 3,
+          "baseRevisionId": "51000000-0000-4000-8000-000000000008",
+          "reason": "Fictional correction explanation",
+          "requestedAt": "2026-10-20T12:00:00.000Z",
+          "status": "pending",
+          "history": [
+            {
+              "status": "pending",
+              "recordedAt": "2026-10-20T12:00:00.000Z",
+              "reason": null
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "listManualRevisions:extended-history",
+      "operationId": "listManualRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "representation": "extended",
+              "id": "51000000-0000-4000-8000-000000000018",
+              "reportId": "51000000-0000-4000-8000-000000000019",
+              "number": 2,
+              "submittedAt": "2026-10-20T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "origin": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000001",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "destination": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000002",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "cargo": {
+                  "status": "unresolved",
+                  "label": "Fictional cargo",
+                  "reasonCode": "not_listed",
+                  "locale": "en",
+                  "context": null
+                },
+                "cargoMassKg": "0",
+                "trailerType": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000004",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "51000000-0000-4000-8000-000000000006"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            },
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "number": 1,
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+                "originCityId": "41000000-0000-4000-8000-000000000011",
+                "destinationCityId": "41000000-0000-4000-8000-000000000012",
+                "cargoId": "41000000-0000-4000-8000-000000000013",
+                "cargoMassKg": "12500.5",
+                "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "41000000-0000-4000-8000-000000000001"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getManualRevision:extended-history",
+      "operationId": "getManualRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "representation": "extended",
+          "id": "51000000-0000-4000-8000-000000000008",
+          "reportId": "51000000-0000-4000-8000-000000000009",
+          "number": 1,
+          "submittedAt": "2026-10-20T12:00:00.000Z",
+          "fields": {
+            "game": "ets2",
+            "origin": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000001",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "destination": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000002",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "cargo": {
+              "status": "unresolved",
+              "label": "Fictional cargo",
+              "reasonCode": "not_listed",
+              "locale": "en",
+              "context": null
+            },
+            "cargoMassKg": "0",
+            "trailerType": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000004",
+              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            },
+            "actualDistanceM": "12500.5",
+            "evidenceIds": [
+              "51000000-0000-4000-8000-000000000006"
+            ],
+            "eventId": null,
+            "comment": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "submitManualTrip:omitted-optionals",
+      "operationId": "submitManualTrip",
+      "status": 201,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "unassessed",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "game": "ets2",
+        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+        "originCityId": "41000000-0000-4000-8000-000000000011",
+        "destinationCityId": "41000000-0000-4000-8000-000000000012",
+        "cargoId": "41000000-0000-4000-8000-000000000013",
+        "cargoMassKg": "12500.5",
+        "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+        "actualDistanceM": "12500.5",
+        "evidenceIds": [
+          "41000000-0000-4000-8000-000000000001"
+        ]
+      }
+    },
+    {
+      "id": "getTrip:extended-manual-revision",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "open",
+            "decision": "unassessed",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": null,
+            "reportingAt": null,
+            "sourceKinds": []
+          },
+          "manualRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getManualReport:not_found",
+      "operationId": "getManualReport",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "submitManualReport:forbidden",
+      "operationId": "submitManualReport",
+      "status": 403,
+      "response": {
+        "error": {
+          "code": "FORBIDDEN",
+          "messageKey": "errors.forbidden",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "submitManualDraft:version_conflict",
+      "operationId": "submitManualDraft",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "messageKey": "errors.version_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "reviseManualReport:precondition_required",
+      "operationId": "reviseManualReport",
+      "status": 428,
+      "response": {
+        "error": {
+          "code": "PRECONDITION_REQUIRED",
+          "messageKey": "errors.precondition_required",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "submitManualReport:evidence_transition",
+      "operationId": "submitManualReport",
+      "status": 503,
+      "response": {
+        "error": {
+          "code": "EVIDENCE_TRANSITION",
+          "messageKey": "errors.evidence_transition",
+          "retryable": true
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getEvidence:evidence_transition",
+      "operationId": "getEvidence",
+      "status": 503,
+      "response": {
+        "error": {
+          "code": "EVIDENCE_TRANSITION",
+          "messageKey": "errors.evidence_transition",
+          "retryable": true
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "downloadEvidence:evidence_expired",
+      "operationId": "downloadEvidence",
+      "status": 410,
+      "response": {
+        "error": {
+          "code": "EVIDENCE_EXPIRED",
+          "messageKey": "errors.evidence_expired",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "createManualDraft:private-error",
+      "operationId": "createManualDraft",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "getMyManualDraft:private-error",
+      "operationId": "getMyManualDraft",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "replaceManualDraft:private-error",
+      "operationId": "replaceManualDraft",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "submitManualDraft:private-error",
+      "operationId": "submitManualDraft",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listMyManualDrafts:private-error",
+      "operationId": "listMyManualDrafts",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listMyManualReports:private-error",
+      "operationId": "listMyManualReports",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "submitManualReport:private-error",
+      "operationId": "submitManualReport",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listTripManualReports:private-error",
+      "operationId": "listTripManualReports",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "getManualReport:private-error",
+      "operationId": "getManualReport",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listManualReportRevisions:private-error",
+      "operationId": "listManualReportRevisions",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "reviseManualReport:private-error",
+      "operationId": "reviseManualReport",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "getManualReportRevision:private-error",
+      "operationId": "getManualReportRevision",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listTripCorrectionRequests:private-error",
+      "operationId": "listTripCorrectionRequests",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "getTripCorrectionRequest:private-error",
+      "operationId": "getTripCorrectionRequest",
+      "status": 404,
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-private-error"
+        }
+      }
+    },
+    {
+      "id": "listManualReportRevisions:mixed-history",
+      "operationId": "listManualReportRevisions",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "representation": "extended",
+              "id": "51000000-0000-4000-8000-000000000018",
+              "reportId": "51000000-0000-4000-8000-000000000019",
+              "number": 2,
+              "submittedAt": "2026-10-20T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "origin": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000001",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "destination": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000002",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "cargo": {
+                  "status": "unresolved",
+                  "label": "Fictional cargo",
+                  "reasonCode": "not_listed",
+                  "locale": "en",
+                  "context": null
+                },
+                "cargoMassKg": "0",
+                "trailerType": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000004",
+                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                },
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "51000000-0000-4000-8000-000000000006"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            },
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "number": 1,
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
+                "originCityId": "41000000-0000-4000-8000-000000000011",
+                "destinationCityId": "41000000-0000-4000-8000-000000000012",
+                "cargoId": "41000000-0000-4000-8000-000000000013",
+                "cargoMassKg": "12500.5",
+                "trailerTypeId": "41000000-0000-4000-8000-000000000014",
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "41000000-0000-4000-8000-000000000001"
+                ],
+                "eventId": null,
+                "comment": null
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getManualReport:mixed-history",
+      "operationId": "getManualReport",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000019",
+          "version": 2,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 4,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000018",
+            "reportId": "51000000-0000-4000-8000-000000000019",
+            "number": 2,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004",
+                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
     }
   ]
 }

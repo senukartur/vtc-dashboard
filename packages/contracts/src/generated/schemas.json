@@ -2220,7 +2220,8 @@
         "byteLength",
         "originalName"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed."
     },
     "UploadPolicy": {
       "type": "object",
@@ -2273,7 +2274,8 @@
         "allowedMimeTypes",
         "policyRevision"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Operator technical policy, not company qualification limits or measured capacity. Disabled has null bounds/empty allowlist. Enabled requires configured positive bounds and a nonempty tested image allowlist. MIME/extension alone is insufficient; bounded structural decode, pixel/resource/stream limits and durable private storage are required before ready. See manual-reports.md."
     },
     "ManualInput": {
       "type": "object",
@@ -2746,7 +2748,7 @@
         "manualRevision": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ManualRevision"
+              "$ref": "#/$defs/ManualRevisionRead"
             },
             {
               "type": "null"
@@ -6127,7 +6129,7 @@
         "items": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/ManualRevision"
+            "$ref": "#/$defs/ManualRevisionRead"
           }
         },
         "nextCursor": {
@@ -6169,7 +6171,7 @@
       "type": "object",
       "properties": {
         "data": {
-          "$ref": "#/$defs/ManualRevision"
+          "$ref": "#/$defs/ManualRevisionRead"
         },
         "meta": {
           "$ref": "#/$defs/Meta"
@@ -7183,6 +7185,957 @@
         "deliveryId"
       ],
       "additionalProperties": false
+    },
+    "ManualResolvedInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "catalogRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "originCityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "destinationCityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "cargoId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "cargoMassKg": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "trailerTypeId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "actualDistanceM": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+          "maxLength": 64
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "catalogRevisionId",
+        "originCityId",
+        "destinationCityId",
+        "cargoId",
+        "cargoMassKg",
+        "trailerTypeId",
+        "actualDistanceM",
+        "evidenceIds"
+      ],
+      "additionalProperties": false,
+      "description": "Backward-compatible resolved write input. Omitted event/comment normalize to null in the unchanged legacy ManualRevision readback."
+    },
+    "ManualResolvedSelection": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "resolved"
+        },
+        "entityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "catalogRevisionId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "status",
+        "entityId",
+        "catalogRevisionId"
+      ],
+      "additionalProperties": false
+    },
+    "ManualUnresolvedSelection": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "unresolved"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reasonCode": {
+          "type": "string",
+          "enum": [
+            "not_found",
+            "ambiguous",
+            "not_listed"
+          ]
+        },
+        "locale": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "label",
+        "reasonCode",
+        "locale",
+        "context"
+      ],
+      "additionalProperties": false
+    },
+    "ManualCatalogSelection": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ManualResolvedSelection"
+        },
+        {
+          "$ref": "#/$defs/ManualUnresolvedSelection"
+        }
+      ],
+      "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin."
+    },
+    "ManualSubmissionFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "origin",
+        "destination",
+        "cargo",
+        "cargoMassKg",
+        "trailerType",
+        "actualDistanceM",
+        "evidenceIds"
+      ],
+      "additionalProperties": false,
+      "description": "Complete undated manual submission. Optional event/comment accept omission or null; persisted immutable readback normalizes omissions to explicit null while preserving original selections. Exact quantities are validated against persistence precision without rounding. No submission implies acceptance or progress credit."
+    },
+    "ManualDraftFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "ManualTelemetryTarget": {
+      "type": "object",
+      "properties": {
+        "tripId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "tripId",
+        "expectedVersion"
+      ],
+      "additionalProperties": false,
+      "description": "Explicit same-owner/game canonical target with actual telemetry source, validated under current trip locks. No heuristic matching. expectedVersion is the authoritative trip version, not the report/draft version."
+    },
+    "ManualDraftInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualDraftFields"
+        },
+        "targetTrip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualTelemetryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "ManualDraft": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "editing",
+            "submitted"
+          ]
+        },
+        "fields": {
+          "$ref": "#/$defs/ManualDraftFields"
+        },
+        "targetTrip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualTelemetryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "submittedReportId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "state",
+        "fields",
+        "targetTrip",
+        "createdAt",
+        "updatedAt",
+        "submittedReportId"
+      ],
+      "additionalProperties": false,
+      "description": "Owner-only durable draft. No source/canonical trip exists before submission; a successful submission freezes this draft and retains a discoverable submittedReportId."
+    },
+    "ManualDraftSubmission": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualSubmissionFields"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false,
+      "description": "Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target."
+    },
+    "ManualReportInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualSubmissionFields"
+        },
+        "targetTrip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualTelemetryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "ManualReportRevisionInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualSubmissionFields"
+        },
+        "expectedTripVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "fields",
+        "expectedTripVersion"
+      ],
+      "additionalProperties": false
+    },
+    "ManualReportRevision": {
+      "type": "object",
+      "properties": {
+        "representation": {
+          "const": "extended"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "reportId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "fields": {
+          "$ref": "#/$defs/ManualReportFields"
+        }
+      },
+      "required": [
+        "representation",
+        "id",
+        "reportId",
+        "number",
+        "submittedAt",
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "ManualRevisionRead": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ManualRevision"
+        },
+        {
+          "$ref": "#/$defs/ManualReportRevision"
+        }
+      ],
+      "description": "Coordinated VTC-025 response migration: unchanged legacy resolved revision or complete extended revision. Never omit an unresolved revision or invent canonical IDs."
+    },
+    "ManualReport": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "tripId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "tripVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "currentRevision": {
+          "$ref": "#/$defs/ManualRevisionRead"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "tripId",
+        "tripVersion",
+        "currentRevision",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "description": "Private permanent report identity and current immutable revision. version is the report ETag; tripVersion is the separate authoritative canonical trip version. Effective decisions remain trip-owned."
+    },
+    "ManualCorrectionRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "tripId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "baseTripVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "baseRevisionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "resolved",
+            "declined"
+          ]
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManualCorrectionRequestHistory"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "tripId",
+        "baseTripVersion",
+        "baseRevisionId",
+        "reason",
+        "requestedAt",
+        "status",
+        "history"
+      ],
+      "additionalProperties": false,
+      "description": "Immutable author request and retained status history; baseRevisionId is null for a telemetry-only accepted trip. Does not represent a VTC-029 proposal, staff application or recalculation. Current accepted result remains effective."
+    },
+    "ManualCorrectionRequestHistory": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "resolved",
+            "declined"
+          ]
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "recordedAt",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeManualDraft": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ManualDraft"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "ListManualDraft": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManualDraft"
+          },
+          "minItems": 0
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeListManualDraft": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ListManualDraft"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeManualReport": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ManualReport"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "ListManualReport": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManualReport"
+          },
+          "minItems": 0
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeListManualReport": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ListManualReport"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeManualCorrectionRequest": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ManualCorrectionRequest"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "ListManualCorrectionRequest": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManualCorrectionRequest"
+          },
+          "minItems": 0
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeListManualCorrectionRequest": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ListManualCorrectionRequest"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "ManualReportFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "origin",
+        "destination",
+        "cargo",
+        "cargoMassKg",
+        "trailerType",
+        "actualDistanceM",
+        "evidenceIds",
+        "eventId",
+        "comment"
+      ],
+      "additionalProperties": false,
+      "description": "Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs."
     }
   }
 }

@@ -1,0 +1,82 @@
+# Manual report contract evolution (VTC-025)
+
+This is the contract stage of [VTC-025](https://trello.com/c/vvzoG7gy). The [OpenAPI](openapi.json) owns wire shapes; [CONCEPT.MD](../../../CONCEPT.MD#manual-report-review-and-resubmission) owns product policy. These operations do not establish runtime, database, filesystem or hosted activation evidence. The dependent implementation follows independent review and merge of this contract.
+
+## Coordinated response migration
+
+The existing `ManualInput` and `ManualRevision` schema objects are preserved exactly. Complete resolved request and response payloads remain valid. Legacy POSTs use the separate `ManualResolvedInput`, which only relaxes the required presence of optional `eventId` and `comment`; omitted values become null in legacy `ManualRevision.fields`. Explicit null retains its existing meaning. Every other required fact and closed-body guard remains.
+
+**This is an explicit coordinated response-union migration**, not a claim of purely additive compatibility. `ManualRevisionRead` is either the unchanged `ManualRevision` or `ManualReportRevision`. It replaces the element type in `ListManualRevision`, the data type in `EnvelopeManualRevision`, and the non-null alternative of `TripPrivate.manualRevision`. Strict clients must regenerate and narrow the union before VTC-025 runtime activation.
+
+Representation is determined by the immutable persisted revision format: a legacy resolved submission retains the legacy shape, and an extended submission retains `representation: "extended"`, its `reportId` and original resolved/unresolved selections. Reading through another route, a later catalog publication or a different client never changes that representation. A legacy POST can create a legacy revision after an extended revision; both remain in the same report and canonical trip history. The server never manufactures IDs to fit a legacy shape or silently filters out extended revisions. The two branches are disjoint closed objects; clients narrow with `"representation" in revision` before inspecting extended selections.
+
+All affected existing consumers at this base are:
+
+| Consumer | Migration handling |
+| --- | --- |
+| Generated `packages/contracts/src/generated/browser.ts` and `schemas.json` | Regenerated union and strict runtime schema references |
+| `getTrip`, `submitManualTrip`, `reviseManualTrip` through `TripView`/`TripPrivate`/their envelopes | Resolved payloads unchanged; private readback can contain either revision format |
+| `listManualRevisions`, `getManualRevision` and their envelopes | Complete mixed history; no unresolved-history omission |
+| `apps/api/src/modules/trips/service.ts` | Existing private projection supplies null; no field dereference or new runtime behavior in this stage |
+| `test/integration/trips.test.ts` | Existing expected null projection remains valid |
+| `test/scaffold/contracts.test.ts` | Validates old payloads plus new and mixed fixtures with the generated runtime schema |
+| `test/contracts/manual-reports.test.ts` | Exercises both formats, forbidden fields, discovery contracts and generated TypeScript narrowing |
+| `spikes/architecture/validate-contract.py` | Historical structural validator traverses schema references; original history fixture stays intact |
+
+There is no implemented frontend manual-report or trip-history consumer at this base. VTC-030 must consume the regenerated union; its live UI gate remains open. Other strict generated `TripView` consumers inherit the widened type and pass the repository typecheck. The telemetry contract is unchanged.
+
+## Resources and discovery
+
+| Resource | Operations and authority |
+| --- | --- |
+| `/me/manual-drafts` and `/{draftId}` | Owner list/create/get/PUT replacement, with `trips.submit_own`; staff cannot impersonate the owner or read an unattached draft |
+| `/me/manual-drafts/{draftId}/submission` | Submit complete final fields under draft ETag; freezes the draft and returns its report |
+| `/manual-reports` | Submit complete fields directly, optionally selecting a telemetry target |
+| `/me/manual-reports` | Current session owner discovers every own report, including those created through legacy operations; does not grant access to anyone else's reports |
+| `/trips/{tripId}/manual-reports` | Owner/current authorized review staff discovers all reports attached to the accessible canonical trip |
+| `/manual-reports/{reportId}` | Private report/current revision and authoritative report/trip versions |
+| `/manual-reports/{reportId}/revisions` and `/{revisionId}` | Full mixed immutable history; POST resubmits to the same report and canonical trip |
+| `/trips/{tripId}/manual-revisions` and `/{revisionId}` | Existing trip-wide full mixed history, including all attached reports; child ID must belong to that trip |
+| `/trips/{tripId}/correction-requests` and `/{requestId}` | Private correction discovery/detail; existing POST creates the request |
+
+Lists use the existing default-25/max-100 signed keyset cursor, descending `(createdAt,id)`; revisions use `(submittedAt,id)` and correction requests `(requestedAt,id)`. Cursors bind actor, resource, filters and visibility and never replace current authorization. Draft lists include editing and submitted records. Report revision numbers are local to that report; trip-wide history preserves report IDs on extended revisions. A report ID remains stable through revisions and attachment/reconciliation history. Legacy submissions and extended submissions use the same owning module, idempotency storage, source identity and canonical commands.
+
+`ManualDraftFields` is partial: `{}` and an empty evidence list are valid, but present fields must validate. PUT replaces the fields rather than merging a patch. Omitted draft `targetTrip` clears it to null; omitted draft event/comment remain absent until submission. Drafts create no canonical trip, source revision, decision or contribution. Successful submission retains `submittedReportId` for reload and replay discovery.
+
+`ManualSubmissionFields` requires game, origin, destination, cargo, cargo mass, trailer type, actual distance and at least one evidence ID. Event/comment may be omitted or null. Immutable `ManualReportFields` normalizes either absence to explicit null; all original selections and evidence IDs remain unchanged. Each resolved selection has a real canonical entity ID and its catalog revision. Each unresolved selection has a discriminator, bounded diagnostic label/reason/locale/context and **no entity ID**. It always enters human review. Labels are not automatic identity mappings. Validate resolved game, kind, applicable published revision and new-versus-historical retired choices through the catalog owner; immutable older pins remain readable.
+
+Unknown fields fail closed, including owner, trip date, timestamps, accepted/qualification/attendance/staff flags. No deadline or required damage/timing/violation fields are added. Exact nonnegative base-unit decimal strings accept zero and reject numeric JSON, negative/scientific/noncanonical values. Persistence additionally rejects unsupported range/precision without rounding. Submitted/received timestamps do not establish actual gameplay times, confirmation, qualification assignment or analytics credit.
+
+## Authority, versions and retries
+
+All reads require a current active session. Owner reads use current ownership; staff reads require current `trips.review` and actual attachment to that trip. Unattached upload metadata/content remains owner-only. Accepted company visibility grants only the existing summary, never report fields, evidence, comments, reasons, corrections or history. Missing route capability returns 403; an inaccessible individual resource returns private 404. Revoked sessions/inactive membership fail before private serialization. Private successful and error responses use `Cache-Control: no-store`.
+
+Every write requires exact configured Origin, current-session CSRF and actor/route/target-scoped UUID `Idempotency-Key`. Fingerprint validated input with a server key, normalize only declared optional absence/null equivalence, and persist safe result references atomically with domain/audit/outbox effects. Concurrent equal keys return one ordinary committed result (or durable pending upload); different input returns 409 `IDEMPOTENCY_CONFLICT`. Replay resolves safe result references under current authority; it never restores revoked access. A lost response/unknown commit is resolved through the same key and durable state, without blindly creating another trip or upload. Distinct draft/direct/legacy routes have distinct keys, while domain uniqueness still prevents duplicate source/report effects.
+
+Draft GET/PUT/create return the draft ETag. Draft submission requires that draft ETag, then returns the report ETag; the frozen draft's own version advances. Report GET/create/revise return the report ETag. Report revision POST requires that ETag **and** `expectedTripVersion`. The telemetry target captures the separate authoritative canonical trip `expectedVersion`; submission rechecks same owner/game, actual telemetry source and version under current locks. A foreign target gives private 404; accessible wrong-game/nontelemetry targets give 409 `STATE_CONFLICT`; stale target gives 409 `VERSION_CONFLICT`. Update/refetch the draft target before retrying with new input/key. No heuristic attachment or provider replacement occurs.
+
+Legacy revision POST continues to require the canonical trip ETag. It selects the unique author-owned report on that trip; if multiple reports make that selection ambiguous, return 409 `STATE_CONFLICT` and use the report-specific route. This does not impose a one-report-per-trip restriction. Missing `If-Match` is 428 `PRECONDITION_REQUIRED`; stale version is 409 `VERSION_CONFLICT`. Report/trip versions, owner, unchanged canonical game, active capability, ready evidence generation and pending-or-rejected state are rechecked inside the command transaction. Accepted direct edits return 409 `STATE_CONFLICT`. A new revision supersedes only the current unaccepted manual source revision, preserves every source/history link, and creates no second canonical trip or contribution. Reviewer actions must identify the immutable revision actually reviewed; VTC-029 owns decision application and the no-self-approval guard.
+
+The existing correction POST still returns `CommandResult`: **`id` is the correction-request ID and `version`/ETag is the updated canonical trip version**. GET discovery/detail returns `ManualCorrectionRequest`, including immutable reason, base trip/revision and retained status history. A request creates a review/retention hold while preserving the effective accepted decision; it is never a proposal ID or completed staff correction. Detail GET uses the current trip ETag. There is no VTC-025 accept/reject/recalculate operation; VTC-029 owns subsequent proposal creation, staff disposition and recalculation. Status-history terminal values describe that future integration, not an implemented handler.
+
+## Upload and private content boundary
+
+`UploadPolicy` publishes actual configured technical bounds and tested MIME allowlist, never assumed company quotas or storage capacity. Disabled storage returns `enabled:false`, null bounds and an empty allowlist; enabled policy requires positive bounds and a nonempty narrow tested image allowlist. No hard-coded production values are established here. Completion-screen content must be checked by staff; a decoder proves image structure, not trip truth.
+
+The implementation must bound multipart envelope, part/file/field counts, actual streamed bytes (including chunked requests), time/cancellation and decoded pixel/resource use. MIME, extension and magic alone are insufficient: use a reviewed bounded image parser/decoder with a narrow tested PNG/JPEG-style allowlist. Malformed/truncated/spoofed/unsupported files return 422 `INVALID_PAYLOAD`, unsupported transport 415, and configured byte excess 413. Policy disabled or missing persistent storage returns retryable 503 `DEPENDENCY_UNAVAILABLE`. Catalog multipart imports retain their separate limits/registration.
+
+The portable adapter initially uses a dedicated private persistent filesystem root outside static assets and release directories. Server-generated IDs/generations derive immutable object paths; display filenames never become paths. Reject traversal, symlinks, nonregular files and unsafe roots; exclusively create staging objects, stream/checksum/validate, and durably finalize **outside database locks** before a readiness transaction. Persist upload identity before streaming, and recover interrupted processing, file-created/DB-not-committed and DB-processing/file-missing states without permanently stranding an idempotency key. Orphan cleanup positively identifies owned generated objects, waits configured technical grace and revalidates metadata; arbitrary recursive deletion is forbidden.
+
+Upload 202 acknowledges durable processing/ready metadata, never trip acceptance. Safe `Evidence` states stay `processing|ready|rejected|expired`; no path, secret, raw decoder diagnostic or internal generation is exposed. Protected binary reads recheck current authority and immutable generation after opening the file outside authorization locks, close on cancellation/failure, and use no-store, nosniff and safe attachment disposition. Missing inaccessible evidence is private 404. Expired evidence metadata remains readable; expired bytes return 410 `EVIDENCE_EXPIRED` with `retryable:false`.
+
+## Retention and deletion fence
+
+The internal `deleting` state is deliberately not a new public `Evidence.state` enum. Metadata/content reads and new attach/resubmit/reopen/correction commands that encounter a committed deletion reservation return **503 `EVIDENCE_TRANSITION`, `retryable:true`, `Retry-After`** until deletion settles. They must not return `ready` or acknowledge a new active review depending on disappearing bytes. Retry with the same key after the advised delay; transient failures do not become a permanent successful idempotency result. Once expiry completes, new submission requiring those bytes returns 409 `STATE_CONFLICT`; it must use ready evidence. History remains available and can record expired evidence without promising resurrection.
+
+Discover all referencing reports/revisions/canonical trips, lock trips in stable order, then lock evidence/reference state and revalidate the complete discovered set. A changed reference set requires release/retry of discovery, never late earlier-order locks. Every reference protects its evidence: no decision means no expiry; pending/reopened review or correction hold prevents deletion. Use at least one **UTC calendar year** after the latest applicable decision, including leap-day/year-boundary handling; do not substitute a fixed 365-day interval. Multiple references use the most protective clock/hold.
+
+Reserve `ready -> deleting` with an irreversible generation tombstone and durable safe-reference deletion job in the same transaction. Attach/review/reopen uses the same gate. If a hold/reference wins, cleanup is ineligible; if reservation wins, the dependent command returns the retryable transition. Workers remove only that immutable generation outside locks; missing bytes are idempotent. They finalize `expired` under the generation fence and recover crashes after reservation, unlink or before tombstone completion. Never reuse/cancel the reserved path/generation. Retain fields, metadata/checksum, references, explanations and decision history after expiry. Unattached draft/staging technical grace is separate from the decision clock and cannot shorten attached evidence retention.
+
+## Remaining implementation gates
+
+This contract stage has schema/fixture/type evidence only. The dependent stage must prove real MySQL authorization/idempotency/version races, restrictive schema/history, all-reference retention/deletion races, persistent Linux filesystem interruption/restart/durability behavior, private HTTP streaming and catalog-upload regressions. A rename alone does not prove power-failure durability; document actual OS directory-sync limits. VTC-026/028/029 own reconciliation/qualifications/decision effects; VTC-030 owns live UI; VTC-039/041/042 own operational capacity, backup/restore, final host and activation. Nothing here marks those gates complete.

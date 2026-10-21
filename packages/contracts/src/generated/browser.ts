@@ -949,7 +949,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** uploadEvidence */
+        /**
+         * uploadEvidence
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         post: operations["uploadEvidence"];
         delete?: never;
         options?: never;
@@ -964,7 +967,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getEvidence */
+        /**
+         * getEvidence
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         get: operations["getEvidence"];
         put?: never;
         post?: never;
@@ -981,7 +987,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** downloadEvidence */
+        /**
+         * downloadEvidence
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         get: operations["downloadEvidence"];
         put?: never;
         post?: never;
@@ -1025,6 +1034,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/manual-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * submitManualReport
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        post: operations["submitManualReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/manual-reports/{reportId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getManualReport
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["getManualReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/manual-reports/{reportId}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listManualReportRevisions
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["listManualReportRevisions"];
+        put?: never;
+        /**
+         * reviseManualReport
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        post: operations["reviseManualReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/manual-reports/{reportId}/revisions/{revisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getManualReportRevision
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["getManualReportRevision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/manual-trips": {
         parameters: {
             query?: never;
@@ -1034,7 +1127,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** submitManualTrip */
+        /**
+         * submitManualTrip
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         post: operations["submitManualTrip"];
         delete?: never;
         options?: never;
@@ -1170,6 +1266,94 @@ export interface paths {
         };
         /** getIdentity */
         get: operations["getIdentity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/manual-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listMyManualDrafts
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["listMyManualDrafts"];
+        put?: never;
+        /**
+         * createManualDraft
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        post: operations["createManualDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/manual-drafts/{draftId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getMyManualDraft
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["getMyManualDraft"];
+        /**
+         * replaceManualDraft
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        put: operations["replaceManualDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/manual-drafts/{draftId}/submission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * submitManualDraft
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        post: operations["submitManualDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/manual-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listMyManualReports
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["listMyManualReports"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1391,7 +1575,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getUploadPolicy */
+        /**
+         * getUploadPolicy
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         get: operations["getUploadPolicy"];
         put?: never;
         post?: never;
@@ -1799,10 +1986,37 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * listTripCorrectionRequests
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["listTripCorrectionRequests"];
         put?: never;
-        /** requestTripCorrection */
+        /**
+         * requestTripCorrection
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         post: operations["requestTripCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{tripId}/correction-requests/{requestId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getTripCorrectionRequest
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["getTripCorrectionRequest"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1843,6 +2057,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trips/{tripId}/manual-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listTripManualReports
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
+        get: operations["listTripManualReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips/{tripId}/manual-revisions": {
         parameters: {
             query?: never;
@@ -1850,10 +2084,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listManualRevisions */
+        /**
+         * listManualRevisions
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         get: operations["listManualRevisions"];
         put?: never;
-        /** reviseManualTrip */
+        /**
+         * reviseManualTrip
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         post: operations["reviseManualTrip"];
         delete?: never;
         options?: never;
@@ -1868,7 +2108,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** getManualRevision */
+        /**
+         * getManualRevision
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         */
         get: operations["getManualRevision"];
         put?: never;
         post?: never;
@@ -2463,6 +2706,18 @@ export interface components {
             data: components["schemas"]["ListLeaderboardEntry"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeListManualCorrectionRequest: {
+            data: components["schemas"]["ListManualCorrectionRequest"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeListManualDraft: {
+            data: components["schemas"]["ListManualDraft"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeListManualReport: {
+            data: components["schemas"]["ListManualReport"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListManualRevision: {
             data: components["schemas"]["ListManualRevision"];
             meta: components["schemas"]["Meta"];
@@ -2519,8 +2774,20 @@ export interface components {
             data: components["schemas"]["MailDelivery"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeManualCorrectionRequest: {
+            data: components["schemas"]["ManualCorrectionRequest"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeManualDraft: {
+            data: components["schemas"]["ManualDraft"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeManualReport: {
+            data: components["schemas"]["ManualReport"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeManualRevision: {
-            data: components["schemas"]["ManualRevision"];
+            data: components["schemas"]["ManualRevisionRead"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeMemberAdmin: {
@@ -2689,6 +2956,7 @@ export interface components {
             title: string;
             version: number;
         };
+        /** @description Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed. */
         Evidence: {
             byteLength: number;
             contentType: string;
@@ -2820,8 +3088,20 @@ export interface components {
             items: components["schemas"]["LeaderboardEntry"][];
             nextCursor: string | null;
         };
+        ListManualCorrectionRequest: {
+            items: components["schemas"]["ManualCorrectionRequest"][];
+            nextCursor: string | null;
+        };
+        ListManualDraft: {
+            items: components["schemas"]["ManualDraft"][];
+            nextCursor: string | null;
+        };
+        ListManualReport: {
+            items: components["schemas"]["ManualReport"][];
+            nextCursor: string | null;
+        };
         ListManualRevision: {
-            items: components["schemas"]["ManualRevision"][];
+            items: components["schemas"]["ManualRevisionRead"][];
             nextCursor: string | null;
         };
         ListMemberAdmin: {
@@ -2897,6 +3177,66 @@ export interface components {
             updatedAt: string;
             version: number;
         };
+        /** @description Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin. */
+        ManualCatalogSelection: components["schemas"]["ManualResolvedSelection"] | components["schemas"]["ManualUnresolvedSelection"];
+        /** @description Immutable author request and retained status history; baseRevisionId is null for a telemetry-only accepted trip. Does not represent a VTC-029 proposal, staff application or recalculation. Current accepted result remains effective. */
+        ManualCorrectionRequest: {
+            baseRevisionId: string | null;
+            baseTripVersion: number;
+            history: components["schemas"]["ManualCorrectionRequestHistory"][];
+            /** Format: uuid */
+            id: string;
+            reason: string;
+            /** Format: date-time */
+            requestedAt: string;
+            /** @enum {string} */
+            status: "pending" | "resolved" | "declined";
+            /** Format: uuid */
+            tripId: string;
+        };
+        ManualCorrectionRequestHistory: {
+            reason: string | null;
+            /** Format: date-time */
+            recordedAt: string;
+            /** @enum {string} */
+            status: "pending" | "resolved" | "declined";
+        };
+        /** @description Owner-only durable draft. No source/canonical trip exists before submission; a successful submission freezes this draft and retains a discoverable submittedReportId. */
+        ManualDraft: {
+            /** Format: date-time */
+            createdAt: string;
+            fields: components["schemas"]["ManualDraftFields"];
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            state: "editing" | "submitted";
+            submittedReportId: string | null;
+            targetTrip: components["schemas"]["ManualTelemetryTarget"] | null;
+            /** Format: date-time */
+            updatedAt: string;
+            version: number;
+        };
+        ManualDraftFields: {
+            actualDistanceM?: components["schemas"]["Decimal"];
+            cargo?: components["schemas"]["ManualCatalogSelection"];
+            cargoMassKg?: components["schemas"]["Decimal"];
+            comment?: string | null;
+            destination?: components["schemas"]["ManualCatalogSelection"];
+            eventId?: string | null;
+            evidenceIds?: string[];
+            /** @enum {string} */
+            game?: "ets2" | "ats";
+            origin?: components["schemas"]["ManualCatalogSelection"];
+            trailerType?: components["schemas"]["ManualCatalogSelection"];
+        };
+        ManualDraftInput: {
+            fields: components["schemas"]["ManualDraftFields"];
+            targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
+        };
+        /** @description Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target. */
+        ManualDraftSubmission: {
+            fields: components["schemas"]["ManualSubmissionFields"];
+        };
         ManualInput: {
             actualDistanceM: string;
             /** Format: uuid */
@@ -2916,6 +3256,80 @@ export interface components {
             /** Format: uuid */
             trailerTypeId: string;
         };
+        /** @description Private permanent report identity and current immutable revision. version is the report ETag; tripVersion is the separate authoritative canonical trip version. Effective decisions remain trip-owned. */
+        ManualReport: {
+            /** Format: date-time */
+            createdAt: string;
+            currentRevision: components["schemas"]["ManualRevisionRead"];
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tripId: string;
+            tripVersion: number;
+            version: number;
+        };
+        /** @description Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs. */
+        ManualReportFields: {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment: string | null;
+            destination: components["schemas"]["ManualCatalogSelection"];
+            eventId: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        };
+        ManualReportInput: {
+            fields: components["schemas"]["ManualSubmissionFields"];
+            targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
+        };
+        ManualReportRevision: {
+            fields: components["schemas"]["ManualReportFields"];
+            /** Format: uuid */
+            id: string;
+            number: number;
+            /** Format: uuid */
+            reportId: string;
+            /** @constant */
+            representation: "extended";
+            /** Format: date-time */
+            submittedAt: string;
+        };
+        ManualReportRevisionInput: {
+            expectedTripVersion: number;
+            fields: components["schemas"]["ManualSubmissionFields"];
+        };
+        /** @description Backward-compatible resolved write input. Omitted event/comment normalize to null in the unchanged legacy ManualRevision readback. */
+        ManualResolvedInput: {
+            actualDistanceM: string;
+            /** Format: uuid */
+            cargoId: string;
+            cargoMassKg: string;
+            /** Format: uuid */
+            catalogRevisionId: string;
+            comment?: string | null;
+            /** Format: uuid */
+            destinationCityId: string;
+            eventId?: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            originCityId: string;
+            /** Format: uuid */
+            trailerTypeId: string;
+        };
+        ManualResolvedSelection: {
+            /** Format: uuid */
+            catalogRevisionId: string;
+            /** Format: uuid */
+            entityId: string;
+            /** @constant */
+            status: "resolved";
+        };
         ManualRevision: {
             fields: components["schemas"]["ManualInput"];
             /** Format: uuid */
@@ -2923,6 +3337,37 @@ export interface components {
             number: number;
             /** Format: date-time */
             submittedAt: string;
+        };
+        /** @description Coordinated VTC-025 response migration: unchanged legacy resolved revision or complete extended revision. Never omit an unresolved revision or invent canonical IDs. */
+        ManualRevisionRead: components["schemas"]["ManualRevision"] | components["schemas"]["ManualReportRevision"];
+        /** @description Complete undated manual submission. Optional event/comment accept omission or null; persisted immutable readback normalizes omissions to explicit null while preserving original selections. Exact quantities are validated against persistence precision without rounding. No submission implies acceptance or progress credit. */
+        ManualSubmissionFields: {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment?: string | null;
+            destination: components["schemas"]["ManualCatalogSelection"];
+            eventId?: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        };
+        /** @description Explicit same-owner/game canonical target with actual telemetry source, validated under current trip locks. No heuristic matching. expectedVersion is the authoritative trip version, not the report/draft version. */
+        ManualTelemetryTarget: {
+            expectedVersion: number;
+            /** Format: uuid */
+            tripId: string;
+        };
+        ManualUnresolvedSelection: {
+            context: string | null;
+            label: string;
+            locale: ("en" | "ru") | null;
+            /** @enum {string} */
+            reasonCode: "not_found" | "ambiguous" | "not_listed";
+            /** @constant */
+            status: "unresolved";
         };
         MemberAdmin: {
             accessEpoch: number;
@@ -3352,7 +3797,7 @@ export interface components {
         TripPrivate: {
             decisions: components["schemas"]["Decision"][];
             evidence: components["schemas"]["Evidence"][];
-            manualRevision: components["schemas"]["ManualRevision"] | null;
+            manualRevision: components["schemas"]["ManualRevisionRead"] | null;
             pendingProposalId: string | null;
             reviewReasonCodes: string[];
             summary: components["schemas"]["TripSummary"];
@@ -3406,6 +3851,7 @@ export interface components {
             /** Format: binary */
             file: string;
         };
+        /** @description Operator technical policy, not company qualification limits or measured capacity. Disabled has null bounds/empty allowlist. Enabled requires configured positive bounds and a nonempty tested image allowlist. MIME/extension alone is insufficient; bounded structural decode, pixel/resource/stream limits and durable private storage are required before ready. See manual-reports.md. */
         UploadPolicy: {
             allowedMimeTypes: string[];
             enabled: boolean;
@@ -5090,12 +5536,24 @@ export interface operations {
             /** @description Committed result; see semantic preconditions. */
             202: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeEvidence"];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5113,12 +5571,18 @@ export interface operations {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeEvidence"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5136,12 +5600,22 @@ export interface operations {
             /** @description Authorized private image bytes; no-store, no-sniff and safe disposition. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Safe attachment disposition; originalName never becomes a filesystem path. */
+                    "Content-Disposition"?: string;
+                    "X-Content-Type-Options"?: "nosniff";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/octet-stream": string;
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            410: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5198,6 +5672,183 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    submitManualReport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualReportInput"];
+            };
+        };
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            201: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getManualReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listManualReportRevisions: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                reportId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListManualRevision"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    reviseManualReport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                reportId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualReportRevisionInput"];
+            };
+        };
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getManualReportRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reportId: string;
+                revisionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualRevision"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     submitManualTrip: {
         parameters: {
             query?: never;
@@ -5209,19 +5860,30 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualInput"];
+                "application/json": components["schemas"]["ManualResolvedInput"];
             };
         };
         responses: {
             /** @description Committed result; see semantic preconditions. */
             201: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeTripPrivate"];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5429,6 +6091,225 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeIdentity"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    listMyManualDrafts: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListManualDraft"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createManualDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualDraftInput"];
+            };
+        };
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            201: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualDraft"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getMyManualDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draftId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualDraft"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    replaceManualDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                draftId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualDraftInput"];
+            };
+        };
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualDraft"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    submitManualDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                draftId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualDraftSubmission"];
+            };
+        };
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            201: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listMyManualReports: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListManualReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5785,12 +6666,18 @@ export interface operations {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeUploadPolicy"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -6377,6 +7264,38 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listTripCorrectionRequests: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                tripId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListManualCorrectionRequest"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     requestTripCorrection: {
         parameters: {
             query?: never;
@@ -6395,9 +7314,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Committed result; see semantic preconditions. */
+            /** @description Committed correction request. CommandResult.id identifies this request, never a proposal; version and ETag identify the updated trip. Discover/read through correction-request GETs. Accepted result is preserved. */
             201: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     /** @description Strong authoritative aggregate version, for the next command. */
                     ETag?: string;
                     [name: string]: unknown;
@@ -6406,6 +7327,48 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeCommandResult"];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getTripCorrectionRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                requestId: string;
+                tripId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong authoritative report or draft version; trip-scoped correction reads use the current trip version. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeManualCorrectionRequest"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -6473,6 +7436,38 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listTripManualReports: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                tripId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed private result; see manual report contract semantics. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListManualReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listManualRevisions: {
         parameters: {
             query?: {
@@ -6490,12 +7485,18 @@ export interface operations {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeListManualRevision"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -6513,13 +7514,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualInput"];
+                "application/json": components["schemas"]["ManualResolvedInput"];
             };
         };
         responses: {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     /** @description Strong authoritative aggregate version, for the next command. */
                     ETag?: string;
                     [name: string]: unknown;
@@ -6528,6 +7531,16 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeTripPrivate"];
                 };
             };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -6546,12 +7559,18 @@ export interface operations {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeManualRevision"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
