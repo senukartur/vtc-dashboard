@@ -94,8 +94,9 @@ async function cooperatingMigrations(
   phase: "replay" | "fresh",
   folder?: string,
 ) {
-  // Successful waiters allow full fixture application; lock denial is tested separately.
-  const lockTimeoutSeconds = 15;
+  // Successful waiters use the supported 30-second bound for full fixture application;
+  // lock denial and disconnect release retain their separate short bounds below.
+  const lockTimeoutSeconds = 30;
   const results = await Promise.allSettled(
     [0, 1].map(async (caller) => {
       const started = performance.now();
