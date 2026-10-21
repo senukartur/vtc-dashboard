@@ -824,6 +824,70 @@ test("recovery validates finalized objects after restart, rejects missing files 
   expect((await restarted.metadata(owner, id)).state).toBe("expired");
 });
 
+test("recovery rejects finalized PNG bytes declared as JPEG and permits a fresh-generation retry", async () => {
+  const key = newId();
+  await expect(
+    manual.upload(owner, key, "synthetic.jpg", bytes(), "image/jpeg"),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const [reserved] = await unit.run((tx) => unit.client(tx).select().from(manualEvidence));
+  if (!reserved) throw Error("SYNTHETIC_UPLOAD_MISSING");
+  const original = { id: reserved.id, generation: reserved.generation };
+  expect(await blobs.present(original)).toBe(true);
+  expect((await blobs.inspect(original))?.contentType).toBe("image/png");
+  // Restore the durable boundary after finalization but before upload MIME validation.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(manualEvidence)
+      .set({
+        state: "processing",
+        leaseToken: newId(),
+        leaseUntil: "2026-10-20T00:00:00.000Z",
+      })
+      .where(eq(manualEvidence.id, reserved.id)),
+  );
+  const recovered = createManualReports(
+    unit,
+    manualConfig,
+    {
+      identity,
+      catalogs,
+      trips: tripService,
+      blobs: createPrivateFilesystem(manualConfig.storage),
+    },
+    now,
+  );
+  await recovered.recoverUpload(reserved.id);
+  const [rejected] = await unit.run((tx) =>
+    unit.client(tx).select().from(manualEvidence).where(eq(manualEvidence.id, reserved.id)),
+  );
+  expect(rejected).toMatchObject({
+    ...original,
+    state: "rejected",
+    contentType: "image/jpeg",
+    sha256: null,
+    fingerprint: null,
+    leaseToken: null,
+    leaseUntil: null,
+  });
+  const [intent] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(manualBlobGenerations)
+      .where(eq(manualBlobGenerations.generation, original.generation)),
+  );
+  expect(intent).toMatchObject({ evidenceId: reserved.id, state: "tracked" });
+  expect(await blobs.present(original)).toBe(true);
+  const retry = await recovered.upload(owner, key, "synthetic.png", bytes(), "image/png");
+  expect(retry).toMatchObject({ id: reserved.id, state: "ready", contentType: "image/png" });
+  const [current] = await unit.run((tx) =>
+    unit.client(tx).select().from(manualEvidence).where(eq(manualEvidence.id, reserved.id)),
+  );
+  expect(current?.generation).not.toBe(original.generation);
+  expect(await blobs.present(original)).toBe(true);
+});
+
 test("more than one hundred referencing trips are locked in complete ordered batches without starving retention", async () => {
   const image = await upload(),
     first = await submit(image.id);

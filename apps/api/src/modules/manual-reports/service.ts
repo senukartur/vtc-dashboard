@@ -980,7 +980,10 @@ export function createManualReports(
     if (!reserved) return;
     let verified: VerifiedBlob | null = null;
     try {
-      verified = await blobs.inspect(reserved, signal);
+      const recovered = await blobs.inspect(reserved, signal);
+      if (recovered && recovered.contentType !== reserved.contentType)
+        throw new BlobFailure("invalid");
+      verified = recovered;
     } catch (error) {
       if (
         !(error instanceof BlobFailure) ||
