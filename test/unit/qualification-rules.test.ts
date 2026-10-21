@@ -155,6 +155,16 @@ describe("Qualification Rules Module — VTC-027", () => {
       expect(resUnknown.ruleResults[0]?.observed).toBeNull();
     });
 
+    test("returns unknown when cargo mass is a malformed decimal string", () => {
+      const malformedMass = createSyntheticTripEvidence({
+        cargoMassKg: knownFact("not-a-valid-decimal"),
+      });
+      const resMalformed = evaluateQualificationRules(malformedMass, [rule]);
+      expect(resMalformed.outcome).toBe("unknown");
+      expect(resMalformed.ruleResults[0]?.reasonCode).toBe(REASON_CODES.RULE_MASS_INVALID);
+      expect(resMalformed.ruleResults[0]?.observed).toBe("not-a-valid-decimal");
+    });
+
     test("strictly validates max_mass configuration schema", () => {
       expect(validateMaxMassConfig({ type: "max_mass", maxKg: "20000" })).toBe(true);
       expect(validateMaxMassConfig({ type: "max_mass", maxKg: "0" })).toBe(true);
@@ -428,6 +438,86 @@ describe("Qualification Rules Module — VTC-027", () => {
         confirmedEventContext,
       );
       expect(res.outcome).toBe("fail");
+    });
+
+    test("event with all null prescribed load fields does not authorize bypass", () => {
+      const noPrescribedLoadContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          prescribedCargoId: null,
+          prescribedMassKg: null,
+          prescribedTrailerTypeId: null,
+        },
+      });
+
+      const match = matchEventPrescribedLoad(heavyPrescribedLoadTrip, noPrescribedLoadContext);
+      expect(match.matches).toBe(false);
+      expect(match.reasonCode).toBe(REASON_CODES.EVENT_NO_PRESCRIBED_LOAD);
+
+      // Ordinary qualification limits remain in force and reject the heavy trip
+      const res = evaluateQualificationRules(
+        heavyPrescribedLoadTrip,
+        traineeRules,
+        noPrescribedLoadContext,
+      );
+      expect(res.outcome).toBe("fail");
+      expect(res.eventExceptionApplied).toBe(false);
+    });
+
+    test("incomplete trailer chain does not authorize prescribed trailer bypass", () => {
+      const incompleteTrailerTrip = createSyntheticTripEvidence({
+        cargo: pinnedEntityFact(SYNTHETIC_IDS.CARGO_PRESCRIBED, "cargo"),
+        cargoMassKg: knownFact("45000"),
+        trailers: {
+          complete: false, // Incomplete chain
+          items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)],
+        },
+      });
+
+      const match = matchEventPrescribedLoad(incompleteTrailerTrip, confirmedEventContext);
+      expect(match.matches).toBe(false);
+      expect(match.reasonCode).toBe(REASON_CODES.EVENT_PRESCRIBED_LOAD_MISMATCH);
+
+      const res = evaluateQualificationRules(
+        incompleteTrailerTrip,
+        traineeRules,
+        confirmedEventContext,
+      );
+      expect(res.outcome).toBe("fail");
+      expect(res.eventExceptionApplied).toBe(false);
+    });
+
+    test("malformed mass string in evidence or event fails mass match safely", () => {
+      const malformedTrip = createSyntheticTripEvidence({
+        cargo: pinnedEntityFact(SYNTHETIC_IDS.CARGO_PRESCRIBED, "cargo"),
+        cargoMassKg: knownFact("not-a-decimal"),
+        trailers: {
+          complete: true,
+          items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)],
+        },
+      });
+
+      const match = matchEventPrescribedLoad(malformedTrip, confirmedEventContext);
+      expect(match.matches).toBe(false);
+      expect(match.reasonCode).toBe(REASON_CODES.EVENT_PRESCRIBED_LOAD_MISMATCH);
+
+      // Malformed prescribed mass in event
+      const malformedEventContext: EvaluationContext = createSyntheticEvaluationContext({
+        confirmedEvent: {
+          eventId: SYNTHETIC_IDS.EVENT_ID,
+          eventRevisionId: SYNTHETIC_IDS.EVENT_REVISION_ID,
+          attendanceRevisionId: SYNTHETIC_IDS.ATTENDANCE_REVISION_ID,
+          prescribedCargoId: SYNTHETIC_IDS.CARGO_PRESCRIBED,
+          prescribedMassKg: "invalid-event-mass",
+          prescribedTrailerTypeId: SYNTHETIC_IDS.TRAILER_HEAVY,
+        },
+      });
+
+      const matchEvent = matchEventPrescribedLoad(heavyPrescribedLoadTrip, malformedEventContext);
+      expect(matchEvent.matches).toBe(false);
+      expect(matchEvent.reasonCode).toBe(REASON_CODES.EVENT_PRESCRIBED_LOAD_MISMATCH);
     });
 
     test("event exception NEVER bypasses company acceptance rules", () => {

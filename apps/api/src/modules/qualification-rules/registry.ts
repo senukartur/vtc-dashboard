@@ -127,9 +127,9 @@ export class RuleEvaluatorRegistry {
           outcome: "fail",
           observed: null,
           expected: null,
-          reasonCode: "unknown_rule_type",
+          reasonCode: REASON_CODES.RULE_TYPE_UNKNOWN,
         });
-        reasonCodes.push("unknown_rule_type");
+        reasonCodes.push(REASON_CODES.RULE_TYPE_UNKNOWN);
         continue;
       }
 

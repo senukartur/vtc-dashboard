@@ -6,7 +6,7 @@ import {
   type RuleEvaluationDetail,
   type RuleEvaluator,
 } from "../contracts.js";
-import { compareDecimal } from "../decimal.js";
+import { compareDecimal, isValidNonNegativeDecimal } from "../decimal.js";
 
 const MAX_MASS_REGEX = /^(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/;
 
@@ -62,6 +62,19 @@ export const maxMassEvaluator: RuleEvaluator<MaxMassRule> = {
     }
 
     const observed = fact.value;
+    if (!isValidNonNegativeDecimal(observed)) {
+      return {
+        ruleType: "max_mass",
+        outcome: "unknown",
+        observed,
+        expected: rule.maxKg,
+        reasonCode: REASON_CODES.RULE_MASS_INVALID,
+        reasonDetails: {
+          error: "MALFORMED_MASS_DECIMAL",
+        },
+      };
+    }
+
     const cmp = compareDecimal(observed, rule.maxKg);
 
     if (cmp <= 0) {

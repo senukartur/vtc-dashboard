@@ -4,7 +4,7 @@ import {
   type EventPrescribedLoadMatchResult,
   REASON_CODES,
 } from "./contracts.js";
-import { compareDecimal } from "./decimal.js";
+import { compareDecimal, isValidNonNegativeDecimal } from "./decimal.js";
 
 export const BYPASSED_QUALIFICATION_RULE_TYPES = new Set([
   "max_mass",
@@ -60,7 +60,25 @@ export function matchEventPrescribedLoad(
     };
   }
 
-  // 2. Cargo matching
+  // 2. Prescribed load constraint check: at least one prescribed load field must be configured
+  const hasPrescribedLoad =
+    event.prescribedCargoId !== null ||
+    event.prescribedMassKg !== null ||
+    event.prescribedTrailerTypeId !== null;
+  if (!hasPrescribedLoad) {
+    return {
+      matches: false,
+      reasonCode: REASON_CODES.EVENT_NO_PRESCRIBED_LOAD,
+      details: {
+        attendanceConfirmed: true,
+        cargoMatch: false,
+        massMatch: false,
+        trailerMatch: false,
+      },
+    };
+  }
+
+  // 3. Cargo matching
   let cargoMatch = true;
   if (event.prescribedCargoId !== null) {
     cargoMatch =
@@ -68,18 +86,21 @@ export function matchEventPrescribedLoad(
       evidence.cargo.value.entityId === event.prescribedCargoId;
   }
 
-  // 3. Mass matching
+  // 4. Mass matching with non-negative decimal validation guards
   let massMatch = true;
   if (event.prescribedMassKg !== null) {
     massMatch =
       evidence.cargoMassKg.status === "known" &&
+      isValidNonNegativeDecimal(evidence.cargoMassKg.value) &&
+      isValidNonNegativeDecimal(event.prescribedMassKg) &&
       compareDecimal(evidence.cargoMassKg.value, event.prescribedMassKg) === 0;
   }
 
-  // 4. Trailer type matching
+  // 5. Trailer type matching (requires complete trailer chain and all items matching)
   let trailerMatch = true;
   if (event.prescribedTrailerTypeId !== null) {
     trailerMatch =
+      evidence.trailers.complete &&
       evidence.trailers.items.length > 0 &&
       evidence.trailers.items.every(
         (t: Fact<PinnedEntity>) =>

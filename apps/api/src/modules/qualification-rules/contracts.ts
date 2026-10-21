@@ -119,15 +119,18 @@ export const REASON_CODES = {
   RULE_PASSED: "rule_passed",
   RULE_MASS_EXCEEDED: "rule_mass_exceeded",
   RULE_MASS_UNKNOWN: "rule_mass_unknown",
+  RULE_MASS_INVALID: "rule_mass_invalid",
   RULE_TRAILER_TYPE_DISALLOWED: "rule_trailer_type_disallowed",
   RULE_TRAILER_TYPE_UNKNOWN: "rule_trailer_type_unknown",
   RULE_TRAILERS_INCOMPLETE: "rule_trailers_incomplete",
   RULE_ADR_CATEGORY_DISALLOWED: "rule_adr_category_disallowed",
   RULE_ADR_CATEGORY_UNKNOWN: "rule_adr_category_unknown",
+  RULE_TYPE_UNKNOWN: "unknown_rule_type",
 
   // Event-specific prescribed load exception
   EVENT_PRESCRIBED_LOAD_BYPASS: "event_prescribed_load_bypass",
   EVENT_PRESCRIBED_LOAD_MISMATCH: "event_prescribed_load_mismatch",
+  EVENT_NO_PRESCRIBED_LOAD: "event_no_prescribed_load",
   EVENT_ATTENDANCE_UNCONFIRMED: "event_attendance_unconfirmed",
   EVENT_NOT_CONFIRMED: "event_not_confirmed",
 
