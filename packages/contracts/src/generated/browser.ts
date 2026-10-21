@@ -2322,6 +2322,16 @@ export interface components {
             periodId: string;
         };
         AssignmentInput: {
+            /**
+             * Format: date-time
+             * @description Supported historical interval start, required only for historical_resolution.
+             */
+            assignedAt?: string;
+            /**
+             * Format: date-time
+             * @description Supported exclusive historical interval end, required only for historical_resolution.
+             */
+            endedAt?: string;
             /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */
@@ -3511,10 +3521,12 @@ export interface components {
             /** Format: date-time */
             computedAt: string;
             eligibleForConfirmation: boolean;
-            projectionPending: boolean;
+            /** @constant */
+            projectionPending: false;
             projectionVersion: number;
             requiredDistanceM: string | null;
             requiredTrips: number | null;
+            reviewReasonCodes: "promotion_requirements_no_longer_met"[];
             reviewRequired: boolean;
         };
         ProgressPublic: {
@@ -3524,7 +3536,8 @@ export interface components {
             /** Format: date-time */
             computedAt: string;
             eligibleForConfirmation: boolean;
-            projectionPending: boolean;
+            /** @constant */
+            projectionPending: false;
             projectionVersion: number;
             requiredDistanceM: string | null;
             requiredTrips: number | null;
@@ -3575,6 +3588,8 @@ export interface components {
             version: number;
         };
         QualificationRuleVersion: {
+            /** Format: date-time */
+            effectiveAt: string;
             /** @enum {string} */
             game: "ets2" | "ats";
             /** Format: uuid */
@@ -3701,6 +3716,11 @@ export interface components {
             type: "allowed_adr_categories";
         };
         RulesInput: {
+            /**
+             * Format: date-time
+             * @description Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected.
+             */
+            effectiveAt?: string;
             reason: string;
             requiredDistanceM: string | null;
             requiredTrips: number | null;

@@ -14,6 +14,8 @@ import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
+import { registerQualificationRoutes } from "./modules/qualifications/http.js";
+import type { Qualifications } from "./modules/qualifications/service.js";
 import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
 import type { TelemetryService } from "./modules/telemetry/service.js";
 import { registerTripRoutes } from "./modules/trips/http.js";
@@ -47,6 +49,7 @@ export interface AppOptions {
   catalogs?: Catalogs;
   trips?: Trips;
   telemetry?: TelemetryService;
+  qualifications?: Qualifications;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -150,6 +153,8 @@ export async function createApp(options: AppOptions) {
     await registerTripRoutes(app, options.identity, options.trips);
   if (options.identity && options.telemetry)
     await registerTelemetryRoutes(app, options.identity, options.telemetry);
+  if (options.identity && options.qualifications)
+    await registerQualificationRoutes(app, options.identity, options.qualifications);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

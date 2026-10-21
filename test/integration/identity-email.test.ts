@@ -1,21 +1,30 @@
-import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import { eq, membership, sql } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
-  createIdentity,
   type Actor,
+  createIdentity,
   type PrivateChallenge,
 } from "../../apps/api/src/modules/identity/service.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const config = {
   secret: randomBytes(32).toString("hex"),

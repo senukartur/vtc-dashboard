@@ -25,6 +25,7 @@ try {
             config.catalogs,
             config.trips,
             config.telemetry,
+            config.qualifications,
           ),
         }
       : {}),

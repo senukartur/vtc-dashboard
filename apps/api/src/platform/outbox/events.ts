@@ -239,11 +239,73 @@ export function accessEvent(value: unknown): AccessEvent {
     },
   };
 }
+export interface QualificationEvent {
+  eventId: string;
+  type:
+    | "qualification.rules_changed"
+    | "qualification.assigned"
+    | "qualification.promoted"
+    | "qualification.progress_changed"
+    | "promotion.review_required";
+  schemaVersion: 1;
+  aggregate: { kind: "qualification"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { userId: string | null; assignmentId: string | null };
+}
+export function qualificationEvent(value: unknown): QualificationEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["userId", "assignmentId"]);
+  if (
+    ![
+      "qualification.rules_changed",
+      "qualification.assigned",
+      "qualification.promoted",
+      "qualification.progress_changed",
+      "promotion.review_required",
+    ].includes(e.type as string) ||
+    e.schemaVersion !== 1 ||
+    a.kind !== "qualification" ||
+    typeof e.occurredAt !== "string" ||
+    (e.type === "qualification.rules_changed"
+      ? d.userId !== null || d.assignmentId !== null
+      : d.userId === null || d.assignmentId === null)
+  )
+    throw new Error("UNSUPPORTED_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: e.type as QualificationEvent["type"],
+    schemaVersion: 1,
+    aggregate: {
+      kind: "qualification",
+      id: applicationId(a.id as string),
+      version: positive(a.version),
+    },
+    occurredAt: utcIso(utcDateTime(e.occurredAt)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      userId: d.userId === null ? null : applicationId(d.userId as string),
+      assignmentId: d.assignmentId === null ? null : applicationId(d.assignmentId as string),
+    },
+  };
+}
 export function createOutbox(unit: UnitOfWork) {
   return {
     async append(
       tx: TxContext,
-      input: AccessEvent | AdmissionsEvent | CatalogEvent | TripEvent,
+      input: AccessEvent | AdmissionsEvent | CatalogEvent | TripEvent | QualificationEvent,
     ): Promise<void> {
       const client = unit.client(tx);
       const e =
@@ -255,7 +317,10 @@ export function createOutbox(unit: UnitOfWork) {
                   input.type,
                 )
               ? tripEvent(input)
-              : admissionsEvent(input);
+              : input.type.startsWith("qualification.") ||
+                  input.type === "promotion.review_required"
+                ? qualificationEvent(input)
+                : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.

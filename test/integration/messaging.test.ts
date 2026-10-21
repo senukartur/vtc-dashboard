@@ -7,36 +7,46 @@ import {
   TransactionCommitOutcomeUnknownError,
   type UnitOfWork,
 } from "@vtc/db";
+import { company, membership, roles } from "@vtc/db/identity-schema";
 import { eq, mailCommands, mailDeliveries, sql } from "@vtc/db/messaging-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
-import { company, membership, roles } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
-import { mailCrypto, type MailIntent } from "../../apps/api/src/modules/messaging/content.ts";
+import { type MailIntent, mailCrypto } from "../../apps/api/src/modules/messaging/content.ts";
 import {
   localProvider,
   type MailProvider,
   type Outcome,
 } from "../../apps/api/src/modules/messaging/provider.ts";
 import {
-  createMessaging,
   cleanupMail,
-  mailExpirySweep,
+  createMessaging,
   type MailOwners,
   type Messaging,
   type MessagingConfig,
+  mailExpirySweep,
 } from "../../apps/api/src/modules/messaging/service.ts";
 import { createQueue, LeaseLostError } from "../../apps/api/src/platform/jobs/queue.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 let control: Connection, unit: UnitOfWork;
 let instant = Date.now();

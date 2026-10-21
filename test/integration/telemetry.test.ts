@@ -7,7 +7,13 @@ import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
 import { telemetryTokens as tokens } from "@vtc/db/telemetry-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import {
   steamEndpoint,
   steamProvider,
@@ -35,6 +41,9 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 let control: Connection,
   unit: UnitOfWork,

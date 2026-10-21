@@ -16,6 +16,7 @@ import {
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
 import { catalogFacts, catalogRevisions } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
+import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
 
 export { and, asc, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
 
@@ -267,4 +268,67 @@ export const tripHistory = mysqlTable(
     createdAt: utcColumn("created_at").notNull(),
   },
   (t) => [uniqueIndex("trip_history_version").on(t.tripId, t.version)],
+);
+
+// One authoritative replaceable credit row; immutable replacements retain the full decision seam.
+export const tripContributions = mysqlTable(
+  "trip_contributions",
+  {
+    tripId: idColumn("trip_id")
+      .primaryKey()
+      .references(() => trips.id, { onDelete: "restrict" }),
+    version: int("version", { unsigned: true }).notNull(),
+    ownerId: idColumn("owner_id")
+      .notNull()
+      .references(() => membership.userId, { onDelete: "restrict" }),
+    game: game("game").notNull(),
+    factId: idColumn("fact_id")
+      .notNull()
+      .references(() => tripFacts.id, { onDelete: "restrict" }),
+    accepted: boolean("accepted").notNull(),
+    credited: boolean("credited").notNull(),
+    aliasOf: idColumn("alias_of").references(() => trips.id, { onDelete: "restrict" }),
+    assignmentId: idColumn("assignment_id"),
+    ruleVersionId: idColumn("rule_version_id"),
+    attributionBasis: mysqlEnum("attribution_basis", [
+      "actual_start",
+      "manual_confirmation",
+      "unresolved",
+    ]).notNull(),
+    attributionAt: utcColumn("attribution_at"),
+    actualDistanceM: decimalColumn("actual_distance_m"),
+    fingerprint: opaqueColumn("fingerprint", { length: 32 }).notNull(),
+    changedAt: utcColumn("changed_at").notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "trip_credit_assignment_fk",
+      columns: [t.assignmentId],
+      foreignColumns: [qualificationAssignments.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_credit_rules_fk",
+      columns: [t.ruleVersionId],
+      foreignColumns: [qualificationRules.id],
+    }).onDelete("restrict"),
+    index("trip_contribution_period").on(t.assignmentId, t.credited, t.tripId),
+    check("trip_credit_version_positive", sql`${t.version} > 0`),
+    check("trip_credit_alias_distinct", sql`${t.aliasOf} IS NULL OR ${t.aliasOf} <> ${t.tripId}`),
+    check(
+      "trip_credit_shape",
+      sql`${t.credited} = 0 OR (${t.accepted} = 1 AND ${t.aliasOf} IS NULL AND ${t.assignmentId} IS NOT NULL AND ${t.ruleVersionId} IS NOT NULL AND ${t.attributionAt} IS NOT NULL AND ${t.actualDistanceM} > 0)`,
+    ),
+  ],
+);
+export const tripContributionHistory = mysqlTable(
+  "trip_contribution_history",
+  {
+    tripId: idColumn("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "restrict" }),
+    version: int("version", { unsigned: true }).notNull(),
+    snapshot: json("snapshot").$type<unknown>().notNull(),
+    changedAt: utcColumn("changed_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.tripId, t.version] })],
 );

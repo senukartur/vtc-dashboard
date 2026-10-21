@@ -26,7 +26,15 @@
     "external_steam_links": ["SELECT", "INSERT", "UPDATE"],
     "external_steam_proofs": ["SELECT", "INSERT", "UPDATE", "DELETE"],
     "external_steam_nonces": ["SELECT", "INSERT", "DELETE"],
-    "external_truckers_cache": ["SELECT", "INSERT", "UPDATE", "DELETE"]
+    "external_truckers_cache": ["SELECT", "INSERT", "UPDATE", "DELETE"],
+    "qualification_levels": ["SELECT", "UPDATE"],
+    "qualification_rule_versions": ["SELECT", "INSERT"],
+    "qualification_assignments": ["SELECT", "INSERT", "UPDATE"],
+    "qualification_states": ["SELECT", "INSERT", "UPDATE"],
+    "qualification_promotions": ["SELECT", "INSERT"],
+    "qualification_promotion_reviews": ["SELECT", "INSERT", "UPDATE"],
+    "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
+    "trip_contribution_history": ["SELECT", "INSERT"]
   },
   "jobs": {
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],

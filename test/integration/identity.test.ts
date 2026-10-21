@@ -14,7 +14,7 @@ import {
 } from "@vtc/db/identity-schema";
 import { outboxEvents } from "@vtc/db/platform-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { engine, type IdentityConfig } from "../../apps/api/src/modules/identity/engine.ts";
 import {
@@ -29,12 +29,15 @@ import {
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const diagnostic = identityDiagnostics("identity");
 let control: Connection;

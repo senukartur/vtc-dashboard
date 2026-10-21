@@ -1,17 +1,20 @@
-import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { createAudit, createUnitOfWork, dedicatedConnection, runMigrations } from "@vtc/db";
 import { sql } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   hasCode,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { clock, idGenerator } from "../support/builders.ts";
 import { barrier, bounded, connections, deferred, transaction } from "../support/concurrency.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const diagnostic = identityDiagnostics("concurrency");
 let control: Connection;

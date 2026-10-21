@@ -17,6 +17,10 @@ import {
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import {
+  createQualifications,
+  type QualificationsConfig,
+} from "../modules/qualifications/service.js";
+import {
   createTelemetry,
   invalidateTelemetryCredentials,
   type TelemetryConfig,
@@ -38,10 +42,13 @@ export function composeIdentity(
   catalogConfig?: CatalogConfig,
   tripsConfig?: TripsConfig,
   telemetryConfig?: TelemetryConfig,
+  qualificationsConfig?: QualificationsConfig,
 ) {
   let identity: Identity;
   if (telemetryConfig && (!externalEnabled || !tripsConfig))
     throw new Error("TELEMETRY_PREREQUISITES_REQUIRED");
+  if (qualificationsConfig && !tripsConfig)
+    throw new Error("QUALIFICATIONS_PREREQUISITES_REQUIRED");
   let admissions: Admissions | undefined;
   const messaging = mail
     ? createMessaging(
@@ -64,6 +71,7 @@ export function composeIdentity(
     : undefined;
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
     ...(telemetryConfig
       ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }
       : {}),
@@ -101,6 +109,15 @@ export function composeIdentity(
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   return {
     identity,
+    ...(qualificationsConfig && trips
+      ? {
+          qualifications: createQualifications(unit, qualificationsConfig, {
+            identity,
+            trips,
+            ...(catalogs ? { catalogs } : {}),
+          }),
+        }
+      : {}),
     ...(telemetryConfig && trips && externalIdentities
       ? {
           telemetry: createTelemetry(unit, telemetryConfig, {
