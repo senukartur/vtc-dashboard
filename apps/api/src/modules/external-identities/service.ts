@@ -28,9 +28,9 @@ import {
   cacheLifetimeMs,
   type ExternalProviders,
   nonceLifetimeMs,
+  ProviderFailure,
   parseAssertion,
   proofLifetimeMs,
-  ProviderFailure,
   returnUrl,
   steamId,
   steamProfile,
@@ -642,6 +642,12 @@ export function createExternalIdentities(
       return snapshot(actor);
     },
     refresh,
+    async captureCredential(tx: TxContext, userId: string) {
+      const current = await identity.accessState(tx, userId),
+        active = await link(tx, userId);
+      if (!current.active || !current.canSubmitTrips || !active) throw identityError(403);
+      return { userId, steamId: active.steamId, ...current };
+    },
     // VTC-023 must invoke this synchronously for every credential use, on its command transaction.
     async credentialEligible(tx: TxContext, credential: ExternalCredential) {
       const current = await identity.accessState(tx, credential.userId),

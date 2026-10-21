@@ -16,6 +16,11 @@ import {
   type MessagingConfig,
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
+import {
+  createTelemetry,
+  invalidateTelemetryCredentials,
+  type TelemetryConfig,
+} from "../modules/telemetry/service.js";
 import { createTrips, type TripsConfig } from "../modules/trips/service.js";
 import { createQueue } from "../platform/jobs/queue.js";
 import {
@@ -32,8 +37,11 @@ export function composeIdentity(
   externalEnabled = false,
   catalogConfig?: CatalogConfig,
   tripsConfig?: TripsConfig,
+  telemetryConfig?: TelemetryConfig,
 ) {
   let identity: Identity;
+  if (telemetryConfig && (!externalEnabled || !tripsConfig))
+    throw new Error("TELEMETRY_PREREQUISITES_REQUIRED");
   let admissions: Admissions | undefined;
   const messaging = mail
     ? createMessaging(
@@ -56,6 +64,9 @@ export function composeIdentity(
     : undefined;
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    ...(telemetryConfig
+      ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }
+      : {}),
     ...(externalEnabled ? { steamProjection: steamProjection(unit) } : {}),
     ...(messaging ? { delivery: messaging.delivery } : {}),
   });
@@ -84,12 +95,23 @@ export function composeIdentity(
     undefined,
     [...(!messaging ? ["mail.deliver"] : []), ...(!catalogs ? ["catalog.import"] : [])],
   );
+  const trips = tripsConfig
+    ? createTrips(unit, tripsConfig, { identity, ...(catalogs ? { catalogs } : {}) })
+    : undefined;
+  const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   return {
     identity,
-    ...(tripsConfig
-      ? { trips: createTrips(unit, tripsConfig, { identity, ...(catalogs ? { catalogs } : {}) }) }
+    ...(telemetryConfig && trips && externalIdentities
+      ? {
+          telemetry: createTelemetry(unit, telemetryConfig, {
+            identity,
+            external: externalIdentities,
+            trips,
+          }),
+        }
       : {}),
-    ...(externalEnabled ? { externalIdentities: createExternalIdentities(unit, identity) } : {}),
+    ...(trips ? { trips } : {}),
+    ...(externalIdentities ? { externalIdentities } : {}),
     jobsQueue,
     ...(catalogs ? { catalogs } : {}),
     ...(messaging ? { messaging } : {}),

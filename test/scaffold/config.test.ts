@@ -12,6 +12,39 @@ const fixture = {
   MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
 };
 
+test("telemetry activation requires all prerequisites, separate key and uint32-safe validated limits", () => {
+  assert.equal(readConfig(fixture).telemetry, undefined);
+  const input = {
+    ...fixture,
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    TRIPS_ENABLED: "true",
+    TRIPS_CURSOR_KEY: "a".repeat(64),
+    EXTERNAL_IDENTITIES_ENABLED: "true",
+    TELEMETRY_ENABLED: "true",
+    TELEMETRY_CURSOR_KEY: "b".repeat(64),
+    TELEMETRY_IP_PER_MINUTE: "600",
+    TELEMETRY_GLOBAL_PER_MINUTE: "6000",
+  };
+  assert.equal(readConfig(input).telemetry?.globalPerMinute, 6000);
+  assert.equal(
+    readConfig({ ...input, TELEMETRY_IP_PER_MINUTE: "60000", TELEMETRY_GLOBAL_PER_MINUTE: "60000" })
+      .telemetry?.globalPerMinute,
+    60000,
+  );
+  for (const changes of [
+    { TELEMETRY_ENABLED: "yes" },
+    { TRIPS_ENABLED: "false" },
+    { EXTERNAL_IDENTITIES_ENABLED: "false" },
+    { TELEMETRY_CURSOR_KEY: "a".repeat(64) },
+    { TELEMETRY_IP_PER_MINUTE: "59" },
+    { TELEMETRY_GLOBAL_PER_MINUTE: "1000000" },
+    { TELEMETRY_GLOBAL_PER_MINUTE: "599" },
+  ])
+    assert.throws(() => readConfig({ ...input, ...changes }), /TELEMETRY_/);
+});
+
 test("trip reads are opt-in and require identity plus a separate cursor key", () => {
   assert.equal(readConfig(fixture).trips, undefined);
   assert.throws(() => readConfig({ ...fixture, TRIPS_ENABLED: "yes" }), /TRIPS_ENABLED/);

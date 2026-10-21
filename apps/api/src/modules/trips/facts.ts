@@ -83,12 +83,12 @@ export function createFactRepository(unit: UnitOfWork) {
             }),
           );
     },
-    async read(tx: TxContext, ids: string[]) {
+    async read(tx: TxContext, ids: string[], current = false) {
       const result = new Map<string, { tripId: string; evidence: NormalizedTripEvidence }>();
       const unique = [...new Set(ids)].map(applicationId);
       if (unique.length > 100) throw new Error("SOURCE_FACT_BATCH_BOUND_EXCEEDED");
       if (!unique.length) return result;
-      const rows = await c(tx)
+      const rowsQuery = c(tx)
         .select({
           stored: tripFacts,
           provider: sourceMessages.provider,
@@ -99,11 +99,15 @@ export function createFactRepository(unit: UnitOfWork) {
         .innerJoin(sourceMessages, eq(sourceMessages.id, tripFacts.messageId))
         .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
         .where(inArray(tripFacts.id, unique));
-      const trailers = await c(tx)
+      // A command may have locked a pointer committed after its RR snapshot began.
+      // Read the complete immutable projection from that same current view.
+      const rows = await (current ? rowsQuery.for("share") : rowsQuery);
+      const trailersQuery = c(tx)
         .select()
         .from(tripFactTrailers)
         .where(inArray(tripFactTrailers.tripFactId, unique))
         .orderBy(asc(tripFactTrailers.position));
+      const trailers = await (current ? trailersQuery.for("share") : trailersQuery);
       for (const row of rows) {
         const stored = row.stored,
           metadata = stored.evidence as NormalizedTripEvidence;

@@ -64,6 +64,7 @@ export interface PrivateChallenge {
   emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
+  invalidateTelemetryCredentials?: (tx: TxContext, userId: string) => Promise<void>;
   steamProjection?: (tx: TxContext, userId: string) => Promise<boolean>;
   // Implementations must persist on this tx and perform network delivery after commit.
   delivery?: {
@@ -366,6 +367,7 @@ export function createIdentity(
         .values(checked.map((role) => ({ userId: id, role })));
   }
   async function invalidate(tx: TxContext, row: Member, identityChange = false) {
+    await ports.invalidateTelemetryCredentials?.(tx, row.userId);
     await ports.delivery?.invalidate?.(tx, { userId: row.userId });
     await client(tx).delete(session).where(eq(session.userId, row.userId));
     await client(tx)
@@ -604,6 +606,7 @@ export function createIdentity(
       const current = await lockCompany(tx);
       const member = (await lockMembers(tx, [userId])).get(userId);
       if (member?.status !== "active") throw identityError(409);
+      await ports.invalidateTelemetryCredentials?.(tx, userId);
       await ports.delivery?.invalidate?.(tx, { userId });
       await client(tx)
         .update(challenges)
@@ -1453,6 +1456,7 @@ export function createIdentity(
       if (!row) throw identityError(404);
       return {
         active: row.status === "active",
+        companyId: current.id,
         canSubmitTrips: capabilities(await memberRoles(tx, userId, current)).includes(
           "trips.submit_own",
         ),

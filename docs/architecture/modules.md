@@ -43,3 +43,5 @@ One owner edits each module's contracts/schema and exports its facade. Shared ro
 Cross-module FKs refer to stable IDs and use deliberate deletion behavior. Deactivation retains history; do not cascade-delete accepted trips or invite/review/audit facts. No module may write auth hashes/session fields, overwrite a published catalog/rule revision, or alter an already reviewed manual revision through a shared "generic update" helper.
 
 VTC-022 implements the [canonical trip/source foundation](../development/trips.md): permanent source ownership, immutable normalized revisions, conservative projection and authorized trip reads. Multiple sources can attach only through an explicit same-owner/game/version coordinator selection; reconciliation and contributions remain later workflows.
+
+VTC-023 [telemetry ingestion](../development/telemetry.md) owns tokens, safe issuance commands, registrations and shared persistent admission. It calls identity/external credential facades and the existing trip/source transaction facade; the source message remains the durable receipt. Optional identity invalidation is injected above both modules.

@@ -32,7 +32,7 @@ Telemetry uses supported actual start for qualification/rules/progress assignmen
 
 | Command | Atomic boundary and concurrency guard |
 | --- | --- |
-| Telemetry receipt | Preserve the [VTC-003](../contracts/telemetry-v1.md) unique event/source-revision/owner scopes; commit immutable inbox + processing job before ACK. Browser idempotency below does not replace telemetry receipts |
+| Telemetry receipt | Preserve the [VTC-003](../contracts/telemetry-v1.md) unique event/source-revision/owner scopes; commit immutable source evidence with completed synchronous projection and durable outbox, or a durable processing job, before ACK. Browser idempotency below does not replace telemetry receipts |
 | Submit/revise manual report | Lock canonical trip and expected revision, validate ready owner-controlled evidence, insert immutable manual revision + pending review + audit/outbox; same canonical trip on resubmit |
 | Review / apply correction / reconcile | Lock canonical trip(s) in sorted ID order, current decision/version and supporting facts; recheck actor != manual author, ownership and expected revisions; write new decision/source links/contribution version + audit/outbox together. Preserve prior accepted outcome while a proposal waits |
 | Promote | Lock company/member and per-game assignment/progress; re-evaluate current accepted contributions, write assignment and any global Trainee-to-Driver role change together. Corrections flag promotion review; never auto-demote |

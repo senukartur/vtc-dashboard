@@ -19,6 +19,7 @@ import { type Allocation, safeChildEnvironment } from "../test/support/environme
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
 import { browserFailureLine } from "./browser-diagnostics.mjs";
 import { eventLine } from "./ci-result.mjs";
+import { runTestProcess } from "./test-process.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
@@ -78,7 +79,32 @@ async function execute(name: string, probe = false, capture = false, guardFailur
             "--test",
             `test/persistence/${name === "persistence" ? "persistence" : "recovery"}.test.ts`,
           ];
-    const result = await child(args, env, capture);
+    let prepared = true;
+    if (name === "e2e") {
+      const setupStarted = Date.now();
+      const setup = await runTestProcess(
+        process.execPath,
+        ["--import", "tsx", "test/e2e/support/prepare.ts"],
+        {
+          cwd: process.cwd(),
+          env,
+          // Reuse the owned-process deadline/teardown; fixture work has the existing
+          // 30-second schema-setup bound, separate from real server readiness.
+          cleanup: true,
+          timeout: 30000,
+          onSpawn: (process) => {
+            active = process;
+          },
+        },
+      );
+      prepared = setup.exitCode === 0 && !interrupted;
+      console.log(
+        `BROWSER fixture preparation: ${prepared ? "PASS" : "FAIL"} (${setup.category}, ${Date.now() - setupStarted}ms)`,
+      );
+    }
+    const result = prepared
+      ? await child(args, env, capture)
+      : { code: 1, output: "SYNTHETIC_BROWSER_FIXTURE_SETUP_FAILED" };
     if (!capture) console.log(`LANE ${name}: ${result.code === 0 ? "PASS" : "FAIL"}`);
     if (!probe) console.log(eventLine(name, result.code, Date.now() - started));
     return result;
@@ -245,6 +271,14 @@ async function proveFailures() {
   console.log(
     "PROBE integration guard assertion: rejected as deliberate-proof evidence (expected)",
   );
+  const browserGuard = await execute("e2e", true, true, true);
+  if (
+    browserGuard.code !== 1 ||
+    browserGuard.output !== "SYNTHETIC_BROWSER_FIXTURE_SETUP_FAILED" ||
+    isDeliberateFailure("e2e", browserGuard)
+  )
+    throw new Error("FAILURE_PROBE_BROWSER_SETUP_GUARD_INVALID");
+  console.log("PROBE browser setup ownership: refused before browser execution (expected)");
   const result = await child(
     ["--import", "tsx", "scripts/test-lanes.ts", "all", "--assertion-probe"],
     safeChildEnvironment(),

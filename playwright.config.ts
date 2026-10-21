@@ -30,7 +30,7 @@ export default defineConfig({
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
   ],
-  // The command validates its allocation, migrates it, and starts the built API/SPA.
+  // The lane already prepared the owned fixtures; this clock covers the built API/SPA.
   webServer: {
     command: "node --import tsx test/e2e/support/server.ts",
     url: "http://127.0.0.1:4173/health/ready",

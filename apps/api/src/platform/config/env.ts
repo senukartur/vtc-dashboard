@@ -5,6 +5,7 @@ import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissi
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
+import { type TelemetryConfig, validateTelemetryConfig } from "../../modules/telemetry/service.js";
 import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
 import { exactProxyAddress } from "../http/ingress.js";
 
@@ -162,7 +163,34 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let telemetry: TelemetryConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.TELEMETRY_ENABLED))
+    throw new Error("Invalid environment fields: TELEMETRY_ENABLED");
+  if (input.TELEMETRY_ENABLED === "true") {
+    try {
+      if (!identity || !trips || input.EXTERNAL_IDENTITIES_ENABLED !== "true") throw new Error();
+      telemetry = {
+        cursorKey: input.TELEMETRY_CURSOR_KEY ?? "",
+        ipPerMinute: Number(input.TELEMETRY_IP_PER_MINUTE),
+        globalPerMinute: Number(input.TELEMETRY_GLOBAL_PER_MINUTE),
+      };
+      validateTelemetryConfig(telemetry);
+      if (
+        [identity.secret, trips.cursorKey, catalogs?.cursorKey, mail?.key].includes(
+          telemetry.cursorKey,
+        ) ||
+        (admissions &&
+          Buffer.from(telemetry.cursorKey, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: TELEMETRY_ENABLED, TELEMETRY_CURSOR_KEY, TELEMETRY_IP_PER_MINUTE, TELEMETRY_GLOBAL_PER_MINUTE, IDENTITY_ENABLED, EXTERNAL_IDENTITIES_ENABLED, TRIPS_ENABLED",
+      );
+    }
+  }
   return {
+    telemetry,
     trips,
     environment: env.NODE_ENV,
     host: env.API_HOST,

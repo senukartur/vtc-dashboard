@@ -286,7 +286,12 @@ export function createTrips(
     if (event) {
       if (!existing || event.sourceTripId !== existing.id || !event.sha256.equals(hash))
         throw identityError(409);
-      return { tripId: existing.canonicalTripId, sourceRecordId: event.id, duplicate: true };
+      return {
+        tripId: existing.canonicalTripId,
+        sourceRecordId: event.id,
+        firstReceivedAt: event.receivedAt,
+        duplicate: true,
+      };
     }
     const tripId = existing?.canonicalTripId ?? context.canonical?.tripId ?? newId(),
       sourceTripId = existing?.id ?? newId();
@@ -340,10 +345,12 @@ export function createTrips(
           eq(sourceMessages.sourceTripId, sourceTripId),
           eq(sourceMessages.revision, String(key.revision)),
         ),
-      );
+      )
+      .for("update");
     if (revision) throw identityError(409);
     const messageId = newId(),
-      factId = newId();
+      factId = newId(),
+      firstReceivedAt = at();
     const fact = await adapter.normalize(immutablePayload, {
       tx,
       ownerUserId: context.ownerUserId,
@@ -352,7 +359,7 @@ export function createTrips(
       ...(ports.catalogs ? { catalogs: ports.catalogs } : {}),
     });
     const current = trip.currentFactId
-      ? (await factsRepository.read(tx, [trip.currentFactId])).get(trip.currentFactId)
+      ? (await factsRepository.read(tx, [trip.currentFactId], true)).get(trip.currentFactId)
       : undefined;
     if (trip.currentFactId && (!current || current.tripId !== trip.id))
       throw new Error("TRIP_FACT_POINTER_INVALID");
@@ -371,14 +378,14 @@ export function createTrips(
         eventKey: sourceKey(key.eventKey),
         revision: String(key.revision),
         sha256: hash,
-        receivedAt: at(),
+        receivedAt: firstReceivedAt,
         deliveryMode: key.deliveryMode,
       });
     await c(tx).insert(sourcePayloads).values({ messageId, content });
     await factsRepository.insert(tx, tripId, fact, adapter.version);
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
     if (!newer && conflicts.length === 0)
-      return { tripId, sourceRecordId: messageId, duplicate: false };
+      return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
     if (newer)
       await c(tx)
         .update(sourceTrips)
@@ -437,7 +444,7 @@ export function createTrips(
       version,
       fact,
     );
-    return { tripId, sourceRecordId: messageId, duplicate: false };
+    return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
   }
   async function summaries(
     tx: TxContext,

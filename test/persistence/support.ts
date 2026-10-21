@@ -60,6 +60,10 @@ export async function testConnection(): Promise<Connection> {
 export async function reset(connection: Connection) {
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   for (const name of [
+    "telemetry_commands",
+    "telemetry_installations",
+    "telemetry_limits",
+    "telemetry_tokens",
     "trip_history",
     "trip_fact_trailers",
     "trip_facts",
@@ -152,7 +156,7 @@ export async function catalogsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(7);
 }
 
-async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8): Promise<string> {
+async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -177,6 +181,8 @@ async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8): Prom
     throw new Error("PUBLISHED_EXTERNAL_IDENTITIES_PREFIX_REQUIRED");
   if (count === 8 && entries[7]?.tag !== "0007_nice_gateway")
     throw new Error("PUBLISHED_CATALOG_PREFIX_REQUIRED");
+  if (count === 9 && entries[8]?.tag !== "0008_stale_prowler")
+    throw new Error("PUBLISHED_TRIP_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -235,4 +241,8 @@ export function hasMessage(message: string) {
 
 export async function tripsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(8);
+}
+
+export async function telemetryPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(9);
 }
