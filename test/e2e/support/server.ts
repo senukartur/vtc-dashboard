@@ -1,64 +1,12 @@
 import { spawn } from "node:child_process";
-import { createHmac, randomBytes } from "node:crypto";
-import { createUnitOfWork, runMigrations } from "@vtc/db";
-import { sql } from "@vtc/db/identity-schema";
-import { createIdentity } from "../../../apps/api/src/modules/identity/service.ts";
-import { guardedSettings, testConnection } from "../../persistence/support.ts";
-import { guardedAllocation, safeChildEnvironment } from "../../support/environment.ts";
+import { randomBytes } from "node:crypto";
+import { guardedSettings } from "../../persistence/support.ts";
+import { safeChildEnvironment } from "../../support/environment.ts";
 import { accountSecret } from "./account.ts";
 
+// The lane prepares its owned schema before Playwright starts the real readiness clock.
 const settings = guardedSettings();
-const ownership = await testConnection();
-await ownership.query(
-  "CREATE TABLE synthetic_browser_events (id VARCHAR(36) PRIMARY KEY) ENGINE=InnoDB",
-);
-await ownership.end();
-await runMigrations(settings);
 const secret = accountSecret("identity");
-const password = createHmac("sha256", guardedAllocation().token)
-  .update("browser-identity-password")
-  .digest("base64url");
-const unit = createUnitOfWork(settings);
-try {
-  const identity = createIdentity(
-    unit,
-    { secret, origin: "http://127.0.0.1:4173", production: false },
-    {
-      accessEvents: {
-        append: async (tx, event) => {
-          await unit
-            .client(tx)
-            .execute(sql`INSERT INTO synthetic_browser_events VALUES (${event.eventId})`);
-        },
-      },
-    },
-  );
-  await identity.bootstrap({
-    email: "browser@example.invalid",
-    name: "Synthetic Browser Member",
-    password,
-  });
-  for (const project of ["desktop", "tablet", "mobile"]) {
-    const credential = await identity.prepareCredential(
-      createHmac("sha256", guardedAllocation().token)
-        .update(`browser-steam-${project}`)
-        .digest("base64url"),
-    );
-    await unit.run((tx) =>
-      identity.insertWithCredential(tx, {
-        userId: crypto.randomUUID(),
-        email: `browser-steam-${project}@example.invalid`,
-        name: "Synthetic Browser Steam Member",
-        roles: ["driver"],
-        ...credential,
-      }),
-    );
-  }
-} catch {
-  throw new Error("SYNTHETIC_BROWSER_IDENTITY_SETUP_FAILED");
-} finally {
-  await unit.close();
-}
 const app = spawn(process.execPath, ["--import", "tsx", "test/e2e/support/runtime.ts"], {
   stdio: "inherit",
   env: {
