@@ -16,6 +16,7 @@ All affected existing consumers at this base are:
 | --- | --- |
 | Generated `packages/contracts/src/generated/browser.ts` and `schemas.json` | Regenerated union and strict runtime schema references |
 | `getTrip`, `submitManualTrip`, `reviseManualTrip` through `TripView`/`TripPrivate`/their envelopes | Resolved payloads unchanged; private readback can contain either revision format |
+| `getTripReview` through `Review.trip`/`EnvelopeReview` | Inherits the same private revision union; VTC-029 must narrow it when implementing staff review |
 | `listManualRevisions`, `getManualRevision` and their envelopes | Complete mixed history; no unresolved-history omission |
 | `apps/api/src/modules/trips/service.ts` | Existing private projection supplies null; no field dereference or new runtime behavior in this stage |
 | `test/integration/trips.test.ts` | Existing expected null projection remains valid |
