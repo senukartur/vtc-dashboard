@@ -12,7 +12,8 @@ RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS development
 COPY --chown=node:node . .
-RUN chown -R node:node /workspace
+RUN chown -R node:node /workspace \
+    && mkdir -p -m 700 /app/private-evidence && chown node:node /app/private-evidence
 USER node
 CMD ["pnpm", "dev"]
 
@@ -29,8 +30,9 @@ ENV VTC_REVISION=$VTC_REVISION
 WORKDIR /app
 COPY --from=build --chown=node:node /out/ ./
 COPY --from=build --chown=node:node /workspace/apps/web/dist/ ./public/
-COPY --chown=node:node deploy/development/probe.mjs ./operations/probe.mjs
-RUN mkdir /app/private-evidence && chown node:node /app/private-evidence
+COPY --chown=node:node deploy/development/probe.mjs deploy/development/manual-codec-smoke.mjs deploy/development/manual-native-notices.mjs deploy/development/manual-grants-smoke.mjs ./operations/
+COPY --chown=node:node third_party/sharp-libvips-1.3.4/ ./third_party/sharp-libvips-1.3.4/
+RUN mkdir -m 700 /app/private-evidence && chown node:node /app/private-evidence
 USER node
 EXPOSE 3000
 CMD ["node", "dist/server.js"]

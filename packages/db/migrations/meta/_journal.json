@@ -71,6 +71,13 @@
       "when": 1792538170921,
       "tag": "0009_slimy_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1792593322679,
+      "tag": "0010_manual_reports",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
-import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
+import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 
 type Fixture =
@@ -9,7 +9,8 @@ type Fixture =
   | "email"
   | "reset"
   | "concurrency"
-  | "external";
+  | "external"
+  | "messaging";
 type Phase =
   | "connection"
   | "reset"
@@ -17,6 +18,7 @@ type Phase =
   | "synthetic_ddl"
   | "bootstrap"
   | "verification"
+  | "unit"
   | "operation"
   | "transaction";
 const codes = new Set([

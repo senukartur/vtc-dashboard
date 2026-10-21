@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdir, open } from "node:fs/promises";
 
+const args = process.argv.slice(2);
+if (args.length > 1 || (args.length === 1 && args[0] !== "--manual-only"))
+  throw new Error("REHEARSAL_MODE_INVALID");
+const mode = args.length ? "manual-only" : "full";
+const label = mode === "full" ? "Deployment rehearsal" : "Focused manual deployment rehearsal";
 const identity = randomBytes(8).toString("hex");
 const project = `vtc011-${identity}`;
 const revision = identity.repeat(3).slice(0, 40);
@@ -39,7 +44,7 @@ try {
     `vtc-dashboard:${revision}`,
     ".",
   ]);
-  console.log("Deployment rehearsal: production image built");
+  console.log(`${label}: production image built`);
   await docker([
     "build",
     "-f",
@@ -70,16 +75,20 @@ try {
       `REHEARSAL_VOLUME=${volume}`,
       "-e",
       `REHEARSAL_REVISION=${revision}`,
+      "-e",
+      `REHEARSAL_MODE=${mode}`,
       runner,
     ],
     900000,
   );
   passed = true;
   console.log(
-    "Deployment rehearsal: SQL privileges, persistence, consistent export/restore, dirty migration, auth, TLS, archive and operation-lock cases passed",
+    mode === "full"
+      ? "Deployment rehearsal: SQL privileges, persistence, consistent export/restore, dirty migration, auth, TLS, archive and operation-lock cases passed"
+      : "Focused manual deployment rehearsal: codec, notices, persistent bytes and restricted manual role proof passed; remaining baseline NOT RUN",
   );
 } catch {
-  console.error("Deployment rehearsal: failed; raw child output kept private");
+  console.error(`${label}: failed; raw child output kept private`);
   await docker(["logs", `${project}-db-1`], 30000, true);
   await docker(
     [

@@ -1,0 +1,37 @@
+{
+  "runtime": {
+    "manual_evidence": ["SELECT", "INSERT", "UPDATE"],
+    "manual_reports": ["SELECT", "INSERT", "UPDATE"],
+    "manual_drafts": ["SELECT", "INSERT", "UPDATE"],
+    "manual_review_gates": ["SELECT", "INSERT", "UPDATE"],
+    "manual_commands": ["SELECT", "INSERT"],
+    "manual_draft_history": ["SELECT", "INSERT"],
+    "manual_evidence_refs": ["SELECT", "INSERT"],
+    "manual_correction_requests": ["SELECT", "INSERT"],
+    "manual_correction_history": ["SELECT", "INSERT"],
+    "manual_revisions": ["SELECT", "INSERT", "UPDATE(source_record_id)"],
+    "manual_draft_evidence": ["SELECT", "INSERT", "DELETE"],
+    "trips": ["SELECT", "INSERT", "UPDATE"],
+    "source_trips": ["SELECT", "INSERT", "UPDATE"],
+    "source_messages": ["SELECT", "INSERT"],
+    "source_payloads": ["SELECT", "INSERT"],
+    "trip_facts": ["SELECT", "INSERT"],
+    "trip_fact_trailers": ["SELECT", "INSERT"],
+    "trip_history": ["SELECT", "INSERT"],
+    "catalog_revisions": ["SELECT"],
+    "catalog_entities": ["SELECT"],
+    "catalog_facts": ["SELECT"],
+    "catalog_relations": ["SELECT"],
+    "catalog_publications": ["SELECT"],
+    "catalog_mappings": ["SELECT"],
+    "manual_blob_generations": ["SELECT", "INSERT", "UPDATE(lease_until,updated_at)"]
+  },
+  "jobs": {
+    "manual_evidence": ["SELECT", "UPDATE"],
+    "manual_evidence_refs": ["SELECT"],
+    "manual_review_gates": ["SELECT"],
+    "manual_draft_evidence": ["SELECT"],
+    "trips": ["SELECT"],
+    "manual_blob_generations": ["SELECT", "INSERT", "UPDATE"]
+  }
+}

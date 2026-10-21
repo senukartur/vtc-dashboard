@@ -7,38 +7,40 @@ import {
   TransactionCommitOutcomeUnknownError,
   type UnitOfWork,
 } from "@vtc/db";
+import { company, membership, roles } from "@vtc/db/identity-schema";
 import { eq, mailCommands, mailDeliveries, sql } from "@vtc/db/messaging-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
-import { company, membership, roles } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
-import { mailCrypto, type MailIntent } from "../../apps/api/src/modules/messaging/content.ts";
+import { type MailIntent, mailCrypto } from "../../apps/api/src/modules/messaging/content.ts";
 import {
   localProvider,
   type MailProvider,
   type Outcome,
 } from "../../apps/api/src/modules/messaging/provider.ts";
 import {
-  createMessaging,
   cleanupMail,
-  mailExpirySweep,
+  createMessaging,
   type MailOwners,
   type Messaging,
   type MessagingConfig,
+  mailExpirySweep,
 } from "../../apps/api/src/modules/messaging/service.ts";
 import { createQueue, LeaseLostError } from "../../apps/api/src/platform/jobs/queue.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
-import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 
 let control: Connection, unit: UnitOfWork;
+let preparation: Promise<void> | undefined;
+const diagnostic = identityDiagnostics("messaging");
 let instant = Date.now();
 const now = () => new Date(instant);
 const config: MessagingConfig = {
@@ -130,19 +132,22 @@ async function execute(mail: Messaging) {
   return claim;
 }
 const rejected: Outcome = { state: "rejected", category: "authentication", retryAfterMs: null };
-beforeAll(
-  async () =>
-    safe(async () => {
-      control = await testConnection();
-      await reset(control);
-      await runMigrations(guardedSettings());
-      await control.query(
+beforeAll(() => {
+  preparation = safe(async () => {
+    control = await diagnostic.phase("connection", () => testConnection());
+    await diagnostic.phase("reset", () => reset(control));
+    await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+    await diagnostic.phase("synthetic_ddl", () =>
+      control.query(
         "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
-      );
+      ),
+    );
+    await diagnostic.phase("unit", async () => {
       unit = createUnitOfWork(guardedSettings());
-    }),
-  SCHEMA_SETUP_TIMEOUT_MS,
-);
+    });
+  });
+  return preparation;
+}, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () =>
   safe(async () => {
     instant = Date.now();
@@ -157,8 +162,17 @@ beforeEach(async () =>
   }),
 );
 afterAll(async () => {
-  await unit?.close();
-  await control?.end();
+  try {
+    // The original setup promise remains the beforeAll result. Settle it before
+    // closing resources; a hook timeout itself does not cancel migration work.
+    if (preparation) await Promise.allSettled([preparation]);
+  } finally {
+    try {
+      await unit?.close();
+    } finally {
+      await control?.end();
+    }
+  }
 });
 afterEach(async () =>
   safe(async () => {

@@ -58,8 +58,27 @@ export async function testConnection(): Promise<Connection> {
 }
 
 export async function reset(connection: Connection) {
+  const [pointer] = await connection.query<RowDataPacket[]>(
+    "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='manual_report_current_revision_fk'",
+  );
+  if (pointer.length)
+    await connection.query(
+      "ALTER TABLE manual_reports DROP FOREIGN KEY manual_report_current_revision_fk",
+    );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
-  for (const name of [
+  const tables = [
+    "manual_blob_generations",
+    "manual_commands",
+    "manual_draft_history",
+    "manual_draft_evidence",
+    "manual_drafts",
+    "manual_correction_history",
+    "manual_correction_requests",
+    "manual_evidence_refs",
+    "manual_revisions",
+    "manual_reports",
+    "manual_review_gates",
+    "manual_evidence",
     "telemetry_commands",
     "telemetry_installations",
     "telemetry_limits",
@@ -121,9 +140,8 @@ export async function reset(connection: Connection) {
     "synthetic_recovery_kept",
     "synthetic_recovery_missing",
     "_vtc_migrations",
-  ]) {
-    await connection.query(`DROP TABLE IF EXISTS ${name}`);
-  }
+  ];
+  await connection.query(`DROP TABLE IF EXISTS ${tables.join(",")}`);
 }
 
 interface Journal {
@@ -156,7 +174,9 @@ export async function catalogsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(7);
 }
 
-async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9): Promise<string> {
+async function publishedPrefixFolder(
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
   await mkdir(join(folder, "meta"));
@@ -181,6 +201,8 @@ async function publishedPrefixFolder(count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9): 
     throw new Error("PUBLISHED_EXTERNAL_IDENTITIES_PREFIX_REQUIRED");
   if (count === 8 && entries[7]?.tag !== "0007_nice_gateway")
     throw new Error("PUBLISHED_CATALOG_PREFIX_REQUIRED");
+  if (count === 10 && entries[9]?.tag !== "0009_slimy_exiles")
+    throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
   if (count === 9 && entries[8]?.tag !== "0008_stale_prowler")
     throw new Error("PUBLISHED_TRIP_PREFIX_REQUIRED");
   for (const entry of entries)
@@ -245,4 +267,8 @@ export async function tripsPriorFolder(): Promise<string> {
 
 export async function telemetryPriorFolder(): Promise<string> {
   return publishedPrefixFolder(9);
+}
+
+export async function manualPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(10);
 }

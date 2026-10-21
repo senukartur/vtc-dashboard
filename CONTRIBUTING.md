@@ -120,4 +120,7 @@ The explicit human standing completion scope in [AGENTS.md](AGENTS.md#branches-c
 
 For first use in Claude Code, start a new session in a checkout containing the native definitions in `.claude/agents/`. Tool enforcement differs by host and is described in the entrypoints; these files do not create a security sandbox.
 
-The [canonical trip foundation](docs/development/trips.md) provides opt-in authorized reads with `TRIPS_ENABLED` and a separate `TRIPS_CURSOR_KEY`. [Personal telemetry ingestion](docs/development/telemetry.md) is separately opt-in with TELEMETRY_ENABLED and requires identity/external identities/trips. Manual forms/evidence and company acceptance remain later cards. Raw envelopes have no automatic expiry policy.
+The [canonical trip foundation](docs/development/trips.md) provides opt-in authorized reads with `TRIPS_ENABLED` and a separate `TRIPS_CURSOR_KEY`. [Personal telemetry ingestion](docs/development/telemetry.md) is separately opt-in with TELEMETRY_ENABLED and requires identity/external identities/trips. Manual forms and company acceptance remain later cards. Raw envelopes have no automatic expiry policy.
+
+
+VTC-025 provides opt-in [manual reports and private evidence](docs/development/manual-reports.md). Read its migration/rollback, decoder, persistent-root, retention and prepared-grant boundaries before enabling the feature. Hosted activation remains separate.

@@ -80,23 +80,44 @@ async function addMember() {
     cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
   return { actor: await identity.authenticate(new Headers({ cookie })), cookie };
 }
+async function fixturePhase<T>(
+  phase: "connection" | "reset" | "migrations" | "bootstrap" | "credentials",
+  operation: () => Promise<T>,
+): Promise<T> {
+  const started = performance.now();
+  console.log(JSON.stringify({ event: "trip_fixture_phase", phase, state: "started" }));
+  try {
+    return await operation();
+  } finally {
+    console.log(
+      JSON.stringify({
+        event: "trip_fixture_phase",
+        phase,
+        state: "settled",
+        durationMs: Math.round(performance.now() - started),
+      }),
+    );
+  }
+}
 beforeAll(async () => {
-  control = await testConnection();
+  control = await fixturePhase("connection", () => testConnection());
   unit = createUnitOfWork(guardedSettings());
-  await reset(control);
-  await runMigrations(guardedSettings());
+  await fixturePhase("reset", () => reset(control));
+  await fixturePhase("migrations", () => runMigrations(guardedSettings()));
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
-  await identity.bootstrap({
-    email: "trip-director@example.invalid",
-    name: "Fictional Trip Director",
-    password,
-  });
+  await fixturePhase("bootstrap", () =>
+    identity.bootstrap({
+      email: "trip-director@example.invalid",
+      name: "Fictional Trip Director",
+      password,
+    }),
+  );
   const login = await identity.login("trip-director@example.invalid", password);
   staff = await identity.authenticate(
     new Headers({ cookie: login.cookies.map((value) => value.split(";", 1)[0]).join("; ") }),
   );
-  const a = await addMember(),
-    b = await addMember();
+  const a = await fixturePhase("credentials", () => addMember()),
+    b = await fixturePhase("credentials", () => addMember());
   owner = a.actor;
   ownerCookie = a.cookie;
   other = b.actor;

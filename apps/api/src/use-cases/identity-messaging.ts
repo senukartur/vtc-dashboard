@@ -9,6 +9,11 @@ import {
 } from "../modules/external-identities/service.js";
 import type { IdentityConfig } from "../modules/identity/engine.js";
 import { createIdentity, type Identity } from "../modules/identity/service.js";
+import {
+  createManualReports,
+  type ManualConfig,
+  type ManualReports,
+} from "../modules/manual-reports/service.js";
 import { localProvider, resendProvider } from "../modules/messaging/provider.js";
 import {
   createMessaging,
@@ -38,6 +43,7 @@ export function composeIdentity(
   catalogConfig?: CatalogConfig,
   tripsConfig?: TripsConfig,
   telemetryConfig?: TelemetryConfig,
+  manualConfig?: ManualConfig,
 ) {
   let identity: Identity;
   if (telemetryConfig && (!externalEnabled || !tripsConfig))
@@ -88,19 +94,50 @@ export function composeIdentity(
   const catalogs = catalogConfig
     ? createCatalogs(unit, catalogConfig, { identity, published: catalogEvents(unit).append })
     : undefined;
+  let manualReports: ManualReports | undefined;
+  const trips = tripsConfig
+    ? createTrips(unit, tripsConfig, {
+        identity,
+        ...(catalogs ? { catalogs } : {}),
+        ...(manualConfig
+          ? {
+              manualEvidence: (tx, owner, payload, tripId) => {
+                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                return manualReports.validateSourceInTransaction(tx, owner, payload, tripId);
+              },
+              manualProjection: (tx, ids) => {
+                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                return manualReports.projectionInTransaction(tx, ids);
+              },
+            }
+          : {}),
+      })
+    : undefined;
+  if (manualConfig) {
+    if (!trips || !catalogs) throw new Error("MANUAL_PREREQUISITES_REQUIRED");
+    manualReports = createManualReports(unit, manualConfig, { identity, catalogs, trips });
+  }
   const jobsQueue = createQueue(
     unit,
-    [...(messaging ? [messaging.handler] : []), ...(catalogs ? [catalogs.handler] : [])],
+    [
+      ...(messaging ? [messaging.handler] : []),
+      ...(catalogs ? [catalogs.handler] : []),
+      ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
+    ],
     [],
     undefined,
-    [...(!messaging ? ["mail.deliver"] : []), ...(!catalogs ? ["catalog.import"] : [])],
+    [
+      ...(!messaging ? ["mail.deliver"] : []),
+      ...(!catalogs ? ["catalog.import"] : []),
+      ...(!manualReports || !manualReports.config.storage
+        ? ["manual.evidence-delete", "manual.generation-delete"]
+        : []),
+    ],
   );
-  const trips = tripsConfig
-    ? createTrips(unit, tripsConfig, { identity, ...(catalogs ? { catalogs } : {}) })
-    : undefined;
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   return {
     identity,
+    ...(manualReports ? { manualReports } : {}),
     ...(telemetryConfig && trips && externalIdentities
       ? {
           telemetry: createTelemetry(unit, telemetryConfig, {

@@ -45,3 +45,6 @@ Cross-module FKs refer to stable IDs and use deliberate deletion behavior. Deact
 VTC-022 implements the [canonical trip/source foundation](../development/trips.md): permanent source ownership, immutable normalized revisions, conservative projection and authorized trip reads. Multiple sources can attach only through an explicit same-owner/game/version coordinator selection; reconciliation and contributions remain later workflows.
 
 VTC-023 [telemetry ingestion](../development/telemetry.md) owns tokens, safe issuance commands, registrations and shared persistent admission. It calls identity/external credential facades and the existing trip/source transaction facade; the source message remains the durable receipt. Optional identity invalidation is injected above both modules.
+
+
+VTC-025 now implements [manual reports and private evidence](../development/manual-reports.md) as an owning coordinator over identity/catalog/trips facades. Drafts create no trip; immutable submissions/revisions attach to one canonical trip; accepted edits become correction requests. VTC-029 still owns decisions and contribution recalculation.

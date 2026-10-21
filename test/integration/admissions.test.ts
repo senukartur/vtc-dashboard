@@ -49,9 +49,9 @@ import {
   identityAccessEvents,
 } from "../../apps/api/src/platform/outbox/events.ts";
 import {
-  SCHEMA_SETUP_TIMEOUT_MS,
   guardedSettings,
   reset,
+  SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
@@ -238,7 +238,7 @@ beforeAll(async () => {
   control = await diagnostic.phase("connection", () => testConnection());
   await diagnostic.phase("reset", () => reset(control));
   await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
-  unit = createUnitOfWork(guardedSettings());
+  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
   ({ identity, admissions, messaging } = harness());
   await identity.bootstrap({
     email: "admissions-director@example.invalid",
@@ -1031,12 +1031,39 @@ test("anonymous and unauthorized HTTP floods cannot charge staff quotas; current
       }
     }
     expect(await count("admissions_limits")).toBe(0);
-    const cookies = await Promise.all(
-      [0, 1].map(async () => {
-        const login = await identity.login("admissions-director@example.invalid", password);
-        return login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+    const logins = await Promise.allSettled(
+      [0, 1].map(async (ordinal) => {
+        const started = performance.now();
+        try {
+          const login = await identity.login("admissions-director@example.invalid", password);
+          console.log(
+            JSON.stringify({
+              event: "admission_quota_login",
+              ordinal,
+              durationMs: Math.round(performance.now() - started),
+              status: "fulfilled",
+            }),
+          );
+          return login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+        } catch (error) {
+          console.log(
+            JSON.stringify({
+              event: "admission_quota_login",
+              ordinal,
+              durationMs: Math.round(performance.now() - started),
+              status: "rejected",
+            }),
+          );
+          diagnostic.failure(error, performance.now() - started);
+          throw error;
+        }
       }),
     );
+    // Settle both concurrent operations before propagating any uncertain outcome.
+    const cookies = logins.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    });
     const directorActors = await Promise.all(
       cookies.map((cookie) => identity.authenticate(new Headers({ cookie }))),
     );

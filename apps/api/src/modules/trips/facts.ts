@@ -16,10 +16,12 @@ export function createFactRepository(unit: UnitOfWork) {
   return {
     async insert(tx: TxContext, tripId: string, f: NormalizedTripEvidence, adapterVersion: number) {
       function pin(value: Fact<PinnedEntity>) {
-        if (value.status === "unknown") return { entityId: null, factId: null };
-        if (value.value.catalogRevisionId !== f.catalogRevisionId)
-          throw new Error("SOURCE_FACT_CATALOG_MISMATCH");
-        return { entityId: value.value.entityId, factId: value.value.factRevisionId };
+        if (value.status === "unknown") return { entityId: null, factId: null, revisionId: null };
+        return {
+          entityId: value.value.entityId,
+          factId: value.value.factRevisionId,
+          revisionId: value.value.catalogRevisionId,
+        };
       }
       const origin = pin(f.origin),
         destination = pin(f.destination),
@@ -42,12 +44,16 @@ export function createFactRepository(unit: UnitOfWork) {
           endUtc: f.end.utc,
           endBasis: f.end.basis,
           endVerified: f.end.verifiedActual,
+          originCatalogRevisionId: origin.revisionId,
           originEntityId: origin.entityId,
           originFactId: origin.factId,
+          destinationCatalogRevisionId: destination.revisionId,
           destinationEntityId: destination.entityId,
           destinationFactId: destination.factId,
+          cargoCatalogRevisionId: cargo.revisionId,
           cargoEntityId: cargo.entityId,
           cargoFactId: cargo.factId,
+          adrCatalogRevisionId: adr.revisionId,
           adrEntityId: adr.entityId,
           adrFactId: adr.factId,
           cargoMassKg: quantity(f.cargoMassKg),
@@ -73,6 +79,7 @@ export function createFactRepository(unit: UnitOfWork) {
               const ref = pin(item);
               return {
                 tripFactId: f.factRevisionId,
+                sourceAdapterVersion: adapterVersion,
                 position,
                 catalogRevisionId: item.status === "known" ? item.value.catalogRevisionId : null,
                 entityId: ref.entityId,
@@ -111,7 +118,8 @@ export function createFactRepository(unit: UnitOfWork) {
       for (const row of rows) {
         const stored = row.stored,
           metadata = stored.evidence as NormalizedTripEvidence;
-        if (stored.adapterVersion !== 1) throw new Error("UNSUPPORTED_SOURCE_FACT_VERSION");
+        if (![1, 2].includes(stored.adapterVersion))
+          throw new Error("UNSUPPORTED_SOURCE_FACT_VERSION");
         if (!metadata || typeof metadata !== "object") throw new Error("SOURCE_PROVENANCE_MISSING");
         const unknown = <T>(meta: Fact<T>): Fact<T> => ({
           status: "unknown",
@@ -132,13 +140,11 @@ export function createFactRepository(unit: UnitOfWork) {
           entityId: string | null,
           factId: string | null,
           meta: Fact<PinnedEntity>,
+          revisionId: string | null = stored.catalogRevisionId,
         ): Fact<PinnedEntity> => {
           if (entityId === null) return unknown(meta);
-          if (!stored.catalogRevisionId || !factId) throw new Error("SOURCE_PIN_INCONSISTENT");
-          return known(
-            { entityId, factRevisionId: factId, catalogRevisionId: stored.catalogRevisionId },
-            meta,
-          );
+          if (!revisionId || !factId) throw new Error("SOURCE_PIN_INCONSISTENT");
+          return known({ entityId, factRevisionId: factId, catalogRevisionId: revisionId }, meta);
         };
         const quantity = (value: string | null, meta: Fact<string>): Fact<string> =>
           value === null ? unknown(meta) : known(decimal(value), meta);
@@ -183,14 +189,30 @@ export function createFactRepository(unit: UnitOfWork) {
             verifiedActual: stored.startVerified,
           },
           end: { utc: stored.endUtc, basis: stored.endBasis, verifiedActual: stored.endVerified },
-          origin: pin(stored.originEntityId, stored.originFactId, metadata.origin),
+          origin: pin(
+            stored.originEntityId,
+            stored.originFactId,
+            metadata.origin,
+            stored.originCatalogRevisionId ?? stored.catalogRevisionId,
+          ),
           destination: pin(
             stored.destinationEntityId,
             stored.destinationFactId,
             metadata.destination,
+            stored.destinationCatalogRevisionId ?? stored.catalogRevisionId,
           ),
-          cargo: pin(stored.cargoEntityId, stored.cargoFactId, metadata.cargo),
-          adrCategory: pin(stored.adrEntityId, stored.adrFactId, metadata.adrCategory),
+          cargo: pin(
+            stored.cargoEntityId,
+            stored.cargoFactId,
+            metadata.cargo,
+            stored.cargoCatalogRevisionId ?? stored.catalogRevisionId,
+          ),
+          adrCategory: pin(
+            stored.adrEntityId,
+            stored.adrFactId,
+            metadata.adrCategory,
+            stored.adrCatalogRevisionId ?? stored.catalogRevisionId,
+          ),
           cargoMassKg: quantity(stored.cargoMassKg, metadata.cargoMassKg),
           actualDistanceM: quantity(stored.actualDistanceM, metadata.actualDistanceM),
           measuredSegmentM: quantity(stored.measuredSegmentM, metadata.measuredSegmentM),

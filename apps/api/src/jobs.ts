@@ -2,6 +2,7 @@ import { createUnitOfWork } from "@vtc/db";
 import { cleanupAdmissions } from "./modules/admissions/service.js";
 import { cleanupCatalogs } from "./modules/catalogs/service.js";
 import { cleanupMail } from "./modules/messaging/service.js";
+import { manualCleanupPending } from "./modules/manual-reports/service.js";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
@@ -32,6 +33,9 @@ await ownedCli(async () => {
           config.admissions,
           config.externalIdentities,
           config.catalogs,
+          config.trips,
+          config.telemetry,
+          config.manualReports,
         )
       : undefined;
     const messaging = composed?.messaging;
@@ -47,9 +51,23 @@ await ownedCli(async () => {
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
     if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
+    const manualCleanup =
+      mode === "run"
+        ? ((await composed?.manualReports?.maintenance(abort.signal)) ??
+          ((await manualCleanupPending(unit)) ? "configuration_pending" : "complete"))
+        : "not_run";
+    if (manualCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
+      );
     const queue =
       composed?.jobsQueue ??
-      createQueue(unit, [], [], undefined, ["mail.deliver", "catalog.import"]);
+      createQueue(unit, [], [], undefined, [
+        "mail.deliver",
+        "catalog.import",
+        "manual.evidence-delete",
+        "manual.generation-delete",
+      ]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(
       JSON.stringify({
@@ -57,6 +75,7 @@ await ownedCli(async () => {
         mailMode: config.mail?.mode ?? "disabled",
         mailCleanup,
         admissionsCleanup,
+        manualCleanup,
         ...result,
       }),
     );
