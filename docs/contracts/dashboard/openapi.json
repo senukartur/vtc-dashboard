@@ -3030,12 +3030,33 @@
                   "$ref": "#/components/schemas/EnvelopeUploadPolicy"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/evidence": {
@@ -3057,7 +3078,13 @@
         "x-guards": [
           "configured_file_limits",
           "owner_private_staging",
-          "validate_content_before_ready"
+          "validate_content_before_ready",
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "evidence_deleting_retryable",
+          "bounded_stream_and_image_decode",
+          "exclusive_persistent_private_staging",
+          "finalize_before_ready_no_blob_io_under_db_locks"
         ],
         "responses": {
           "202": {
@@ -3068,7 +3095,45 @@
                   "$ref": "#/components/schemas/EnvelopeEvidence"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3088,7 +3153,8 @@
               }
             }
           }
-        }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/evidence/{evidenceId}": {
@@ -3108,7 +3174,8 @@
         "x-capability": "session",
         "x-guards": [
           "owner_or_authorized_trip_reviewer",
-          "not_company_trip_visibility"
+          "not_company_trip_visibility",
+          "unattached_upload_owner_only"
         ],
         "responses": {
           "200": {
@@ -3119,7 +3186,27 @@
                   "$ref": "#/components/schemas/EnvelopeEvidence"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3136,7 +3223,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/evidence/{evidenceId}/content": {
@@ -3156,7 +3244,10 @@
         "x-capability": "session",
         "x-guards": [
           "owner_or_authorized_trip_reviewer",
-          "private_stream_no_public_url"
+          "private_stream_no_public_url",
+          "unattached_upload_owner_only",
+          "revalidate_current_authority_and_generation",
+          "deleting_503_expired_410"
         ],
         "responses": {
           "200": {
@@ -3168,7 +3259,41 @@
                   "format": "binary"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              },
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Safe attachment disposition; originalName never becomes a filesystem path."
+              }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "410": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3185,7 +3310,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/trips": {
@@ -3400,7 +3526,10 @@
           "ready_owned_screenshots",
           "catalog_game_kind_revision_match",
           "no_trip_date",
-          "pending_human_review"
+          "pending_human_review",
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "evidence_deleting_retryable"
         ],
         "responses": {
           "201": {
@@ -3411,7 +3540,42 @@
                   "$ref": "#/components/schemas/EnvelopeTripPrivate"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3427,11 +3591,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualInput"
+                "$ref": "#/components/schemas/ManualResolvedInput"
               }
             }
           }
-        }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/trips/{tripId}/manual-revisions": {
@@ -3455,7 +3620,10 @@
           "pending_or_rejected_only",
           "catalog_game_kind_revision_match",
           "same_canonical_trip",
-          "immutable_revision_history"
+          "immutable_revision_history",
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "evidence_deleting_retryable"
         ],
         "responses": {
           "200": {
@@ -3473,8 +3641,44 @@
                   "type": "string"
                 },
                 "description": "Strong authoritative aggregate version, for the next command."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3503,11 +3707,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualInput"
+                "$ref": "#/components/schemas/ManualResolvedInput"
               }
             }
           }
-        }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       },
       "get": {
         "operationId": "listManualRevisions",
@@ -3537,7 +3742,27 @@
                   "$ref": "#/components/schemas/EnvelopeListManualRevision"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3560,7 +3785,8 @@
           {
             "$ref": "#/components/parameters/Cursor"
           }
-        ]
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/trips/{tripId}/review": {
@@ -3646,7 +3872,27 @@
                   "$ref": "#/components/schemas/EnvelopeManualRevision"
                 }
               }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3673,7 +3919,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/trips/{tripId}/proposals": {
@@ -3892,11 +4139,14 @@
         "x-guards": [
           "owner_only",
           "accepted_only",
-          "preserve_effective_decision"
+          "preserve_effective_decision",
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "evidence_deleting_retryable"
         ],
         "responses": {
           "201": {
-            "description": "Committed result; see semantic preconditions.",
+            "description": "Committed correction request. CommandResult.id identifies this request, never a proposal; version and ETag identify the updated trip. Discover/read through correction-request GETs. Accepted result is preserved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3910,8 +4160,44 @@
                   "type": "string"
                 },
                 "description": "Strong authoritative aggregate version, for the next command."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3944,7 +4230,83 @@
               }
             }
           }
-        }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      },
+      "get": {
+        "operationId": "listTripCorrectionRequests",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "listTripCorrectionRequests",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListManualCorrectionRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "tripId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
     },
     "/api/v1/trips/{tripId}/resolution-proposals": {
@@ -7033,6 +7395,1177 @@
           }
         ]
       }
+    },
+    "/api/v1/me/manual-drafts": {
+      "get": {
+        "operationId": "listMyManualDrafts",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "listMyManualDrafts",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "owner_only",
+          "no_staff_impersonation"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListManualDraft"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      },
+      "post": {
+        "operationId": "createManualDraft",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "createManualDraft",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "no_staff_impersonation",
+          "evidence_deleting_retryable"
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualDraftInput"
+              }
+            }
+          }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/me/manual-drafts/{draftId}": {
+      "get": {
+        "operationId": "getMyManualDraft",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "getMyManualDraft",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "owner_only",
+          "no_staff_impersonation"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualDraft"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      },
+      "put": {
+        "operationId": "replaceManualDraft",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "replaceManualDraft",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "no_staff_impersonation",
+          "editing_only",
+          "replace_partial_fields_not_patch",
+          "evidence_deleting_retryable"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualDraftInput"
+              }
+            }
+          }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/me/manual-drafts/{draftId}/submission": {
+      "post": {
+        "operationId": "submitManualDraft",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "submitManualDraft",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "no_staff_impersonation",
+          "ready_owned_evidence_generation",
+          "catalog_game_kind_published_pin",
+          "unresolved_requires_review",
+          "same_owner_game_telemetry_target_current_version",
+          "no_actual_times_or_credit",
+          "durable_same_transaction",
+          "evidence_deleting_retryable",
+          "draft_version_if_match",
+          "freeze_draft_once"
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualDraftSubmission"
+              }
+            }
+          }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/me/manual-reports": {
+      "get": {
+        "operationId": "listMyManualReports",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "listMyManualReports",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_only",
+          "includes_legacy_and_extended_reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListManualReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/manual-reports": {
+      "post": {
+        "operationId": "submitManualReport",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "submitManualReport",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "no_staff_impersonation",
+          "ready_owned_evidence_generation",
+          "catalog_game_kind_published_pin",
+          "unresolved_requires_review",
+          "same_owner_game_telemetry_target_current_version",
+          "no_actual_times_or_credit",
+          "durable_same_transaction",
+          "evidence_deleting_retryable"
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualReportInput"
+              }
+            }
+          }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/trips/{tripId}/manual-reports": {
+      "get": {
+        "operationId": "listTripManualReports",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "listTripManualReports",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility",
+          "includes_all_attached_reports"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListManualReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "tripId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/manual-reports/{reportId}": {
+      "get": {
+        "operationId": "getManualReport",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "getManualReport",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualReport"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/manual-reports/{reportId}/revisions": {
+      "get": {
+        "operationId": "listManualReportRevisions",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "listManualReportRevisions",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility",
+          "all_legacy_and_extended_immutable_revisions"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListManualRevision"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      },
+      "post": {
+        "operationId": "reviseManualReport",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "reviseManualReport",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "no_staff_impersonation",
+          "ready_owned_evidence_generation",
+          "catalog_game_kind_published_pin",
+          "unresolved_requires_review",
+          "same_owner_game_telemetry_target_current_version",
+          "no_actual_times_or_credit",
+          "durable_same_transaction",
+          "evidence_deleting_retryable",
+          "pending_or_rejected_only",
+          "same_report_and_canonical_trip",
+          "report_if_match_and_expected_trip_version"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualReportRevisionInput"
+              }
+            }
+          }
+        },
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/manual-reports/{reportId}/revisions/{revisionId}": {
+      "get": {
+        "operationId": "getManualReportRevision",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "getManualReportRevision",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility",
+          "revision_belongs_to_report"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualRevision"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
+    },
+    "/api/v1/trips/{tripId}/correction-requests/{requestId}": {
+      "get": {
+        "operationId": "getTripCorrectionRequest",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "getTripCorrectionRequest",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-025",
+        "x-capability": "session",
+        "x-guards": [
+          "current_active_membership",
+          "owner_or_current_authorized_trip_reviewer",
+          "private_resource_404",
+          "not_company_trip_visibility",
+          "request_belongs_to_trip"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed private result; see manual report contract semantics.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong authoritative report or draft version; trip-scoped correction reads use the current trip version."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeManualCorrectionRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "tripId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+      }
     }
   },
   "components": {
@@ -9255,7 +10788,8 @@
           "byteLength",
           "originalName"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed."
       },
       "UploadPolicy": {
         "type": "object",
@@ -9308,7 +10842,8 @@
           "allowedMimeTypes",
           "policyRevision"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Operator technical policy, not company qualification limits or measured capacity. Disabled has null bounds/empty allowlist. Enabled requires configured positive bounds and a nonempty tested image allowlist. MIME/extension alone is insufficient; bounded structural decode, pixel/resource/stream limits and durable private storage are required before ready. See manual-reports.md."
       },
       "ManualInput": {
         "type": "object",
@@ -9781,7 +11316,7 @@
           "manualRevision": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ManualRevision"
+                "$ref": "#/components/schemas/ManualRevisionRead"
               },
               {
                 "type": "null"
@@ -13162,7 +14697,7 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ManualRevision"
+              "$ref": "#/components/schemas/ManualRevisionRead"
             }
           },
           "nextCursor": {
@@ -13204,7 +14739,7 @@
         "type": "object",
         "properties": {
           "data": {
-            "$ref": "#/components/schemas/ManualRevision"
+            "$ref": "#/components/schemas/ManualRevisionRead"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -14218,6 +15753,957 @@
           "deliveryId"
         ],
         "additionalProperties": false
+      },
+      "ManualResolvedInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "catalogRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "originCityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "destinationCityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "cargoId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "cargoMassKg": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+            "maxLength": 64
+          },
+          "trailerTypeId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "actualDistanceM": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+            "maxLength": 64
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "catalogRevisionId",
+          "originCityId",
+          "destinationCityId",
+          "cargoId",
+          "cargoMassKg",
+          "trailerTypeId",
+          "actualDistanceM",
+          "evidenceIds"
+        ],
+        "additionalProperties": false,
+        "description": "Backward-compatible resolved write input. Omitted event/comment normalize to null in the unchanged legacy ManualRevision readback."
+      },
+      "ManualResolvedSelection": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "const": "resolved"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "catalogRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "status",
+          "entityId",
+          "catalogRevisionId"
+        ],
+        "additionalProperties": false
+      },
+      "ManualUnresolvedSelection": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "const": "unresolved"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "not_found",
+              "ambiguous",
+              "not_listed"
+            ]
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "label",
+          "reasonCode",
+          "locale",
+          "context"
+        ],
+        "additionalProperties": false
+      },
+      "ManualCatalogSelection": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ManualResolvedSelection"
+          },
+          {
+            "$ref": "#/components/schemas/ManualUnresolvedSelection"
+          }
+        ],
+        "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin."
+      },
+      "ManualSubmissionFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "origin",
+          "destination",
+          "cargo",
+          "cargoMassKg",
+          "trailerType",
+          "actualDistanceM",
+          "evidenceIds"
+        ],
+        "additionalProperties": false,
+        "description": "Complete undated manual submission. Optional event/comment accept omission or null; persisted immutable readback normalizes omissions to explicit null while preserving original selections. Exact quantities are validated against persistence precision without rounding. No submission implies acceptance or progress credit."
+      },
+      "ManualDraftFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 0,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "ManualTelemetryTarget": {
+        "type": "object",
+        "properties": {
+          "tripId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "tripId",
+          "expectedVersion"
+        ],
+        "additionalProperties": false,
+        "description": "Explicit same-owner/game canonical target with actual telemetry source, validated under current trip locks. No heuristic matching. expectedVersion is the authoritative trip version, not the report/draft version."
+      },
+      "ManualDraftInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualDraftFields"
+          },
+          "targetTrip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTelemetryTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "ManualDraft": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "editing",
+              "submitted"
+            ]
+          },
+          "fields": {
+            "$ref": "#/components/schemas/ManualDraftFields"
+          },
+          "targetTrip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTelemetryTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "submittedReportId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "state",
+          "fields",
+          "targetTrip",
+          "createdAt",
+          "updatedAt",
+          "submittedReportId"
+        ],
+        "additionalProperties": false,
+        "description": "Owner-only durable draft. No source/canonical trip exists before submission; a successful submission freezes this draft and retains a discoverable submittedReportId."
+      },
+      "ManualDraftSubmission": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualSubmissionFields"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false,
+        "description": "Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target."
+      },
+      "ManualReportInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualSubmissionFields"
+          },
+          "targetTrip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTelemetryTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "ManualReportRevisionInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualSubmissionFields"
+          },
+          "expectedTripVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "fields",
+          "expectedTripVersion"
+        ],
+        "additionalProperties": false
+      },
+      "ManualReportRevision": {
+        "type": "object",
+        "properties": {
+          "representation": {
+            "const": "extended"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/ManualReportFields"
+          }
+        },
+        "required": [
+          "representation",
+          "id",
+          "reportId",
+          "number",
+          "submittedAt",
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "ManualRevisionRead": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ManualRevision"
+          },
+          {
+            "$ref": "#/components/schemas/ManualReportRevision"
+          }
+        ],
+        "description": "Coordinated VTC-025 response migration: unchanged legacy resolved revision or complete extended revision. Never omit an unresolved revision or invent canonical IDs."
+      },
+      "ManualReport": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "tripId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "tripVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "currentRevision": {
+            "$ref": "#/components/schemas/ManualRevisionRead"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "tripId",
+          "tripVersion",
+          "currentRevision",
+          "createdAt"
+        ],
+        "additionalProperties": false,
+        "description": "Private permanent report identity and current immutable revision. version is the report ETag; tripVersion is the separate authoritative canonical trip version. Effective decisions remain trip-owned."
+      },
+      "ManualCorrectionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "tripId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "baseTripVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "baseRevisionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "resolved",
+              "declined"
+            ]
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManualCorrectionRequestHistory"
+            },
+            "minItems": 0
+          }
+        },
+        "required": [
+          "id",
+          "tripId",
+          "baseTripVersion",
+          "baseRevisionId",
+          "reason",
+          "requestedAt",
+          "status",
+          "history"
+        ],
+        "additionalProperties": false,
+        "description": "Immutable author request and retained status history; baseRevisionId is null for a telemetry-only accepted trip. Does not represent a VTC-029 proposal, staff application or recalculation. Current accepted result remains effective."
+      },
+      "ManualCorrectionRequestHistory": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "resolved",
+              "declined"
+            ]
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "recordedAt",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeManualDraft": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualDraft"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ListManualDraft": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManualDraft"
+            },
+            "minItems": 0
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListManualDraft": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListManualDraft"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeManualReport": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualReport"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ListManualReport": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManualReport"
+            },
+            "minItems": 0
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListManualReport": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListManualReport"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeManualCorrectionRequest": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualCorrectionRequest"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ListManualCorrectionRequest": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManualCorrectionRequest"
+            },
+            "minItems": 0
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListManualCorrectionRequest": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListManualCorrectionRequest"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ManualReportFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "origin",
+          "destination",
+          "cargo",
+          "cargoMassKg",
+          "trailerType",
+          "actualDistanceM",
+          "evidenceIds",
+          "eventId",
+          "comment"
+        ],
+        "additionalProperties": false,
+        "description": "Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs."
       }
     },
     "parameters": {
