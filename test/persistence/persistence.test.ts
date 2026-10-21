@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -32,6 +33,8 @@ import {
 import { eq, type SQL, sql } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import type { RowDataPacket } from "mysql2/promise";
+import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import {
   admissionsPriorFolder,
@@ -464,8 +467,8 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
     },
   );
   publishedUpgrade(
-    "qualification upgrade preserves exact ten-migration prefix and onboarding evidence without invented inactive history",
-    async ({ settings, connection }) => {
+    "qualification upgrade preserves onboarding evidence and fences inactive or returned-active legacy history",
+    async ({ settings, connection, unit }) => {
       await reset(connection);
       const folder = await qualificationsPriorFolder();
       try {
@@ -475,11 +478,14 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         );
         const activeId = newId(),
           inactiveId = newId(),
+          returnedId = newId(),
           activeAssignment = newId(),
-          inactiveAssignment = newId();
+          inactiveAssignment = newId(),
+          returnedAssignment = newId();
         for (const [id, status] of [
           [activeId, "active"],
           [inactiveId, "inactive"],
+          [returnedId, "active"],
         ] as const) {
           await connection.execute(
             "INSERT INTO identity_users(id,name,email,email_verified,created_at,updated_at) VALUES(?, 'Fictional upgrade member', ?, 0, UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))",
@@ -493,11 +499,42 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         for (const [id, userId] of [
           [activeAssignment, activeId],
           [inactiveAssignment, inactiveId],
+          [returnedAssignment, returnedId],
         ] as const)
           await connection.execute(
             "INSERT INTO qualification_initial_assignments(id,user_id,game,level,assigned_at) VALUES(?,?,'ets2','trainee','2026-01-02 03:04:05.678')",
             [id, userId],
           );
+        // This is the pre-0010 identity composition: no qualification lifecycle port existed.
+        const identity = createIdentity(
+          unit,
+          {
+            secret: randomBytes(32).toString("hex"),
+            origin: "http://127.0.0.1:4173",
+            production: false,
+          },
+          { accessEvents: identityAccessEvents(unit) },
+        );
+        const password = "Fictional-upgrade-passphrase-42";
+        await identity.bootstrap({
+          email: "upgrade-director@example.invalid",
+          name: "Fictional Upgrade Director",
+          password,
+        });
+        const login = await identity.login("upgrade-director@example.invalid", password);
+        const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
+        const director = await identity.authenticate(new Headers({ cookie }));
+        await identity.administer(director, returnedId, newId(), 1, { kind: "deactivate" });
+        await identity.administer(director, returnedId, newId(), 2, {
+          kind: "reinstate",
+          roles: ["trainee"],
+        });
+        const [returned] = await connection.query<RowDataPacket[]>(
+          "SELECT status,identity_epoch FROM identity_memberships WHERE user_id=?",
+          [returnedId],
+        );
+        assert.equal(returned[0]?.status, "active");
+        assert.equal(Number(returned[0]?.identity_epoch), 3);
         const [original] = await connection.query<RowDataPacket[]>(
           "SELECT HEX(id) id,HEX(user_id) userId,game,level,CAST(assigned_at AS CHAR) assignedAt FROM qualification_initial_assignments ORDER BY id",
         );
@@ -519,9 +556,17 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         assert.equal(assignments[0]?.assignedAt, "2026-01-02 03:04:05.678");
         assert.equal(assignments[0]?.ended_at, null);
         const [states] = await connection.query<RowDataPacket[]>(
-          "SELECT COUNT(*) n FROM qualification_states",
+          "SELECT CAST(user_id AS CHAR) userId,CAST(assignment_id AS CHAR) assignmentId FROM qualification_states",
         );
-        assert.equal(Number(states[0]?.n), 1);
+        assert.deepEqual(
+          states.map((row) => [row.userId, row.assignmentId]),
+          [[activeId, activeAssignment]],
+        );
+        const [unsupported] = await connection.query<RowDataPacket[]>(
+          "SELECT COUNT(*) n FROM qualification_assignments WHERE user_id IN (?,?)",
+          [inactiveId, returnedId],
+        );
+        assert.equal(Number(unsupported[0]?.n), 0);
         const [rules] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) n FROM qualification_rule_versions",
         );

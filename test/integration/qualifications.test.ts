@@ -1163,3 +1163,68 @@ test("configuration audit traces changed level separately from actor and publica
   expect((await service.levels(director, "ets2")).items[0]?.version).toBe(3);
   expect((await service.rules(director, levelId)).items).toHaveLength(1);
 });
+
+test("promotion uses one confirmation instant and immutable rule when a stricter scheduled rule activates during execution", async () => {
+  await publish("ets2", 0, 1, "100");
+  const confirmedAt = iso(),
+    boundary = instant + 1000;
+  await publish("ets2", 0, 10, "1000", { effectiveAt: new Date(boundary).toISOString() });
+  const a = await fixture(),
+    b = await fixture({ ownerId: deputy.userId });
+  await replace([a.change, b.change]);
+  const initial = await progress();
+  let calls = 0;
+  // The former implementation read assignment/rule/computedAt before reselecting a stricter rule.
+  const crossing = createQualifications(
+    unit,
+    config,
+    { identity, trips: tripService },
+    () => new Date(++calls <= 3 ? instant : boundary),
+  );
+  const result = await crossing.promote(director, owner.userId, newId(), initial.version, {
+    game: "ets2",
+    assignmentId: initial.data.assignment.id,
+    targetLevelId: structuralLevels.ets2[1],
+    reason: "Fictional clock-boundary confirmation",
+  });
+  expect(calls).toBeGreaterThan(3);
+  const [proof] = await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions));
+  if (!proof) throw new Error("SYNTHETIC_PROMOTION_PROOF_MISSING");
+  expect(proof).toMatchObject({
+    requiredTrips: 1,
+    requiredDistanceM: "100.000000000000000000",
+    acceptedTrips: 1,
+    actualDistanceM: "100.000000000000000000",
+    confirmedAt,
+  });
+  expect(result).toMatchObject({ data: { assignedAt: confirmedAt } });
+  expect(await service.progress(director, owner.userId, "ets2", "admin")).not.toHaveProperty(
+    "rule",
+  );
+  const [rule] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(qualificationRules)
+      .where(eq(qualificationRules.id, proof.ruleVersionId)),
+  );
+  expect(rule?.effectiveAt).toBe(confirmedAt);
+  const later = createQualifications(
+    unit,
+    config,
+    { identity, trips: tripService },
+    () => new Date(boundary),
+  );
+  const pending = await progress("ets2", deputy);
+  await expect(
+    later.promote(director, deputy.userId, newId(), pending.version, {
+      game: "ets2",
+      assignmentId: pending.data.assignment.id,
+      targetLevelId: structuralLevels.ets2[1],
+      reason: "Fictional after-boundary confirmation",
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  expect(
+    await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions)),
+  ).toHaveLength(1);
+});

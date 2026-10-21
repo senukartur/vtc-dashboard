@@ -322,7 +322,13 @@ export function createQualifications(
         );
     }
   }
-  async function progress(tx: TxContext, userId: string, selectedGame: Game, privateRead: boolean) {
+  async function progress(
+    tx: TxContext,
+    userId: string,
+    selectedGame: Game,
+    privateRead: boolean,
+    instant = at(),
+  ) {
     const current = await state(tx, userId, selectedGame);
     if (!current.assignmentId) throw identityError(409, "SETUP_REQUIRED");
     const [assignment] = await c(tx)
@@ -330,10 +336,10 @@ export function createQualifications(
       .from(qualificationAssignments)
       .where(eq(qualificationAssignments.id, current.assignmentId))
       .for("update");
-    if (!assignment || assignment.endedAt !== null || assignment.assignedAt > at())
+    if (!assignment || assignment.endedAt !== null || assignment.assignedAt > instant)
       throw identityError(409, "SETUP_REQUIRED");
     const selected = await level(tx, assignment.levelId),
-      rule = await ruleAt(tx, assignment.levelId, at()),
+      rule = await ruleAt(tx, assignment.levelId, instant),
       totals = await ports.trips.contributions.totals(tx, assignment.id);
     const requirements = {
       requiredTrips: rule?.requiredTrips ?? null,
@@ -350,11 +356,11 @@ export function createQualifications(
       actualDistanceM: totals.completedDistanceM,
       ...requirements,
       eligibleForConfirmation: eligible,
-      computedAt: at(),
+      computedAt: instant,
       projectionVersion: assignment.revision,
       projectionPending: false,
     };
-    if (!privateRead) return { data, version: current.version };
+    if (!privateRead) return { data, version: current.version, rule };
     const reviews = await c(tx)
       .select({ required: promotionReviews.reviewRequired })
       .from(promotionReviews)
@@ -382,6 +388,7 @@ export function createQualifications(
         reviewReasonCodes: reviewRequired ? ["promotion_requirements_no_longer_met"] : [],
       } as S["Progress"],
       version: current.version,
+      rule,
     };
   }
   async function writeAssignment(
@@ -741,7 +748,8 @@ export function createQualifications(
               ? "trips.submit_own"
               : "company.read",
         );
-        return progress(tx, userId, selectedGame, scope !== "public");
+        const { data, version } = await progress(tx, userId, selectedGame, scope !== "public");
+        return { data, version };
       });
     },
     async history(
@@ -930,8 +938,10 @@ export function createQualifications(
               levelCodes.indexOf(target.code) !== levelCodes.indexOf(source.code) + 1
             )
               throw identityError(409);
-            const currentProgress = await progress(tx, userId, input.game, true),
-              rule = await ruleAt(tx, source.id, at());
+            // One confirmation instant selects the immutable rule used by evaluation and proof.
+            const confirmedAt = at(),
+              currentProgress = await progress(tx, userId, input.game, true, confirmedAt),
+              rule = currentProgress.rule;
             if (
               !currentProgress.data.eligibleForConfirmation ||
               !rule ||
@@ -946,7 +956,7 @@ export function createQualifications(
               input.game,
               target.id,
               "promotion",
-              at(),
+              confirmedAt,
               null,
               input.reason,
             );
@@ -960,7 +970,7 @@ export function createQualifications(
               acceptedTrips: currentProgress.data.acceptedTrips,
               actualDistanceM: currentProgress.data.actualDistanceM,
               periodRevision: currentProgress.data.projectionVersion,
-              confirmedAt: at(),
+              confirmedAt,
               actorId: actor.userId,
               reason: input.reason,
             });

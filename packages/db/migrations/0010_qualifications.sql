@@ -140,12 +140,14 @@ INSERT INTO qualification_levels (id,game,code,name,version) VALUES
 ('02800000-0000-4000-8000-000000000007','ats','driver_ii','Driver II',1),
 ('02800000-0000-4000-8000-000000000008','ats','driver_i','Driver I',1);
 --> statement-breakpoint
--- Preserve exact onboarding identity/time only where membership is currently active.
--- Inactive legacy evidence has no known departure instant and remains unresolved.
+-- Membership identity_epoch starts at 1 and only increases; departure and return
+-- each increment it. Active epoch 1 therefore fences uninterrupted legacy membership.
+-- Higher epochs (also changed by identity operations) are conservatively unresolved;
+-- retained onboarding evidence alone cannot establish departure or continuity.
 INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,ended_at,revision,purpose,actor_id,reason)
 SELECT q.id,q.user_id,q.game,l.id,q.assigned_at,NULL,1,'initial',NULL,'Preserved admission initial assignment'
 FROM qualification_initial_assignments q
-JOIN identity_memberships m ON m.user_id=q.user_id AND m.status='active'
+JOIN identity_memberships m ON m.user_id=q.user_id AND m.status='active' AND m.identity_epoch=1
 JOIN qualification_levels l ON l.game=q.game AND l.code='trainee';
 --> statement-breakpoint
 INSERT INTO qualification_states (user_id,game,assignment_id,version)
