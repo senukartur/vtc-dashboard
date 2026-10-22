@@ -28,8 +28,12 @@ export function validateReconciliationConfig(config: ReconciliationConfig) {
   )
     throw new Error("INVALID_RECONCILIATION_RULE");
 }
+export const ruleSnapshot = (rule: MatchingRule | undefined) => ({
+  matcher: "canonical-evidence/v1",
+  rule: rule ?? null,
+});
 export const ruleIdentity = (rule: MatchingRule | undefined) =>
-  contentHash(canonicalJson({ matcher: "canonical-evidence/v1", rule: rule ?? null }));
+  contentHash(canonicalJson(ruleSnapshot(rule)));
 function scaled(value: string) {
   const [whole = "0", fraction = ""] = decimal(value).split(".");
   return BigInt(whole) * 10n ** 18n + BigInt(fraction.padEnd(18, "0"));

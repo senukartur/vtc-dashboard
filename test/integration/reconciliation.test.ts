@@ -36,9 +36,15 @@ import {
   type Qualifications,
 } from "../../apps/api/src/modules/qualifications/service.ts";
 import {
+  type ReconciliationConfig,
+  ruleIdentity,
+  ruleSnapshot,
+} from "../../apps/api/src/modules/reconciliation/matcher.ts";
+import {
   createReconciliation,
   type Reconciliation,
 } from "../../apps/api/src/modules/reconciliation/service.ts";
+import { decimal } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import { retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
@@ -346,7 +352,7 @@ async function corrections() {
   );
   return Number(rows[0]?.n);
 }
-test("production composition invokes matching in telemetry and completed manual transactions without an outbox subscription", async () => {
+function productionComposition(reconciliationConfig: ReconciliationConfig = config) {
   const composed = composeIdentity(
     unit,
     identityConfig,
@@ -359,10 +365,14 @@ test("production composition invokes matching in telemetry and completed manual 
     manualConfig,
     qualConfig,
     undefined,
-    config,
+    reconciliationConfig,
   );
-  if (!composed.trips || !composed.manualReports || !composed.reconciliation)
-    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const { trips, manualReports, reconciliation } = composed;
+  if (!trips || !manualReports || !reconciliation) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  return { trips, manualReports, reconciliation };
+}
+test("production composition invokes matching in telemetry and completed manual transactions without an outbox subscription", async () => {
+  const composed = productionComposition();
   const t = await receive(payload(), owner, composed.trips),
     r = await report(owner, composed.manualReports);
   const candidates = await composed.reconciliation.list(director);
@@ -379,6 +389,184 @@ test("production composition invokes matching in telemetry and completed manual 
   );
   expect(facts[0]?.evidence.factIds).toHaveLength(2);
 });
+test("production reconciliation advances an exact source from started to completed with cumulative fuel", async () => {
+  const composed = productionComposition(),
+    start = payload("started"),
+    completed = payload();
+  completed.source = structuredClone(start.source);
+  completed.snapshot.start = structuredClone(start.snapshot.start);
+  const first = await receive(start, owner, composed.trips),
+    before = await state(first.tripId),
+    terminal = await receive(completed, owner, composed.trips),
+    after = await state(first.tripId);
+  expect(terminal.tripId).toBe(first.tripId);
+  expect(after).toMatchObject({
+    outcome: "delivered",
+    recording: "complete",
+    actualStart: new Date(start.snapshot.start.utcMs as number).toISOString(),
+    actualEnd: new Date(completed.snapshot.end?.utcMs as number).toISOString(),
+    reportingAt: new Date(completed.snapshot.end?.utcMs as number).toISOString(),
+    reviewHold: false,
+  });
+  expect(decimal(after?.actualDistanceM as string)).toBe("123400");
+  expect(after?.currentFactId).not.toBe(before?.currentFactId);
+  expect(after?.reviewReasons).not.toContain("quality_supported_conflict");
+  const original = await unit.run((tx) =>
+      composed.trips.sourceEvidenceInTransaction(tx, first.sourceRecordId),
+    ),
+    selected = await unit.run((tx) =>
+      composed.trips.sourceEvidenceInTransaction(tx, terminal.sourceRecordId),
+    );
+  expect(original?.fuelUsedL).toMatchObject({ status: "known", value: "0" });
+  expect(selected?.fuelUsedL).toMatchObject({ status: "known", value: "38.5" });
+  expect((await receive(completed, owner, composed.trips)).duplicate).toBe(true);
+  expect(await state(first.tripId)).toEqual(after);
+});
+
+test("production reconciliation advances open cumulative quantities, ignores stale revisions and selects one completed snapshot", async () => {
+  const composed = productionComposition(),
+    start = payload("started"),
+    refresh = structuredClone(start);
+  refresh.eventId = newId();
+  refresh.revision = 3;
+  if (refresh.snapshot.fuelUsed.available) refresh.snapshot.fuelUsed.value = 5.25;
+  if (refresh.snapshot.observedDistance.available) refresh.snapshot.observedDistance.value = 1500;
+  refresh.snapshot.cargoDamage = structuredClone(payload().snapshot.cargoDamage);
+  if (refresh.snapshot.cargoDamage.available) refresh.snapshot.cargoDamage.value = 0.01;
+  const first = await receive(start, owner, composed.trips),
+    updated = await receive(refresh, owner, composed.trips),
+    open = await state(first.tripId);
+  expect(open).toMatchObject({ outcome: "open", actualDistanceM: null, reviewHold: false });
+  const openFact = await unit.run((tx) =>
+    composed.trips.sourceEvidenceInTransaction(tx, updated.sourceRecordId),
+  );
+  expect(open?.currentFactId).toBe(openFact?.factRevisionId);
+  expect(openFact?.fuelUsedL).toMatchObject({ status: "known", value: "5.25" });
+  expect(openFact?.measuredSegmentM).toMatchObject({ status: "known", value: "1500" });
+  expect(openFact?.cargoDamageFraction).toMatchObject({ status: "known", value: "0.01" });
+  const stale = structuredClone(start);
+  stale.eventId = newId();
+  stale.revision = 2;
+  await receive(stale, owner, composed.trips);
+  expect(await state(first.tripId)).toEqual(open);
+  const completed = payload();
+  completed.source = structuredClone(start.source);
+  completed.snapshot.start = structuredClone(start.snapshot.start);
+  completed.revision = 4;
+  if (completed.snapshot.cargoDamage.available) completed.snapshot.cargoDamage.value = 0.02;
+  const terminal = await receive(completed, owner, composed.trips),
+    terminalFact = await unit.run((tx) =>
+      composed.trips.sourceEvidenceInTransaction(tx, terminal.sourceRecordId),
+    );
+  expect(await state(first.tripId)).toMatchObject({
+    currentFactId: terminalFact?.factRevisionId,
+    outcome: "delivered",
+    reviewHold: false,
+  });
+  expect(terminalFact?.fuelUsedL).toMatchObject({ status: "known", value: "38.5" });
+  expect(terminalFact?.actualDistanceM).toMatchObject({ status: "known", value: "123400" });
+  expect(terminalFact?.cargoDamageFraction).toMatchObject({ status: "known", value: "0.02" });
+  expect(await corrections()).toBe(0);
+});
+
+test.each([
+  "independent_source",
+  "changed_start",
+  "unknown_fuel",
+  "terminal_metric",
+  "accepted",
+] as const)("production source progression preserves the %s guard", async (scenario) => {
+  const composed = productionComposition(),
+    start = payload(
+      scenario === "accepted" || scenario === "terminal_metric" ? "completed" : "started",
+    ),
+    first = await receive(start, owner, composed.trips);
+  if (scenario === "accepted") await accepted(first.tripId);
+  const before = await state(first.tripId),
+    next = structuredClone(start);
+  if (!before) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+  next.eventId = newId();
+  next.revision++;
+  if (next.snapshot.fuelUsed.available) next.snapshot.fuelUsed.value = 41;
+  if (scenario === "independent_source") next.source = payload().source;
+  if (scenario === "changed_start" && next.snapshot.start.utcMs !== null)
+    next.snapshot.start.utcMs += 1000;
+  if (scenario === "unknown_fuel")
+    next.snapshot.fuelUsed = {
+      available: false,
+      reason: "not-observed",
+      unit: "L",
+    } as typeof next.snapshot.fuelUsed;
+  await retryTransaction(unit, (tx) =>
+    composed.trips.storeInTransaction(tx, "ets2telemetry", next, {
+      ownerUserId: owner.userId,
+      connection: { state: "unknown", referenceId: null },
+      ...(scenario === "independent_source"
+        ? { canonical: { tripId: first.tripId, expectedVersion: before.version } }
+        : {}),
+    }),
+  );
+  const after = await state(first.tripId);
+  expect(after).toMatchObject({
+    currentFactId: before.currentFactId,
+    outcome: before.outcome,
+    actualStart: before.actualStart,
+    actualEnd: before.actualEnd,
+    actualDistanceM: before.actualDistanceM,
+    reportingAt: before.reportingAt,
+    decision: before.decision,
+    reviewHold: true,
+  });
+  expect(after?.reviewReasons).toContain(
+    scenario === "changed_start"
+      ? "start_time_conflict"
+      : scenario === "unknown_fuel"
+        ? "quality_cannot_replace_supported_snapshot"
+        : "quality_supported_conflict",
+  );
+  if (scenario === "accepted") {
+    expect(after?.correctionPending).toBe(true);
+    expect(after?.reviewReasons).toContain("confirmed_facts_require_review");
+  }
+});
+
+test("production telemetry and manual ingestion persist an unconfigured JSON rule and replay exactly with all optional matching settings omitted", async () => {
+  const composed = productionComposition({ key: config.key }),
+    p = payload(),
+    t = await receive(p, owner, composed.trips),
+    key = newId(),
+    input = { fields: fields(await image()) },
+    r = await composed.manualReports.submitReport(owner, key, input),
+    candidates = await composed.reconciliation.list(director);
+  expect(candidates.items).toHaveLength(1);
+  expect(candidates.items[0]?.reasonCodes).toEqual(
+    expect.arrayContaining(["matching_rule_unconfigured", "manual_actual_time_unknown"]),
+  );
+  expect(await state(t.tripId)).toMatchObject({ aliasOf: null });
+  expect(await state(r.tripId)).toMatchObject({ aliasOf: null, decision: "pending_review" });
+  const [rules] = await control.query<RowDataPacket[]>(
+    "SELECT HEX(hash) hash,version,config,config IS NULL is_sql_null FROM reconciliation_rules",
+  );
+  expect(rules).toHaveLength(1);
+  expect(rules[0]).toMatchObject({
+    version: null,
+    config: ruleSnapshot(undefined),
+    is_sql_null: 0,
+  });
+  expect(String(rules[0]?.hash).toLowerCase()).toBe(ruleIdentity(undefined).toString("hex"));
+  const counts = async () => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT (SELECT COUNT(*) FROM source_messages) messages,(SELECT COUNT(*) FROM trip_facts) facts,(SELECT COUNT(*) FROM outbox_events) events,(SELECT COUNT(*) FROM reconciliation_rules) rules,(SELECT COUNT(*) FROM reconciliation_candidates) candidates,(SELECT COUNT(*) FROM manual_revisions) revisions",
+    );
+    return rows[0];
+  };
+  const before = await counts();
+  expect((await receive(p, owner, composed.trips)).duplicate).toBe(true);
+  expect(await composed.manualReports.submitReport(owner, key, input)).toEqual(r);
+  expect(await counts()).toEqual(before);
+  expect(await corrections()).toBe(0);
+});
+
 test("delayed manual report and repeated/overlapping routes retain review candidates; distinct same-provider identities never auto-link", async () => {
   const a = await receive(),
     b = await receive();

@@ -1,5 +1,6 @@
 import { canonicalJson } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence as Evidence } from "../sources/contracts/evidence.js";
+
 const fields = [
   "origin",
   "destination",
@@ -34,7 +35,11 @@ function value(f: Evidence, key: string): unknown {
   const v = f[key as (typeof fields)[number]];
   return v?.status === "known" ? (typeof v.value === "object" ? v.value.entityId : v.value) : true;
 }
-export function selectQuality(facts: readonly Evidence[], preferredId?: string | null) {
+export function selectQuality(
+  facts: readonly Evidence[],
+  preferredId?: string | null,
+  progression?: { fromFactId: string; toFactId: string },
+) {
   const ordered = [...facts].sort((a, b) => a.factRevisionId.localeCompare(b.factRevisionId));
   let selected = ordered.find((f) => f.factRevisionId === preferredId) ?? ordered[0];
   const reasons = new Set<string>();
@@ -42,9 +47,22 @@ export function selectQuality(facts: readonly Evidence[], preferredId?: string |
     if (!selected || next === selected) continue;
     const a = supported(selected),
       b = supported(next);
+    // Only the owning ingestion path can prove this exact persisted open-source lineage.
+    const evolving =
+      progression &&
+      ((selected.factRevisionId === progression.fromFactId &&
+        next.factRevisionId === progression.toFactId) ||
+        (next.factRevisionId === progression.fromFactId &&
+          selected.factRevisionId === progression.toFactId));
     const conflicts = [...a].filter(
       (key) =>
         b.has(key) &&
+        !(
+          evolving &&
+          ["actualDistanceM", "deliveredDistanceM", "fuelUsedL", "cargoDamageFraction"].includes(
+            key,
+          )
+        ) &&
         canonicalJson(value(selected as Evidence, key)) !== canonicalJson(value(next, key)),
     );
     if (conflicts.length) {

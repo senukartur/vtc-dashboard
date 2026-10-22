@@ -29,6 +29,7 @@ import {
   matchEvidence,
   type ReconciliationConfig,
   ruleIdentity,
+  ruleSnapshot,
   validateReconciliationConfig,
 } from "./matcher.js";
 
@@ -126,7 +127,7 @@ export function createReconciliation(
         .values({
           hash,
           version: config.rule?.version ?? null,
-          config: config.rule ?? null,
+          config: config.rule ?? ruleSnapshot(undefined),
           createdAt: at(),
         });
     } catch (error) {

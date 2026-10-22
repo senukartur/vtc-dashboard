@@ -5,17 +5,19 @@ import {
   automaticCandidate,
   matchEvidence,
   ruleIdentity,
+  ruleSnapshot,
   validateReconciliationConfig,
   withinDistance,
 } from "../../apps/api/src/modules/reconciliation/matcher.ts";
 import { selectQuality } from "../../apps/api/src/modules/reconciliation/quality.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
-  telemetryAdapter,
   type Telemetry,
+  telemetryAdapter,
 } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import { reconciliationEvent } from "../../apps/api/src/platform/outbox/events.ts";
 import { telemetryFixture } from "../support/builders.ts";
+
 const rule = {
   version: 1,
   startToleranceMs: 1000,
@@ -51,6 +53,8 @@ test("explicit versioned tolerances use exact decimals and inclusive integer mil
   ).toThrow();
   expect(ruleIdentity(rule)).not.toEqual(ruleIdentity({ ...rule, version: 2 }));
   expect(ruleIdentity(rule)).not.toEqual(ruleIdentity({ ...rule, distanceToleranceM: "0.02" }));
+  expect(ruleSnapshot(undefined)).toEqual({ matcher: "canonical-evidence/v1", rule: null });
+  expect(JSON.stringify(ruleSnapshot(undefined))).not.toBe("null");
   const a = await fact(),
     b = { ...structuredClone(a), provider: "manual" as const };
   b.start.utc = new Date(Date.parse(a.start.utc as string) + 1000).toISOString();
@@ -137,6 +141,53 @@ test("coherent quality snapshots preserve known zero, exact nonadditive metrics,
     high.factRevisionId,
   );
 });
+test("only a proven open-source pair permits metric evolution while unknown values and identity conflicts remain guarded", async () => {
+  const previous = await fact(),
+    next = structuredClone(previous);
+  previous.outcome = "open";
+  previous.fuelUsedL = {
+    status: "known",
+    value: "0",
+    sourceRecordId: previous.sourceRecordId,
+    sourceField: "synthetic.fuel",
+  };
+  next.factRevisionId = newId();
+  next.sourceRecordId = newId();
+  next.fuelUsedL = {
+    status: "known",
+    value: "38.5",
+    sourceRecordId: next.sourceRecordId,
+    sourceField: "synthetic.fuel",
+  };
+  const progression = { fromFactId: previous.factRevisionId, toFactId: next.factRevisionId };
+  expect(selectQuality([previous, next], next.factRevisionId).reasons).toContain(
+    "quality_supported_conflict",
+  );
+  const evolved = selectQuality([previous, next], next.factRevisionId, progression);
+  expect(evolved.reasons).toEqual([]);
+  expect(evolved.selected?.fuelUsedL).toEqual(next.fuelUsedL);
+  expect(evolved.selected?.actualDistanceM).toEqual(next.actualDistanceM);
+  expect(
+    selectQuality([previous, next], next.factRevisionId, { ...progression, fromFactId: newId() })
+      .reasons,
+  ).toContain("quality_supported_conflict");
+  const missing = structuredClone(next);
+  missing.fuelUsedL = {
+    status: "unknown",
+    reasonCode: "unavailable",
+    sourceRecordId: missing.sourceRecordId,
+  };
+  const degraded = selectQuality([previous, missing], missing.factRevisionId, progression);
+  expect(
+    degraded.selected?.factRevisionId !== missing.factRevisionId || degraded.reasons.length > 0,
+  ).toBe(true);
+  const conflict = structuredClone(next);
+  if (conflict.origin.status === "known") conflict.origin.value.entityId = newId();
+  expect(
+    selectQuality([previous, conflict], conflict.factRevisionId, progression).reasons,
+  ).toContain("quality_supported_conflict");
+});
+
 test("correction events reject private fields and retain safe versioned references only", () => {
   const tripId = newId(),
     value = {

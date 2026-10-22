@@ -28,6 +28,7 @@ import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/que
 import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
+import { selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash, decimal, sourceKey } from "../sources/contracts/canonical.js";
 import type {
   NormalizedTripEvidence,
@@ -36,11 +37,10 @@ import type {
 } from "../sources/contracts/evidence.js";
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
-import { selectQuality } from "../reconciliation/quality.js";
+import { createContributionRegister } from "./contributions.js";
+import { createFactRepository } from "./facts.js";
 import { createTripGroups } from "./groups.js";
 import { createTripReconciliation } from "./reconciliation.js";
-import { createFactRepository } from "./facts.js";
-import { createContributionRegister } from "./contributions.js";
 
 type S = components["schemas"];
 type Trip = typeof trips.$inferSelect;
@@ -425,8 +425,35 @@ export function createTrips(
       throw new Error("TRIP_FACT_POINTER_INVALID");
     const previous = current?.evidence;
     const newer = !existing || key.revision > Number(existing.latestRevision);
+    const [lineage] =
+      ports.sourceStored &&
+      previous &&
+      existing &&
+      provider === "ets2telemetry" &&
+      previous.outcome === "open" &&
+      newer
+        ? await c(tx)
+            .select({ id: sourceMessages.id })
+            .from(sourceMessages)
+            .where(
+              and(
+                eq(sourceMessages.id, previous.sourceRecordId),
+                eq(sourceMessages.sourceTripId, existing.id),
+                eq(sourceMessages.revision, existing.latestRevision),
+              ),
+            )
+            .for("share")
+        : [];
     const quality =
-      previous && !supersede ? selectQuality([previous, fact], fact.factRevisionId) : null;
+      previous && !supersede
+        ? selectQuality(
+            [previous, fact],
+            fact.factRevisionId,
+            lineage
+              ? { fromFactId: previous.factRevisionId, toFactId: fact.factRevisionId }
+              : undefined,
+          )
+        : null;
     const conflicts =
       previous && !supersede && (newer || fact.outcome !== "open")
         ? [
