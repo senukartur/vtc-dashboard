@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyMySqlColumn,
   boolean,
   check,
   customType,
@@ -18,7 +19,7 @@ import { catalogFacts, catalogRevisions } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
 
-export { and, asc, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
+export { and, asc, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const provider = (name: string) => mysqlEnum(name, ["ets2telemetry", "manual"]);
@@ -34,6 +35,9 @@ export const trips = mysqlTable(
       .notNull()
       .references(() => membership.userId, { onDelete: "restrict" }),
     game: game("game").notNull(),
+    aliasOf: idColumn("alias_of").references((): AnyMySqlColumn => trips.id, {
+      onDelete: "restrict",
+    }),
     version: int("version", { unsigned: true }).notNull(),
     outcome: mysqlEnum("outcome", ["open", "delivered", "cancelled", "none"]).notNull(),
     recording: mysqlEnum("recording", ["complete", "partial", "unknown"]).notNull(),
@@ -54,6 +58,9 @@ export const trips = mysqlTable(
     createdAt: utcColumn("created_at").notNull(),
   },
   (t) => [
+    index("trip_group_members").on(t.aliasOf, t.id),
+    index("trip_match_owner").on(t.ownerId, t.game, t.aliasOf, t.id),
+    check("trip_alias_distinct", sql`${t.aliasOf} IS NULL OR ${t.aliasOf} <> ${t.id}`),
     index("trip_company_page").on(t.decision, t.createdAt, t.id),
     index("trip_owner_page").on(t.ownerId, t.createdAt, t.id),
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),

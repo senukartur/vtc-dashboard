@@ -18,6 +18,8 @@ import { registerManualRoutes } from "./modules/manual-reports/http.js";
 import type { ManualReports } from "./modules/manual-reports/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
+import { registerReconciliationRoutes } from "./modules/reconciliation/http.js";
+import type { Reconciliation } from "./modules/reconciliation/service.js";
 import { registerQualificationRoutes } from "./modules/qualifications/http.js";
 import type { Qualifications } from "./modules/qualifications/service.js";
 import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
@@ -57,6 +59,7 @@ export interface AppOptions {
   manualReports?: ManualReports;
   qualifications?: Qualifications;
   events?: Events;
+  reconciliation?: Reconciliation;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -180,6 +183,14 @@ export async function createApp(options: AppOptions) {
     await registerQualificationRoutes(app, options.identity, options.qualifications);
   if (options.identity && options.events)
     await registerEventRoutes(app, options.identity, options.events);
+  if (options.identity && options.reconciliation)
+    await app.register(async (scope) =>
+      registerReconciliationRoutes(
+        scope,
+        options.identity as Identity,
+        options.reconciliation as Reconciliation,
+      ),
+    );
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

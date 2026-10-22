@@ -522,6 +522,7 @@ export function createManualReports(
     existing?: Report,
     expectedTripVersion?: number,
   ): Promise<Extract<Receipt, { kind: "report" }>> {
+    await ports.trips.prepareSourceInTransaction(tx, actor.userId, fields.game);
     let tripId: string;
     if (existing) {
       const trip = await ports.trips.manualGateInTransaction(
@@ -632,7 +633,9 @@ export function createManualReports(
       .insert(manualReviewGates)
       .values({ tripId, underReview: true })
       .onDuplicateKeyUpdate({ set: { underReview: true } });
-    const tripVersion = await ports.trips.manualPendingInTransaction(tx, tripId);
+    let tripVersion = await ports.trips.manualPendingInTransaction(tx, tripId);
+    await ports.trips.manualStoredInTransaction(tx, tripId, stored.sourceRecordId);
+    tripVersion = (await ports.trips.groups.resolve(tx, tripId, true)).version;
     await auditWrite(tx, actor, tripId);
     await emit(tx, "manual.report_submitted", reportId, version, revisionId, tripId);
     return { kind: "report", id: reportId, version, revisionId, tripVersion };
@@ -1331,7 +1334,12 @@ export function createManualReports(
               await c(tx)
                 .select({ id: manualReports.id })
                 .from(manualReports)
-                .where(eq(manualReports.tripId, id))
+                .where(
+                  inArray(
+                    manualReports.tripId,
+                    (await ports.trips.groups.members(tx, [id], true)).map((t) => t.id),
+                  ),
+                )
             ).map((row) => row.id)
           : [(await privateReport(tx, actor, id)).id];
         const scope = `${tripScope ? "trip" : "report"}/${id}/revisions`,
@@ -1436,7 +1444,10 @@ export function createManualReports(
           .from(manualCorrectionRequests)
           .where(
             and(
-              eq(manualCorrectionRequests.tripId, tripId),
+              inArray(
+                manualCorrectionRequests.tripId,
+                (await ports.trips.groups.members(tx, [tripId])).map((t) => t.id),
+              ),
               requestId ? eq(manualCorrectionRequests.id, applicationId(requestId)) : undefined,
               after
                 ? or(
@@ -1709,6 +1720,20 @@ export function createManualReports(
     },
     validateSourceInTransaction: validateSource,
     projectionInTransaction: projection,
+    async reconciliationGuardInTransaction(tx: TxContext, tripIds: string[], actorId?: string) {
+      const members = await ports.trips.groups.members(tx, tripIds, true),
+        ids = members.map((t) => t.id);
+      const reports = await c(tx)
+        .select({ ownerId: manualReports.ownerId })
+        .from(manualReports)
+        .where(inArray(manualReports.tripId, ids))
+        .for("share");
+      if (actorId && reports.some((r) => r.ownerId === actorId))
+        throw manualError(403, "SELF_REVIEW_FORBIDDEN");
+      for (const id of ids) await gateTripEvidence(tx, id);
+      return [...new Set(reports.map((r) => r.ownerId))];
+    },
+
     // VTC-029 calls this only in its decision transaction after applying the trip
     // state. It records retention metadata, never an acceptance or contribution.
     async decisionRecordedInTransaction(
@@ -1744,20 +1769,30 @@ export function createManualReports(
         .where(eq(manualReviewGates.tripId, trip.id))
         .for("update");
       if (gate?.latestDecisionAt && instant < gate.latestDecisionAt) throw manualError(409);
-      await c(tx)
-        .insert(manualReviewGates)
-        .values({ tripId: trip.id, latestDecisionAt: instant, underReview: false })
-        .onDuplicateKeyUpdate({ set: { latestDecisionAt: instant, underReview: false } });
+      for (const member of await ports.trips.groups.members(tx, [trip.id], true)) {
+        const [previous] = await c(tx)
+          .select()
+          .from(manualReviewGates)
+          .where(eq(manualReviewGates.tripId, member.id))
+          .for("update");
+        if (previous?.latestDecisionAt && previous.latestDecisionAt > instant)
+          throw manualError(409);
+        await c(tx)
+          .insert(manualReviewGates)
+          .values({ tripId: member.id, latestDecisionAt: instant, underReview: false })
+          .onDuplicateKeyUpdate({ set: { latestDecisionAt: instant, underReview: false } });
+      }
     },
     async reopenInTransaction(tx: TxContext, actor: Actor, tripId: string) {
       await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
       const trip = await privateTrip(tx, actor, tripId);
       await ports.trips.manualGateInTransaction(tx, trip.ownerId, tripId);
       await gateTripEvidence(tx, tripId);
-      await c(tx)
-        .insert(manualReviewGates)
-        .values({ tripId, underReview: true })
-        .onDuplicateKeyUpdate({ set: { underReview: true } });
+      for (const member of await ports.trips.groups.members(tx, [tripId], true))
+        await c(tx)
+          .insert(manualReviewGates)
+          .values({ tripId: member.id, underReview: true })
+          .onDuplicateKeyUpdate({ set: { underReview: true } });
     },
     reserveExpiry,
     recoverUpload,
@@ -1880,10 +1915,13 @@ export function createManualReports(
       { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
     >();
     if (!tripIds.length) return result;
+    const members = await ports.trips.groups.members(tx, tripIds);
+    const group = new Map(members.map((t) => [t.id, t.aliasOf ?? t.id]));
+    const originalIds = members.map((t) => t.id);
     const reports = await c(tx)
       .select()
       .from(manualReports)
-      .where(inArray(manualReports.tripId, tripIds))
+      .where(inArray(manualReports.tripId, originalIds))
       .orderBy(desc(manualReports.createdAt), desc(manualReports.id));
     const ids = reports.flatMap((r) => (r.currentRevisionId ? [r.currentRevisionId] : [])),
       revisions = ids.length
@@ -1893,12 +1931,14 @@ export function createManualReports(
         .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
         .from(manualEvidenceReferences)
         .innerJoin(manualEvidence, eq(manualEvidence.id, manualEvidenceReferences.evidenceId))
-        .where(inArray(manualEvidenceReferences.tripId, tripIds));
+        .where(inArray(manualEvidenceReferences.tripId, originalIds));
     for (const tripId of tripIds) {
-      const report = reports.find((r) => r.tripId === tripId),
+      const report = reports.find((r) => group.get(r.tripId) === group.get(tripId)),
         revision = report ? revisions.find((r) => r.id === report.currentRevisionId) : null;
       const unique = new Map(
-        refs.filter((r) => r.tripId === tripId).map((r) => [r.evidence.id, r.evidence]),
+        refs
+          .filter((r) => group.get(r.tripId) === group.get(tripId))
+          .map((r) => [r.evidence.id, r.evidence]),
       );
       result.set(tripId, {
         manualRevision: revision ? revisionDto(revision) : null,
@@ -1911,7 +1951,12 @@ export function createManualReports(
     const refs = await c(tx)
       .select({ id: manualEvidenceReferences.evidenceId })
       .from(manualEvidenceReferences)
-      .where(eq(manualEvidenceReferences.tripId, tripId))
+      .where(
+        inArray(
+          manualEvidenceReferences.tripId,
+          (await ports.trips.groups.members(tx, [tripId], true)).map((t) => t.id),
+        ),
+      )
       .for("share");
     if (refs.length) {
       const rows = await c(tx)
@@ -1934,7 +1979,18 @@ export function createManualReports(
       const tripIds = [...new Set(discover.map((r) => r.tripId))].sort();
       const outcome = await run(async (tx) => {
         // Current shared trip locks fence decisions without granting a cleanup worker domain writes.
-        const states = await ports.trips.statesInTransaction(tx, tripIds, "share");
+        if (tripIds.length)
+          for (const owner of await ports.trips.contributions.owners(tx, tripIds))
+            await ports.trips.prepareSourceInTransaction(tx, owner.ownerId, owner.game);
+        // Keep discovery before the established owning lock boundary. Group expansion must
+        // not take a trip/gap lock before callers can coordinate that boundary.
+        if (tripIds.length) await ports.trips.statesInTransaction(tx, tripIds, "share");
+        const members = tripIds.length
+          ? await ports.trips.groups.members(tx, tripIds, "share")
+          : [];
+        const groupIds = members.map((t) => t.id);
+        const roots = new Map(members.filter((t) => !t.aliasOf).map((t) => [t.id, t]));
+        const states = members.map((t) => roots.get(t.aliasOf ?? t.id) ?? t);
         const [row] = await c(tx)
           .select()
           .from(manualEvidence)
@@ -1958,11 +2014,11 @@ export function createManualReports(
           const gates = await c(tx)
             .select()
             .from(manualReviewGates)
-            .where(inArray(manualReviewGates.tripId, tripIds))
+            .where(inArray(manualReviewGates.tripId, groupIds))
             .for("share");
           if (
-            states.length !== tripIds.length ||
-            gates.length !== tripIds.length ||
+            states.length !== groupIds.length ||
+            gates.length !== groupIds.length ||
             states.some(
               (t) =>
                 t.reviewHold ||

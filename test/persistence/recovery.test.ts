@@ -11,12 +11,52 @@ import {
   guardedSettings,
   hasCode,
   manualPriorFolder,
+  reconciliationPriorFolder,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "./support.ts";
 
 let recoveryRunning = false;
+
+async function reconciliationPhase<T>(
+  scenario: "sticky_ddl" | "baseline_restore",
+  phase:
+    | "connection"
+    | "reset"
+    | "prefix_fixture"
+    | "prefix_migration"
+    | "partial_fixture"
+    | "partial_migration"
+    | "sticky_inspection"
+    | "dirty_replay"
+    | "full_migration"
+    | "clean_replay"
+    | "cleanup",
+  command: () => Promise<T>,
+): Promise<T> {
+  const started = performance.now();
+  const record = (state: "started" | "success" | "failed") =>
+    console.log(
+      JSON.stringify({
+        event: "recovery_fixture_phase",
+        category: "reconciliation_recovery",
+        scenario,
+        phase,
+        state,
+        durationMs: Math.round(performance.now() - started),
+      }),
+    );
+  record("started");
+  try {
+    const result = await command();
+    record("success");
+    return result;
+  } catch (error) {
+    record("failed");
+    throw error;
+  }
+}
 
 async function recoveryTest(name: string, command: () => Promise<void>) {
   await test(name, { timeout: SCHEMA_SETUP_TIMEOUT_MS, concurrency: false }, async () => {
@@ -70,7 +110,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 13);
+      assert.equal(await runMigrations(settings), 14);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -126,7 +166,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 13);
+      assert.equal(await runMigrations(settings), 14);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -242,6 +282,7 @@ await recoveryTest(
       const journal = JSON.parse(
         await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
       );
+      journal.entries = journal.entries.slice(0, 13);
       const entry = journal.entries.at(-1);
       assert.equal(entry.idx, 12);
       const sql = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
@@ -299,7 +340,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 13);
+      assert.equal(await runMigrations(guardedSettings()), 14);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_origin_shape','trip_fact_destination_shape','trip_fact_cargo_shape','trip_fact_adr_shape')",
@@ -311,6 +352,91 @@ await recoveryTest(
       assert.equal(foreign.length, 3);
     } finally {
       await connection.end();
+    }
+  },
+);
+
+await recoveryTest(
+  "reconciliation partial DDL remains sticky and preserves the interrupted alias column",
+  async () => {
+    const connection = await reconciliationPhase("sticky_ddl", "connection", testConnection),
+      settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reconciliationPhase("sticky_ddl", "reset", () => reset(connection));
+      folder = await reconciliationPhase("sticky_ddl", "prefix_fixture", reconciliationPriorFolder);
+      const priorFolder = folder;
+      await reconciliationPhase("sticky_ddl", "prefix_migration", async () => {
+        assert.equal(await runMigrations(settings, { folder: priorFolder }), 13);
+      });
+      await reconciliationPhase("sticky_ddl", "partial_fixture", async () => {
+        const journal = JSON.parse(
+            await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+          ),
+          entry = journal.entries.at(-1);
+        assert.equal(entry.idx, 13);
+        const original = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
+        const marker = "ALTER TABLE `trips` ADD `alias_of` binary(36);";
+        assert.ok(original.includes(marker));
+        await writeFile(
+          join(priorFolder, `${entry.tag}.sql`),
+          original.replace(
+            marker,
+            `${marker}\n--> statement-breakpoint\nALTER TABLE synthetic_reconciliation_missing ADD COLUMN fault INT;`,
+          ),
+        );
+        await writeFile(join(priorFolder, "meta/_journal.json"), JSON.stringify(journal));
+      });
+      await reconciliationPhase("sticky_ddl", "partial_migration", async () => {
+        await assert.rejects(
+          runMigrations(settings, { folder: priorFolder }),
+          hasCode("ER_NO_SUCH_TABLE"),
+        );
+      });
+      await reconciliationPhase("sticky_ddl", "sticky_inspection", async () => {
+        const [history] = await connection.query<RowDataPacket[]>(
+          "SELECT state FROM _vtc_migrations ORDER BY version",
+        );
+        assert.equal(history.length, 14);
+        assert.equal(history.at(-1)?.state, "applying");
+        const [columns] = await connection.query<RowDataPacket[]>(
+          "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trips' AND COLUMN_NAME='alias_of'",
+        );
+        assert.equal(columns.length, 1);
+      });
+      await reconciliationPhase("sticky_ddl", "dirty_replay", async () => {
+        await assert.rejects(
+          runMigrations(settings, { folder: priorFolder, lockTimeoutSeconds: 0 }),
+          /MIGRATION_RECOVERY_REQUIRED/,
+        );
+      });
+    } finally {
+      await reconciliationPhase("sticky_ddl", "cleanup", async () => {
+        try {
+          await connection.end();
+        } finally {
+          if (folder) await rm(folder, { recursive: true, force: true });
+        }
+      });
+    }
+  },
+);
+await recoveryTest(
+  "reconciliation partial-DDL recovery restores the known synthetic baseline and full schema",
+  async () => {
+    const connection = await reconciliationPhase("baseline_restore", "connection", testConnection),
+      settings = guardedSettings();
+    try {
+      // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
+      await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
+      await reconciliationPhase("baseline_restore", "full_migration", async () => {
+        assert.equal(await runMigrations(settings), 14);
+      });
+      await reconciliationPhase("baseline_restore", "clean_replay", async () => {
+        assert.equal(await runMigrations(settings), 0);
+      });
+    } finally {
+      await reconciliationPhase("baseline_restore", "cleanup", () => connection.end());
     }
   },
 );

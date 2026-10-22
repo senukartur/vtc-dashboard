@@ -51,6 +51,10 @@
     "./events-schema": {
       "types": "./dist/schema/events/index.d.ts",
       "default": "./dist/schema/events/index.js"
+    },
+    "./reconciliation-schema": {
+      "types": "./dist/schema/reconciliation/index.d.ts",
+      "default": "./dist/schema/reconciliation/index.js"
     }
   },
   "files": [

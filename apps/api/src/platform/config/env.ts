@@ -1,3 +1,7 @@
+import {
+  type ReconciliationConfig,
+  validateReconciliationConfig,
+} from "../../modules/reconciliation/matcher.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -297,7 +301,60 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let reconciliation: ReconciliationConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.RECONCILIATION_ENABLED))
+    throw new Error("Invalid environment fields: RECONCILIATION_ENABLED");
+  if (input.RECONCILIATION_ENABLED === "true") {
+    try {
+      if (!identity || !trips || !qualifications) throw new Error();
+      const fields = [
+        input.RECONCILIATION_RULE_VERSION,
+        input.RECONCILIATION_START_TOLERANCE_MS,
+        input.RECONCILIATION_END_TOLERANCE_MS,
+        input.RECONCILIATION_DISTANCE_TOLERANCE_M,
+      ];
+      if (
+        fields.some((v) => v !== undefined && v !== "") &&
+        !fields.every((v) => v !== undefined && v !== "")
+      )
+        throw new Error();
+      reconciliation = {
+        key: input.RECONCILIATION_KEY ?? "",
+        ...(fields.every((v) => v !== undefined && v !== "")
+          ? {
+              rule: {
+                version: Number(input.RECONCILIATION_RULE_VERSION),
+                startToleranceMs: Number(input.RECONCILIATION_START_TOLERANCE_MS),
+                endToleranceMs: Number(input.RECONCILIATION_END_TOLERANCE_MS),
+                distanceToleranceM: input.RECONCILIATION_DISTANCE_TOLERANCE_M as string,
+              },
+            }
+          : {}),
+      };
+      validateReconciliationConfig(reconciliation);
+      if (
+        [
+          identity.secret,
+          mail?.key,
+          catalogs?.cursorKey,
+          trips.cursorKey,
+          qualifications.cursorKey,
+          telemetry?.cursorKey,
+          manualReports?.key,
+          events?.cursorKey,
+        ].includes(reconciliation.key) ||
+        (admissions &&
+          Buffer.from(reconciliation.key, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: RECONCILIATION_ENABLED, RECONCILIATION_KEY, RECONCILIATION_RULE_VERSION, RECONCILIATION_START_TOLERANCE_MS, RECONCILIATION_END_TOLERANCE_MS, RECONCILIATION_DISTANCE_TOLERANCE_M, TRIPS_ENABLED, QUALIFICATIONS_ENABLED",
+      );
+    }
+  }
   return {
+    reconciliation,
     manualReports,
     events,
     qualifications,

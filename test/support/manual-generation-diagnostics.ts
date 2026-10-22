@@ -170,7 +170,7 @@ export function safeGenerationWorkerRecord(value: unknown): Record<string, unkno
     !fields(
       value,
       ["event", "phase", "state", "durationMs"],
-      ["category", "codes", "databaseOperation"],
+      ["category", "codes", "databaseOperation", "runnerStatus", "processed"],
     ) ||
     value.event !== "manual_generation_worker_phase" ||
     !allowed(value.phase, phases) ||
@@ -184,6 +184,17 @@ export function safeGenerationWorkerRecord(value: unknown): Record<string, unkno
     state: value.state,
     durationMs: value.durationMs,
   };
+  if (Object.hasOwn(value, "runnerStatus") || Object.hasOwn(value, "processed")) {
+    if (
+      value.phase !== "pass" ||
+      value.state !== "success" ||
+      !allowed(value.runnerStatus, ["completed", "overlap", "stopped"]) ||
+      !integer(value.processed)
+    )
+      return;
+    result.runnerStatus = value.runnerStatus;
+    result.processed = value.processed;
+  }
   if (Object.hasOwn(value, "category") || Object.hasOwn(value, "codes")) {
     if (
       value.state !== "failed" ||

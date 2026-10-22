@@ -20,6 +20,7 @@ import { initialQualifications } from "@vtc/db/qualifications-schema";
 import { getTableName } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
+  afterEach,
   beforeEach,
   expect,
   test,
@@ -62,6 +63,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
+import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
@@ -283,6 +285,13 @@ beforeEach(async () => {
 afterAll(async () => {
   await unit?.close();
   await control?.end();
+});
+afterEach(async ({ task }) => {
+  if (
+    task.result?.state === "fail" &&
+    task.name.startsWith("anonymous and unauthorized HTTP floods")
+  )
+    await fixtureDatabaseFailure(control, "admissions_flood");
 });
 
 test("public duplicates preserve immutable evidence and return only binding-owned receipts; exact replay conflicts on changed input", async () => {
