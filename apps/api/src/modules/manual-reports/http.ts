@@ -350,10 +350,25 @@ export async function registerManualRoutes(
       schema: { querystring: object({}), response: { 202: ref("EnvelopeEvidence") } },
     },
     async (r, reply) => {
+      if (!manual.config.storage) {
+        reply.raw.once("finish", () => r.raw.destroy());
+        throw manualError(503, "DEPENDENCY_UNAVAILABLE");
+      }
       const abort = new AbortController(),
         cancel = () => abort.abort();
-      r.raw.once("aborted", cancel);
       let file: NodeJS.ReadableStream | undefined;
+      let expired = false,
+        uploadStarted = false;
+      const timer = setTimeout(() => {
+        expired = true;
+        cancel();
+        if (file && "destroy" in file) (file as import("node:stream").Readable).destroy();
+        // A premature raw close rejects multipart's pending next(), even before
+        // it has produced a file. Aborting the blob signal alone cannot do that.
+        r.raw.destroy();
+        r.raw.socket.destroy();
+      }, manual.config.storage.timeoutMs);
+      r.raw.once("aborted", cancel);
       try {
         const parts = r.parts(),
           first = await parts.next();
@@ -361,6 +376,7 @@ export async function registerManualRoutes(
           throw manualError(422);
         const part = first.value;
         file = part.file;
+        abort.signal.throwIfAborted();
         async function* chunks() {
           try {
             for await (const chunk of part.file) {
@@ -381,8 +397,11 @@ export async function registerManualRoutes(
             );
           }
         }
+        const current = await actor(r);
+        abort.signal.throwIfAborted();
+        uploadStarted = true;
         const data = await manual.upload(
-          await actor(r),
+          current,
           key(r),
           part.filename,
           chunks(),
@@ -392,11 +411,13 @@ export async function registerManualRoutes(
         return reply.code(202).send(envelope(r, data));
       } catch (error) {
         if (file && "destroy" in file) (file as import("node:stream").Readable).destroy();
-        reply.raw.once("finish", () => r.raw.destroy());
+        if (!r.raw.destroyed) reply.raw.once("finish", () => r.raw.destroy());
         if (oversized.has(r)) throw manualError(413);
+        if (expired && !uploadStarted) throw manualError(503, "DEPENDENCY_UNAVAILABLE");
         if (error && typeof error === "object" && "statusCode" in error) throw error;
         throw manualError(422);
       } finally {
+        clearTimeout(timer);
         r.raw.removeListener("aborted", cancel);
       }
     },

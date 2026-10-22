@@ -8,6 +8,8 @@ Manual reports are disabled by default. Activation requires explicit migration, 
 
 Uploads additionally require `MANUAL_EVIDENCE_ROOT`, `MANUAL_MAX_FILE_BYTES` (1–64 MiB), `MANUAL_MAX_PIXELS` (1–16 million) and `MANUAL_UPLOAD_TIMEOUT_MS` (100–120000). All are operator settings with no inferred production values. Without storage configuration, drafts/read discovery remain available and upload policy is disabled with null limits and an empty allowlist. Capacity, backup space and actual one-year retention must be demonstrated before activation.
 
+The upload allowance starts after authenticated request admission, before waiting for the first multipart part, and remains active through byte consumption and image decoding. Expiry aborts the upload and closes its connection, including an unfinished first part header. This route-local body deadline does not configure global HTTP header or connection timeouts; database operations retain their existing settlement and recovery rules.
+
 The root must already exist, be absolute, private, owned by the application user and outside served assets. On Linux require mode 0700, no symlink ancestors and a stable root inode. The application does not create/chmod a live operator path. A dedicated persistent mount at the established `/app/private-evidence` location is physically separate from the image release, despite the container pathname beneath `/app`. The production Dockerfile prepares mode 0700 for a fresh volume. Existing volumes require an explicit operator permission check; replacing an image does not chmod them. Existing backup/restore sentinels and mount names are preserved. No hosted configuration, volume, grants or files are changed by a source merge.
 
 ## Storage and validation

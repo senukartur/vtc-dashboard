@@ -66,7 +66,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
-import { bounded, until } from "../support/concurrency.ts";
+import { bounded, deferred, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
 import {
   type GenerationCase,
@@ -1533,6 +1533,186 @@ test("built listening HTTP protects chunked uploads, actual limits, socket abort
       (await http(`/api/v1/evidence/${image.id}/content`, "GET", { cookie: staffCookie })).status,
     ).toBe(200);
   } finally {
+    await app.close();
+  }
+});
+
+test("built listening upload deadline closes incomplete first part headers and settles the handler before a valid upload", async () => {
+  const { createApp: builtApp }: { createApp: typeof createApp } = await import(
+    pathToFileURL(resolve("apps/api/dist/app.js")).href
+  );
+  const { createManualReports: builtManual }: { createManualReports: typeof createManualReports } =
+    await import(pathToFileURL(resolve("apps/api/dist/modules/manual-reports/service.js")).href);
+  const module = builtManual(unit, manualConfig, { identity, catalogs, trips: tripService }, now);
+  let uploads = 0;
+  const observed: ManualReports = {
+    ...module,
+    upload(...args) {
+      uploads++;
+      return module.upload(...args);
+    },
+  };
+  const app = await builtApp({
+    identity,
+    manualReports: observed,
+    trips: tripService,
+    checkReadiness: async () => true,
+  });
+  const stallKey = newId(),
+    closed = deferred<void>(),
+    settled = deferred<void>(),
+    clients = new Set<ReturnType<typeof request>>();
+  let serverStarted: number | undefined,
+    elapsed: number | undefined,
+    handlerStatus: number | undefined,
+    handlerCode: unknown,
+    serverDestroyed = false,
+    watchdogFired = false,
+    clientClosed = false,
+    bytesSent = 0;
+  let drip: ReturnType<typeof setInterval> | undefined,
+    watchdog: ReturnType<typeof setTimeout> | undefined;
+  app.addHook("preHandler", async (r) => {
+    if (r.headers["idempotency-key"] === stallKey) serverStarted = performance.now();
+  });
+  app.addHook("onError", async (r, _reply, error) => {
+    if (r.headers["idempotency-key"] !== stallKey) return;
+    handlerStatus = error.statusCode;
+    handlerCode = "publicCode" in error ? error.publicCode : undefined;
+    serverDestroyed = r.raw.destroyed;
+    elapsed = serverStarted === undefined ? undefined : performance.now() - serverStarted;
+    settled.resolve();
+  });
+  try {
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw Error("SYNTHETIC_LISTENER_REQUIRED");
+    const port = address.port;
+    async function http(
+      path: string,
+      method = "GET",
+      headers: Record<string, string> = {},
+      chunks: Buffer[] = [],
+    ) {
+      return new Promise<{ status: number; body: Buffer }>((accept, reject) => {
+        const req = request({ host: "127.0.0.1", port, path, method, headers }, (res) => {
+          const body: Buffer[] = [];
+          res.on("data", (chunk) => body.push(chunk));
+          res.on("end", () => accept({ status: res.statusCode ?? 0, body: Buffer.concat(body) }));
+        });
+        clients.add(req);
+        req.setTimeout(5000, () => req.destroy(new Error("SYNTHETIC_HTTP_DEADLINE")));
+        req.on("error", () => reject(new Error("SYNTHETIC_HTTP_FAILURE")));
+        for (const chunk of chunks) req.write(chunk);
+        req.end();
+      });
+    }
+    const csrf = JSON.parse(
+      (await http("/api/v1/auth/csrf", "GET", { cookie: ownerCookie })).body.toString(),
+    ).data.token as string;
+    const boundary = "synthetic-incomplete-first-part",
+      headers = {
+        cookie: ownerCookie,
+        origin: identityConfig.origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": stallKey,
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+        "transfer-encoding": "chunked",
+      },
+      filesBefore = (await readdir(root)).sort();
+    const stalled = request({
+      host: "127.0.0.1",
+      port,
+      path: "/api/v1/evidence",
+      method: "POST",
+      headers,
+    });
+    clients.add(stalled);
+    stalled.on("error", () => {});
+    stalled.on("response", (res) => res.resume());
+    stalled.once("close", () => {
+      clientClosed = true;
+      clearInterval(drip);
+      closed.resolve();
+    });
+    const deadline = new Promise<never>((_, reject) => {
+      watchdog = setTimeout(() => {
+        watchdogFired = true;
+        reject(new Error("SYNTHETIC_FIRST_PART_WATCHDOG"));
+      }, 7000);
+    });
+    // Deliberately omit the header terminator and never end the chunked body.
+    const firstHeader = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="synthetic.png"\r\nContent-Type: image/png`,
+    );
+    stalled.flushHeaders();
+    stalled.write(firstHeader);
+    bytesSent += firstHeader.length;
+    drip = setInterval(() => {
+      if (!stalled.destroyed) {
+        stalled.write("a");
+        bytesSent++;
+      }
+    }, 100);
+    await Promise.race([Promise.all([closed.promise, settled.promise]), deadline]);
+    clearTimeout(watchdog);
+    expect(watchdogFired).toBe(false);
+    expect(clientClosed).toBe(true);
+    expect(serverDestroyed).toBe(true);
+    expect(handlerStatus).toBe(503);
+    expect(handlerCode).toBe("DEPENDENCY_UNAVAILABLE");
+    // Allow timer clock granularity without changing the configured allowance.
+    expect(elapsed).toBeGreaterThanOrEqual(manualConfig.storage.timeoutMs - 10);
+    expect(elapsed).toBeLessThan(7000);
+    expect(bytesSent).toBeLessThan(manualConfig.storage.maxFileBytes);
+    expect(bytesSent).toBeGreaterThan(firstHeader.length);
+    expect(uploads).toBe(0);
+    for (const table of ["manual_evidence", "manual_commands", "manual_blob_generations"]) {
+      const [rows] = await control.query<RowDataPacket[]>(`SELECT COUNT(*) n FROM ${table}`);
+      expect(Number(rows[0]?.n)).toBe(0);
+    }
+    expect((await readdir(root)).sort()).toEqual(filesBefore);
+    console.info(
+      JSON.stringify({
+        event: "manual_first_part_deadline",
+        elapsedMs: Math.round(elapsed ?? 0),
+        clientClosed,
+        handlerSettled: true,
+        watchdogFired,
+        uploads,
+        bytesSent,
+      }),
+    );
+    const valid = await http(
+      "/api/v1/evidence",
+      "POST",
+      { ...headers, "idempotency-key": newId() },
+      [
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="synthetic.png"\r\nContent-Type: image/png\r\n\r\n`,
+        ),
+        pngBytes(),
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ],
+    );
+    expect(valid.status).toBe(202);
+    expect(uploads).toBe(1);
+    const image = JSON.parse(valid.body.toString()).data as S["Evidence"];
+    const download = await http(`/api/v1/evidence/${image.id}/content`, "GET", {
+      cookie: ownerCookie,
+    });
+    expect(download.status).toBe(200);
+    expect(download.body).toEqual(pngBytes());
+    expect(
+      (await http(`/api/v1/evidence/${image.id}/content`, "GET", { cookie: otherCookie })).status,
+    ).toBe(404);
+    expect(
+      (await http(`/api/v1/evidence/${image.id}/content`, "GET", { cookie: staffCookie })).status,
+    ).toBe(404);
+  } finally {
+    clearInterval(drip);
+    clearTimeout(watchdog);
+    for (const client of clients) client.destroy();
     await app.close();
   }
 });
