@@ -551,7 +551,7 @@ test("production telemetry and manual ingestion persist an unconfigured JSON rul
   expect(rules[0]).toMatchObject({
     version: null,
     config: ruleSnapshot(undefined),
-    is_sql_null: 0,
+    is_sql_null: "0",
   });
   expect(String(rules[0]?.hash).toLowerCase()).toBe(ruleIdentity(undefined).toString("hex"));
   const counts = async () => {
