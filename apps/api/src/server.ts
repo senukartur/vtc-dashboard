@@ -26,6 +26,7 @@ try {
             config.trips,
             config.telemetry,
             config.qualifications,
+            config.events,
           ),
         }
       : {}),

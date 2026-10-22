@@ -7,6 +7,7 @@ import {
   createExternalIdentities,
   steamProjection,
 } from "../modules/external-identities/service.js";
+import { createEvents, type EventsConfig } from "../modules/events/service.js";
 import type { IdentityConfig } from "../modules/identity/engine.js";
 import { createIdentity, type Identity } from "../modules/identity/service.js";
 import { localProvider, resendProvider } from "../modules/messaging/provider.js";
@@ -43,6 +44,7 @@ export function composeIdentity(
   tripsConfig?: TripsConfig,
   telemetryConfig?: TelemetryConfig,
   qualificationsConfig?: QualificationsConfig,
+  eventsConfig?: EventsConfig,
 ) {
   let identity: Identity;
   if (telemetryConfig && (!externalEnabled || !tripsConfig))
@@ -109,6 +111,11 @@ export function composeIdentity(
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   return {
     identity,
+    ...(eventsConfig
+      ? {
+          events: createEvents(unit, eventsConfig, { identity, ...(catalogs ? { catalogs } : {}) }),
+        }
+      : {}),
     ...(qualificationsConfig && trips
       ? {
           qualifications: createQualifications(unit, qualificationsConfig, {

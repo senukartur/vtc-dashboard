@@ -3,6 +3,7 @@ import { createUnitOfWork, newId } from "@vtc/db";
 import { challenges, company, sql, user } from "@vtc/db/identity-schema";
 import { mailDeliveries } from "@vtc/db/messaging-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
+import { createEvents } from "./modules/events/service.js";
 import { readConfig } from "./platform/config/env.js";
 import { composeIdentity } from "./use-cases/identity-messaging.js";
 
@@ -40,6 +41,7 @@ try {
       allocation.length === 1 &&
       (allocation[0] as { run_id?: string }).run_id === run,
   );
+  let eventsVerified = false;
   if (mode === "produce") {
     const empty = await ownedUnit.run(async (tx) => {
       const db = ownedUnit.client(tx);
@@ -55,6 +57,83 @@ try {
     const cookie = signed.cookies.map((value) => value.split(";", 1)[0]).join("; ");
     const actor = await identity.authenticate(new Headers({ cookie }));
     await identity.requestChallenge(actor, newId(), "email_verification");
+    if (process.env.VTC_EVENTS_ACCEPTANCE === "synthetic-only") {
+      requireState(
+        config.environment === "test" &&
+          config.mail.mode === "local" &&
+          recipient.endsWith("@example.invalid"),
+      );
+      let clock = Date.now();
+      const events = createEvents(
+        ownedUnit,
+        { cursorKey: randomBytes(32).toString("hex") },
+        { identity },
+        () => new Date(clock),
+      );
+      const value = {
+        title: "Fictional restricted-runtime convoy",
+        description: "Fictional privilege evidence",
+        game: "ets2" as const,
+        server: "Fictional server",
+        organizer: "Fictional organizer",
+        meetingLocation: "Fictional meeting location",
+        route: "Fictional route",
+        meetingAt: new Date(clock + 30000).toISOString(),
+        startsAt: new Date(clock + 60000).toISOString(),
+        endsAt: null,
+        visibility: "members" as const,
+        originCityId: null,
+        destinationCityId: null,
+        prescribedCargoId: null,
+        prescribedMassKg: "30000",
+        prescribedTrailerTypeId: null,
+      };
+      const createKey = newId(),
+        created = await events.create(actor, createKey, value),
+        eventId = created.data.event.id;
+      requireState(
+        JSON.stringify(await events.create(actor, createKey, value)) === JSON.stringify(created),
+      );
+      const responseKey = newId(),
+        response = await events.respond(actor, eventId, responseKey, 1, {
+          response: "participating",
+        });
+      requireState(
+        response.version === 2 &&
+          JSON.stringify(
+            await events.respond(actor, eventId, responseKey, 1, { response: "participating" }),
+          ) === JSON.stringify(response),
+      );
+      await events.update(actor, eventId, newId(), 1, {
+        ...value,
+        title: "Fictional revised convoy",
+      });
+      clock += 60000;
+      const attendanceKey = newId(),
+        decision = {
+          members: [
+            {
+              memberId: actor.userId,
+              attendance: "attended" as const,
+              note: "Fictional private staff note",
+            },
+          ],
+        };
+      const attendance = await events.setAttendance(actor, eventId, attendanceKey, 1, decision);
+      requireState(
+        attendance.version === 2 &&
+          JSON.stringify(await events.setAttendance(actor, eventId, attendanceKey, 1, decision)) ===
+            JSON.stringify(attendance),
+      );
+      await events.cancel(actor, eventId, newId(), 2, "Fictional private cancellation");
+      const history = await events.history(actor, eventId);
+      requireState(
+        history.definitions.length === 3 &&
+          history.responses.length === 1 &&
+          history.attendance.length === 1,
+      );
+      eventsVerified = true;
+    }
   }
   const result = await ownedUnit.run(async (tx) => {
     const db = ownedUnit.client(tx);
@@ -89,6 +168,7 @@ try {
           delivery.receipt !== null),
     );
     return {
+      ...(eventsVerified ? { eventsVerified: true } : {}),
       event: "identity_acceptance",
       runId: run,
       challengeId: generation.id,

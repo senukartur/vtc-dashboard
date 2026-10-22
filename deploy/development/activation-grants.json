@@ -34,7 +34,15 @@
     "qualification_promotions": ["SELECT", "INSERT"],
     "qualification_promotion_reviews": ["SELECT", "INSERT", "UPDATE"],
     "trip_contributions": ["SELECT", "INSERT", "UPDATE"],
-    "trip_contribution_history": ["SELECT", "INSERT"]
+    "trip_contribution_history": ["SELECT", "INSERT"],
+    "events": ["SELECT", "INSERT", "UPDATE"],
+    "event_responses": ["SELECT", "INSERT", "UPDATE"],
+    "event_attendances": ["SELECT", "INSERT", "UPDATE"],
+    "event_revisions": ["SELECT", "INSERT"],
+    "event_response_revisions": ["SELECT", "INSERT"],
+    "event_attendance_revisions": ["SELECT", "INSERT"],
+    "event_catalog_pins": ["SELECT", "INSERT"],
+    "event_commands": ["SELECT", "INSERT"]
   },
   "jobs": {
     "durable_jobs": ["SELECT", "INSERT", "UPDATE"],

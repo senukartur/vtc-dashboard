@@ -43,6 +43,10 @@
     "./telemetry-schema": {
       "types": "./dist/schema/telemetry/index.d.ts",
       "default": "./dist/schema/telemetry/index.js"
+    },
+    "./events-schema": {
+      "types": "./dist/schema/events/index.d.ts",
+      "default": "./dist/schema/events/index.js"
     }
   },
   "files": [

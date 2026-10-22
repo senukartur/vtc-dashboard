@@ -2344,6 +2344,7 @@ export interface components {
             /** @enum {string} */
             attendance: "unconfirmed" | "attended" | "not_attended";
             member: components["schemas"]["MemberSummary"];
+            note: string | null;
             response: components["schemas"]["Rsvp"];
         };
         AttendanceInput: {
@@ -2929,10 +2930,16 @@ export interface components {
             endsAt: string | null;
             /** @enum {string} */
             game: "ets2" | "ats";
+            /** Format: date-time */
+            meetingAt: string;
+            meetingLocation: string;
+            organizer: string;
             originCityId: string | null;
             prescribedCargoId: string | null;
             prescribedMassKg: string | null;
             prescribedTrailerTypeId: string | null;
+            route: string;
+            server: string;
             /** Format: date-time */
             startsAt: string;
             title: string;
@@ -2958,7 +2965,13 @@ export interface components {
             game: "ets2" | "ats";
             /** Format: uuid */
             id: string;
+            /** Format: date-time */
+            meetingAt: string;
+            meetingLocation: string;
+            organizer: string;
             origin: components["schemas"]["CatalogLabel"] | null;
+            route: string;
+            server: string;
             /** Format: date-time */
             startsAt: string;
             /** @enum {string} */
