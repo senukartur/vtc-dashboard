@@ -13,6 +13,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   lt,
   or,
   sourceMessages,
@@ -35,6 +36,9 @@ import type {
 } from "../sources/contracts/evidence.js";
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
+import { selectQuality } from "../reconciliation/quality.js";
+import { createTripGroups } from "./groups.js";
+import { createTripReconciliation } from "./reconciliation.js";
 import { createFactRepository } from "./facts.js";
 import { createContributionRegister } from "./contributions.js";
 
@@ -47,6 +51,8 @@ export function validateTripsConfig(config: TripsConfig) {
   if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_TRIPS_CONFIG");
 }
 export interface TripsPorts {
+  prepare?: (tx: TxContext, ownerId: string, game: "ets2" | "ats") => Promise<void>;
+  sourceStored?: (tx: TxContext, tripId: string, sourceRecordId: string) => Promise<void>;
   identity: Pick<
     Identity,
     "authorizeInTransaction" | "accessState" | "memberSummariesInTransaction"
@@ -142,7 +148,8 @@ export function createTrips(
   const c = (tx: TxContext) => unit.client(tx),
     at = () => now().toISOString();
   const outbox = ports.events ?? createOutbox(unit);
-  const factsRepository = createFactRepository(unit);
+  const factsRepository = createFactRepository(unit),
+    groups = createTripGroups(unit);
   const adapters = new Map<Provider, TripSourceAdapter>([
     ["ets2telemetry", telemetryAdapter],
     ["manual", manualAdapter],
@@ -264,6 +271,7 @@ export function createTrips(
     }
     freeze(immutablePayload);
     const key = adapter.identity(immutablePayload);
+    await ports.prepare?.(tx, context.ownerUserId, key.game);
     // Eligibility precedes any receipt lookup, including exact replays.
     const access = await ports.identity.accessState(tx, context.ownerUserId);
     if (!access.active || !access.canSubmitTrips) throw identityError(403);
@@ -280,7 +288,12 @@ export function createTrips(
       )
       .for("update");
     if (existing && existing.ownerId !== context.ownerUserId) throw identityError(409);
-    if (existing && context.canonical && existing.canonicalTripId !== context.canonical.tripId)
+    if (
+      existing &&
+      context.canonical &&
+      (await groups.resolve(tx, existing.canonicalTripId, true)).id !==
+        (await groups.resolve(tx, context.canonical.tripId, true)).id
+    )
       throw identityError(409);
     const [event] = await c(tx)
       .select()
@@ -296,20 +309,20 @@ export function createTrips(
       if (!existing || event.sourceTripId !== existing.id || !event.sha256.equals(hash))
         throw identityError(409);
       return {
-        tripId: existing.canonicalTripId,
+        tripId: (await groups.resolve(tx, existing.canonicalTripId, true)).id,
         sourceRecordId: event.id,
         firstReceivedAt: event.receivedAt,
         duplicate: true,
       };
     }
-    const tripId = existing?.canonicalTripId ?? context.canonical?.tripId ?? newId(),
+    const originalTripId = existing?.canonicalTripId ?? context.canonical?.tripId ?? newId(),
+      tripId =
+        existing || context.canonical
+          ? (await groups.resolve(tx, originalTripId, true)).id
+          : originalTripId,
       sourceTripId = existing?.id ?? newId();
     if (context.canonical) {
-      const [target] = await c(tx)
-        .select()
-        .from(trips)
-        .where(eq(trips.id, context.canonical.tripId))
-        .for("update");
+      const target = await groups.resolve(tx, context.canonical.tripId, true);
       if (!target || target.ownerId !== context.ownerUserId || target.game !== key.game)
         throw identityError(409);
       if (target.version !== context.canonical.expectedVersion)
@@ -337,7 +350,7 @@ export function createTrips(
           sessionKey: sourceKey(key.sessionKey),
           tripKey: sourceKey(key.tripKey),
           ownerId: context.ownerUserId,
-          canonicalTripId: tripId,
+          canonicalTripId: originalTripId,
           latestRevision: "0",
           connectionContext: context.connection,
           createdAt: at(),
@@ -348,7 +361,7 @@ export function createTrips(
       throw identityError(409);
     if (provider === "manual") {
       if (!ports.manualEvidence) throw identityError(503);
-      await ports.manualEvidence(tx, context.ownerUserId, immutablePayload, tripId);
+      await ports.manualEvidence(tx, context.ownerUserId, immutablePayload, originalTripId);
     }
     let supersede = false;
     if (previousManualRevisionId) {
@@ -405,12 +418,25 @@ export function createTrips(
     const current = trip.currentFactId
       ? (await factsRepository.read(tx, [trip.currentFactId], true)).get(trip.currentFactId)
       : undefined;
-    if (trip.currentFactId && (!current || current.tripId !== trip.id))
+    if (
+      trip.currentFactId &&
+      (!current || !(await groups.contains(tx, trip.id, current.tripId, true)))
+    )
       throw new Error("TRIP_FACT_POINTER_INVALID");
     const previous = current?.evidence;
     const newer = !existing || key.revision > Number(existing.latestRevision);
+    const quality =
+      previous && !supersede ? selectQuality([previous, fact], fact.factRevisionId) : null;
     const conflicts =
-      previous && !supersede && (newer || fact.outcome !== "open") ? differing(previous, fact) : [];
+      previous && !supersede && (newer || fact.outcome !== "open")
+        ? [
+            ...differing(previous, fact),
+            ...(ports.sourceStored ? (quality?.reasons ?? []) : []),
+            ...(ports.sourceStored && quality?.selected?.factRevisionId !== fact.factRevisionId
+              ? ["quality_cannot_replace_supported_snapshot"]
+              : []),
+          ]
+        : [];
     if (conflicts.length)
       fact.reasonCodes = [...new Set([...fact.reasonCodes, ...conflicts])].sort();
     await c(tx)
@@ -428,13 +454,15 @@ export function createTrips(
     await c(tx).insert(sourcePayloads).values({ messageId, content });
     await factsRepository.insert(
       tx,
-      tripId,
+      originalTripId,
       fact,
       adapter.versionFor?.(immutablePayload) ?? adapter.version,
     );
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
-    if (!newer && conflicts.length === 0)
+    if (!newer && conflicts.length === 0) {
+      if (provider !== "manual") await ports.sourceStored?.(tx, tripId, messageId);
       return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
+    }
     if (newer)
       await c(tx)
         .update(sourceTrips)
@@ -493,7 +521,13 @@ export function createTrips(
       version,
       fact,
     );
-    return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
+    if (provider !== "manual") await ports.sourceStored?.(tx, tripId, messageId);
+    return {
+      tripId: (await groups.resolve(tx, tripId, true)).id,
+      sourceRecordId: messageId,
+      firstReceivedAt,
+      duplicate: false,
+    };
   }
   async function summaries(
     tx: TxContext,
@@ -509,13 +543,19 @@ export function createTrips(
       tx,
       rows.flatMap((row) => (row.currentFactId ? [row.currentFactId] : [])),
     );
+    const membership = rows.length
+      ? await groups.members(
+          tx,
+          rows.map((row) => row.id),
+        )
+      : [];
     const sources = await c(tx)
       .select({ tripId: sourceTrips.canonicalTripId, provider: sourceTrips.provider })
       .from(sourceTrips)
       .where(
         inArray(
           sourceTrips.canonicalTripId,
-          rows.map((row) => row.id),
+          membership.map((row) => row.id),
         ),
       );
     let labels = new Map<string, S["CatalogLabel"]>();
@@ -533,11 +573,12 @@ export function createTrips(
       }
       labels = await ports.catalogs.labelsInTransaction(tx, [...pins.values()], locale);
     }
+    const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     return rows.map((row) => {
       const owner = members.get(row.ownerId);
       if (!owner) throw new Error("TRIP_OWNER_MISSING");
       const saved = row.currentFactId ? facts.get(row.currentFactId) : undefined;
-      if (row.currentFactId && (!saved || saved.tripId !== row.id))
+      if (row.currentFactId && (!saved || factMembers.get(saved.tripId) !== row.id))
         throw new Error("TRIP_FACT_POINTER_INVALID");
       const f = saved?.evidence;
       const label = (value: NormalizedTripEvidence["origin"] | undefined) =>
@@ -558,7 +599,9 @@ export function createTrips(
         actualDistanceM: row.actualDistanceM === null ? null : decimal(row.actualDistanceM),
         reportingAt: row.reportingAt,
         sourceKinds: [
-          ...new Set(sources.filter((s) => s.tripId === row.id).map((s) => s.provider)),
+          ...new Set(
+            sources.filter((s) => factMembers.get(s.tripId) === row.id).map((s) => s.provider),
+          ),
         ],
       };
     });
@@ -615,11 +658,16 @@ export function createTrips(
   }
   return {
     config,
+    groups,
+    reconciliation: createTripReconciliation(unit, now),
+    prepareSourceInTransaction: async (tx: TxContext, owner: string, game: "ets2" | "ats") => {
+      await ports.prepare?.(tx, owner, game);
+    },
+    manualStoredInTransaction: async (tx: TxContext, id: string, sourceRecordId: string) => {
+      await ports.sourceStored?.(tx, id, sourceRecordId);
+    },
     async summaryInTransaction(tx: TxContext, tripId: string, locale: "en" | "ru") {
-      const [row] = await c(tx)
-        .select()
-        .from(trips)
-        .where(eq(trips.id, applicationId(tripId)));
+      const row = await groups.resolve(tx, tripId);
       if (!row) throw identityError(404);
       const [result] = await summaries(tx, [row], locale);
       if (!result) throw new Error("TRIP_SUMMARY_MISSING");
@@ -629,6 +677,7 @@ export function createTrips(
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
     storeInTransaction: store,
     async reserveManualInTransaction(tx: TxContext, ownerId: string, game: "ets2" | "ats") {
+      await ports.prepare?.(tx, ownerId, game);
       const access = await ports.identity.accessState(tx, ownerId);
       if (!access.active || !access.canSubmitTrips) throw identityError(403);
       const id = newId();
@@ -652,11 +701,7 @@ export function createTrips(
       expectedVersion?: number,
       telemetry = false,
     ) {
-      const [row] = await c(tx)
-        .select()
-        .from(trips)
-        .where(eq(trips.id, applicationId(tripId)))
-        .for("update");
+      const row = await groups.resolve(tx, tripId, true);
       if (!row || row.ownerId !== ownerId) throw identityError(404);
       if (expectedVersion !== undefined && row.version !== expectedVersion)
         throw identityError(409, "VERSION_CONFLICT");
@@ -665,12 +710,18 @@ export function createTrips(
           .select({ id: sourceTrips.id })
           .from(sourceTrips)
           .where(
-            and(eq(sourceTrips.canonicalTripId, tripId), eq(sourceTrips.provider, "ets2telemetry")),
+            and(
+              inArray(
+                sourceTrips.canonicalTripId,
+                (await groups.members(tx, [row.id], true)).map((t) => t.id),
+              ),
+              eq(sourceTrips.provider, "ets2telemetry"),
+            ),
           )
           .for("share");
         if (!source) throw identityError(409);
       }
-      return row;
+      return { ...row, id: tripId };
     },
     async statesInTransaction(tx: TxContext, tripIds: string[], lock: boolean | "share" = false) {
       const ids = [...new Set(tripIds)].sort(),
@@ -684,10 +735,18 @@ export function createTrips(
           .orderBy(trips.id);
         rows.push(...(await (lock ? query.for(lock === "share" ? "share" : "update") : query)));
       }
-      return rows;
+      const roots = new Map(
+        (await groups.members(tx, ids, lock)).filter((t) => !t.aliasOf).map((t) => [t.id, t]),
+      );
+      return rows.map((row) => ({
+        ...(roots.get(row.aliasOf ?? row.id) ?? row),
+        id: row.id,
+        aliasOf: row.aliasOf,
+      }));
     },
     async manualPendingInTransaction(tx: TxContext, tripId: string, correction = false) {
-      const [row] = await c(tx).select().from(trips).where(eq(trips.id, tripId)).for("update");
+      const row = await groups.resolve(tx, tripId, true);
+      tripId = row.id;
       if (!row) throw identityError(404);
       if (
         (correction && row.decision !== "accepted") ||
@@ -728,7 +787,7 @@ export function createTrips(
       const facts = (await factsRepository.read(tx, [row.factId])).get(row.factId)?.evidence;
       if (!facts) throw new Error("SOURCE_FACT_MISSING");
       return {
-        tripId: row.tripId,
+        tripId: (await groups.resolve(tx, row.tripId)).id,
         receivedAt: row.receivedAt,
         deliveryMode: row.deliveryMode,
         start: facts.start,
@@ -763,6 +822,7 @@ export function createTrips(
           .from(trips)
           .where(
             and(
+              isNull(trips.aliasOf),
               scope === "company"
                 ? eq(trips.decision, "accepted")
                 : scope === "mine"
@@ -800,7 +860,7 @@ export function createTrips(
       applicationId(tripId);
       return run(async (tx) => {
         const current = await authority(tx, actor);
-        const [row] = await c(tx).select().from(trips).where(eq(trips.id, tripId));
+        const row = await groups.resolve(tx, tripId);
         const privateRead =
           row && (row.ownerId === actor.userId || current.capabilities.includes("trips.review"));
         if (!row || (!privateRead && row.decision !== "accepted")) throw identityError(404);
@@ -835,7 +895,13 @@ export function createTrips(
             correctionPending: sql<number>`COALESCE(SUM(${trips.correctionPending}),0)`,
           })
           .from(trips)
-          .where(and(eq(trips.ownerId, actor.userId), game ? eq(trips.game, game) : undefined));
+          .where(
+            and(
+              isNull(trips.aliasOf),
+              eq(trips.ownerId, actor.userId),
+              game ? eq(trips.game, game) : undefined,
+            ),
+          );
         if (!row) throw new Error("TRIP_STATUS_MISSING");
         const count = (n: unknown) => {
           const value = Number(n);
@@ -866,15 +932,20 @@ export function createTrips(
       )
         throw new Error("INVALID_REVIEWED_RETENTION_POLICY");
       const [link] = await c(tx)
-        .select({ tripId: sourceTrips.canonicalTripId })
+        .select({
+          tripId: sourceTrips.canonicalTripId,
+          ownerId: sourceTrips.ownerId,
+          game: sourceTrips.game,
+        })
         .from(sourceMessages)
         .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
         .where(eq(sourceMessages.id, applicationId(messageId)));
       if (!link) throw identityError(404);
+      await ports.prepare?.(tx, link.ownerId, link.game);
       await c(tx)
         .select({ id: trips.id })
         .from(trips)
-        .where(eq(trips.id, link.tripId))
+        .where(eq(trips.id, (await groups.resolve(tx, link.tripId, true)).id))
         .for("update");
       const [message] = await c(tx)
         .select()
@@ -892,15 +963,21 @@ export function createTrips(
     },
     async expirePayloadInTransaction(tx: TxContext, messageId: string) {
       const [link] = await c(tx)
-        .select({ tripId: sourceTrips.canonicalTripId, provider: sourceMessages.provider })
+        .select({
+          tripId: sourceTrips.canonicalTripId,
+          provider: sourceMessages.provider,
+          ownerId: sourceTrips.ownerId,
+          game: sourceTrips.game,
+        })
         .from(sourceMessages)
         .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
         .where(eq(sourceMessages.id, applicationId(messageId)));
       if (link?.provider !== "ets2telemetry") return false;
+      await ports.prepare?.(tx, link.ownerId, link.game);
       const [trip] = await c(tx)
         .select()
         .from(trips)
-        .where(eq(trips.id, link.tripId))
+        .where(eq(trips.id, (await groups.resolve(tx, link.tripId, true)).id))
         .for("update");
       const [payload] = await c(tx)
         .select()

@@ -12,6 +12,7 @@ import { identityError } from "../identity/service.js";
 import { compareDecimal } from "../qualification-rules/decimal.js";
 import { canonicalJson, contentHash, decimal } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
+import { createTripGroups } from "./groups.js";
 import { createFactRepository } from "./facts.js";
 export interface ContributionChange {
   tripId: string;
@@ -34,7 +35,8 @@ export interface ContributionContext {
 }
 export function createContributionRegister(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
-    facts = createFactRepository(unit);
+    facts = createFactRepository(unit),
+    groups = createTripGroups(unit);
   return {
     async contexts(tx: TxContext, changes: readonly ContributionChange[]) {
       if (
@@ -97,7 +99,7 @@ export function createContributionRegister(unit: UnitOfWork) {
         );
         if (
           !fact ||
-          fact.tripId !== trip.id ||
+          !(await groups.contains(tx, trip.aliasOf ?? trip.id, fact.tripId, true)) ||
           fact.evidence.ownerUserId !== trip.ownerId ||
           fact.evidence.game !== trip.game
         )

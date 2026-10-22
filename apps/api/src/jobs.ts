@@ -38,6 +38,8 @@ await ownedCli(async () => {
           config.telemetry,
           config.manualReports,
           config.qualifications,
+          config.events,
+          config.reconciliation,
         )
       : undefined;
     const messaging = composed?.messaging;

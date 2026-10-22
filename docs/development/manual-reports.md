@@ -70,3 +70,7 @@ For local diagnosis, `node deploy/development/test.mjs --manual-only` uses the s
 Report/revision/history lists use descending timestamp/ID keysets. Equal timestamps use immutable ID order; revision numbers retain their within-report sequence. Equal-time pagination is covered without assuming a random UUID identifies a later submission.
 
 Current integration preserves VTC-028 qualification/contribution storage. The contribution reader reconstructs format-2 scoped catalog pins through the same fact repository; manual gameplay times stay unknown and only an explicit actual confirmation instant supplies manual attribution. Submission does not populate contributions or grant credit. The common integration schema lifecycle and 60000 ms outer setup/teardown allowance come from the published VTC-028 baseline; runtime/query/transaction and negative-test deadlines are unchanged.
+
+## VTC-026 group integration
+
+[Reconciliation](reconciliation.md) preserves original report/revision/evidence references. The manual callback runs only after the immutable source revision, attachment references and pending state exist. Private projection, correction, review/reopen and retention include aliases and the full effective group. Latest decision timing and renewed review remain authoritative for the complete minimum calendar year. Deleting generations cannot be reused by merge/reversal.

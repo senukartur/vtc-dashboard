@@ -1,3 +1,5 @@
+import { createReconciliation, type Reconciliation } from "../modules/reconciliation/service.js";
+import type { ReconciliationConfig } from "../modules/reconciliation/matcher.js";
 import type { UnitOfWork } from "@vtc/db";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
@@ -23,6 +25,7 @@ import {
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import {
+  type Qualifications,
   createQualifications,
   type QualificationsConfig,
 } from "../modules/qualifications/service.js";
@@ -51,8 +54,12 @@ export function composeIdentity(
   manualConfig?: ManualConfig,
   qualificationsConfig?: QualificationsConfig,
   eventsConfig?: EventsConfig,
+  reconciliationConfig?: ReconciliationConfig,
 ) {
   let identity: Identity;
+  let qualifications: Qualifications | undefined, reconciliation: Reconciliation | undefined;
+  if (reconciliationConfig && (!tripsConfig || !qualificationsConfig))
+    throw new Error("RECONCILIATION_PREREQUISITES_REQUIRED");
   if (telemetryConfig && (!externalEnabled || !tripsConfig))
     throw new Error("TELEMETRY_PREREQUISITES_REQUIRED");
   if (qualificationsConfig && !tripsConfig)
@@ -108,6 +115,18 @@ export function composeIdentity(
   const trips = tripsConfig
     ? createTrips(unit, tripsConfig, {
         identity,
+        ...(reconciliationConfig
+          ? {
+              prepare: async (tx, ownerId, game) => {
+                if (!qualifications) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                await qualifications.prepareInTransaction(tx, [{ ownerId, game }]);
+              },
+              sourceStored: async (tx, tripId, sourceRecordId) => {
+                if (!reconciliation) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                await reconciliation.refreshInTransaction(tx, tripId, sourceRecordId);
+              },
+            }
+          : {}),
         ...(catalogs ? { catalogs } : {}),
         ...(manualConfig
           ? {
@@ -123,10 +142,27 @@ export function composeIdentity(
           : {}),
       })
     : undefined;
+  qualifications =
+    qualificationsConfig && trips
+      ? createQualifications(unit, qualificationsConfig, {
+          identity,
+          trips,
+          ...(catalogs ? { catalogs } : {}),
+        })
+      : undefined;
   if (manualConfig) {
     if (!trips || !catalogs) throw new Error("MANUAL_PREREQUISITES_REQUIRED");
     manualReports = createManualReports(unit, manualConfig, { identity, catalogs, trips });
   }
+  reconciliation =
+    reconciliationConfig && trips && qualifications
+      ? createReconciliation(unit, reconciliationConfig, {
+          identity,
+          trips,
+          qualifications,
+          ...(manualReports ? { manual: manualReports } : {}),
+        })
+      : undefined;
   const jobsQueue = createQueue(
     unit,
     [
@@ -153,15 +189,8 @@ export function composeIdentity(
           events: createEvents(unit, eventsConfig, { identity, ...(catalogs ? { catalogs } : {}) }),
         }
       : {}),
-    ...(qualificationsConfig && trips
-      ? {
-          qualifications: createQualifications(unit, qualificationsConfig, {
-            identity,
-            trips,
-            ...(catalogs ? { catalogs } : {}),
-          }),
-        }
-      : {}),
+    ...(qualifications ? { qualifications } : {}),
+    ...(reconciliation ? { reconciliation } : {}),
     ...(telemetryConfig && trips && externalIdentities
       ? {
           telemetry: createTelemetry(unit, telemetryConfig, {

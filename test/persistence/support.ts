@@ -80,6 +80,11 @@ export async function reset(connection: Connection) {
     );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   const tables = [
+    "reconciliation_commands",
+    "reconciliation_history",
+    "reconciliations",
+    "reconciliation_candidates",
+    "reconciliation_rules",
     "manual_blob_generations",
     "manual_commands",
     "manual_draft_history",
@@ -208,7 +213,7 @@ export async function eventsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -314,4 +319,8 @@ export async function qualificationsPriorFolder(): Promise<string> {
 
 export async function manualPriorFolder(): Promise<string> {
   return publishedPrefixFolder(12);
+}
+
+export async function reconciliationPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(13);
 }

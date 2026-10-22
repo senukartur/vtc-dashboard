@@ -442,8 +442,34 @@ export function createQualifications(
     await emit(tx, "qualification.assigned", id, current.version + 1, userId, id);
     return { data: assignmentDto(row), version: current.version + 1 };
   }
+  async function prepare(tx: TxContext, owners: { ownerId: string; game: Game }[], actor?: Actor) {
+    await ports.identity.qualificationContextInTransaction(
+      tx,
+      [...new Set(owners.map((r) => r.ownerId))],
+      actor,
+      "trips.review",
+    );
+    const unique = [...new Map(owners.map((r) => [`${r.ownerId}:${r.game}`, r])).values()].sort(
+      (a, b) => `${a.ownerId}:${a.game}`.localeCompare(`${b.ownerId}:${b.game}`),
+    );
+    for (const row of unique) {
+      await state(tx, row.ownerId, row.game);
+      await c(tx)
+        .select({ id: qualificationAssignments.id })
+        .from(qualificationAssignments)
+        .where(
+          and(
+            eq(qualificationAssignments.userId, row.ownerId),
+            eq(qualificationAssignments.game, row.game),
+          ),
+        )
+        .orderBy(asc(qualificationAssignments.id))
+        .for("update");
+    }
+  }
   return {
     config,
+    prepareInTransaction: prepare,
     async authorize(actor: Actor, manage = false) {
       return ports.identity.transaction((tx) =>
         ports.identity.qualificationContextInTransaction(

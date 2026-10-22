@@ -127,3 +127,5 @@ VTC-025 provides opt-in [manual reports and private evidence](docs/development/m
 The [qualification guide](docs/development/qualifications.md) documents opt-in VTC-028 APIs, unset numeric launch configuration, explicit effective/history semantics, synchronous contribution authority and promotion proof/correction seams. `QUALIFICATIONS_ENABLED` defaults to false; migration and prepared grants are separate activation work. Admission/lifecycle always use the new assignment substrate after migration, even while qualification HTTP remains disabled.
 
 [Events backend APIs](docs/development/events.md) are opt-in through `EVENTS_ENABLED` and an independent cursor key. They provide public/member views, voluntary RSVP and separate staff actual attendance; VTC-035 owns event UI and VTC-036 owns notifications/reminders.
+
+VTC-026 reconciliation is disabled by default. Its independent key, explicit optional rule settings, additive migration, lock/reversal rules and pending activation gates are documented in [reconciliation](docs/development/reconciliation.md). Use the isolated Linux launcher for MySQL and filesystem verification.

@@ -28,6 +28,7 @@ try {
             config.manualReports,
             config.qualifications,
             config.events,
+            config.reconciliation,
           ),
         }
       : {}),

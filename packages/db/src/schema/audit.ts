@@ -14,6 +14,7 @@ export const auditOperations = [
   "invitation.redeemed",
   "steam.linked",
   "steam.replaced",
+  "trip.reconciled",
   "manual.submitted",
   "manual.correction_requested",
 ] as const;

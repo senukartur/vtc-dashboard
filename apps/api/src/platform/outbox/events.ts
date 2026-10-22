@@ -77,6 +77,63 @@ export interface CatalogEvent {
   causationId: string | null;
   data: { catalogRevisionId: string };
 }
+export interface ReconciliationEvent {
+  eventId: string;
+  type: "trip.correction_recorded";
+  schemaVersion: 1;
+  aggregate: { kind: "trip"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: {
+    reconciliationId: string;
+    primaryTripId: string;
+    secondaryTripId: string;
+    reconciliationVersion: number;
+  };
+}
+export function reconciliationEvent(value: unknown): ReconciliationEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, [
+      "reconciliationId",
+      "primaryTripId",
+      "secondaryTripId",
+      "reconciliationVersion",
+    ]);
+  if (
+    e.type !== "trip.correction_recorded" ||
+    e.schemaVersion !== 1 ||
+    a.kind !== "trip" ||
+    a.id !== d.primaryTripId ||
+    d.primaryTripId === d.secondaryTripId
+  )
+    throw new Error("INVALID_RECONCILIATION_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: "trip.correction_recorded",
+    schemaVersion: 1,
+    aggregate: { kind: "trip", id: applicationId(a.id as string), version: positive(a.version) },
+    occurredAt: utcIso(utcDateTime(e.occurredAt as string)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      reconciliationId: applicationId(d.reconciliationId as string),
+      primaryTripId: applicationId(d.primaryTripId as string),
+      secondaryTripId: applicationId(d.secondaryTripId as string),
+      reconciliationVersion: positive(d.reconciliationVersion),
+    },
+  };
+}
 export interface TripEvent {
   eventId: string;
   type: "source.snapshot_stored" | "trip.lifecycle_changed" | "trip.facts_changed";
@@ -438,6 +495,7 @@ export function createOutbox(unit: UnitOfWork) {
     async append(
       tx: TxContext,
       input:
+        | ReconciliationEvent
         | AccessEvent
         | AdmissionsEvent
         | CatalogEvent
@@ -447,22 +505,27 @@ export function createOutbox(unit: UnitOfWork) {
         | CompanyEvent,
     ): Promise<void> {
       const client = unit.client(tx);
-      const e = input.type.startsWith("manual.")
-        ? manualEvent(input)
-        : input.type === "member.access_changed"
-          ? accessEvent(input)
-          : input.type === "catalog.published"
-            ? catalogEvent(input)
-            : ["source.snapshot_stored", "trip.lifecycle_changed", "trip.facts_changed"].includes(
-                  input.type,
-                )
-              ? tripEvent(input)
-              : input.type.startsWith("qualification.") ||
-                  input.type === "promotion.review_required"
-                ? qualificationEvent(input)
-                : input.type.startsWith("event.")
-                  ? companyEvent(input)
-                  : admissionsEvent(input);
+      const e =
+        input.type === "trip.correction_recorded"
+          ? reconciliationEvent(input)
+          : input.type.startsWith("manual.")
+            ? manualEvent(input)
+            : input.type === "member.access_changed"
+              ? accessEvent(input)
+              : input.type === "catalog.published"
+                ? catalogEvent(input)
+                : [
+                      "source.snapshot_stored",
+                      "trip.lifecycle_changed",
+                      "trip.facts_changed",
+                    ].includes(input.type)
+                  ? tripEvent(input)
+                  : input.type.startsWith("qualification.") ||
+                      input.type === "promotion.review_required"
+                    ? qualificationEvent(input)
+                    : input.type.startsWith("event.")
+                      ? companyEvent(input)
+                      : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
