@@ -26,11 +26,11 @@ import {
 import { sourceMessages, tripFacts, tripFactTrailers, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
-  afterAll as vitestAfterAll,
-  beforeAll as vitestBeforeAll,
   beforeEach,
   expect,
   test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
@@ -68,6 +68,11 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
+import {
+  type GenerationCase,
+  generationProcessLine,
+  parseGenerationWorkerLine,
+} from "../support/manual-generation-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -1745,7 +1750,7 @@ test("stale deletion generations cannot expire a ready object; two ordinary work
   expect((await manual.metadata(owner, image.id)).state).toBe("expired");
 });
 
-async function generationWorker(signal?: AbortSignal) {
+async function generationWorker(caseId: GenerationCase, ordinal: number, signal?: AbortSignal) {
   signal?.throwIfAborted();
   const started = performance.now();
   const db = guardedSettings();
@@ -1767,33 +1772,120 @@ async function generationWorker(signal?: AbortSignal) {
       },
     },
   );
-  let output = "";
-  child.stdout.on("data", (chunk) => {
-    output = (output + String(chunk)).slice(-4000);
-  });
-  child.stderr.resume();
-  const stop = () => {
+  let receipt: { event: string; processed: number; pid: number } | undefined;
+  let malformed = false,
+    closed = false,
+    timerFired = false,
+    caseAborted = false,
+    spawnFailed = false;
+  let exitCode: number | null = null;
+  let exitSignal: string | null = null;
+  let firstStop: "none" | "child_deadline" | "case_abort" = "none";
+  const emit = (state: "exit" | "close" | "spawn_error") =>
+    console.log(
+      generationProcessLine({
+        event: "manual_generation_process",
+        caseId,
+        ordinal,
+        state,
+        durationMs: Math.round(performance.now() - started),
+        exitCode,
+        signal:
+          exitSignal === null || ["SIGKILL", "SIGTERM", "SIGINT"].includes(exitSignal)
+            ? exitSignal
+            : "other",
+        timerFired,
+        caseAborted,
+        spawnFailed,
+        firstStop,
+        receiptState: receipt ? "valid" : !closed ? "pending" : malformed ? "malformed" : "missing",
+      }),
+    );
+  for (const [stream, stdout] of [
+    [child.stdout, true],
+    [child.stderr, false],
+  ] as const) {
+    let pending = "",
+      oversized = false;
+    const line = (value: string) => {
+      const record = parseGenerationWorkerLine(value);
+      if (stdout && record?.event === "manual_generation_worker") {
+        // This validated private PID stays in memory for the original distinct-process proof.
+        receipt = JSON.parse(value) as typeof receipt;
+      } else if (record?.event === "manual_generation_worker_phase") {
+        console.log(
+          generationProcessLine({ ...record, event: "manual_generation_phase", caseId, ordinal }),
+        );
+      } else if (stdout && value.trim()) malformed = true;
+    };
+    stream.on("data", (chunk) => {
+      for (const part of String(chunk).split(/(\n)/)) {
+        if (part === "\n") {
+          if (!oversized) line(pending);
+          else if (stdout) malformed = true;
+          pending = "";
+          oversized = false;
+        } else if (!oversized) {
+          pending += part;
+          if (pending.length > 4000) {
+            pending = "";
+            oversized = true;
+            if (stdout) malformed = true;
+          }
+        }
+      }
+    });
+    stream.once("end", () => {
+      if (pending && !oversized) line(pending);
+    });
+  }
+  const stop = (reason: "child_deadline" | "case_abort") => {
+    // This records a local kill attempt, independently of the native exit code/signal.
+    if (firstStop === "none") firstStop = reason;
     child.kill("SIGKILL");
   };
-  const timer = setTimeout(stop, 5000);
-  signal?.addEventListener("abort", stop, { once: true });
-  if (signal?.aborted) stop();
+  const timer = setTimeout(() => {
+    timerFired = true;
+    stop("child_deadline");
+  }, 5000);
+  const abort = () => {
+    caseAborted = true;
+    stop("case_abort");
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  child.once("close", (code, signal) => {
+    closed = true;
+    exitCode = code;
+    exitSignal = signal;
+    emit("close");
+  });
   const status = await new Promise<number | null>((accept, reject) => {
-    child.once("exit", accept);
-    child.once("error", () => reject(Error("SYNTHETIC_GENERATION_WORKER_START_FAILED")));
+    child.once("exit", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
+      emit("exit");
+      accept(code);
+    });
+    child.once("error", () => {
+      spawnFailed = true;
+      emit("spawn_error");
+      reject(Error("SYNTHETIC_GENERATION_WORKER_START_FAILED"));
+    });
   }).finally(() => {
     clearTimeout(timer);
-    signal?.removeEventListener("abort", stop);
+    signal?.removeEventListener("abort", abort);
   });
   expect(status).toBe(0);
-  const lines = output.trim().split("\n"),
-    last = JSON.parse(lines.at(-1) ?? "{}");
+  const last = receipt ?? { event: undefined };
   expect(last.event).toBe("manual_generation_worker");
   console.log(
-    JSON.stringify({
+    generationProcessLine({
       event: "manual_generation_process_duration",
+      caseId,
+      ordinal,
       durationMs: Math.round(performance.now() - started),
-      processed: last.processed,
+      processed: receipt?.processed,
     }),
   );
   return last as { processed: number; pid: number };
@@ -1835,7 +1927,8 @@ test("durable generation intent makes bounded progress beyond100 protected curre
   await writeFile(join(root, unregistered), pngBytes(), { flag: "wx", mode: 0o600 });
   expect((await readdir(root)).length).toBeGreaterThan(100);
   const workers = [];
-  for (let pass = 0; pass < 5; pass++) workers.push(await generationWorker(signal));
+  for (let pass = 0; pass < 5; pass++)
+    workers.push(await generationWorker("generation_progress", pass, signal));
   expect(workers.map((worker) => worker.processed)).toEqual([0, 0, 0, 0, 1]);
   expect(new Set(workers.map((worker) => worker.pid)).size).toBe(5);
   const names = await readdir(root);
@@ -1863,7 +1956,7 @@ test("missing generation observations survive late actual finalization and recon
       nextCheckAt: "2020-01-01T00:00:00.000Z",
     }),
   );
-  expect((await generationWorker()).processed).toBe(0);
+  expect((await generationWorker("generation_late", 0)).processed).toBe(0);
   const [seen] = await unit.run((tx) =>
     unit
       .client(tx)
@@ -1879,7 +1972,7 @@ test("missing generation observations survive late actual finalization and recon
     "UPDATE manual_blob_generations SET next_check_at='2020-01-01 00:00:00.000' WHERE generation=?",
     [Buffer.from(generation)],
   );
-  expect((await generationWorker()).processed).toBe(1);
+  expect((await generationWorker("generation_late", 1)).processed).toBe(1);
   expect(await blobs.present(key)).toBe(false);
   expect((await manual.metadata(owner, image.id)).state).toBe("ready");
 });
@@ -1967,7 +2060,7 @@ test("generation cleanup retries a failed file effect durably and recovers an ex
     "UPDATE manual_blob_generations SET next_check_at='2020-01-01 00:00:00.000' WHERE generation=?",
     [Buffer.from(generation)],
   );
-  expect((await generationWorker()).processed).toBe(1);
+  expect((await generationWorker("generation_retry", 0)).processed).toBe(1);
   expect(await blobs.present(key)).toBe(false);
   const [saved] = await unit.run((tx) =>
     unit

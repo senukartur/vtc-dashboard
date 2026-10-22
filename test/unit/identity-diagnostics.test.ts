@@ -1,8 +1,16 @@
-import type { UnitOfWork } from "@vtc/db";
+import type { TxContext, UnitOfWork } from "@vtc/db";
 import type { Connection } from "mysql2/promise";
 import { expect, test, vi } from "vitest";
 import { observeDatabaseOperation } from "../../packages/db/dist/core/operation-context.js";
+import { deferred } from "../support/concurrency.ts";
 import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import {
+  generationProcessLine,
+  generationWorkerPhaseLine,
+  parseGenerationWorkerLine,
+  safeGenerationProcessRecord,
+  safeGenerationWorkerRecord,
+} from "../support/manual-generation-diagnostics.ts";
 
 test("identity fixture diagnostics retain only allowlisted failure facts through bounded cyclic causes", () => {
   const inner = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL_AND_INPUT"), {
@@ -168,3 +176,236 @@ test.each([
     }
   },
 );
+
+test("identity scopes bind at transaction invocation across concurrent and nested work without retries", async () => {
+  const lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  const diagnostic = identityDiagnostics("identity"),
+    gate = deferred<void>(),
+    entered = deferred<void>();
+  const unknown = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL"), {
+    code: "TRANSACTION_COMMIT_OUTCOME_UNKNOWN",
+  });
+  const other = Object.assign(new Error("SYNTHETIC_PRIVATE_ACCOUNT"), { code: "ETIMEDOUT" });
+  const run = vi.fn();
+  const subject = diagnostic.unit({
+    async run<T>(command: (tx: TxContext) => Promise<T>) {
+      run();
+      return command({} as TxContext);
+    },
+    client: vi.fn(),
+    close: async () => {},
+  });
+  try {
+    const first = diagnostic.scope(
+      { caseId: "role_matrix", step: "member_login", mask: 7 },
+      async () => {
+        expect(await subject.run(async () => 1)).toBe(1);
+        await expect(
+          subject.run(async () => {
+            entered.resolve();
+            await gate.promise;
+            throw unknown;
+          }),
+        ).rejects.toBe(unknown);
+      },
+    );
+    await entered.promise;
+    await diagnostic.scope({ caseId: "role_matrix", step: "director_login" }, async () => {
+      await expect(
+        subject.run(async () => {
+          throw other;
+        }),
+      ).rejects.toBe(other);
+    });
+    gate.resolve();
+    await first;
+    const facts = lines.map((line) => JSON.parse(line));
+    expect(
+      facts
+        .filter((f) => f.phase === "transaction")
+        .map((f) => [f.step, f.mask, f.transactionOrdinal]),
+    ).toEqual([
+      ["director_login", undefined, 1],
+      ["member_login", 7, 2],
+    ]);
+    expect(facts.find((f) => f.event === "identity_fixture_unknown_commit")).toMatchObject({
+      caseId: "role_matrix",
+      step: "member_login",
+      mask: 7,
+      transactionOrdinal: 2,
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+    await diagnostic.scope({ caseId: "role_matrix", step: "member_seed", mask: 2 }, async () => {
+      await diagnostic.scope({ caseId: "role_matrix", step: "director_lookup" }, async () =>
+        diagnostic.failure(other),
+      );
+      diagnostic.failure(other);
+    });
+    diagnostic.failure(other);
+    const restored = lines.slice(-3).map((line) => JSON.parse(line));
+    expect(restored.map((f) => f.step)).toEqual(["director_lookup", "member_seed", undefined]);
+    expect(restored[2]).not.toHaveProperty("caseId");
+    expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+  } finally {
+    gate.resolve();
+    await subject.close();
+    output.mockRestore();
+  }
+});
+
+test("identity scopes reject private extra fields and invalid masks before starting work", () => {
+  const diagnostic = identityDiagnostics("identity"),
+    work = vi.fn(async () => 1);
+  for (const mask of [-1, 16, 0.5, Number.NaN, Number.POSITIVE_INFINITY])
+    expect(() =>
+      diagnostic.scope({ caseId: "role_matrix", step: "member_login", mask }, work),
+    ).toThrow("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+  const withExtra = Object.defineProperty(
+    { caseId: "role_matrix" as const, step: "director_login" as const },
+    "account",
+    {
+      enumerable: true,
+      get() {
+        throw Error("PRIVATE_FIELD_READ");
+      },
+    },
+  );
+  expect(() => diagnostic.scope(withExtra, work)).toThrow("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+  expect(work).not.toHaveBeenCalled();
+});
+
+test("worker receipt remains identifiable before a later close phase without exposing its PID", () => {
+  const receipt = JSON.stringify({ event: "manual_generation_worker", processed: 1, pid: 42 });
+  const close = generationWorkerPhaseLine({
+    event: "manual_generation_worker_phase",
+    phase: "close",
+    state: "success",
+    durationMs: 1,
+  });
+  const records = [receipt, close].map(parseGenerationWorkerLine);
+  expect(records.find((record) => record?.event === "manual_generation_worker")).toEqual({
+    event: "manual_generation_worker",
+    processed: 1,
+  });
+  expect(records[1]).toMatchObject({ phase: "close", state: "success" });
+  expect(JSON.stringify(records)).not.toContain("pid");
+  expect(JSON.parse(receipt).pid).toBe(42);
+  const failure = safeGenerationWorkerRecord({
+    event: "manual_generation_worker_phase",
+    phase: "maintenance",
+    state: "failed",
+    durationMs: 5001,
+    category: "unclassified",
+    codes: ["TRANSACTION_COMMIT_OUTCOME_UNKNOWN", "PROTOCOL_SEQUENCE_TIMEOUT"],
+  });
+  expect(failure).toMatchObject({
+    phase: "maintenance",
+    codes: ["TRANSACTION_COMMIT_OUTCOME_UNKNOWN", "PROTOCOL_SEQUENCE_TIMEOUT"],
+  });
+});
+
+test("closed worker lifecycle retains native exit and independent local stop facts per invocation", () => {
+  const value = {
+    event: "manual_generation_process",
+    caseId: "generation_progress",
+    ordinal: 0,
+    state: "exit",
+    durationMs: 5001,
+    exitCode: null,
+    signal: "SIGKILL",
+    timerFired: true,
+    caseAborted: false,
+    spawnFailed: false,
+    firstStop: "child_deadline",
+    receiptState: "pending",
+  };
+  for (const facts of [
+    {},
+    { exitCode: 0, signal: null, timerFired: false, firstStop: "none", receiptState: "valid" },
+    { exitCode: 7, signal: null, timerFired: false, firstStop: "none" },
+    { exitCode: -1, signal: null },
+    { caseAborted: true, timerFired: false, firstStop: "case_abort" },
+    { exitCode: 0, signal: null, caseAborted: true },
+    { state: "spawn_error", spawnFailed: true, signal: null, timerFired: false, firstStop: "none" },
+    { state: "close", receiptState: "missing" },
+    { state: "close", receiptState: "malformed" },
+  ]) {
+    const record = { ...value, ...facts };
+    expect(safeGenerationProcessRecord(record)).toEqual(record);
+    expect(JSON.parse(generationProcessLine(record))).toEqual(record);
+  }
+  const first = safeGenerationProcessRecord(value);
+  safeGenerationProcessRecord({ ...value, caseId: "generation_late", ordinal: 1 });
+  expect(first).toMatchObject({ caseId: "generation_progress", ordinal: 0 });
+});
+
+test("worker parsers reject private fields, malformed receipts and unsupported numeric or enum values", () => {
+  const value = {
+    event: "manual_generation_process",
+    caseId: "generation_progress",
+    ordinal: 0,
+    state: "close",
+    durationMs: 1,
+    exitCode: 0,
+    signal: null,
+    timerFired: false,
+    caseAborted: false,
+    spawnFailed: false,
+    firstStop: "none",
+    receiptState: "valid",
+  };
+  const privateText = "SYNTHETIC_PRIVATE_VALUE";
+  for (const invalid of [
+    ...["pid", "output", "stderr", "settings", "error", "path"].map((key) => ({
+      ...value,
+      [key]: privateText,
+    })),
+    { ...value, ordinal: 5 },
+    { ...value, ordinal: -1 },
+    { ...value, caseId: privateText },
+    { ...value, exitCode: Number.NaN },
+    { ...value, exitCode: 0.5 },
+    { ...value, signal: privateText },
+    { ...value, firstStop: privateText },
+    { ...value, receiptState: privateText },
+    { ...value, durationMs: 86400001 },
+  ]) {
+    expect(safeGenerationProcessRecord(invalid)).toBeUndefined();
+    expect(() => generationProcessLine(invalid)).toThrow("INVALID_GENERATION_PROCESS_DIAGNOSTIC");
+  }
+  for (const line of [
+    "not json",
+    privateText.repeat(4001),
+    JSON.stringify({ event: "manual_generation_worker", processed: 1, pid: 1 }),
+    JSON.stringify({
+      event: "manual_generation_worker",
+      processed: 1,
+      pid: 42,
+      password: privateText,
+    }),
+    JSON.stringify({
+      event: "manual_generation_worker_phase",
+      phase: "pass",
+      state: "failed",
+      durationMs: 1,
+      category: "unclassified",
+      codes: [privateText],
+    }),
+  ])
+    expect(parseGenerationWorkerLine(line)).toBeUndefined();
+  expect(
+    safeGenerationWorkerRecord({
+      event: "manual_generation_worker_phase",
+      phase: "pass",
+      state: "failed",
+      durationMs: 1,
+      databaseOperation: {
+        operation: "migration_statement",
+        wireDeadlineMs: 30000,
+        elapsedMs: 1,
+        sql: privateText,
+      },
+    }),
+  ).toBeUndefined();
+});

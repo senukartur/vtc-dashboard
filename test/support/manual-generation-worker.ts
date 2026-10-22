@@ -1,56 +1,100 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork } from "@vtc/db";
+
 const { composeIdentity } = await import(
   new URL("../../apps/api/dist/use-cases/identity-messaging.js", import.meta.url).href
 );
 const { runPass } = await import(
   new URL("../../apps/api/dist/platform/jobs/runner.js", import.meta.url).href
 );
+
 import { guardedSettings, testConnection } from "../persistence/support.ts";
+import { safeIdentityFailure } from "./identity-diagnostics.ts";
+import {
+  type GenerationPhase,
+  generationWorkerPhaseLine,
+} from "./manual-generation-diagnostics.ts";
 
 // This producer-free worker inherits only its launcher's disposable allocation.
-const control = await testConnection();
-await control.end();
-const unit = createUnitOfWork(guardedSettings()),
-  key = () => randomBytes(32).toString("hex");
-let phase = "composition";
+let unit: ReturnType<typeof createUnitOfWork> | undefined;
+const key = () => randomBytes(32).toString("hex");
+async function phase<T>(name: GenerationPhase, work: () => T | Promise<T>): Promise<T> {
+  const started = performance.now();
+  const emit = (state: "started" | "success" | "failed", extra = {}) =>
+    console.error(
+      generationWorkerPhaseLine({
+        event: "manual_generation_worker_phase",
+        phase: name,
+        state,
+        durationMs: Math.round(performance.now() - started),
+        ...extra,
+      }),
+    );
+  emit("started");
+  try {
+    const result = await work();
+    emit("success");
+    return result;
+  } catch (error) {
+    try {
+      const failure = safeIdentityFailure(error);
+      emit("failed", {
+        category: failure.category,
+        codes: failure.codes,
+        ...(failure.databaseOperation ? { databaseOperation: failure.databaseOperation } : {}),
+      });
+    } catch {
+      /* Keep the original failure and exit verdict. */
+    }
+    throw error;
+  }
+}
 try {
-  const composed = composeIdentity(
-    unit,
-    { secret: key(), origin: "http://127.0.0.1:4173", production: false },
-    undefined,
-    undefined,
-    false,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: key(),
-      maxFileBytes: 1048576,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { cursorKey: key() },
-    undefined,
-    {
-      key: key(),
-      maxFilesPerReport: 5,
-      policyRevision: 1,
-      orphanGraceMs: 60000,
-      storage: {
-        root: process.argv[2] ?? "",
+  await phase("guard", async () => {
+    const control = await testConnection();
+    await control.end();
+  });
+  unit = createUnitOfWork(guardedSettings());
+  const current = unit;
+  const composed = await phase("composition", () =>
+    composeIdentity(
+      current,
+      { secret: key(), origin: "http://127.0.0.1:4173", production: false },
+      undefined,
+      undefined,
+      false,
+      {
+        production: false,
+        synthetic: true,
+        cursorKey: key(),
         maxFileBytes: 1048576,
-        maxPixels: 10000,
-        timeoutMs: 5000,
+        artifactTtlMs: 86400000,
+        policyRevision: 1,
+        evidence: [],
       },
-    },
+      { cursorKey: key() },
+      undefined,
+      {
+        key: key(),
+        maxFilesPerReport: 5,
+        policyRevision: 1,
+        orphanGraceMs: 60000,
+        storage: {
+          root: process.argv[2] ?? "",
+          maxFileBytes: 1048576,
+          maxPixels: 10000,
+          timeoutMs: 5000,
+        },
+      },
+    ),
   );
-  phase = "initialize";
-  await composed.manualReports?.initialize();
-  phase = "maintenance";
-  await composed.manualReports?.maintenance(new AbortController().signal);
-  phase = "pass";
-  const result = await runPass(composed.jobsQueue, new AbortController().signal);
+  await phase("initialize", () => composed.manualReports?.initialize());
+  await phase("maintenance", () =>
+    composed.manualReports?.maintenance(new AbortController().signal),
+  );
+  const result = await phase("pass", () =>
+    runPass(composed.jobsQueue, new AbortController().signal),
+  );
   console.log(
     JSON.stringify({
       event: "manual_generation_worker",
@@ -59,8 +103,14 @@ try {
     }),
   );
 } catch {
-  console.error(JSON.stringify({ event: "manual_generation_worker", status: "failed", phase }));
   process.exitCode = 1;
 } finally {
-  await unit.close();
+  if (unit) {
+    const current = unit;
+    try {
+      await phase("close", () => current.close());
+    } catch {
+      process.exitCode = 1;
+    }
+  }
 }
