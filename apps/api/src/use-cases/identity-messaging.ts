@@ -1,5 +1,3 @@
-import { createReconciliation, type Reconciliation } from "../modules/reconciliation/service.js";
-import type { ReconciliationConfig } from "../modules/reconciliation/matcher.js";
 import type { UnitOfWork } from "@vtc/db";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
@@ -25,10 +23,12 @@ import {
 } from "../modules/messaging/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import {
-  type Qualifications,
   createQualifications,
+  type Qualifications,
   type QualificationsConfig,
 } from "../modules/qualifications/service.js";
+import type { ReconciliationConfig } from "../modules/reconciliation/matcher.js";
+import { createReconciliation, type Reconciliation } from "../modules/reconciliation/service.js";
 import {
   createTelemetry,
   invalidateTelemetryCredentials,
@@ -169,12 +169,14 @@ export function composeIdentity(
       ...(messaging ? [messaging.handler] : []),
       ...(catalogs ? [catalogs.handler] : []),
       ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
+      ...(reconciliation ? [reconciliation.handler] : []),
     ],
     [],
     undefined,
     [
       ...(!messaging ? ["mail.deliver"] : []),
       ...(!catalogs ? ["catalog.import"] : []),
+      ...(!reconciliation ? ["reconciliation.search"] : []),
       ...(!manualReports?.config.storage
         ? ["manual.evidence-delete", "manual.generation-delete"]
         : []),

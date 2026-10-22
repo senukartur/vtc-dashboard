@@ -1,7 +1,9 @@
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { request } from "node:http";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import type { components } from "@vtc/contracts";
 import {
   createUnitOfWork,
@@ -12,9 +14,10 @@ import {
 } from "@vtc/db";
 import { and, eq, roles } from "@vtc/db/identity-schema";
 import { manualEvidence } from "@vtc/db/manual-reports-schema";
+import { reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { beforeEach, expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
+import { beforeEach, expect, test, afterAll as vAfter, beforeAll as vBefore, vi } from "vitest";
 import type { createApp } from "../../apps/api/src/app.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
@@ -57,7 +60,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
-import { deferred } from "../support/concurrency.ts";
+import { bounded, deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vBefore, vAfter);
@@ -193,6 +196,9 @@ beforeEach(async () => {
   await control.query("UPDATE manual_reports SET current_revision_id=NULL");
   await control.query("UPDATE trips SET alias_of=NULL");
   for (const table of [
+    "job_effect_receipts",
+    "durable_jobs",
+    "reconciliation_searches",
     "reconciliation_commands",
     "reconciliation_history",
     "reconciliations",
@@ -367,9 +373,117 @@ function productionComposition(reconciliationConfig: ReconciliationConfig = conf
     undefined,
     reconciliationConfig,
   );
-  const { trips, manualReports, reconciliation } = composed;
-  if (!trips || !manualReports || !reconciliation) throw new Error("SYNTHETIC_COMPOSITION_MISSING");
-  return { trips, manualReports, reconciliation };
+  const { trips, manualReports, reconciliation, qualifications, jobsQueue } = composed;
+  if (!trips || !manualReports || !reconciliation || !qualifications)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  return { trips, manualReports, reconciliation, qualifications, jobsQueue };
+}
+const lowRootIds = (count: number) =>
+  Array.from(
+    { length: count },
+    (_, i) => `00000001-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+  );
+async function seedTelemetry(
+  ids: string[],
+  target = createTrips(unit, tripConfig, { identity }, now),
+) {
+  return unit.run(async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: "ets2" }]);
+    await unit
+      .client(tx)
+      .insert(trips)
+      .values(
+        ids.map((id) => ({
+          id,
+          ownerId: owner.userId,
+          game: "ets2" as const,
+          version: 1,
+          outcome: "open" as const,
+          recording: "unknown" as const,
+          decision: "unassessed" as const,
+          reviewReasons: [],
+          createdAt: iso(),
+        })),
+      );
+    const receipts = [];
+    for (const id of ids) {
+      const p = payload();
+      receipts.push({
+        payload: p,
+        receipt: await target.storeInTransaction(tx, "ets2telemetry", p, {
+          ownerUserId: owner.userId,
+          connection: { state: "unknown", referenceId: null },
+          canonical: { tripId: id, expectedVersion: 1 },
+        }),
+      });
+    }
+    return receipts;
+  });
+}
+async function searchState(id: string) {
+  return unit.run(
+    async (tx) =>
+      (
+        await unit
+          .client(tx)
+          .select()
+          .from(reconciliationSearches)
+          .where(eq(reconciliationSearches.tripId, id))
+      )[0],
+  );
+}
+async function drainSearch(composed: ReturnType<typeof productionComposition>) {
+  let pages = 0;
+  for (; pages < 12; pages++) {
+    const claim = await composed.jobsQueue.claim();
+    if (!claim) return pages;
+    expect(claim.kind.toString()).toBe("reconciliation.search");
+    await composed.jobsQueue.execute(claim);
+  }
+  throw new Error("SYNTHETIC_SEARCH_DID_NOT_SETTLE");
+}
+async function workerCli(enabled: boolean) {
+  // Only the launcher's isolated database and synthetic feature settings cross this process boundary.
+  const environment: NodeJS.ProcessEnv = {
+    NODE_ENV: "test",
+    ...Object.fromEntries(
+      ["MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"].map((key) => [
+        key,
+        process.env[key],
+      ]),
+    ),
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: identityConfig.secret,
+    IDENTITY_ORIGIN: identityConfig.origin,
+    TRIPS_ENABLED: "true",
+    TRIPS_CURSOR_KEY: tripConfig.cursorKey,
+    QUALIFICATIONS_ENABLED: "true",
+    QUALIFICATIONS_CURSOR_KEY: qualConfig.cursorKey,
+    RECONCILIATION_ENABLED: String(enabled),
+    RECONCILIATION_KEY: config.key,
+    RECONCILIATION_RULE_VERSION: String(config.rule.version),
+    RECONCILIATION_START_TOLERANCE_MS: String(config.rule.startToleranceMs),
+    RECONCILIATION_END_TOLERANCE_MS: String(config.rule.endToleranceMs),
+    RECONCILIATION_DISTANCE_TOLERANCE_M: config.rule.distanceToleranceM,
+  };
+  let stdout: string;
+  try {
+    ({ stdout } = await promisify(execFile)(process.execPath, ["apps/api/dist/jobs.js", "run"], {
+      env: environment,
+      timeout: 20000,
+      maxBuffer: 65536,
+      windowsHide: true,
+    }));
+  } catch {
+    throw new Error("SYNTHETIC_RECONCILIATION_WORKER_FAILED");
+  }
+  const result = stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { event: string; status?: string; processed?: number })
+    .find((value) => value.event === "jobs_result");
+  expect(result?.status).toBe("completed");
+  return result;
 }
 test("production composition invokes matching in telemetry and completed manual transactions without an outbox subscription", async () => {
   const composed = productionComposition();
@@ -566,6 +680,288 @@ test("production telemetry and manual ingestion persist an unconfigured JSON rul
   expect(await counts()).toEqual(before);
   expect(await corrections()).toBe(0);
 });
+
+test(
+  "root-focused discovery preserves unrelated pairs and finds/reconsiders a mixed group beyond the former UUID prefix",
+  async () => {
+    const composed = productionComposition(),
+      target = "f0000000-0000-4000-8000-000000000001";
+    await seedTelemetry([target]);
+    await composed.manualReports.submitReport(owner, newId(), {
+      fields: fields(await image()),
+      targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
+    });
+    const aPayload = payload(),
+      a = await receive(aPayload, owner, composed.trips);
+    const oldPair = (await composed.reconciliation.list(director)).items[0];
+    if (!oldPair) throw new Error("SYNTHETIC_PAIR_REQUIRED");
+    await seedTelemetry(lowRootIds(105));
+    const discovery = vi.spyOn(composed.trips.reconciliation, "discover"),
+      started = performance.now();
+    const b = await receive(payload(), owner, composed.trips);
+    const after = (await composed.reconciliation.list(director)).items;
+    expect(after.some((r) => r.id === oldPair.id)).toBe(true);
+    expect(
+      after.some(
+        (r) =>
+          new Set([r.primaryTripId, r.secondaryTripId]).has(b.tripId) &&
+          new Set([r.primaryTripId, r.secondaryTripId]).has(target),
+      ),
+    ).toBe(true);
+    const discovered = await Promise.all(discovery.mock.results.map((r) => r.value));
+    expect(discovered.map((rows) => rows.length)).toEqual([1]);
+    const untouched = after.find((r) => r.id !== oldPair.id);
+    const revision = structuredClone(aPayload);
+    revision.eventId = newId();
+    revision.revision++;
+    await receive(revision, owner, composed.trips);
+    const refreshed = (await composed.reconciliation.list(director)).items;
+    expect(refreshed.some((r) => r.id === untouched?.id)).toBe(true);
+    expect(refreshed.some((r) => r.id === oldPair.id)).toBe(false);
+    expect(
+      refreshed.some(
+        (r) =>
+          [r.primaryTripId, r.secondaryTripId].includes(a.tripId) &&
+          [r.primaryTripId, r.secondaryTripId].includes(target),
+      ),
+    ).toBe(true);
+    console.log(
+      JSON.stringify({
+        event: "reconciliation_bounded_work",
+        fixtureRoots: 108,
+        discoveryReturned: discovered.map((rows) => rows.length),
+        durationMs: Math.round(performance.now() - started),
+      }),
+    );
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+test(
+  "reviewed merge persists visible zero-pair pending search among more than one page of original roots",
+  async () => {
+    const composed = productionComposition(),
+      ids = lowRootIds(105);
+    await seedTelemetry(ids);
+    const primaryTripId = ids[0] as string,
+      secondaryTripId = ids[1] as string;
+    await composed.reconciliation.merge(director, newId(), {
+      primaryTripId,
+      secondaryTripId,
+      primaryVersion: (await state(primaryTripId))?.version as number,
+      secondaryVersion: (await state(secondaryTripId))?.version as number,
+      reason: "Fictional reviewed duplicate source identities for one journey",
+    });
+    const pending = await searchState(primaryTripId),
+      before = await state(primaryTripId);
+    expect(pending).toMatchObject({ phase: "partners", finished: false, complete: false });
+    expect((await composed.reconciliation.list(director)).items).toHaveLength(0);
+    const detail = await composed.trips.detail(director, primaryTripId);
+    if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_REQUIRED");
+    expect(detail.reviewReasonCodes).toContain("candidate_search_overflow");
+    expect(await drainSearch(composed)).toBe(1);
+    expect(await searchState(primaryTripId)).toMatchObject({
+      generation: pending?.generation,
+      finished: true,
+      complete: true,
+    });
+    expect((await composed.reconciliation.list(director)).items).toHaveLength(0);
+    expect(await state(primaryTripId)).toMatchObject({
+      version: before?.version,
+      currentFactId: before?.currentFactId,
+      decision: before?.decision,
+      reviewHold: before?.reviewHold,
+      correctionPending: before?.correctionPending,
+    });
+    expect((await state(primaryTripId))?.reviewReasons).not.toContain("candidate_search_overflow");
+    expect(await corrections()).toBe(1);
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+test(
+  "incomplete search stays visible and the configured production worker completes it while disabled workers pause it",
+  async () => {
+    const composed = productionComposition();
+    await seedTelemetry(lowRootIds(105));
+    const body = fields(await image());
+    const report = await composed.manualReports.submitReport(owner, newId(), { fields: body });
+    const pending = await searchState(report.tripId),
+      before = await state(report.tripId);
+    expect(pending).toMatchObject({ finished: false, complete: false });
+    expect((await composed.reconciliation.list(director, { limit: 100 })).items).toHaveLength(100);
+    const detail = await composed.trips.detail(director, report.tripId);
+    if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_REQUIRED");
+    expect(detail.reviewReasonCodes).toContain("candidate_search_overflow");
+    expect((await workerCli(false))?.processed).toBe(0);
+    expect(await searchState(report.tripId)).toEqual(pending);
+    expect((await workerCli(true))?.processed).toBeGreaterThan(0);
+    expect(await searchState(report.tripId)).toMatchObject({
+      generation: pending?.generation,
+      finished: true,
+      complete: true,
+    });
+    const [pairs] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM reconciliation_candidates WHERE active=1 AND (primary_trip_id=? OR secondary_trip_id=?)",
+      [report.tripId, report.tripId],
+    );
+    expect(String(pairs[0]?.n)).toBe("105");
+    expect(await state(report.tripId)).toMatchObject({
+      version: before?.version,
+      currentFactId: before?.currentFactId,
+      decision: before?.decision,
+      correctionPending: before?.correctionPending,
+    });
+    expect((await state(report.tripId))?.reviewReasons).not.toContain("candidate_search_overflow");
+    expect(await corrections()).toBe(0);
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+test(
+  "production durable continuation finishes unknown manual overflow without more ingestion and restarts for a source inserted behind its cursor",
+  async () => {
+    const composed = productionComposition(),
+      seed = await seedTelemetry(lowRootIds(105));
+    const key = newId(),
+      input = { fields: fields(await image()) },
+      report = await composed.manualReports.submitReport(owner, key, input);
+    const pending = await searchState(report.tripId),
+      before = await state(report.tripId);
+    expect(pending).toMatchObject({ phase: "discovery", finished: false, complete: false });
+    const detail = await composed.trips.detail(director, report.tripId);
+    if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_REQUIRED");
+    expect(detail.reviewReasonCodes).toContain("candidate_search_overflow");
+    const paused = composeIdentity(
+      unit,
+      identityConfig,
+      undefined,
+      undefined,
+      false,
+      catalogConfig,
+      tripConfig,
+      undefined,
+      manualConfig,
+      qualConfig,
+    );
+    expect(await paused.jobsQueue.claim()).toBeNull();
+    expect(await drainSearch(composed)).toBeGreaterThan(0);
+    expect(await searchState(report.tripId)).toMatchObject({
+      generation: pending?.generation,
+      finished: true,
+      complete: true,
+    });
+    expect((await state(report.tripId))?.version).toBe(before?.version);
+    expect((await state(report.tripId))?.reviewReasons).not.toContain("candidate_search_overflow");
+    const first = await composed.reconciliation.list(director, { limit: 100 });
+    expect(first.items).toHaveLength(100);
+    const second = await composed.reconciliation.list(director, {
+      limit: 100,
+      cursor: first.nextCursor as string,
+    });
+    expect(new Set([...first.items, ...second.items].map((r) => r.id)).size).toBe(105);
+    expect(
+      [...first.items, ...second.items].every(
+        (r) => r.primaryTripId !== r.secondaryTripId && r.confidence === "review_required",
+      ),
+    ).toBe(true);
+    const otherKey = newId(),
+      otherInput = { fields: fields(await image()) },
+      otherReport = await composed.manualReports.submitReport(owner, otherKey, otherInput),
+      old = await searchState(otherReport.tripId);
+    expect(old?.finished).toBe(false);
+    await seedTelemetry(["00000000-0000-4000-8000-000000000001"], composed.trips);
+    const claim = await composed.jobsQueue.claim();
+    if (!claim) throw new Error("SYNTHETIC_SEARCH_JOB_REQUIRED");
+    await composed.jobsQueue.execute(claim);
+    const restarted = await searchState(otherReport.tripId);
+    expect(restarted?.generation).not.toBe(old?.generation);
+    expect(restarted?.finished).toBe(false);
+    await drainSearch(composed);
+    expect(await searchState(otherReport.tripId)).toMatchObject({
+      generation: restarted?.generation,
+      finished: true,
+      complete: true,
+    });
+    const [pairs] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM reconciliation_candidates WHERE active=1 AND (primary_trip_id=? OR secondary_trip_id=?)",
+      [otherReport.tripId, otherReport.tripId],
+    );
+    expect(String(pairs[0]?.n)).toBe("106");
+    const counts = async () =>
+      (
+        await control.query<RowDataPacket[]>(
+          "SELECT (SELECT COUNT(*) FROM durable_jobs) jobs,(SELECT COUNT(*) FROM reconciliation_candidates) candidates,(SELECT COUNT(*) FROM source_messages) messages,(SELECT COUNT(*) FROM trip_facts) facts",
+        )
+      )[0];
+    const saved = await counts();
+    const original = seed[0];
+    if (!original) throw new Error("SYNTHETIC_SOURCE_REQUIRED");
+    expect((await receive(original.payload, owner, composed.trips)).duplicate).toBe(true);
+    expect(await composed.manualReports.submitReport(owner, otherKey, otherInput)).toEqual(
+      otherReport,
+    );
+    expect(await counts()).toEqual(saved);
+    expect(await corrections()).toBe(0);
+    expect((await state(otherReport.tripId))?.aliasOf).toBeNull();
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+test.each(["worker_first", "ingestion_first"] as const)(
+  "real queue page versus ingestion settles in %s lock order without losing search work",
+  async (order) => {
+    const composed = productionComposition();
+    await seedTelemetry(lowRootIds(101));
+    const report = await composed.manualReports.submitReport(owner, newId(), {
+      fields: fields(await image()),
+    });
+    const claim = await composed.jobsQueue.claim();
+    if (!claim) throw new Error("SYNTHETIC_SEARCH_JOB_REQUIRED");
+    const firstLocked = deferred<void>(),
+      secondAttempt = deferred<void>(),
+      release = deferred<void>();
+    const prepare = composed.qualifications.prepareInTransaction;
+    let calls = 0;
+    vi.spyOn(composed.qualifications, "prepareInTransaction").mockImplementation(
+      async (...args) => {
+        if (++calls === 1) {
+          await prepare(...args);
+          firstLocked.resolve();
+          await release.promise;
+          return;
+        }
+        secondAttempt.resolve();
+        await prepare(...args);
+      },
+    );
+    const work = () => composed.jobsQueue.execute(claim),
+      ingest = () => receive(payload(), owner, composed.trips);
+    const first = order === "worker_first" ? work() : ingest();
+    let second: Promise<unknown> | undefined;
+    void first.catch(() => {});
+    try {
+      await bounded(firstLocked.promise, "search_first_owner_lock");
+      second = order === "worker_first" ? ingest() : work();
+      void second.catch(() => {});
+      await bounded(secondAttempt.promise, "search_second_owner_attempt");
+      release.resolve();
+      await Promise.all([first, second]);
+    } finally {
+      release.resolve();
+      await Promise.allSettled([first, ...(second ? [second] : [])]);
+    }
+    await drainSearch(composed);
+    expect(await searchState(report.tripId)).toMatchObject({ finished: true });
+    const [pairs] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM reconciliation_candidates WHERE active=1 AND (primary_trip_id=? OR secondary_trip_id=?)",
+      [report.tripId, report.tripId],
+    );
+    expect(String(pairs[0]?.n)).toBe("102");
+    expect(await corrections()).toBe(0);
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
 
 test("delayed manual report and repeated/overlapping routes retain review candidates; distinct same-provider identities never auto-link", async () => {
   const a = await receive(),

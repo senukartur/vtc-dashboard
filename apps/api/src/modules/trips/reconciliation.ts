@@ -1,19 +1,22 @@
-import { applicationId, newId, type TxContext, type UnitOfWork } from "@vtc/db";
+import { newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   and,
   eq,
   inArray,
-  sql,
+  isNull,
+  lt,
   sourceMessages,
   sourceTrips,
+  sql,
   tripContributions,
   tripFacts,
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
 import { identityError } from "../identity/service.js";
-import { canonicalJson } from "../sources/contracts/canonical.js";
 import { selectQuality } from "../reconciliation/quality.js";
+import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
+import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 export interface GroupSnapshot {
@@ -294,8 +297,72 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
       }
       return result;
     },
-    async discover(tx: TxContext, ownerId: string, game: "ets2" | "ats", limit: number) {
-      return groups.discover(tx, applicationId(ownerId), game, limit);
+    async searchStatus(tx: TxContext, id: string, pending: boolean) {
+      const row = await groups.resolve(tx, id, true);
+      // Diagnostic state changes neither the fact/version epoch nor adjudication/credit.
+      const reasons = row.reviewReasons.filter((r) => r !== "candidate_search_overflow");
+      if (pending) reasons.push("candidate_search_overflow");
+      await c(tx)
+        .update(trips)
+        .set({ reviewReasons: [...new Set(reasons)].sort() })
+        .where(eq(trips.id, row.id));
+    },
+    async searchEpoch(tx: TxContext, ownerId: string, game: "ets2" | "ats") {
+      const [rows] = await c(tx)
+        .select({
+          count: sql<string>`COUNT(*)`,
+          versions: sql<string>`COALESCE(SUM(${trips.version}),0)`,
+        })
+        .from(trips)
+        .where(and(eq(trips.ownerId, ownerId), eq(trips.game, game)))
+        .for("share");
+      const [messages] = await c(tx)
+        .select({ count: sql<string>`COUNT(*)` })
+        .from(sourceMessages)
+        .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
+        .where(and(eq(sourceTrips.ownerId, ownerId), eq(sourceTrips.game, game)))
+        .for("share");
+      return contentHash(
+        canonicalJson([String(rows?.count), String(rows?.versions), String(messages?.count)]),
+      );
+    },
+    async discover(
+      tx: TxContext,
+      root: TripState,
+      evidence: { facts: NormalizedTripEvidence[]; complete: boolean },
+      limit: number,
+      cursor: string | null,
+    ) {
+      // EXISTS examines every latest original source in each effective group before LIMIT.
+      // Unknown IDs and incomplete root evidence are possibilities, never exclusion proof.
+      const compatible =
+        evidence.complete && evidence.facts.length
+          ? sql.join(
+              evidence.facts.map(
+                (f) => sql`(s.provider <> ${f.provider}
+            AND ${f.origin.status === "known" ? sql`(f.origin_entity_id IS NULL OR f.origin_entity_id = ${f.origin.value.entityId})` : sql`TRUE`}
+            AND ${f.destination.status === "known" ? sql`(f.destination_entity_id IS NULL OR f.destination_entity_id = ${f.destination.value.entityId})` : sql`TRUE`}
+            AND ${f.cargo.status === "known" ? sql`(f.cargo_entity_id IS NULL OR f.cargo_entity_id = ${f.cargo.value.entityId})` : sql`TRUE`})`,
+              ),
+              sql` OR `,
+            )
+          : sql`TRUE`;
+      return c(tx)
+        .select()
+        .from(trips)
+        .where(
+          and(
+            eq(trips.ownerId, root.ownerId),
+            eq(trips.game, root.game),
+            isNull(trips.aliasOf),
+            sql`${trips.id} <> ${root.id}`,
+            cursor ? lt(sql`${cursor}`, trips.id) : undefined,
+            sql`EXISTS (SELECT 1 FROM source_trips s JOIN trips m ON m.id = s.canonical_trip_id JOIN source_messages sm ON sm.source_trip_id = s.id AND sm.revision = s.latest_revision JOIN trip_facts f ON f.message_id = sm.id WHERE COALESCE(m.alias_of,m.id) = ${trips.id} AND (${compatible}) FOR SHARE)`,
+          ),
+        )
+        .orderBy(trips.id)
+        .limit(limit)
+        .for("update");
     },
   };
 }

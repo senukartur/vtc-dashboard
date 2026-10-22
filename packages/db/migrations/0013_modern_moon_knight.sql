@@ -75,3 +75,21 @@ ALTER TABLE `trips` ADD CONSTRAINT `trip_alias_distinct` CHECK (`trips`.`alias_o
 ALTER TABLE `trips` ADD CONSTRAINT `trips_alias_of_trips_id_fk` FOREIGN KEY (`alias_of`) REFERENCES `trips`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `trip_group_members` ON `trips` (`alias_of`,`id`);--> statement-breakpoint
 CREATE INDEX `trip_match_owner` ON `trips` (`owner_id`,`game`,`alias_of`,`id`);
+--> statement-breakpoint
+CREATE TABLE `reconciliation_searches` (
+	`trip_id` binary(36) NOT NULL,
+	`generation` binary(36) NOT NULL,
+	`root_version` int unsigned NOT NULL,
+	`rule_hash` varbinary(32) NOT NULL,
+	`epoch` varbinary(32) NOT NULL,
+	`phase` enum('partners','discovery') NOT NULL,
+	`cursor` binary(36),
+	`finished` boolean NOT NULL,
+	`complete` boolean NOT NULL,
+	`evidence_complete` boolean NOT NULL,
+	`updated_at` datetime(3) NOT NULL,
+	CONSTRAINT `reconciliation_searches_trip_id` PRIMARY KEY(`trip_id`)
+);
+--> statement-breakpoint
+ALTER TABLE `reconciliation_searches` ADD CONSTRAINT `reconciliation_searches_trip_id_trips_id_fk` FOREIGN KEY (`trip_id`) REFERENCES `trips`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `reconciliation_searches` ADD CONSTRAINT `reconciliation_searches_rule_hash_reconciliation_rules_hash_fk` FOREIGN KEY (`rule_hash`) REFERENCES `reconciliation_rules`(`hash`) ON DELETE restrict ON UPDATE no action;

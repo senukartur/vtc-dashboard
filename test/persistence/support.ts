@@ -80,6 +80,7 @@ export async function reset(connection: Connection) {
     );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   const tables = [
+    "reconciliation_searches",
     "reconciliation_commands",
     "reconciliation_history",
     "reconciliations",

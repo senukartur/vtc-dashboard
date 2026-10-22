@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "1fc1e7ce-a4a1-4834-bf66-ff2152a2d4e5",
+  "id": "f8773a92-f142-45b0-9149-aabbe564fd08",
   "prevId": "17b392cf-c3e6-4778-86fc-cb56a7cab325",
   "tables": {
     "audit_entries": {
@@ -8102,15 +8102,6 @@
         }
       },
       "foreignKeys": {
-        "recon_candidate_owner_fk": {
-          "name": "recon_candidate_owner_fk",
-          "tableFrom": "reconciliation_candidates",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "reconciliation_candidates_primary_trip_id_trips_id_fk": {
           "name": "reconciliation_candidates_primary_trip_id_trips_id_fk",
           "tableFrom": "reconciliation_candidates",
@@ -8135,6 +8126,15 @@
           "tableTo": "reconciliation_rules",
           "columnsFrom": ["rule_hash"],
           "columnsTo": ["hash"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "recon_candidate_owner_fk": {
+          "name": "recon_candidate_owner_fk",
+          "tableFrom": "reconciliation_candidates",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["owner_id"],
+          "columnsTo": ["user_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -8347,6 +8347,117 @@
         "reconciliation_rules_hash": {
           "name": "reconciliation_rules_hash",
           "columns": ["hash"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "reconciliation_searches": {
+      "name": "reconciliation_searches",
+      "columns": {
+        "trip_id": {
+          "name": "trip_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root_version": {
+          "name": "root_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rule_hash": {
+          "name": "rule_hash",
+          "type": "varbinary(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "epoch": {
+          "name": "epoch",
+          "type": "varbinary(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "enum('partners','discovery')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "finished": {
+          "name": "finished",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "complete": {
+          "name": "complete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_complete": {
+          "name": "evidence_complete",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reconciliation_searches_trip_id_trips_id_fk": {
+          "name": "reconciliation_searches_trip_id_trips_id_fk",
+          "tableFrom": "reconciliation_searches",
+          "tableTo": "trips",
+          "columnsFrom": ["trip_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reconciliation_searches_rule_hash_reconciliation_rules_hash_fk": {
+          "name": "reconciliation_searches_rule_hash_reconciliation_rules_hash_fk",
+          "tableFrom": "reconciliation_searches",
+          "tableTo": "reconciliation_rules",
+          "columnsFrom": ["rule_hash"],
+          "columnsTo": ["hash"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "reconciliation_searches_trip_id": {
+          "name": "reconciliation_searches_trip_id",
+          "columns": ["trip_id"]
         }
       },
       "uniqueConstraints": {},

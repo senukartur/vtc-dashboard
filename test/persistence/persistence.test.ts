@@ -194,7 +194,7 @@ async function serializedFreshMigrations(
     JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0013_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 87);
+  assert.equal(expectedTables.length, 88);
   const gate = await journalAckGate("finalize", 14);
   const lock = migrationLockName(settings.database);
   const history = async () => {
@@ -936,6 +936,20 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trips' AND COLUMN_NAME='alias_of'",
         );
         assert.equal(column[0]?.IS_NULLABLE, "YES");
+        const [searches] = await connection.query<RowDataPacket[]>(
+          "SELECT COUNT(*) n FROM reconciliation_searches",
+        );
+        assert.equal(String(searches[0]?.n), "0");
+        const [searchForeign] = await connection.query<RowDataPacket[]>(
+          "SELECT REFERENCED_TABLE_NAME,DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='reconciliation_searches' ORDER BY REFERENCED_TABLE_NAME",
+        );
+        assert.deepEqual(
+          searchForeign.map((row) => [row.REFERENCED_TABLE_NAME, row.DELETE_RULE]),
+          [
+            ["reconciliation_rules", "RESTRICT"],
+            ["trips", "RESTRICT"],
+          ],
+        );
         const [foreign] = await connection.query<RowDataPacket[]>(
           "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'reconciliation%' ",
         );

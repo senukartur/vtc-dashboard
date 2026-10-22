@@ -15,6 +15,7 @@ import {
 import { idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
 import { membership } from "../identity/index.js";
 import { trips } from "../trips/index.js";
+
 export { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 export const reconciliationRules = mysqlTable(
   "reconciliation_rules",
@@ -68,6 +69,23 @@ export const reconciliationCandidates = mysqlTable(
     check("reconciliation_candidate_distinct", sql`${t.primaryTripId} <> ${t.secondaryTripId}`),
   ],
 );
+export const reconciliationSearches = mysqlTable("reconciliation_searches", {
+  tripId: idColumn("trip_id")
+    .primaryKey()
+    .references(() => trips.id, { onDelete: "restrict" }),
+  generation: idColumn("generation").notNull(),
+  rootVersion: int("root_version", { unsigned: true }).notNull(),
+  ruleHash: opaqueColumn("rule_hash", { length: 32 })
+    .notNull()
+    .references(() => reconciliationRules.hash, { onDelete: "restrict" }),
+  epoch: opaqueColumn("epoch", { length: 32 }).notNull(),
+  phase: mysqlEnum("phase", ["partners", "discovery"]).notNull(),
+  cursor: idColumn("cursor"),
+  finished: boolean("finished").notNull(),
+  complete: boolean("complete").notNull(),
+  evidenceComplete: boolean("evidence_complete").notNull(),
+  updatedAt: utcColumn("updated_at").notNull(),
+});
 export const reconciliations = mysqlTable("reconciliations", {
   id: idColumn("id").primaryKey(),
   version: int("version", { unsigned: true }).notNull(),

@@ -11,10 +11,18 @@ import {
   reconciliationCommands,
   reconciliationHistory,
   reconciliationRules,
+  reconciliationSearches,
   reconciliations,
+  sql,
 } from "@vtc/db/reconciliation-schema";
-import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
-import { createOutbox, duplicateKey } from "../../platform/outbox/events.js";
+import {
+  causes,
+  createQueue,
+  type Handler,
+  retryTransaction,
+  unknownCommit,
+} from "../../platform/jobs/queue.js";
+import { closed, createOutbox, duplicateKey } from "../../platform/outbox/events.js";
 import { reconciliationCoordinator } from "../../use-cases/trip-reconciliation.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ManualReports } from "../manual-reports/service.js";
@@ -66,6 +74,7 @@ export function createReconciliation(
     coordinator = reconciliationCoordinator(ports),
     audit = createAudit(unit),
     outbox = ports.outbox ?? createOutbox(unit);
+  let searchQueue: ReturnType<typeof createQueue>;
   async function command<T>(work: (tx: TxContext) => Promise<T>): Promise<T> {
     try {
       return await retryTransaction(unit, work);
@@ -222,152 +231,343 @@ export function createReconciliation(
       snapshot.after.map((t) => t.id),
     );
     await effects(tx, row, actor);
+    await startSearch(tx, p.id, false);
     return { data: dto(row), version: row.version };
   }
   async function authorize(tx: TxContext, actor: Actor) {
     return ports.identity.authorizeInTransaction(tx, actor, "trips.review");
   }
-  return {
-    config,
-    async refreshInTransaction(tx: TxContext, tripId: string, _sourceRecordId: string) {
-      await rule(tx);
-      const root = await ports.trips.groups.resolve(tx, tripId, true);
+  type Search = typeof reconciliationSearches.$inferSelect;
+  const reference = (value: unknown) => {
+    const p = closed(value, ["tripId", "generation", "phase", "cursor"]);
+    if (p.phase !== "partners" && p.phase !== "discovery") throw new Error("INVALID_SEARCH_PHASE");
+    return {
+      tripId: applicationId(p.tripId as string),
+      generation: applicationId(p.generation as string),
+      phase: p.phase,
+      cursor: p.cursor === null ? null : applicationId(p.cursor as string),
+    };
+  };
+  async function enqueueSearch(tx: TxContext, state: Search) {
+    const ref = reference({
+      tripId: state.tripId,
+      generation: state.generation,
+      phase: state.phase,
+      cursor: state.cursor,
+    });
+    await searchQueue.enqueue(tx, {
+      kind: "reconciliation.search",
+      consumer: "reconciliation-search-v1",
+      schemaVersion: 1,
+      eventId: null,
+      effectKey: `search:${contentHash(canonicalJson(ref)).toString("hex")}`,
+      reference: ref,
+      availableAt: state.updatedAt,
+      maxAttempts: 5,
+    });
+  }
+  async function startSearch(tx: TxContext, tripId: string, immediate: boolean) {
+    await rule(tx);
+    const root = await ports.trips.groups.resolve(tx, tripId, true);
+    const state: Search = {
+      tripId: root.id,
+      generation: newId(),
+      rootVersion: root.version,
+      ruleHash: hash,
+      epoch: await ports.trips.reconciliation.searchEpoch(tx, root.ownerId, root.game),
+      phase: "partners",
+      cursor: null,
+      finished: false,
+      complete: false,
+      evidenceComplete: true,
+      updatedAt: at(),
+    };
+    await c(tx).insert(reconciliationSearches).values(state).onDuplicateKeyUpdate({ set: state });
+    await ports.trips.reconciliation.searchStatus(tx, root.id, true);
+    if (immediate) await advanceSearch(tx, state);
+    else await enqueueSearch(tx, state);
+  }
+  async function possibleAutomatic(tx: TxContext, state: Search) {
+    if (!state.complete) return;
+    const related = await c(tx)
+      .select()
+      .from(reconciliationCandidates)
+      .where(
+        and(
+          eq(reconciliationCandidates.active, true),
+          eq(reconciliationCandidates.ruleHash, hash),
+          or(
+            eq(reconciliationCandidates.primaryTripId, state.tripId),
+            eq(reconciliationCandidates.secondaryTripId, state.tripId),
+          ),
+        ),
+      )
+      .limit(2)
+      .for("share");
+    const only = automaticCandidate(
+      related.map((row) => ({
+        row,
+        supported: (row.evidence as { supported?: boolean }).supported === true,
+      })),
+      true,
+    );
+    if (!only) return;
+    const root = await ports.trips.groups.resolve(tx, state.tripId, true),
+      target = await ports.trips.groups.resolve(
+        tx,
+        only.row.primaryTripId === root.id ? only.row.secondaryTripId : only.row.primaryTripId,
+        true,
+      );
+    if (root.id === target.id || root.decision === "accepted" || target.decision === "accepted")
+      return;
+    const [reciprocal] = await c(tx)
+      .select()
+      .from(reconciliationSearches)
+      .where(eq(reconciliationSearches.tripId, target.id))
+      .for("update");
+    if (
+      !reciprocal ||
+      reciprocal.rootVersion !== target.version ||
+      !reciprocal.ruleHash.equals(hash) ||
+      !reciprocal.epoch.equals(state.epoch)
+    ) {
+      await startSearch(tx, target.id, false);
+      return;
+    }
+    if (!reciprocal.complete) return;
+    const other = await c(tx)
+      .select({ id: reconciliationCandidates.id })
+      .from(reconciliationCandidates)
+      .where(
+        and(
+          eq(reconciliationCandidates.active, true),
+          eq(reconciliationCandidates.ruleHash, hash),
+          or(
+            eq(reconciliationCandidates.primaryTripId, target.id),
+            eq(reconciliationCandidates.secondaryTripId, target.id),
+          ),
+        ),
+      )
+      .limit(2)
+      .for("share");
+    if (other.length !== 1) return;
+    await apply(
+      tx,
+      {
+        primaryTripId: target.id,
+        secondaryTripId: root.id,
+        primaryVersion: target.version,
+        secondaryVersion: root.version,
+        reason: "Unique fully supported configured evidence match",
+      },
+      null,
+    );
+  }
+  async function advanceSearch(tx: TxContext, state: Search) {
+    const root = await ports.trips.groups.resolve(tx, state.tripId, true);
+    if (root.id !== state.tripId) {
+      await c(tx)
+        .update(reconciliationSearches)
+        .set({ finished: true, complete: false })
+        .where(eq(reconciliationSearches.tripId, state.tripId));
+      return;
+    }
+    const epoch = await ports.trips.reconciliation.searchEpoch(tx, root.ownerId, root.game);
+    if (
+      root.version !== state.rootVersion ||
+      !epoch.equals(state.epoch) ||
+      !state.ruleHash.equals(hash)
+    ) {
+      await startSearch(tx, root.id, false);
+      return;
+    }
+    const rootMembers = await ports.trips.groups.members(tx, [root.id], true),
+      evidence = await ports.trips.reconciliation.matchingEvidence(
+        tx,
+        rootMembers.map((t) => t.id),
+      );
+    state.evidenceComplete =
+      state.evidenceComplete && evidence.complete && evidence.facts.length > 0;
+    let ids: string[], last: string | null, more: boolean;
+    if (state.phase === "partners") {
+      const rows = await c(tx)
+        .select()
+        .from(reconciliationCandidates)
+        .where(
+          and(
+            eq(reconciliationCandidates.active, true),
+            or(
+              eq(reconciliationCandidates.primaryTripId, root.id),
+              eq(reconciliationCandidates.secondaryTripId, root.id),
+            ),
+            sql`COALESCE(JSON_UNQUOTE(JSON_EXTRACT(${reconciliationCandidates.evidence}, '$.searchGeneration')),'') <> ${state.generation}`,
+            state.cursor ? sql`${reconciliationCandidates.id} > ${state.cursor}` : undefined,
+          ),
+        )
+        .orderBy(reconciliationCandidates.id)
+        .limit(candidateBound + 1)
+        .for("update");
+      ids = [
+        ...new Set(
+          rows
+            .slice(0, candidateBound)
+            .map((r) => (r.primaryTripId === root.id ? r.secondaryTripId : r.primaryTripId)),
+        ),
+      ];
+      more = rows.length > candidateBound;
+      last = rows.slice(0, candidateBound).at(-1)?.id ?? state.cursor;
+      if (!ids.length) {
+        state.phase = "discovery";
+        state.cursor = null;
+        await advanceSearch(tx, state);
+        return;
+      }
+    } else {
+      const rows = await ports.trips.reconciliation.discover(
+        tx,
+        root,
+        evidence,
+        candidateBound + 1,
+        state.cursor,
+      );
+      ids = rows.slice(0, candidateBound).map((r) => r.id);
+      more = rows.length > candidateBound;
+      last = ids.at(-1) ?? state.cursor;
+    }
+    for (const id of ids.sort()) {
+      const target = await ports.trips.groups.resolve(tx, id, true);
+      // Only this affected pair is replaced. All unrelated review work remains intact.
       await c(tx)
         .update(reconciliationCandidates)
         .set({ active: false })
         .where(
-          and(
-            eq(reconciliationCandidates.ownerId, root.ownerId),
-            eq(reconciliationCandidates.game, root.game),
+          or(
+            and(
+              eq(reconciliationCandidates.primaryTripId, root.id),
+              eq(reconciliationCandidates.secondaryTripId, id),
+            ),
+            and(
+              eq(reconciliationCandidates.secondaryTripId, root.id),
+              eq(reconciliationCandidates.primaryTripId, id),
+            ),
           ),
         );
-      const discovered = await ports.trips.reconciliation.discover(
-        tx,
-        root.ownerId,
-        root.game,
-        candidateBound + 1,
-      );
-      const roots = [
-        ...new Map([...discovered.slice(0, candidateBound), root].map((t) => [t.id, t])).values(),
-      ].sort((a, b) => a.id.localeCompare(b.id));
-      let complete = discovered.length <= candidateBound;
-      const entries: {
-        trip: typeof root;
-        facts: Awaited<ReturnType<Trips["reconciliation"]["evidence"]>>;
-      }[] = [];
-      for (const trip of roots) {
-        const members = await ports.trips.groups.members(tx, [trip.id], true),
-          evidence = await ports.trips.reconciliation.matchingEvidence(
-            tx,
-            members.map((t) => t.id),
-          );
-        complete = complete && evidence.complete;
-        entries.push({ trip, facts: evidence.facts });
-      }
-      const searchHash = contentHash(
-        canonicalJson({
-          rule: hash.toString("hex"),
-          complete,
-          groups: entries.map((e) => ({
-            id: e.trip.id,
-            version: e.trip.version,
-            facts: e.facts.map((f) => f.factRevisionId).sort(),
-          })),
-        }),
-      );
-      const matches: {
-        primary: (typeof entries)[number];
-        secondary: (typeof entries)[number];
-        reasons: string[];
-        supported: boolean;
-      }[] = [];
-      for (let i = 0; i < entries.length; i++)
-        for (let j = i + 1; j < entries.length; j++) {
-          const primary = entries[i],
-            secondary = entries[j];
-          if (!primary || !secondary) throw new Error("CANDIDATE_PAIR_MISSING");
-          const outcomes = primary.facts
-            .flatMap((a) => secondary.facts.map((b) => matchEvidence(a, b, config.rule)))
-            .filter((r) => r.outcome !== "different");
-          if (outcomes.length)
-            matches.push({
-              primary,
-              secondary,
-              reasons: [...new Set(outcomes.flatMap((r) => r.reasons))],
-              supported: outcomes.every((r) => r.outcome === "supported"),
-            });
-        }
-      const related = matches.filter(
-          (m) => m.primary.trip.id === root.id || m.secondary.trip.id === root.id,
-        ),
-        only = automaticCandidate(related, complete);
-      if (only) {
-        const target = only.primary.trip.id === root.id ? only.secondary.trip : only.primary.trip;
-        const reciprocal = matches.filter(
-          (m) => m.primary.trip.id === target.id || m.secondary.trip.id === target.id,
+      if (
+        target.id !== id ||
+        target.id === root.id ||
+        target.ownerId !== root.ownerId ||
+        target.game !== root.game
+      )
+        continue;
+      const members = await ports.trips.groups.members(tx, [target.id], true),
+        other = await ports.trips.reconciliation.matchingEvidence(
+          tx,
+          members.map((t) => t.id),
         );
-        if (
-          reciprocal.length === 1 &&
-          root.decision !== "accepted" &&
-          target.decision !== "accepted"
-        ) {
-          await apply(
-            tx,
-            {
-              primaryTripId: target.id,
-              secondaryTripId: root.id,
-              primaryVersion: target.version,
-              secondaryVersion: root.version,
-              reason: "Unique fully supported configured evidence match",
-            },
-            null,
-          );
-          return;
-        }
-      }
-      const values = matches.map((match) => {
-        const primary = match.primary.trip,
-          secondary = match.secondary.trip;
-        const degree = (id: string) =>
-          matches.filter((m) => m.primary.trip.id === id || m.secondary.trip.id === id).length;
-        return {
+      state.evidenceComplete = state.evidenceComplete && other.complete;
+      const outcomes = evidence.facts
+        .flatMap((a) => other.facts.map((b) => matchEvidence(a, b, config.rule)))
+        .filter((r) => r.outcome !== "different");
+      if (!outcomes.length && evidence.complete && other.complete) continue;
+      const pair = [root, target].sort((a, b) => a.id.localeCompare(b.id)),
+        primary = pair[0],
+        secondary = pair[1];
+      if (!primary || !secondary) throw new Error("CANDIDATE_PAIR_MISSING");
+      const factIds = [...evidence.facts, ...other.facts].map((f) => f.factRevisionId).sort();
+      await c(tx)
+        .insert(reconciliationCandidates)
+        .values({
           id: newId(),
           ownerId: root.ownerId,
           game: root.game,
-          searchHash,
+          searchHash: contentHash(
+            canonicalJson([
+              state.generation,
+              epoch.toString("hex"),
+              primary.version,
+              secondary.version,
+              factIds,
+            ]),
+          ),
           primaryTripId: primary.id,
           secondaryTripId: secondary.id,
           primaryVersion: primary.version,
           secondaryVersion: secondary.version,
           ruleHash: hash,
           evidence: {
-            factIds: [...match.primary.facts, ...match.secondary.facts]
-              .map((f) => f.factRevisionId)
-              .sort(),
-            searchComplete: complete,
-            groups: entries.map((e) => ({ id: e.trip.id, version: e.trip.version })),
+            factIds,
+            searchGeneration: state.generation,
+            searchComplete: false,
+            supported:
+              evidence.complete &&
+              other.complete &&
+              outcomes.length > 0 &&
+              outcomes.every((r) => r.outcome === "supported"),
           },
           reasons: [
             ...new Set([
-              ...match.reasons,
-              ...(!complete ? ["candidate_search_overflow"] : []),
-              ...(degree(primary.id) > 1 || degree(secondary.id) > 1
-                ? ["multiple_candidates"]
-                : []),
-              ...(primary.decision === "accepted" || secondary.decision === "accepted"
+              ...outcomes.flatMap((r) => r.reasons),
+              ...(!evidence.complete || !other.complete ? ["candidate_evidence_incomplete"] : []),
+              ...(more ? ["candidate_search_overflow"] : []),
+              ...(root.decision === "accepted" || target.decision === "accepted"
                 ? ["confirmed_facts_require_review"]
                 : []),
             ]),
           ].sort(),
           active: true,
           createdAt: at(),
-        };
-      });
-      for (let offset = 0; offset < values.length; offset += 100)
-        await c(tx)
-          .insert(reconciliationCandidates)
-          .values(values.slice(offset, offset + 100))
-          .onDuplicateKeyUpdate({ set: { active: true } });
+        })
+        .onDuplicateKeyUpdate({ set: { active: true } });
+    }
+    state.cursor = last;
+    if (state.phase === "partners" && !more) {
+      state.phase = "discovery";
+      state.cursor = null;
+    } else if (state.phase === "discovery" && !more) {
+      state.finished = true;
+      state.complete = state.evidenceComplete;
+    }
+    state.updatedAt = at();
+    await c(tx)
+      .update(reconciliationSearches)
+      .set(state)
+      .where(eq(reconciliationSearches.tripId, state.tripId));
+    await ports.trips.reconciliation.searchStatus(tx, root.id, !state.complete);
+    if (!state.finished) await enqueueSearch(tx, state);
+    else await possibleAutomatic(tx, state);
+  }
+  const handler: Handler = {
+    kind: "reconciliation.search",
+    consumer: "reconciliation-search-v1",
+    version: 1,
+    mode: "local",
+    validate: reference,
+    async local(tx, value) {
+      const ref = reference(value);
+      const owners = await ports.trips.contributions.owners(tx, [ref.tripId]);
+      await ports.qualifications.prepareInTransaction(tx, owners);
+      const [state] = await c(tx)
+        .select()
+        .from(reconciliationSearches)
+        .where(eq(reconciliationSearches.tripId, ref.tripId))
+        .for("update");
+      if (
+        !state ||
+        state.finished ||
+        state.generation !== ref.generation ||
+        state.phase !== ref.phase ||
+        state.cursor !== ref.cursor
+      )
+        return;
+      await advanceSearch(tx, state);
+    },
+  };
+  searchQueue = createQueue(unit, [handler]);
+  return {
+    config,
+    handler,
+    async refreshInTransaction(tx: TxContext, tripId: string, _sourceRecordId: string) {
+      await startSearch(tx, tripId, true);
     },
     authorize: (actor: Actor) => ports.identity.transaction((tx) => authorize(tx, actor)),
     list(actor: Actor, options: Page = {}) {
@@ -412,7 +612,31 @@ export function createReconciliation(
             id: row.id,
             primaryTripId: row.primaryTripId,
             secondaryTripId: row.secondaryTripId,
-            reasonCodes: row.reasons,
+            reasonCodes: [
+              ...new Set([
+                ...row.reasons,
+                ...((
+                  await c(tx)
+                    .select({ id: reconciliationCandidates.id })
+                    .from(reconciliationCandidates)
+                    .where(
+                      and(
+                        eq(reconciliationCandidates.active, true),
+                        eq(reconciliationCandidates.ruleHash, hash),
+                        or(
+                          eq(reconciliationCandidates.primaryTripId, row.primaryTripId),
+                          eq(reconciliationCandidates.secondaryTripId, row.primaryTripId),
+                          eq(reconciliationCandidates.primaryTripId, row.secondaryTripId),
+                          eq(reconciliationCandidates.secondaryTripId, row.secondaryTripId),
+                        ),
+                      ),
+                    )
+                    .limit(2)
+                ).length > 1
+                  ? ["multiple_candidates"]
+                  : []),
+              ]),
+            ].sort(),
             confidence: "review_required",
           });
         }
@@ -532,6 +756,8 @@ export function createReconciliation(
             restored.map((t) => t.id),
           );
           await effects(tx, updated, actor);
+          for (const root of restored.filter((t) => !t.aliasOf))
+            await startSearch(tx, root.id, false);
           return { data: dto(updated), version: updated.version };
         });
       });

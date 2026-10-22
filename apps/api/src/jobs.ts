@@ -89,6 +89,7 @@ await ownedCli(async () => {
         "catalog.import",
         "manual.evidence-delete",
         "manual.generation-delete",
+        "reconciliation.search",
       ]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(
