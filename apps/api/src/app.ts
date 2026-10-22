@@ -8,6 +8,8 @@ import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
 import type { Admissions } from "./modules/admissions/service.js";
 import { registerCatalogRoutes } from "./modules/catalogs/http.js";
 import type { Catalogs } from "./modules/catalogs/service.js";
+import { registerEventRoutes } from "./modules/events/http.js";
+import type { Events } from "./modules/events/service.js";
 import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
 import type { ExternalIdentities } from "./modules/external-identities/service.js";
 import { registerIdentityRoutes } from "./modules/identity/http.js";
@@ -50,6 +52,7 @@ export interface AppOptions {
   trips?: Trips;
   telemetry?: TelemetryService;
   qualifications?: Qualifications;
+  events?: Events;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -155,6 +158,8 @@ export async function createApp(options: AppOptions) {
     await registerTelemetryRoutes(app, options.identity, options.telemetry);
   if (options.identity && options.qualifications)
     await registerQualificationRoutes(app, options.identity, options.qualifications);
+  if (options.identity && options.events)
+    await registerEventRoutes(app, options.identity, options.events);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

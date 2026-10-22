@@ -62,3 +62,5 @@ Local/CI/staging use maintained Node.js 24 and MySQL 8.4. [VTC-004](../decisions
 VTC-005 supplies interfaces and bounded compatibility evidence. VTC-006 owns root tooling; VTC-007 owns schema foundations; VTC-008/009 own real-MySQL and CI checks; VTC-013 owns authentication integration. No specification or import smoke is proof of transaction, session, real-client or hosted correctness.
 
 The browser contract's asynchronous catalog imports require the durable operation/job platform, so VTC-019 now explicitly depends on VTC-021. This is an acyclic start prerequisite; the early VTC-011 synthetic infrastructure acceptance remains independent of feature jobs/notifications. No other feature completion is inferred from this architecture hand-off.
+
+The [Events backend](../development/events.md) provides owned transactional definitions, voluntary RSVP, separate staff attendance and safe immutable integration references. Event UI, adjudication and notification delivery retain their downstream VTC-035/029/036 ownership.

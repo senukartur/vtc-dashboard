@@ -1002,6 +1002,53 @@ export function createCatalogs(
         .limit(1);
       return historical?.id ?? null;
     },
+    // Events pins the current published facts on the caller's transaction.
+    async eventReferencesInTransaction(
+      tx: TxContext,
+      game: Game,
+      selections: { field: string; kind: Kind; id: string }[],
+    ) {
+      if (selections.length > 4) throw new Error("EVENT_CATALOG_BOUND_EXCEEDED");
+      const [publication] = await c(tx)
+        .select()
+        .from(catalogPublications)
+        .where(eq(catalogPublications.game, game))
+        .for("share");
+      if (!publication?.revisionId) return null;
+      const r = await revision(tx, publication.revisionId);
+      if (r.state !== "published" || !r.complete || r.game !== game) return null;
+      const pins = [];
+      for (const selection of selections) {
+        const [fact] = await c(tx)
+          .select()
+          .from(catalogFacts)
+          .where(
+            and(
+              eq(catalogFacts.revisionId, r.id),
+              eq(catalogFacts.entityId, applicationId(selection.id)),
+              eq(catalogFacts.kind, selection.kind),
+              eq(catalogFacts.retired, false),
+            ),
+          )
+          .for("share");
+        if (!fact?.labelEn) return null;
+        pins.push({
+          field: selection.field,
+          factId: fact.id,
+          entityId: fact.entityId,
+          catalogRevisionId: r.id,
+          label: {
+            entityId: fact.entityId,
+            label: fact.labelEn,
+            requestedLocale: "en" as const,
+            renderedLocale: "en" as const,
+            englishFallback: false,
+            retired: false,
+          },
+        });
+      }
+      return pins;
+    },
     async qualificationReferencesInTransaction(
       tx: TxContext,
       game: Game,

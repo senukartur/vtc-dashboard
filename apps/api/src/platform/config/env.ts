@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
+import { type EventsConfig, validateEventsConfig } from "../../modules/events/service.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
 import {
@@ -221,7 +222,35 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let events: EventsConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.EVENTS_ENABLED))
+    throw new Error("Invalid environment fields: EVENTS_ENABLED");
+  if (input.EVENTS_ENABLED === "true") {
+    try {
+      if (!identity) throw new Error();
+      events = { cursorKey: input.EVENTS_CURSOR_KEY ?? "" };
+      validateEventsConfig(events);
+      if (
+        [
+          identity.secret,
+          mail?.key,
+          catalogs?.cursorKey,
+          trips?.cursorKey,
+          qualifications?.cursorKey,
+          telemetry?.cursorKey,
+        ].includes(events.cursorKey) ||
+        (admissions &&
+          Buffer.from(events.cursorKey, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: EVENTS_ENABLED, EVENTS_CURSOR_KEY, IDENTITY_ENABLED",
+      );
+    }
+  }
   return {
+    events,
     qualifications,
     telemetry,
     trips,

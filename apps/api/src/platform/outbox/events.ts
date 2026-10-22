@@ -301,11 +301,94 @@ export function qualificationEvent(value: unknown): QualificationEvent {
     },
   };
 }
+export interface CompanyEvent {
+  eventId: string;
+  type: "event.changed" | "event.response_changed" | "event.attendance_changed";
+  schemaVersion: 1;
+  aggregate: { kind: "event" | "event_response" | "event_attendance"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: {
+    eventId: string;
+    eventRevisionId: string;
+    revisionId: string;
+    changeSequence: number;
+    memberId: string | null;
+    category: "created" | "updated" | "cancelled" | "response" | "attendance";
+  };
+}
+export function companyEvent(value: unknown): CompanyEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, [
+      "eventId",
+      "eventRevisionId",
+      "revisionId",
+      "changeSequence",
+      "memberId",
+      "category",
+    ]);
+  const kind =
+    e.type === "event.changed"
+      ? "event"
+      : e.type === "event.response_changed"
+        ? "event_response"
+        : e.type === "event.attendance_changed"
+          ? "event_attendance"
+          : null;
+  if (
+    !kind ||
+    e.schemaVersion !== 1 ||
+    a.kind !== kind ||
+    typeof e.occurredAt !== "string" ||
+    (kind !== "event_response" && a.id !== d.eventId) ||
+    (kind === "event_response"
+      ? d.memberId === null || d.category !== "response"
+      : d.memberId !== null) ||
+    (kind === "event"
+      ? !["created", "updated", "cancelled"].includes(d.category as string)
+      : kind === "event_attendance" && d.category !== "attendance")
+  )
+    throw new Error("UNSUPPORTED_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: e.type as CompanyEvent["type"],
+    schemaVersion: 1,
+    aggregate: { kind, id: applicationId(a.id as string), version: positive(a.version) },
+    occurredAt: utcIso(utcDateTime(e.occurredAt)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      eventId: applicationId(d.eventId as string),
+      eventRevisionId: applicationId(d.eventRevisionId as string),
+      revisionId: applicationId(d.revisionId as string),
+      changeSequence: positive(d.changeSequence),
+      memberId: d.memberId === null ? null : applicationId(d.memberId as string),
+      category: d.category as CompanyEvent["data"]["category"],
+    },
+  };
+}
 export function createOutbox(unit: UnitOfWork) {
   return {
     async append(
       tx: TxContext,
-      input: AccessEvent | AdmissionsEvent | CatalogEvent | TripEvent | QualificationEvent,
+      input:
+        | AccessEvent
+        | AdmissionsEvent
+        | CatalogEvent
+        | TripEvent
+        | QualificationEvent
+        | CompanyEvent,
     ): Promise<void> {
       const client = unit.client(tx);
       const e =
@@ -320,7 +403,9 @@ export function createOutbox(unit: UnitOfWork) {
               : input.type.startsWith("qualification.") ||
                   input.type === "promotion.review_required"
                 ? qualificationEvent(input)
-                : admissionsEvent(input);
+                : input.type.startsWith("event.")
+                  ? companyEvent(input)
+                  : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
