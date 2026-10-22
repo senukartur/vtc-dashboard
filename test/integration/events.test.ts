@@ -417,6 +417,113 @@ test("attendance opens at actual revised start, is atomic/versioned/private and 
   );
   await expect(service.history(dispatcher, id)).rejects.toMatchObject({ statusCode: 403 });
 });
+test("history paginates complete unequal attendance batches without losing revisions or crossing events", async () => {
+  const id = (await create()).data.event.id;
+  await service.update(director, id, newId(), 1, input({ title: "Fictional revision two" }));
+  await service.respond(trainee, id, newId(), 1, { response: "participating" });
+  await service.update(director, id, newId(), 2, input({ title: "Fictional revision three" }));
+  await service.respond(driver, id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional private history reason",
+  });
+  instant = Date.parse(input().startsAt);
+  const members = [director, deputy, trainee, driver, dispatcher].map((a) => a.userId),
+    sizes = Array.from({ length: 60 }, (_, i) => [5, 4, 3, 2][i % 4] as number);
+  // Bulk immutable read fixtures keep command atomicity coverage in its separate cases.
+  const expected = await unit.run(async (tx) => {
+    const client = unit.client(tx),
+      [event] = await client.select().from(events).where(eq(events.id, id));
+    if (!event?.currentRevisionId) throw new Error("SYNTHETIC_EVENT_MISSING");
+    const revisions = sizes.flatMap((size, i) =>
+      members.slice(0, size).map((memberId) => ({
+        id: newId(),
+        eventId: id,
+        eventRevisionId: event.currentRevisionId as string,
+        memberId,
+        version: i + 2,
+        sequence: event.changeSequence + i + 1,
+        actorId: director.userId,
+        recordedAt: now().toISOString(),
+        status: "attended" as const,
+        note: `Fictional private batch ${i + 1}`,
+      })),
+    );
+    expect(revisions).toHaveLength(210);
+    expect(revisions[199]?.sequence).toBe(revisions[200]?.sequence);
+    await client.insert(eventAttendanceRevisions).values(revisions);
+    await client.insert(eventAttendances).values(
+      members.map((memberId) => {
+        const last = revisions.findLast((r) => r.memberId === memberId);
+        if (!last) throw new Error("SYNTHETIC_ATTENDANCE_MISSING");
+        return { eventId: id, memberId, currentRevisionId: last.id };
+      }),
+    );
+    await client
+      .update(events)
+      .set({
+        attendanceVersion: sizes.length + 1,
+        changeSequence: event.changeSequence + sizes.length,
+      })
+      .where(eq(events.id, id));
+    return {
+      definitions: await client
+        .select({ id: eventRevisions.id, sequence: eventRevisions.sequence })
+        .from(eventRevisions)
+        .where(eq(eventRevisions.eventId, id))
+        .orderBy(asc(eventRevisions.sequence), asc(eventRevisions.id)),
+      responses: await client
+        .select({ id: eventResponseRevisions.id, sequence: eventResponseRevisions.sequence })
+        .from(eventResponseRevisions)
+        .where(eq(eventResponseRevisions.eventId, id))
+        .orderBy(asc(eventResponseRevisions.sequence), asc(eventResponseRevisions.id)),
+      attendance: await client
+        .select({ id: eventAttendanceRevisions.id, sequence: eventAttendanceRevisions.sequence })
+        .from(eventAttendanceRevisions)
+        .where(eq(eventAttendanceRevisions.eventId, id))
+        .orderBy(asc(eventAttendanceRevisions.sequence), asc(eventAttendanceRevisions.id)),
+    };
+  });
+  const other = (await create()).data.event.id;
+  await service.setAttendance(director, other, newId(), 1, {
+    members: [{ memberId: trainee.userId, attendance: "not_attended", note: "Other event" }],
+  });
+  await expect(service.history(trainee, id, 0, 1)).rejects.toMatchObject({ statusCode: 403 });
+  for (const limit of [1, 7]) {
+    for (const stream of ["definitions", "responses", "attendance"] as const) {
+      const seen: string[] = [];
+      let afterSequence = 0,
+        pages = 0;
+      for (;;) {
+        const page = await service.history(deputy, id, afterSequence, limit),
+          rows = page[stream],
+          sequences = [...new Set(rows.map((r) => r.sequence))];
+        expect(++pages).toBeLessThanOrEqual(expected[stream].length + 1);
+        expect(sequences.length).toBeLessThanOrEqual(limit);
+        expect(rows.length).toBeLessThanOrEqual(stream === "attendance" ? 100 * limit : limit);
+        expect(rows.every((r) => r.eventId === id && r.sequence > afterSequence)).toBe(true);
+        for (const sequence of sequences)
+          expect(rows.filter((r) => r.sequence === sequence).map((r) => r.id)).toEqual(
+            expected[stream].filter((r) => r.sequence === sequence).map((r) => r.id),
+          );
+        seen.push(...rows.map((r) => r.id));
+        const next = page.nextAfterSequence[stream];
+        if (next === null) break;
+        expect(next).toBe(rows.at(-1)?.sequence);
+        expect(next).toBeGreaterThan(afterSequence);
+        afterSequence = next;
+      }
+      expect(seen).toEqual(expected[stream].map((r) => r.id));
+      expect(new Set(seen).size).toBe(seen.length);
+    }
+  }
+  const end = await service.history(deputy, id, expected.attendance.at(-1)?.sequence, 1);
+  expect(end).toEqual({
+    definitions: [],
+    responses: [],
+    attendance: [],
+    nextAfterSequence: { definitions: null, responses: null, attendance: null },
+  });
+});
 test("history/audit/outbox and batch changes roll back together after injected effect failure", async () => {
   const e = await create(),
     id = e.data.event.id;
@@ -847,7 +954,14 @@ test("current role and session revocation precede both saved-command replay and 
   });
   await expect(service.history(current, id)).rejects.toMatchObject({ statusCode: 403 });
 });
-import { events, eventRevisions } from "@vtc/db/events-schema";
+import {
+  asc,
+  events,
+  eventRevisions,
+  eventResponseRevisions,
+  eventAttendances,
+  eventAttendanceRevisions,
+} from "@vtc/db/events-schema";
 test("representative mixed event histories expose an ordered selective public-page index", async () => {
   const original = await create({ visibility: "public" }),
     id = original.data.event.id;

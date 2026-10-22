@@ -927,8 +927,8 @@ export function createEvents(
           )
           .orderBy(asc(eventResponseRevisions.sequence), asc(eventResponseRevisions.id))
           .limit(limit + 1);
-        const attendance = await c(tx)
-          .select()
+        const attendanceSequences = await c(tx)
+          .select({ sequence: eventAttendanceRevisions.sequence })
           .from(eventAttendanceRevisions)
           .where(
             and(
@@ -936,9 +936,34 @@ export function createEvents(
               gt(eventAttendanceRevisions.sequence, after),
             ),
           )
-          .orderBy(asc(eventAttendanceRevisions.sequence), asc(eventAttendanceRevisions.id))
-          .limit(100 * (limit + 1));
-        return { definitions, responses, attendance };
+          .groupBy(eventAttendanceRevisions.sequence)
+          .orderBy(asc(eventAttendanceRevisions.sequence))
+          .limit(limit + 1);
+        const sequences = attendanceSequences.slice(0, limit).map((r) => r.sequence);
+        const attendance = sequences.length
+          ? await c(tx)
+              .select()
+              .from(eventAttendanceRevisions)
+              .where(
+                and(
+                  eq(eventAttendanceRevisions.eventId, id),
+                  inArray(eventAttendanceRevisions.sequence, sequences),
+                ),
+              )
+              .orderBy(asc(eventAttendanceRevisions.sequence), asc(eventAttendanceRevisions.id))
+          : [];
+        const next = (rows: { sequence: number }[]) =>
+          rows.length > limit ? (rows[limit - 1]?.sequence ?? null) : null;
+        return {
+          definitions: definitions.slice(0, limit),
+          responses: responses.slice(0, limit),
+          attendance,
+          nextAfterSequence: {
+            definitions: next(definitions),
+            responses: next(responses),
+            attendance: next(attendanceSequences),
+          },
+        };
       });
     },
     // Safe future-consumer seam: immutable change order reconstructs RSVP recipients at that change.
