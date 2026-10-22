@@ -9,14 +9,17 @@ const { runPass } = await import(
 );
 
 import { guardedSettings, testConnection } from "../persistence/support.ts";
-import { safeIdentityFailure } from "./identity-diagnostics.ts";
+import { identityDiagnostics, safeIdentityFailure } from "./identity-diagnostics.ts";
 import {
   type GenerationPhase,
+  generationTransactionTracing,
   generationWorkerPhaseLine,
 } from "./manual-generation-diagnostics.ts";
 
 // This producer-free worker inherits only its launcher's disposable allocation.
 let unit: ReturnType<typeof createUnitOfWork> | undefined;
+let traceTransactions = false;
+const diagnostic = identityDiagnostics("generation_worker");
 const key = () => randomBytes(32).toString("hex");
 async function phase<T>(name: GenerationPhase, work: () => T | Promise<T>): Promise<T> {
   const started = performance.now();
@@ -32,7 +35,9 @@ async function phase<T>(name: GenerationPhase, work: () => T | Promise<T>): Prom
     );
   emit("started");
   try {
-    const result = await work();
+    const result = traceTransactions
+      ? await diagnostic.scope({ caseId: "generation_worker", step: name }, async () => work())
+      : await work();
     emit("success");
     return result;
   } catch (error) {
@@ -50,11 +55,13 @@ async function phase<T>(name: GenerationPhase, work: () => T | Promise<T>): Prom
   }
 }
 try {
+  traceTransactions = generationTransactionTracing(process.argv.slice(3));
   await phase("guard", async () => {
     const control = await testConnection();
     await control.end();
   });
-  unit = createUnitOfWork(guardedSettings());
+  const rawUnit = createUnitOfWork(guardedSettings());
+  unit = traceTransactions ? diagnostic.unit(rawUnit, undefined, true) : rawUnit;
   const current = unit;
   const composed = await phase("composition", () =>
     composeIdentity(

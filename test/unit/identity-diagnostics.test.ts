@@ -6,10 +6,15 @@ import { deferred } from "../support/concurrency.ts";
 import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 import {
   generationProcessLine,
+  generationTransactionArguments,
+  generationTransactionFlag,
+  generationTransactionTracing,
   generationWorkerPhaseLine,
   parseGenerationWorkerLine,
   safeGenerationProcessRecord,
   safeGenerationWorkerRecord,
+  safeScopedTransactionRecord,
+  scopedTransactionLine,
 } from "../support/manual-generation-diagnostics.ts";
 
 test("identity fixture diagnostics retain only allowlisted failure facts through bounded cyclic causes", () => {
@@ -30,6 +35,305 @@ test("identity fixture diagnostics retain only allowlisted failure facts through
   expect(
     safeIdentityFailure({ statusCode: "SYNTHETIC_PRIVATE", code: "SYNTHETIC_PRIVATE" }),
   ).toEqual({ codes: [], category: "unclassified" });
+});
+
+test.each(["success", "before_callback", "callback", "after_callback"] as const)(
+  "scoped transaction boundaries preserve exact ownership and %s outcome without retries",
+  async (mode) => {
+    const lines: string[] = [];
+    const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+    const diagnostic = identityDiagnostics("admissions");
+    const tx = {} as TxContext,
+      result = { privateResult: "SYNTHETIC_PRIVATE_RESULT" };
+    const failure = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL"), { code: "ETIMEDOUT" });
+    const callback = vi.fn(async (actual: TxContext) => {
+      expect(actual).toBe(tx);
+      if (mode === "callback") throw failure;
+      return result;
+    });
+    const calls = vi.fn();
+    const client = vi.fn();
+    const subject = diagnostic.unit(
+      {
+        client,
+        close: async () => {},
+        async run<T>(command: (tx: TxContext) => Promise<T>) {
+          calls();
+          if (mode === "before_callback") throw failure;
+          const value = await command(tx);
+          if (mode === "after_callback") throw failure;
+          return value;
+        },
+      },
+      undefined,
+      true,
+    );
+    try {
+      const work = diagnostic.scope({ caseId: "admissions_reissue_expiry", step: "purge" }, () =>
+        subject.run(callback),
+      );
+      if (mode === "success") expect(await work).toBe(result);
+      else await expect(work).rejects.toBe(failure);
+      expect(calls).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledTimes(mode === "before_callback" ? 0 : 1);
+      expect(client).not.toHaveBeenCalled();
+      const records = lines
+        .map((line) => JSON.parse(line))
+        .filter((record) => record.event === "identity_fixture_transaction");
+      const expected =
+        mode === "before_callback"
+          ? ["invoked", "rejected"]
+          : mode === "callback"
+            ? ["invoked", "callback_entered", "callback_threw", "rejected"]
+            : [
+                "invoked",
+                "callback_entered",
+                "callback_returned",
+                mode === "success" ? "fulfilled" : "rejected",
+              ];
+      expect(records.map((record) => record.boundary)).toEqual(expected);
+      for (const record of records) {
+        expect(safeScopedTransactionRecord(record)).toEqual(record);
+        expect(record).toMatchObject({
+          fixture: "admissions",
+          caseId: "admissions_reissue_expiry",
+          step: "purge",
+          transactionOrdinal: 1,
+        });
+        expect(record.durationMs).toBeGreaterThanOrEqual(0);
+      }
+      expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+    } finally {
+      await subject.close();
+      output.mockRestore();
+    }
+  },
+);
+
+test("transaction tracing is scoped and opt-in, with immutable concurrent and nested ordinals", async () => {
+  const lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  const diagnostic = identityDiagnostics("generation_worker"),
+    entered = deferred<void>(),
+    gate = deferred<void>();
+  const raw: UnitOfWork = {
+    client: vi.fn(),
+    close: async () => {},
+    run: async (command) => command({} as TxContext),
+  };
+  const subject = diagnostic.unit(raw, undefined, true),
+    ordinary = diagnostic.unit(raw);
+  try {
+    await subject.run(async () => 0);
+    await diagnostic.scope({ caseId: "generation_worker", step: "initialize" }, () =>
+      ordinary.run(async () => 0),
+    );
+    expect(lines).toHaveLength(0);
+    const first = diagnostic.scope(
+      { caseId: "generation_worker", step: "maintenance" },
+      async () => {
+        await subject.run(async () => {
+          entered.resolve();
+          await gate.promise;
+          return 1;
+        });
+        await diagnostic.scope({ caseId: "generation_worker", step: "pass" }, () =>
+          subject.run(async () => 2),
+        );
+        await subject.run(async () => 3);
+      },
+    );
+    await entered.promise;
+    await diagnostic.scope({ caseId: "generation_worker", step: "initialize" }, () =>
+      subject.run(async () => 4),
+    );
+    gate.resolve();
+    await first;
+    const records = lines.map((line) => JSON.parse(line));
+    expect(
+      records
+        .filter((record) => record.boundary === "invoked")
+        .map((record) => [record.step, record.transactionOrdinal]),
+    ).toEqual([
+      ["maintenance", 1],
+      ["initialize", 1],
+      ["pass", 1],
+      ["maintenance", 2],
+    ]);
+    expect(
+      records
+        .filter((record) => record.boundary === "fulfilled")
+        .map((record) => [record.step, record.transactionOrdinal]),
+    ).toEqual([
+      ["initialize", 1],
+      ["maintenance", 1],
+      ["pass", 1],
+      ["maintenance", 2],
+    ]);
+  } finally {
+    gate.resolve();
+    await subject.close();
+    await ordinary.close();
+    output.mockRestore();
+  }
+});
+
+test("trace output failures cannot replace original callback results or exception identity", async () => {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {
+    throw Error("SYNTHETIC_OUTPUT_FAILURE");
+  });
+  const diagnostic = identityDiagnostics("admissions"),
+    value = {},
+    failure = Error("SYNTHETIC_PRIVATE_ERROR");
+  const subject = diagnostic.unit(
+    { client: vi.fn(), close: async () => {}, run: async (command) => command({} as TxContext) },
+    undefined,
+    true,
+  );
+  try {
+    expect(
+      await diagnostic.scope({ caseId: "admissions_reissue_expiry", step: "purge" }, () =>
+        subject.run(async () => value),
+      ),
+    ).toBe(value);
+    await expect(
+      diagnostic.scope({ caseId: "admissions_reissue_expiry", step: "purge" }, () =>
+        subject.run(async () => {
+          throw failure;
+        }),
+      ),
+    ).rejects.toBe(failure);
+  } finally {
+    await subject.close();
+    output.mockRestore();
+  }
+});
+
+test("new diagnostic scopes require matching factory fixtures before invoking work", () => {
+  const work = vi.fn(async () => 0);
+  expect(() =>
+    identityDiagnostics("identity").scope(
+      { caseId: "admissions_reissue_expiry", step: "purge" },
+      work,
+    ),
+  ).toThrow("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+  expect(() =>
+    identityDiagnostics("admissions").scope(
+      { caseId: "generation_worker", step: "maintenance" },
+      work,
+    ),
+  ).toThrow("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+  expect(() =>
+    identityDiagnostics("generation_worker").scope(
+      { caseId: "admissions_reissue_expiry", step: "purge" },
+      work,
+    ),
+  ).toThrow("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+  expect(work).not.toHaveBeenCalled();
+});
+
+test("only late ordinal1 receives the validated closed synthetic transaction flag", () => {
+  for (const caseId of ["generation_progress", "generation_late", "generation_retry"] as const)
+    for (let ordinal = 0; ordinal < 5; ordinal++) {
+      const args = generationTransactionArguments(caseId, ordinal);
+      expect(args).toEqual(
+        caseId === "generation_late" && ordinal === 1 ? [generationTransactionFlag] : [],
+      );
+      expect(generationTransactionTracing(args)).toBe(
+        caseId === "generation_late" && ordinal === 1,
+      );
+    }
+  for (const args of [
+    ["--debug"],
+    [generationTransactionFlag, generationTransactionFlag],
+    ["SYNTHETIC_PRIVATE"],
+  ])
+    expect(() => generationTransactionTracing(args)).toThrow("INVALID_GENERATION_TRANSACTION_FLAG");
+});
+
+test("closed transaction transport retains receipts and rejects private or unbounded facts", () => {
+  const value = {
+    event: "identity_fixture_transaction",
+    fixture: "generation_worker",
+    caseId: "generation_worker",
+    step: "maintenance",
+    transactionOrdinal: 1,
+    boundary: "callback_returned",
+    durationMs: 4,
+  };
+  expect(safeGenerationWorkerRecord(value)).toEqual(value);
+  const receipt = JSON.stringify({ event: "manual_generation_worker", processed: 1, pid: 42 });
+  const records = [
+    receipt,
+    scopedTransactionLine(value),
+    generationWorkerPhaseLine({
+      event: "manual_generation_worker_phase",
+      phase: "close",
+      state: "success",
+      durationMs: 1,
+    }),
+  ].map(parseGenerationWorkerLine);
+  expect(records[0]).toEqual({ event: "manual_generation_worker", processed: 1 });
+  expect(JSON.parse(receipt).pid).toBe(42);
+  expect(JSON.stringify(records)).not.toContain("pid");
+  const parent = {
+    event: "manual_generation_transaction",
+    caseId: "generation_late",
+    ordinal: 1,
+    phase: "maintenance",
+    transactionOrdinal: 1,
+    boundary: "callback_returned",
+    durationMs: 4,
+  };
+  expect(JSON.parse(generationProcessLine(parent))).toEqual(parent);
+  for (const invalid of [
+    ...["pid", "output", "error", "sql", "settings"].map((key) => ({
+      ...value,
+      [key]: "SYNTHETIC_PRIVATE",
+    })),
+    { ...value, transactionOrdinal: 0 },
+    { ...value, transactionOrdinal: 1000001 },
+    { ...value, transactionOrdinal: 0.5 },
+    { ...value, durationMs: Number.NaN },
+    { ...value, durationMs: 86400001 },
+    { ...value, step: "purge" },
+    { ...value, boundary: "committed" },
+    { ...value, codes: [] },
+    { ...value, fixture: "admissions" },
+    { ...value, boundary: "rejected" },
+  ])
+    expect(safeScopedTransactionRecord(invalid)).toBeUndefined();
+  for (const invalid of [
+    { ...parent, ordinal: 0 },
+    { ...parent, caseId: "generation_progress" },
+    { ...parent, fixture: "generation_worker" },
+    { ...parent, pid: 42 },
+  ])
+    expect(safeGenerationProcessRecord(invalid)).toBeUndefined();
+  const failed = {
+    ...value,
+    boundary: "rejected",
+    category: "unclassified",
+    codes: ["TRANSACTION_COMMIT_OUTCOME_UNKNOWN", "PROTOCOL_SEQUENCE_TIMEOUT"],
+    statusCode: 503,
+    databaseOperation: { operation: "session_configuration", wireDeadlineMs: 1000, elapsedMs: 5 },
+  };
+  expect(safeScopedTransactionRecord(failed)).toEqual(failed);
+  for (const invalid of [
+    { ...failed, statusCode: 600 },
+    { ...failed, category: "SYNTHETIC_PRIVATE" },
+    { ...failed, codes: ["SYNTHETIC_PRIVATE"] },
+    { ...failed, databaseOperation: { ...failed.databaseOperation, sql: "SYNTHETIC_PRIVATE" } },
+  ])
+    expect(safeScopedTransactionRecord(invalid)).toBeUndefined();
+  expect(
+    safeGenerationWorkerRecord({
+      ...value,
+      fixture: "admissions",
+      caseId: "admissions_reissue_expiry",
+      step: "purge",
+    }),
+  ).toBeUndefined();
 });
 
 test("unknown commit capture runs once, keeps fixed numeric counters and never retries the command", async () => {

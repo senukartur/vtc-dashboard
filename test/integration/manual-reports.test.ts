@@ -71,6 +71,7 @@ import { safeChildEnvironment } from "../support/environment.ts";
 import {
   type GenerationCase,
   generationProcessLine,
+  generationTransactionArguments,
   parseGenerationWorkerLine,
 } from "../support/manual-generation-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
@@ -1936,7 +1937,13 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
   const db = guardedSettings();
   const child = spawn(
     process.execPath,
-    ["--import", "tsx", "test/support/manual-generation-worker.ts", root],
+    [
+      "--import",
+      "tsx",
+      "test/support/manual-generation-worker.ts",
+      root,
+      ...generationTransactionArguments(caseId, ordinal),
+    ],
     {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -1995,6 +2002,17 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
       } else if (record?.event === "manual_generation_worker_phase") {
         console.log(
           generationProcessLine({ ...record, event: "manual_generation_phase", caseId, ordinal }),
+        );
+      } else if (record?.event === "identity_fixture_transaction") {
+        const { event: _event, fixture: _fixture, caseId: _scope, step, ...facts } = record;
+        console.log(
+          generationProcessLine({
+            ...facts,
+            event: "manual_generation_transaction",
+            phase: step,
+            caseId,
+            ordinal,
+          }),
         );
       } else if (stdout && value.trim()) malformed = true;
     };

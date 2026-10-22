@@ -249,7 +249,7 @@ beforeAll(async () => {
   await diagnostic.phase("reset", () => reset(control));
   await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
   unit = await diagnostic.phase("unit", async () =>
-    diagnostic.unit(createUnitOfWork(guardedSettings()), control),
+    diagnostic.unit(createUnitOfWork(guardedSettings()), control, true),
   );
   ({ identity, admissions, messaging } = harness());
   await diagnostic.phase("bootstrap", () =>
@@ -502,7 +502,9 @@ test("reissue removes old hash/ciphertext/mail and copy, redeemer and worker rej
   instant++;
   expect(await status(admissions.copy(director, replacement.id, 1))).toBe(409);
   expect(await status(admissions.redeem("pre:expiry", newId(), token, password))).toBe(409);
-  await admissions.purge();
+  await diagnostic.scope({ caseId: "admissions_reissue_expiry", step: "purge" }, () =>
+    admissions.purge(),
+  );
   const [expired] = await unit.run((tx) =>
     unit.client(tx).select().from(invitations).where(eq(invitations.id, replacement.id)),
   );

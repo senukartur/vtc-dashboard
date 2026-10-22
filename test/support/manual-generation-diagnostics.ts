@@ -1,7 +1,16 @@
 const phases = ["guard", "composition", "initialize", "maintenance", "pass", "close"] as const;
 export type GenerationPhase = (typeof phases)[number];
+export const generationTransactionFlag = "--synthetic-late-transaction-trace";
+export function generationTransactionTracing(args: readonly string[]): boolean {
+  if (args.length === 0) return false;
+  if (args.length === 1 && args[0] === generationTransactionFlag) return true;
+  throw Error("INVALID_GENERATION_TRANSACTION_FLAG");
+}
 const cases = ["generation_progress", "generation_late", "generation_retry"] as const;
 export type GenerationCase = (typeof cases)[number];
+export function generationTransactionArguments(caseId: GenerationCase, ordinal: number): string[] {
+  return caseId === "generation_late" && ordinal === 1 ? [generationTransactionFlag] : [];
+}
 const codes = [
   "PROTOCOL_SEQUENCE_TIMEOUT",
   "ETIMEDOUT",
@@ -55,9 +64,100 @@ function allowed(value: unknown, values: readonly string[]) {
   return typeof value === "string" && values.includes(value);
 }
 
+export function safeScopedTransactionRecord(value: unknown): Record<string, unknown> | undefined {
+  if (
+    !fields(
+      value,
+      ["event", "fixture", "caseId", "step", "transactionOrdinal", "boundary", "durationMs"],
+      ["category", "codes", "statusCode", "databaseOperation"],
+    ) ||
+    value.event !== "identity_fixture_transaction" ||
+    !(
+      (value.fixture === "admissions" &&
+        value.caseId === "admissions_reissue_expiry" &&
+        value.step === "purge") ||
+      (value.fixture === "generation_worker" &&
+        value.caseId === "generation_worker" &&
+        allowed(value.step, phases))
+    ) ||
+    !integer(value.transactionOrdinal, 1000000) ||
+    value.transactionOrdinal === 0 ||
+    !integer(value.durationMs, 86400000) ||
+    !allowed(value.boundary, [
+      "invoked",
+      "callback_entered",
+      "callback_returned",
+      "callback_threw",
+      "fulfilled",
+      "rejected",
+    ])
+  )
+    return;
+  const failed = value.boundary === "callback_threw" || value.boundary === "rejected";
+  const failure: Record<string, unknown> = {};
+  if (failed) {
+    if (
+      !allowed(value.category, [
+        "unclassified",
+        "transaction_control_timeout",
+        "pool_capacity",
+        "baseline_mismatch",
+      ]) ||
+      !Array.isArray(value.codes) ||
+      value.codes.length > codes.length ||
+      !value.codes.every((code) => allowed(code, codes))
+    )
+      return;
+    failure.category = value.category;
+    failure.codes = [...value.codes];
+    if (Object.hasOwn(value, "statusCode")) {
+      if (!integer(value.statusCode, 599) || value.statusCode < 400) return;
+      failure.statusCode = value.statusCode;
+    }
+    if (Object.hasOwn(value, "databaseOperation")) {
+      const context = value.databaseOperation;
+      if (
+        !fields(context, ["operation", "wireDeadlineMs", "elapsedMs"]) ||
+        !allowed(context.operation, operations) ||
+        !integer(context.wireDeadlineMs, 86400000) ||
+        context.wireDeadlineMs < 1 ||
+        !integer(context.elapsedMs, 86400000)
+      )
+        return;
+      failure.databaseOperation = {
+        operation: context.operation,
+        wireDeadlineMs: context.wireDeadlineMs,
+        elapsedMs: context.elapsedMs,
+      };
+    }
+  } else if (
+    ["category", "codes", "statusCode", "databaseOperation"].some((key) =>
+      Object.hasOwn(value, key),
+    )
+  )
+    return;
+  return {
+    event: value.event,
+    fixture: value.fixture,
+    caseId: value.caseId,
+    step: value.step,
+    transactionOrdinal: value.transactionOrdinal,
+    boundary: value.boundary,
+    durationMs: value.durationMs,
+    ...failure,
+  };
+}
+export function scopedTransactionLine(value: unknown): string {
+  const record = safeScopedTransactionRecord(value);
+  if (!record) throw Error("INVALID_SCOPED_TRANSACTION");
+  return JSON.stringify(record);
+}
+
 // The private receipt PID is validated for the caller's in-memory distinct-process assertion,
 // but is never returned by this sanitizer or accepted in public process records.
 export function safeGenerationWorkerRecord(value: unknown): Record<string, unknown> | undefined {
+  const transaction = safeScopedTransactionRecord(value);
+  if (transaction?.fixture === "generation_worker") return transaction;
   if (
     fields(value, ["event", "processed", "pid"]) &&
     value.event === "manual_generation_worker" &&
@@ -139,6 +239,29 @@ export function safeGenerationProcessRecord(value: unknown): Record<string, unkn
   const candidate = value as Record<string, unknown>;
   if (!allowed(candidate.caseId, cases) || !integer(candidate.ordinal, 4)) return;
   const context = { caseId: candidate.caseId, ordinal: candidate.ordinal };
+  if (candidate.event === "manual_generation_transaction") {
+    if (
+      !fields(
+        candidate,
+        ["event", "caseId", "ordinal", "phase", "transactionOrdinal", "boundary", "durationMs"],
+        ["category", "codes", "statusCode", "databaseOperation"],
+      ) ||
+      candidate.caseId !== "generation_late" ||
+      candidate.ordinal !== 1
+    )
+      return;
+    const { caseId: _case, ordinal: _ordinal, phase, ...transaction } = candidate;
+    const record = safeScopedTransactionRecord({
+      ...transaction,
+      event: "identity_fixture_transaction",
+      fixture: "generation_worker",
+      caseId: "generation_worker",
+      step: phase,
+    });
+    if (!record) return;
+    const { fixture: _fixture, caseId: _scope, step: _step, ...facts } = record;
+    return { ...facts, event: "manual_generation_transaction", phase, ...context };
+  }
   if (candidate.event === "manual_generation_phase") {
     const { caseId: _case, ordinal: _ordinal, ...phase } = candidate;
     const result = safeGenerationWorkerRecord({
