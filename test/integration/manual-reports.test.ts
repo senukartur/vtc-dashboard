@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmod, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { components } from "@vtc/contracts";
 import {
@@ -2429,4 +2429,297 @@ test("draft-only composition pauses both manual deletion kinds without consuming
     [image.id],
   );
   expect(evidence[0]?.state).toBe("deleting");
+});
+
+async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
+  if (performance.now() >= deadline) throw Error("SYNTHETIC_JOBS_FIXTURE_DEADLINE");
+  const child = spawn(process.execPath, ["apps/api/dist/jobs.js", "run"], {
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...safeChildEnvironment(), ...environment },
+  });
+  let closed = false,
+    timedOut = false,
+    spawnFailed = false,
+    streamFailed = false,
+    storageFailure = false;
+  let exitCode: number | null = null;
+  let result: { manualCleanup: string; processed: number } | undefined;
+  const completion = new Promise<void>((accept) => {
+    child.once("close", (code) => {
+      closed = true;
+      exitCode = code;
+      accept();
+    });
+  });
+  child.once("error", () => {
+    spawnFailed = true;
+  });
+  const stop = () => {
+    if (!closed && child.pid !== undefined) child.kill("SIGTERM");
+  };
+  // Fail this fixture, then let the unchanged CLI supervisor drain/kill its own worker.
+  const watchdog = setTimeout(
+    () => {
+      timedOut = true;
+      stop();
+    },
+    Math.max(1, deadline - performance.now()),
+  );
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.once("error", () => {
+      streamFailed = true;
+      stop();
+    });
+    let line = "",
+      oversized = false;
+    stream.on("data", (chunk) => {
+      for (const part of String(chunk).split(/(\n)/)) {
+        if (part === "\n") {
+          if (!oversized) {
+            try {
+              const value = JSON.parse(line);
+              if (
+                value.event === "manual_cleanup_failed" &&
+                value.category === "storage_unavailable"
+              )
+                storageFailure = true;
+              if (
+                value.event === "jobs_result" &&
+                ["complete", "configuration_pending", "storage_unavailable"].includes(
+                  value.manualCleanup,
+                ) &&
+                Number.isSafeInteger(value.processed) &&
+                value.processed >= 0
+              )
+                result = { manualCleanup: value.manualCleanup, processed: value.processed };
+            } catch {
+              /* Raw child diagnostics are deliberately discarded. */
+            }
+          }
+          line = "";
+          oversized = false;
+        } else if (!oversized) {
+          if (line.length + part.length > 4000) {
+            line = "";
+            oversized = true;
+          } else line += part;
+        }
+      }
+    });
+  }
+  try {
+    await completion;
+    expect(timedOut).toBe(false);
+    expect(spawnFailed).toBe(false);
+    expect(streamFailed).toBe(false);
+    return { exitCode, storageFailure, result };
+  } finally {
+    clearTimeout(watchdog);
+    if (!closed) {
+      stop();
+      await completion;
+    }
+  }
+}
+
+test("unavailable due manual storage reports failure while real local mail completes once, then recovers", async () => {
+  const deadline = performance.now() + 7000;
+  const ownedRoot = resolve(root, "jobs-storage-outage"),
+    heldRoot = resolve(root, "jobs-storage-outage.offline");
+  expect(
+    ownedRoot.startsWith(resolve(root) + sep) && heldRoot.startsWith(resolve(root) + sep),
+  ).toBe(true);
+  await mkdir(ownedRoot, { mode: 0o700 });
+  const owned = await lstat(ownedRoot);
+  const verifyRoot = async (path: string) => {
+    expect([ownedRoot, heldRoot]).toContain(path);
+    const stat = await lstat(path);
+    expect(stat.isDirectory() && !stat.isSymbolicLink()).toBe(true);
+    expect([stat.dev, stat.ino]).toEqual([owned.dev, owned.ino]);
+  };
+  let displaced = false;
+  try {
+    const mailKey = randomBytes(32).toString("hex"),
+      catalogKey = randomBytes(32).toString("hex"),
+      tripKey = randomBytes(32).toString("hex");
+    const config = {
+      ...manualConfig,
+      key: randomBytes(32).toString("hex"),
+      storage: { ...manualConfig.storage, root: ownedRoot },
+    };
+    const composed = composeIdentity(
+      unit,
+      identityConfig,
+      {
+        mode: "local",
+        key: mailKey,
+        sender: "synthetic@example.invalid",
+        origin: identityConfig.origin,
+        production: false,
+      },
+      undefined,
+      false,
+      {
+        production: false,
+        synthetic: true,
+        cursorKey: catalogKey,
+        maxFileBytes: 1048576,
+        artifactTtlMs: 86400000,
+        policyRevision: 1,
+        evidence: [],
+      },
+      { cursorKey: tripKey },
+      undefined,
+      config,
+    );
+    if (!composed.manualReports) throw Error("SYNTHETIC_MANUAL_COMPOSITION_REQUIRED");
+    await composed.manualReports.initialize();
+    const challenge = await composed.identity.requestChallenge(
+      owner,
+      newId(),
+      "email_verification",
+    );
+    const challengeId = challenge.id;
+    if (typeof challengeId !== "string") throw Error("SYNTHETIC_MAIL_CHALLENGE_REQUIRED");
+    const evidenceId = newId(),
+      generation = newId(),
+      leaseToken = newId();
+    const past = new Date(Date.now() - 120000).toISOString();
+    await unit.run(async (tx) => {
+      await unit.client(tx).insert(manualEvidence).values({
+        id: evidenceId,
+        ownerId: owner.userId,
+        state: "processing",
+        generation,
+        originalName: "synthetic.png",
+        contentType: "image/png",
+        leaseToken,
+        leaseUntil: past,
+        nextCheckAt: past,
+        createdAt: past,
+        updatedAt: past,
+      });
+      await unit.client(tx).insert(manualBlobGenerations).values({
+        evidenceId,
+        generation,
+        leaseUntil: past,
+        nextCheckAt: past,
+        createdAt: past,
+        updatedAt: past,
+      });
+    });
+    const db = guardedSettings();
+    const environment: NodeJS.ProcessEnv = {
+      MYSQL_HOST: db.host,
+      MYSQL_PORT: String(db.port),
+      MYSQL_DATABASE: db.database,
+      MYSQL_USER: db.user,
+      MYSQL_PASSWORD: db.password,
+      IDENTITY_ENABLED: "true",
+      IDENTITY_SECRET: identityConfig.secret,
+      IDENTITY_ORIGIN: identityConfig.origin,
+      MAIL_MODE: "local",
+      MAIL_ENCRYPTION_KEY: mailKey,
+      MAIL_SENDER: "synthetic@example.invalid",
+      CATALOGS_ENABLED: "true",
+      CATALOGS_SYNTHETIC: "true",
+      CATALOGS_CURSOR_KEY: catalogKey,
+      CATALOGS_MAX_FILE_BYTES: "1048576",
+      CATALOGS_ARTIFACT_TTL_MS: "86400000",
+      CATALOGS_POLICY_REVISION: "1",
+      TRIPS_ENABLED: "true",
+      TRIPS_CURSOR_KEY: tripKey,
+      MANUAL_REPORTS_ENABLED: "true",
+      MANUAL_REPORTS_KEY: config.key,
+      MANUAL_MAX_FILES_PER_REPORT: "5",
+      MANUAL_POLICY_REVISION: "1",
+      MANUAL_ORPHAN_GRACE_MS: "60000",
+      MANUAL_EVIDENCE_ROOT: ownedRoot,
+      MANUAL_MAX_FILE_BYTES: "1048576",
+      MANUAL_MAX_PIXELS: "10000",
+      MANUAL_UPLOAD_TIMEOUT_MS: "5000",
+    };
+    const delivery = async () => {
+      const [rows] = await control.query<RowDataPacket[]>(
+        "SELECT state,attempts,id,receipt FROM mail_deliveries WHERE generation_id=?",
+        [Buffer.from(challengeId)],
+      );
+      expect(rows).toHaveLength(1);
+      return rows[0] as RowDataPacket;
+    };
+    expect((await delivery()).state).toBe("queued");
+    await verifyRoot(ownedRoot);
+    expect((await readdir(root)).includes("jobs-storage-outage.offline")).toBe(false);
+    await rename(ownedRoot, heldRoot);
+    displaced = true;
+    const failed = await ownedJobsCli(environment, deadline);
+    expect(failed).toMatchObject({
+      exitCode: 1,
+      storageFailure: true,
+      result: { manualCleanup: "storage_unavailable" },
+    });
+    expect(failed.result?.processed).toBeGreaterThanOrEqual(1);
+    const delivered = await delivery();
+    expect(delivered).toMatchObject({ state: "simulated", attempts: 1 });
+    expect(delivered.receipt).toBe(`local:messaging.mail:${String(delivered.id)}`);
+    const [pending] = await control.query<RowDataPacket[]>(
+      "SELECT state,generation,lease_token,deletion_job_id FROM manual_evidence WHERE id=?",
+      [Buffer.from(evidenceId)],
+    );
+    expect(pending[0]?.state).toBe("processing");
+    expect(String(pending[0]?.generation)).toBe(generation);
+    expect(pending[0]?.lease_token).not.toBeNull();
+    expect(pending[0]?.deletion_job_id).toBeNull();
+    await verifyRoot(heldRoot);
+    expect((await readdir(root)).includes("jobs-storage-outage")).toBe(false);
+    await rename(heldRoot, ownedRoot);
+    displaced = false;
+    // Expire only this fixture's recovered lease; production deadlines remain unchanged.
+    await control.execute(
+      "UPDATE manual_evidence SET lease_until=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=? AND state='processing'",
+      [Buffer.from(evidenceId)],
+    );
+    const recovered = await ownedJobsCli(environment, deadline);
+    expect(recovered).toMatchObject({
+      exitCode: 0,
+      storageFailure: false,
+      result: { manualCleanup: "complete" },
+    });
+    expect(await delivery()).toEqual(delivered);
+    const [settled] = await control.query<RowDataPacket[]>(
+      "SELECT state,lease_token,lease_until FROM manual_evidence WHERE id=?",
+      [Buffer.from(evidenceId)],
+    );
+    expect(settled[0]).toMatchObject({ state: "rejected", lease_token: null, lease_until: null });
+    const [generations] = await control.query<RowDataPacket[]>(
+      "SELECT state FROM manual_blob_generations WHERE evidence_id=? AND generation=?",
+      [Buffer.from(evidenceId), Buffer.from(generation)],
+    );
+    expect(generations).toHaveLength(1);
+    expect(generations[0]?.state).toBe("tracked");
+    const [mailJobs] = await control.query<RowDataPacket[]>(
+      "SELECT state,attempts FROM durable_jobs WHERE consumer=? AND effect_key=?",
+      [Buffer.from("messaging.mail"), delivered.id],
+    );
+    expect(mailJobs).toHaveLength(1);
+    expect(mailJobs[0]).toMatchObject({ state: "completed", attempts: 1 });
+    expect(await readdir(ownedRoot)).toEqual([]);
+    console.log(
+      JSON.stringify({
+        event: "manual_jobs_storage_isolation",
+        storageFailureReported: true,
+        mailSimulatedOnce: true,
+        manualRecovered: true,
+      }),
+    );
+  } finally {
+    if (displaced) {
+      await verifyRoot(heldRoot);
+      expect((await readdir(root)).includes("jobs-storage-outage")).toBe(false);
+      await rename(heldRoot, ownedRoot);
+    }
+    await verifyRoot(ownedRoot);
+    await rm(ownedRoot, { recursive: true });
+  }
 });

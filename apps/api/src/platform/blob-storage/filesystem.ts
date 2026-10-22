@@ -77,50 +77,68 @@ export async function validateImage(
         reject(new BlobFailure("cancelled"));
         return;
       }
-      const child = spawn(
-        process.execPath,
-        [
-          "--max-old-space-size=128",
-          "--input-type=module",
-          "-e",
-          decoderSource,
-          sharpPath,
-          file,
-          String(config.maxPixels),
-          String(config.timeoutMs),
-        ],
-        {
-          stdio: ["ignore", "pipe", "ignore"],
-          windowsHide: true,
-          env: process.platform === "win32" ? { SystemRoot: process.env.SystemRoot } : {},
-        },
-      );
+      const child = (() => {
+        try {
+          return spawn(
+            process.execPath,
+            [
+              "--max-old-space-size=128",
+              "--input-type=module",
+              "-e",
+              decoderSource,
+              sharpPath,
+              file,
+              String(config.maxPixels),
+              String(config.timeoutMs),
+            ],
+            {
+              stdio: ["ignore", "pipe", "ignore"],
+              windowsHide: true,
+              env: process.platform === "win32" ? { SystemRoot: process.env.SystemRoot } : {},
+            },
+          );
+        } catch {
+          throw new BlobFailure("unavailable");
+        }
+      })();
       let result = "",
-        timedOut = false;
-      const stop = () => {
-        timedOut = true;
-        child.kill("SIGKILL");
+        failure: BlobFailure["category"] | undefined,
+        settled = false;
+      const stop = (category: BlobFailure["category"]) => {
+        if (settled || failure) return;
+        failure = category;
+        if (child.pid !== undefined) child.kill("SIGKILL");
+        child.stdout.destroy();
       };
-      const timer = setTimeout(stop, config.timeoutMs);
-      signal?.addEventListener("abort", stop, { once: true });
-      child.stdout.on("data", (chunk) => {
-        result += String(chunk);
-        if (result.length > 32) stop();
-      });
+      const abort = () => stop("cancelled");
+      const data = (chunk: Buffer) => {
+        if (settled || failure) return;
+        const text = String(chunk);
+        if (result.length + text.length > 32) stop("invalid");
+        else result += text;
+      };
+      const unavailable = () => stop("unavailable");
+      const timer = setTimeout(abort, config.timeoutMs);
       const cleanup = () => {
         clearTimeout(timer);
-        signal?.removeEventListener("abort", stop);
+        signal?.removeEventListener("abort", abort);
+        child.stdout.removeListener("data", data);
+        child.stdout.removeListener("error", unavailable);
+        child.removeListener("error", unavailable);
       };
-      child.once("error", () => {
+      child.stdout.on("data", data);
+      child.stdout.once("error", unavailable);
+      child.once("error", unavailable);
+      signal?.addEventListener("abort", abort, { once: true });
+      child.once("close", (code) => {
+        if (settled) return;
+        settled = true;
         cleanup();
-        reject(new BlobFailure("unavailable"));
-      });
-      child.once("exit", (code) => {
-        cleanup();
-        if (!timedOut && code === 0 && (result === "image/png" || result === "image/jpeg"))
+        if (!failure && code === 0 && (result === "image/png" || result === "image/jpeg"))
           accept(result);
-        else reject(new BlobFailure(timedOut ? "cancelled" : "invalid"));
+        else reject(new BlobFailure(failure ?? "invalid"));
       });
+      if (signal?.aborted) abort();
     });
   } finally {
     activeDecoders--;

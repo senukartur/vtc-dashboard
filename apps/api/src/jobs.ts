@@ -1,8 +1,9 @@
 import { createUnitOfWork } from "@vtc/db";
 import { cleanupAdmissions } from "./modules/admissions/service.js";
 import { cleanupCatalogs } from "./modules/catalogs/service.js";
-import { cleanupMail } from "./modules/messaging/service.js";
 import { manualCleanupPending } from "./modules/manual-reports/service.js";
+import { cleanupMail } from "./modules/messaging/service.js";
+import { BlobFailure } from "./platform/blob-storage/filesystem.js";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
@@ -52,11 +53,29 @@ await ownedCli(async () => {
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
     if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
-    const manualCleanup =
-      mode === "run"
-        ? ((await composed?.manualReports?.maintenance(abort.signal)) ??
-          ((await manualCleanupPending(unit)) ? "configuration_pending" : "complete"))
-        : "not_run";
+    let manualCleanup: "not_run" | "complete" | "configuration_pending" | "storage_unavailable" =
+      "not_run";
+    if (mode === "run") {
+      try {
+        manualCleanup =
+          (await composed?.manualReports?.maintenance(abort.signal)) ??
+          ((await manualCleanupPending(unit)) ? "configuration_pending" : "complete");
+      } catch (error) {
+        if (
+          unknownCommit(error) ||
+          abort.signal.aborted ||
+          !(error instanceof BlobFailure) ||
+          error.category !== "unavailable" ||
+          "cause" in error
+        )
+          throw error;
+        manualCleanup = "storage_unavailable";
+        console.error(
+          JSON.stringify({ event: "manual_cleanup_failed", category: "storage_unavailable" }),
+        );
+        process.exitCode = 1;
+      }
+    }
     if (manualCleanup === "configuration_pending")
       console.error(
         JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
