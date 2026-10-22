@@ -37,6 +37,7 @@ import {
 import { sourceMessages, tripFacts, tripFactTrailers, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
+  afterEach,
   beforeEach,
   expect,
   test,
@@ -80,6 +81,8 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
+import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
+import { childClose, fixtureSettlement } from "../support/fixture-settlement.ts";
 import {
   type GenerationCase,
   generationProcessLine,
@@ -89,6 +92,10 @@ import {
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
+const workerCases = fixtureSettlement();
+function it(name: string, work: () => Promise<void>) {
+  test(name, () => workerCases.track(work()));
+}
 
 type S = components["schemas"];
 let control: Connection,
@@ -285,6 +292,8 @@ beforeAll(async () => {
   await manual.initialize();
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
+  // Framework timeout does not cancel a child or its original callback.
+  await workerCases.wait();
   await control.query("UPDATE manual_reports SET current_revision_id=NULL");
   for (const table of [
     "identity_limits",
@@ -317,9 +326,24 @@ beforeEach(async () => {
   instant = Date.parse("2026-10-21T12:00:00.000Z");
 });
 afterAll(async () => {
+  await workerCases.wait();
   await unit?.close();
   await control?.end();
   if (root) await rm(root, { recursive: true, force: true });
+});
+afterEach(async ({ task }) => {
+  if (task.result?.state !== "fail") return;
+  await workerCases.wait();
+  const caseId = task.name.startsWith("durable generation intent")
+    ? "generation_progress"
+    : task.name.startsWith("missing generation observations")
+      ? "generation_late"
+      : task.name.startsWith("generation cleanup retries")
+        ? "generation_retry"
+        : task.name.startsWith("unavailable due manual storage")
+          ? "manual_storage"
+          : null;
+  if (caseId) await fixtureDatabaseFailure(control, caseId);
 });
 
 test("partial owner drafts create no trip; submission is atomic/idempotent with original unresolved fields and unknown actual times", async () => {
@@ -1971,6 +1995,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
       },
     },
   );
+  const completion = childClose(child);
   let receipt: { event: string; processed: number; pid: number } | undefined;
   let malformed = false,
     closed = false,
@@ -2000,6 +2025,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
         receiptState: receipt ? "valid" : !closed ? "pending" : malformed ? "malformed" : "missing",
       }),
     );
+  const removeStreamListeners: (() => void)[] = [];
   for (const [stream, stdout] of [
     [child.stdout, true],
     [child.stderr, false],
@@ -2010,7 +2036,8 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
       const record = parseGenerationWorkerLine(value);
       if (stdout && record?.event === "manual_generation_worker") {
         // This validated private PID stays in memory for the original distinct-process proof.
-        receipt = JSON.parse(value) as typeof receipt;
+        if (receipt) malformed = true;
+        else receipt = JSON.parse(value) as typeof receipt;
       } else if (record?.event === "manual_generation_worker_phase") {
         console.log(
           generationProcessLine({ ...record, event: "manual_generation_phase", caseId, ordinal }),
@@ -2028,7 +2055,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
         );
       } else if (stdout && value.trim()) malformed = true;
     };
-    stream.on("data", (chunk) => {
+    const onData = (chunk: Buffer | string) => {
       for (const part of String(chunk).split(/(\n)/)) {
         if (part === "\n") {
           if (!oversized) line(pending);
@@ -2044,9 +2071,15 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
           }
         }
       }
-    });
-    stream.once("end", () => {
+    };
+    const onEnd = () => {
       if (pending && !oversized) line(pending);
+    };
+    stream.on("data", onData);
+    stream.once("end", onEnd);
+    removeStreamListeners.push(() => {
+      stream.off("data", onData);
+      stream.off("end", onEnd);
     });
   }
   const stop = (reason: "child_deadline" | "case_abort") => {
@@ -2070,23 +2103,28 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
     exitSignal = signal;
     emit("close");
   });
-  const status = await new Promise<number | null>((accept, reject) => {
-    child.once("exit", (code, signal) => {
-      exitCode = code;
-      exitSignal = signal;
-      emit("exit");
-      accept(code);
-    });
-    child.once("error", () => {
-      spawnFailed = true;
-      emit("spawn_error");
-      reject(Error("SYNTHETIC_GENERATION_WORKER_START_FAILED"));
-    });
-  }).finally(() => {
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+    exitCode = code;
+    exitSignal = signal;
+    emit("exit");
+  };
+  const onError = () => {
+    spawnFailed = true;
+    emit("spawn_error");
+  };
+  child.once("exit", onExit);
+  child.once("error", onError);
+  const outcome = await completion.finally(() => {
     clearTimeout(timer);
     signal?.removeEventListener("abort", abort);
+    child.off("exit", onExit);
+    child.off("error", onError);
+    for (const remove of removeStreamListeners) remove();
   });
-  expect(status).toBe(0);
+  if (outcome.spawnFailed) throw Error("SYNTHETIC_GENERATION_WORKER_START_FAILED");
+  expect(outcome.streamFailed).toBe(false);
+  expect(outcome.code).toBe(0);
+  expect(malformed).toBe(false);
   const last = receipt ?? { event: undefined };
   expect(last.event).toBe("manual_generation_worker");
   console.log(
@@ -2100,7 +2138,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
   );
   return last as { processed: number; pid: number };
 }
-test("durable generation intent makes bounded progress beyond100 protected current files across fresh worker processes", async () => {
+it("durable generation intent makes bounded progress beyond100 protected current files across fresh worker processes", async () => {
   const signal = AbortSignal.timeout(11000),
     image = await upload();
   await submit(image.id);
@@ -2151,7 +2189,7 @@ test("durable generation intent makes bounded progress beyond100 protected curre
   );
   expect(Number(intents[0]?.n)).toBe(107);
 });
-test("missing generation observations survive late actual finalization and reconcile in a fresh worker", async () => {
+it("missing generation observations survive late actual finalization and reconcile in a fresh worker", async () => {
   const image = await upload();
   await submit(image.id);
   const generation = newId(),
@@ -2225,7 +2263,7 @@ test("every initial, ready replay and rejected retry generation commits its inte
   expect(new Set(observed).size).toBe(4);
 });
 
-test("generation cleanup retries a failed file effect durably and recovers an exhausted job in a fresh worker", async () => {
+it("generation cleanup retries a failed file effect durably and recovers an exhausted job in a fresh worker", async () => {
   const image = await upload();
   await submit(image.id);
   const generation = newId(),
@@ -2535,7 +2573,7 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
   }
 }
 
-test("unavailable due manual storage reports failure while real local mail completes once, then recovers", async () => {
+it("unavailable due manual storage reports failure while real local mail completes once, then recovers", async () => {
   const deadline = performance.now() + 7000;
   const ownedRoot = resolve(root, "jobs-storage-outage"),
     heldRoot = resolve(root, "jobs-storage-outage.offline");

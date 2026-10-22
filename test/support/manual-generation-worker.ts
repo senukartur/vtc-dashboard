@@ -38,7 +38,11 @@ async function phase<T>(name: GenerationPhase, work: () => T | Promise<T>): Prom
     const result = traceTransactions
       ? await diagnostic.scope({ caseId: "generation_worker", step: name }, async () => work())
       : await work();
-    emit("success");
+    const pass = result as { status: string; processed: number };
+    emit(
+      "success",
+      name === "pass" ? { runnerStatus: pass.status, processed: pass.processed } : {},
+    );
     return result;
   } catch (error) {
     try {
