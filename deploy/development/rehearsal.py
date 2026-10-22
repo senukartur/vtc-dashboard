@@ -433,7 +433,13 @@ if mode == 'full':
                                f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
         finally:
             runtime_fixture.write_bytes(runtime_fixture_bytes)
+        # The positively owned sentinel/schema/runtime role remains the existing acceptance allocation.
+        # Opt in only this local, fictional fixture to real Events commands under the same grant matrix.
+        runtime_fixture.write_bytes(runtime_fixture_bytes + b'VTC_EVENTS_ACCEPTANCE=synthetic-only\n')
         invoke('produce')
+        events_result = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+        assert events_result.get('eventsVerified') is True
+        print('Events restricted runtime: create/edit/cancel, own RSVP, attendance, immutable history and exact replay passed with SELECT+INSERT-only receipts/history', flush=True)
         expect_failure(lambda: invoke('produce'))
         invoke('inspect')
         pending = json.loads((base / 'state/identity-acceptance-last.json').read_text())
