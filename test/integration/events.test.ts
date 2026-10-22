@@ -621,6 +621,12 @@ test("safe ordered recipient seam reconstructs participating membership at immut
   });
   expect(new Set(r)).toEqual(new Set([trainee.userId, driver.userId]));
   expect(changed.version).toBe(2);
+  expect(await unit.run((tx) => service.generationInTransaction(tx, id))).toMatchObject({
+    eventId: id,
+    version: 2,
+    status: "scheduled",
+    visibility: "members",
+  });
   const first = await unit.run((tx) => service.recipientsInTransaction(tx, id, 4, null, 1));
   expect(first).toHaveLength(1);
   expect(

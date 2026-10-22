@@ -973,6 +973,24 @@ export function createEvents(
         .limit(limit);
       return rows.map((r) => r.memberId);
     },
+    async generationInTransaction(tx: TxContext, eventId: string) {
+      const [row] = await c(tx)
+        .select({
+          eventId: events.id,
+          revisionId: events.currentRevisionId,
+          version: events.version,
+          changeSequence: events.changeSequence,
+          startsAt: events.startsAt,
+          status: events.status,
+          visibility: events.visibility,
+        })
+        .from(events)
+        .where(eq(events.id, applicationId(eventId)))
+        .for("share");
+      if (!row) throw identityError(404);
+      if (!row.revisionId) throw new Error("EVENT_REVISION_MISSING");
+      return row;
+    },
     async definitionInTransaction(tx: TxContext, revisionId: string) {
       const r = await revision(tx, revisionId);
       return {
