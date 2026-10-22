@@ -30,6 +30,7 @@ export const auditSubjects = [
   "catalog",
   "application",
   "invitation",
+  "qualification",
 ] as const;
 
 export const auditEntries = mysqlTable(

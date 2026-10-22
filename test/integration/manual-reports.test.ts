@@ -25,7 +25,13 @@ import {
 } from "@vtc/db/manual-reports-schema";
 import { sourceMessages, tripFacts, tripFactTrailers, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+  beforeEach,
+  expect,
+  test,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
@@ -38,6 +44,7 @@ import {
   createManualReports,
   type ManualReports,
 } from "../../apps/api/src/modules/manual-reports/service.ts";
+import { createQualifications } from "../../apps/api/src/modules/qualifications/service.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import {
@@ -61,6 +68,9 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 type S = components["schemas"];
 let control: Connection,
@@ -274,6 +284,8 @@ beforeEach(async () => {
     "manual_reports",
     "manual_review_gates",
     "manual_evidence",
+    "trip_contribution_history",
+    "trip_contributions",
     "trip_history",
     "trip_fact_trailers",
     "trip_facts",
@@ -1300,6 +1312,58 @@ test("published resolved pins remain legacy-compatible and invalid null/cross-pi
   await expect(unit.run((tx) => old.read(tx, [current.currentFactId as string]))).rejects.toThrow(
     "UNSUPPORTED_SOURCE_FACT_VERSION",
   );
+  // Exercise the actual transitive contribution reader without installing adjudication/credit.
+  const qualification = createQualifications(
+    unit,
+    { cursorKey: randomBytes(32).toString("hex") },
+    { identity, trips: tripService, catalogs },
+    now,
+  );
+  const context = await unit.run(async (tx) => {
+    await identity.qualificationContextInTransaction(tx, [owner.userId]);
+    const [context] = await tripService.contributions.contexts(tx, [
+      {
+        tripId: current.id,
+        expectedTripVersion: current.version,
+        version: 1,
+        factId: current.currentFactId as string,
+      },
+    ]);
+    if (!context) throw Error("SYNTHETIC_CONTRIBUTION_CONTEXT_REQUIRED");
+    return context;
+  });
+  expect(context.evidence).toMatchObject({
+    provider: "manual",
+    catalogRevisionId: null,
+    origin: { status: "known", value: { catalogRevisionId: revisionId } },
+    cargo: { status: "known", value: { catalogRevisionId: secondRevision } },
+    start: { utc: null, basis: "unknown", verifiedActual: false },
+    end: { utc: null, basis: "unknown", verifiedActual: false },
+  });
+  expect(context.evidence.trailers.items[0]).toMatchObject({
+    status: "known",
+    value: { catalogRevisionId: secondRevision },
+  });
+  expect(
+    await unit.run((tx) => qualification.lookupInTransaction(tx, context.evidence)),
+  ).toMatchObject({
+    status: "unresolved",
+    attributionBasis: "manual_confirmation",
+    attributionAt: null,
+  });
+  const confirmedAt = now().toISOString();
+  expect(
+    await unit.run((tx) => qualification.lookupInTransaction(tx, context.evidence, confirmedAt)),
+  ).toMatchObject({
+    status: "unresolved",
+    attributionBasis: "manual_confirmation",
+    attributionAt: confirmedAt,
+  });
+  const [credits] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM trip_contributions",
+  );
+  expect(Number(credits[0]?.n)).toBe(0);
+  expect(context.trip.decision).toBe("pending_review");
   const history = await manual.revisions(owner, report.id);
   expect(history).toMatchObject({
     items: [

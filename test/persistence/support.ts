@@ -11,8 +11,9 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Full isolated reset/migrations now include the additive catalog tables. Behavior bounds stay unchanged.
-export const SCHEMA_SETUP_TIMEOUT_MS = 30000;
+// Expanded 62-table setup measured 7.1s reset + 21.4s migration before fixture bootstrap.
+// Only the outer setup/teardown allowance changes; runtime/query/transaction bounds are unchanged.
+export const SCHEMA_SETUP_TIMEOUT_MS = 60000;
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const fixtureRoot = join(root, "test/fixtures/persistence");
@@ -50,6 +51,18 @@ export async function testConnection(): Promise<Connection> {
       guardedAllocation().ownerConnectionId,
       "launcher must hold this allocation's suite ownership lock",
     );
+    if (process.env.VTC_TEST_LANE === "integration") {
+      const [guard] = await connection.query<RowDataPacket[]>({
+        sql: "SELECT GET_LOCK(?,0) owned",
+        values: [`vtc008-suite:${settings.database}`],
+        timeout: 1000,
+      });
+      assert.equal(
+        Number(guard[0]?.owned),
+        1,
+        "prior integration setup/teardown must settle before reset",
+      );
+    }
     return connection;
   } catch (error) {
     await connection.end();
@@ -83,6 +96,14 @@ export async function reset(connection: Connection) {
     "telemetry_installations",
     "telemetry_limits",
     "telemetry_tokens",
+    "trip_contribution_history",
+    "trip_contributions",
+    "qualification_promotion_reviews",
+    "qualification_promotions",
+    "qualification_states",
+    "qualification_assignments",
+    "qualification_rule_versions",
+    "qualification_levels",
     "trip_history",
     "trip_fact_trailers",
     "trip_facts",
@@ -175,7 +196,7 @@ export async function catalogsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -205,6 +226,10 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
   if (count === 9 && entries[8]?.tag !== "0008_stale_prowler")
     throw new Error("PUBLISHED_TRIP_PREFIX_REQUIRED");
+  if (count === 10 && entries[9]?.tag !== "0009_slimy_exiles")
+    throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
+  if (count === 11 && entries[10]?.tag !== "0010_qualifications")
+    throw new Error("PUBLISHED_QUALIFICATION_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -269,6 +294,10 @@ export async function telemetryPriorFolder(): Promise<string> {
   return publishedPrefixFolder(9);
 }
 
-export async function manualPriorFolder(): Promise<string> {
+export async function qualificationsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(10);
+}
+
+export async function manualPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(11);
 }

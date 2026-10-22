@@ -36,6 +36,7 @@ await ownedCli(async () => {
           config.trips,
           config.telemetry,
           config.manualReports,
+          config.qualifications,
         )
       : undefined;
     const messaging = composed?.messaging;

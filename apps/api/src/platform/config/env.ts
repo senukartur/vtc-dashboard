@@ -6,6 +6,10 @@ import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalog
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type ManualConfig, validateManualConfig } from "../../modules/manual-reports/service.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
+import {
+  type QualificationsConfig,
+  validateQualificationsConfig,
+} from "../../modules/qualifications/service.js";
 import { type TelemetryConfig, validateTelemetryConfig } from "../../modules/telemetry/service.js";
 import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
 import { rootsOverlap } from "../blob-storage/roots.js";
@@ -165,6 +169,35 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let qualifications: QualificationsConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.QUALIFICATIONS_ENABLED))
+    throw new Error("Invalid environment fields: QUALIFICATIONS_ENABLED");
+  if (input.QUALIFICATIONS_ENABLED === "true") {
+    try {
+      if (!identity || !trips) throw new Error();
+      qualifications = { cursorKey: input.QUALIFICATIONS_CURSOR_KEY ?? "" };
+      validateQualificationsConfig(qualifications);
+      if (
+        [
+          identity.secret,
+          trips.cursorKey,
+          catalogs?.cursorKey,
+          mail?.key,
+          input.TELEMETRY_CURSOR_KEY,
+          input.MANUAL_REPORTS_KEY,
+        ].includes(qualifications.cursorKey) ||
+        (admissions &&
+          Buffer.from(qualifications.cursorKey, "hex").equals(
+            Buffer.from(admissions.key, "base64url"),
+          ))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: QUALIFICATIONS_ENABLED, QUALIFICATIONS_CURSOR_KEY, IDENTITY_ENABLED, TRIPS_ENABLED",
+      );
+    }
+  }
   let telemetry: TelemetryConfig | undefined;
   if (![undefined, "true", "false"].includes(input.TELEMETRY_ENABLED))
     throw new Error("Invalid environment fields: TELEMETRY_ENABLED");
@@ -220,6 +253,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           trips.cursorKey,
           catalogs.cursorKey,
           telemetry?.cursorKey,
+          qualifications?.cursorKey,
           mail?.key,
         ].includes(manualReports.key) ||
         (admissions &&
@@ -236,6 +270,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
   }
   return {
     manualReports,
+    qualifications,
     telemetry,
     trips,
     environment: env.NODE_ENV,

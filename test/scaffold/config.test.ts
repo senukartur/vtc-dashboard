@@ -137,3 +137,27 @@ test("external identities activation is explicit and requires valid identity con
     true,
   );
 });
+
+test("qualification activation requires identity/trips and an independent cursor key without numeric defaults", () => {
+  assert.equal(readConfig(fixture).qualifications, undefined);
+  const input = {
+    ...fixture,
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    TRIPS_ENABLED: "true",
+    TRIPS_CURSOR_KEY: "a".repeat(64),
+    QUALIFICATIONS_ENABLED: "true",
+    QUALIFICATIONS_CURSOR_KEY: "b".repeat(64),
+  };
+  assert.deepEqual(readConfig(input).qualifications, { cursorKey: "b".repeat(64) });
+  for (const changes of [
+    { QUALIFICATIONS_ENABLED: "yes" },
+    { IDENTITY_ENABLED: "false" },
+    { TRIPS_ENABLED: "false" },
+    { QUALIFICATIONS_CURSOR_KEY: "" },
+    { QUALIFICATIONS_CURSOR_KEY: "a".repeat(64) },
+    { MANUAL_REPORTS_KEY: "b".repeat(64) },
+  ])
+    assert.throws(() => readConfig({ ...input, ...changes }));
+});

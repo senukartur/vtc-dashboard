@@ -3,7 +3,13 @@ import { createUnitOfWork, newId, runMigrations } from "@vtc/db";
 import { eq, steamLinks, steamNonces, steamProofs } from "@vtc/db/external-identities-schema";
 import { membership } from "@vtc/db/identity-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
   type ExternalProviders,
@@ -25,6 +31,9 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 const config = {
   secret: randomBytes(32).toString("hex"),

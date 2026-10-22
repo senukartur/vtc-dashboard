@@ -64,6 +64,9 @@ export interface PrivateChallenge {
   emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
+  qualificationsLifecycle?: {
+    close(tx: TxContext, userId: string, endedAt: string): Promise<void>;
+  };
   invalidateTelemetryCredentials?: (tx: TxContext, userId: string) => Promise<void>;
   steamProjection?: (tx: TxContext, userId: string) => Promise<boolean>;
   // Implementations must persist on this tx and perform network delivery after commit.
@@ -1259,6 +1262,8 @@ export function createIdentity(
               if (target.version !== expectedVersion) throw identityError(409, "VERSION_CONFLICT");
               if ((input.kind === "reinstate") !== (target.status === "inactive"))
                 throw identityError(409);
+              if (input.kind === "deactivate")
+                await ports.qualificationsLifecycle?.close(tx, targetId, now().toISOString());
               await invalidate(tx, target, input.kind !== "roles");
               await replaceRoles(
                 tx,
@@ -1416,6 +1421,42 @@ export function createIdentity(
         if (successor?.status !== "active") return false;
       }
       return true;
+    },
+    // Company first, then sorted members: shared lock order for promotion and contribution replacement.
+    async qualificationContextInTransaction(
+      tx: TxContext,
+      targetIds: string[],
+      actor?: Actor,
+      capability = "qualifications.manage",
+    ) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [...targetIds, ...(actor ? [actor.userId] : [])]);
+      if (actor) {
+        await checkActor(tx, actor, current, locked.get(actor.userId));
+        requireCapability(actor, capability);
+      }
+      for (const id of targetIds) if (!locked.has(id)) throw identityError(404);
+      return { companyId: current.id, members: locked };
+    },
+    async completeTraineeInTransaction(tx: TxContext, actor: Actor, targetId: string) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [actor.userId, targetId]);
+      await checkActor(tx, actor, current, locked.get(actor.userId));
+      requireCapability(actor, "qualifications.manage");
+      const member = locked.get(targetId);
+      if (member?.status !== "active") throw identityError(409);
+      const assigned = await memberRoles(tx, targetId, current);
+      if (!assigned.includes("trainee") && assigned.includes("driver")) return;
+      await client(tx)
+        .delete(roles)
+        .where(and(eq(roles.userId, targetId), eq(roles.role, "trainee")));
+      if (!assigned.includes("driver"))
+        await client(tx).insert(roles).values({ userId: targetId, role: "driver" });
+      await client(tx)
+        .update(membership)
+        .set({ version: member.version + 1 })
+        .where(eq(membership.userId, targetId));
+      await changed(tx, actor.userId, targetId, current);
     },
     // Transaction-scoped seam for future source/qualification coordinators. Current state is authoritative.
     async authorizeInTransaction(tx: TxContext, actor: Actor, capability: string) {

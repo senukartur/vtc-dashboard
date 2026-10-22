@@ -1002,6 +1002,33 @@ export function createCatalogs(
         .limit(1);
       return historical?.id ?? null;
     },
+    async qualificationReferencesInTransaction(
+      tx: TxContext,
+      game: Game,
+      kind: "trailer_type" | "adr_category",
+      ids: string[],
+    ) {
+      if (ids.length > 1000 || new Set(ids).size !== ids.length) return false;
+      if (!ids.length) return true;
+      const [publication] = await c(tx)
+        .select()
+        .from(catalogPublications)
+        .where(eq(catalogPublications.game, game))
+        .for("share");
+      if (!publication?.revisionId) return false;
+      const rows = await c(tx)
+        .select({ id: catalogFacts.entityId })
+        .from(catalogFacts)
+        .where(
+          and(
+            eq(catalogFacts.revisionId, publication.revisionId),
+            eq(catalogFacts.kind, kind),
+            eq(catalogFacts.retired, false),
+            inArray(catalogFacts.entityId, ids.map(applicationId)),
+          ),
+        );
+      return rows.length === ids.length;
+    },
     async pinnedInTransaction(tx: TxContext, revisionId: string, entityId: string) {
       const r = await revision(tx, revisionId);
       if (r.state !== "published") return null;

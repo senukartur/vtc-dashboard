@@ -2106,7 +2106,8 @@
               "publishedAt": "2026-10-17T12:00:00.000Z",
               "rules": [],
               "requiredTrips": null,
-              "requiredDistanceM": null
+              "requiredDistanceM": null,
+              "effectiveAt": "2026-10-17T12:00:00.000Z"
             }
           ],
           "nextCursor": null
@@ -2157,7 +2158,8 @@
             }
           ],
           "requiredTrips": null,
-          "requiredDistanceM": null
+          "requiredDistanceM": null,
+          "effectiveAt": "2026-10-17T12:00:00.000Z"
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -2212,7 +2214,8 @@
           "reviewRequired": false,
           "computedAt": "2026-10-17T12:00:00.000Z",
           "projectionVersion": 1,
-          "projectionPending": false
+          "projectionPending": false,
+          "reviewReasonCodes": []
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -2240,7 +2243,8 @@
           "reviewRequired": false,
           "computedAt": "2026-10-17T12:00:00.000Z",
           "projectionVersion": 1,
-          "projectionPending": false
+          "projectionPending": false,
+          "reviewReasonCodes": []
         },
         "meta": {
           "requestId": "synthetic-request-001"

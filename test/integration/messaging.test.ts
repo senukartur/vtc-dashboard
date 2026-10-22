@@ -11,7 +11,14 @@ import { company, membership, roles } from "@vtc/db/identity-schema";
 import { eq, mailCommands, mailDeliveries, sql } from "@vtc/db/messaging-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  expect,
+  test,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
 import { type MailIntent, mailCrypto } from "../../apps/api/src/modules/messaging/content.ts";
@@ -37,9 +44,11 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 let control: Connection, unit: UnitOfWork;
-let preparation: Promise<void> | undefined;
 const diagnostic = identityDiagnostics("messaging");
 let instant = Date.now();
 const now = () => new Date(instant);
@@ -132,22 +141,23 @@ async function execute(mail: Messaging) {
   return claim;
 }
 const rejected: Outcome = { state: "rejected", category: "authentication", retryAfterMs: null };
-beforeAll(() => {
-  preparation = safe(async () => {
-    control = await diagnostic.phase("connection", () => testConnection());
-    await diagnostic.phase("reset", () => reset(control));
-    await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
-    await diagnostic.phase("synthetic_ddl", () =>
-      control.query(
-        "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
-      ),
-    );
-    await diagnostic.phase("unit", async () => {
-      unit = createUnitOfWork(guardedSettings());
-    });
-  });
-  return preparation;
-}, SCHEMA_SETUP_TIMEOUT_MS);
+beforeAll(
+  () =>
+    safe(async () => {
+      control = await diagnostic.phase("connection", () => testConnection());
+      await diagnostic.phase("reset", () => reset(control));
+      await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+      await diagnostic.phase("synthetic_ddl", () =>
+        control.query(
+          "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
+        ),
+      );
+      await diagnostic.phase("unit", async () => {
+        unit = createUnitOfWork(guardedSettings());
+      });
+    }),
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
 beforeEach(async () =>
   safe(async () => {
     instant = Date.now();
@@ -163,15 +173,9 @@ beforeEach(async () =>
 );
 afterAll(async () => {
   try {
-    // The original setup promise remains the beforeAll result. Settle it before
-    // closing resources; a hook timeout itself does not cancel migration work.
-    if (preparation) await Promise.allSettled([preparation]);
+    await unit?.close();
   } finally {
-    try {
-      await unit?.close();
-    } finally {
-      await control?.end();
-    }
+    await control?.end();
   }
 });
 afterEach(async () =>

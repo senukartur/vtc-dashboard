@@ -5,6 +5,7 @@ import type { Connection, RowDataPacket } from "mysql2/promise";
 type Fixture =
   | "identity"
   | "admission"
+  | "admissions"
   | "availability"
   | "email"
   | "reset"
@@ -18,6 +19,9 @@ type Phase =
   | "synthetic_ddl"
   | "bootstrap"
   | "verification"
+  | "login"
+  | "authentication"
+  | "session_extension"
   | "unit"
   | "operation"
   | "transaction";

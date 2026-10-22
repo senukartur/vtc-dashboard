@@ -4,9 +4,21 @@ import { guardedSettings } from "./support.ts";
 
 // Transparent plaintext transport for this guarded synthetic allocation only. All result
 // bytes come from real MySQL; one real journal OK packet is withheld, never synthesized.
-export async function journalAckGate(target: "insert" | "finalize") {
+export async function journalAckGate(target: "insert" | "finalize", positiveFinalization?: number) {
+  if (
+    positiveFinalization !== undefined &&
+    (target !== "finalize" ||
+      !Number.isSafeInteger(positiveFinalization) ||
+      positiveFinalization < 1)
+  )
+    throw new Error("INVALID_SYNTHETIC_FINALIZATION_GATE");
   const settings = guardedSettings();
   const withheld = deferred<void>();
+  const waiterForwarded = deferred<void>();
+  const positive = positiveFinalization !== undefined;
+  let held: { client: Socket; packet: Buffer; resume: () => void } | undefined;
+  let released = false;
+  let releaseTimer: ReturnType<typeof setTimeout> | undefined;
   const clients = new Set<Socket>();
   const upstreams = new Set<Socket>();
   const facts = {
@@ -18,7 +30,22 @@ export async function journalAckGate(target: "insert" | "finalize") {
     ends: 0,
     queryAttributeEnvelopes: 0,
     unsupportedEnvelopes: 0,
+    waiterRequests: 0,
+    waiterResponses: 0,
+    waiterResponseBeforeRelease: false,
+    explicitReleases: 0,
+    automaticRelease: false,
   };
+  function release(automatic = false) {
+    if (!positive || !held || released) return;
+    released = true;
+    clearTimeout(releaseTimer);
+    if (automatic) facts.automaticRelease = true;
+    else facts.explicitReleases++;
+    held.resume();
+    held.client.write(held.packet);
+    held = undefined;
+  }
   function packets(receive: (packet: Buffer) => void) {
     let buffered: Buffer = Buffer.alloc(0);
     return (chunk: Buffer) => {
@@ -42,6 +69,7 @@ export async function journalAckGate(target: "insert" | "finalize") {
     let authenticated = false;
     let serverAttributes = false;
     let clientAttributes = false;
+    let waitingForLockResponse = false;
     const unsupported = () => {
       facts.unsupportedEnvelopes++;
       withheld.reject(new Error("UNSUPPORTED_SYNTHETIC_MYSQL_ENVELOPE"));
@@ -90,7 +118,19 @@ export async function journalAckGate(target: "insert" | "finalize") {
           if (finalize) facts.finalizations++;
           if (query.startsWith("CREATE TABLE synthetic_parent")) facts.statements++;
           if (query.startsWith("SELECT RELEASE_LOCK")) facts.releases++;
-          if ((target === "insert" && insert) || (target === "finalize" && finalize)) hold = true;
+          if (
+            (target === "insert" && insert) ||
+            (target === "finalize" &&
+              finalize &&
+              (!positive || facts.finalizations === positiveFinalization))
+          )
+            hold = true;
+          if (positive && held && query.startsWith("SELECT GET_LOCK(")) {
+            facts.waiterRequests++;
+            waitingForLockResponse = true;
+            upstream.write(packet, () => waiterForwarded.resolve());
+            return;
+          }
         }
         upstream.write(packet);
       }),
@@ -113,9 +153,30 @@ export async function journalAckGate(target: "insert" | "finalize") {
           if (!captured) {
             captured = true;
             if (packet[4] === 0) facts.okPackets++;
+            if (positive) {
+              if (packet[4] !== 0) {
+                unsupported();
+                return;
+              }
+              // Retain and later forward the genuine MySQL ACK exactly once. A short
+              // safety release prevents test coordination consuming the five-second receipt cap.
+              held = {
+                client,
+                packet: Buffer.from(packet),
+                resume: () => {
+                  hold = false;
+                },
+              };
+              releaseTimer = setTimeout(() => release(true), 2000);
+            }
             withheld.resolve();
           }
           return;
+        }
+        if (waitingForLockResponse) {
+          waitingForLockResponse = false;
+          facts.waiterResponses++;
+          if (!released) facts.waiterResponseBeforeRelease = true;
         }
         client.write(packet);
       }),
@@ -128,9 +189,12 @@ export async function journalAckGate(target: "insert" | "finalize") {
   return {
     settings: { ...settings, host: "127.0.0.1", port: (server.address() as AddressInfo).port },
     withheld: withheld.promise,
+    waiterForwarded: waiterForwarded.promise,
+    release: () => release(),
     facts,
     activeSockets: () => clients.size + upstreams.size,
     async close() {
+      clearTimeout(releaseTimer);
       for (const socket of [...clients, ...upstreams]) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },

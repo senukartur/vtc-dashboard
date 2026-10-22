@@ -19,7 +19,14 @@ import { mailDeliveries } from "@vtc/db/messaging-schema";
 import { initialQualifications } from "@vtc/db/qualifications-schema";
 import { getTableName } from "drizzle-orm";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import {
+  beforeEach,
+  expect,
+  test,
+  vi,
+  afterAll as vitestAfterAll,
+  beforeAll as vitestBeforeAll,
+} from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
   type ApplicationInput,
@@ -56,8 +63,11 @@ import {
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 import { identityDiagnostics } from "../support/identity-diagnostics.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
-const diagnostic = identityDiagnostics("admission");
+const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
+
+const diagnostic = identityDiagnostics("admissions");
 const origin = "http://127.0.0.1:4173",
   password = "Synthetic-onboarding-passphrase-42";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
@@ -238,21 +248,31 @@ beforeAll(async () => {
   control = await diagnostic.phase("connection", () => testConnection());
   await diagnostic.phase("reset", () => reset(control));
   await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
-  unit = diagnostic.unit(createUnitOfWork(guardedSettings()), control);
+  unit = await diagnostic.phase("unit", async () =>
+    diagnostic.unit(createUnitOfWork(guardedSettings()), control),
+  );
   ({ identity, admissions, messaging } = harness());
-  await identity.bootstrap({
-    email: "admissions-director@example.invalid",
-    name: "Fictional Director",
-    password,
-  });
-  const login = await identity.login("admissions-director@example.invalid", password);
-  director = await identity.authenticate(
-    new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+  await diagnostic.phase("bootstrap", () =>
+    identity.bootstrap({
+      email: "admissions-director@example.invalid",
+      name: "Fictional Director",
+      password,
+    }),
+  );
+  const login = await diagnostic.phase("login", () =>
+    identity.login("admissions-director@example.invalid", password),
+  );
+  director = await diagnostic.phase("authentication", () =>
+    identity.authenticate(
+      new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+    ),
   );
   // Keep this synthetic administrative session valid while testing invitation-clock boundaries.
-  await control.execute(
-    "UPDATE identity_sessions SET expires_at=UTC_TIMESTAMP(3)+INTERVAL 30 DAY WHERE id=?",
-    [director.sessionId],
+  await diagnostic.phase("session_extension", () =>
+    control.execute(
+      "UPDATE identity_sessions SET expires_at=UTC_TIMESTAMP(3)+INTERVAL 30 DAY WHERE id=?",
+      [director.sessionId],
+    ),
   );
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
