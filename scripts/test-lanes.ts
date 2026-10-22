@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createDatabase, dedicatedConnection } from "@vtc/db";
 import { type Connection, createConnection } from "mysql2/promise";
+import { SCHEMA_SETUP_TIMEOUT_MS } from "../test/persistence/support.ts";
 import {
   cleanupAllocation,
   type OwnedAllocation,
@@ -17,7 +18,7 @@ import { browserFailureProof } from "../test/support/browser-failure-proof.ts";
 import { bounded } from "../test/support/concurrency.ts";
 import { type Allocation, safeChildEnvironment } from "../test/support/environment.ts";
 import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proof.ts";
-import { browserFailureLine } from "./browser-diagnostics.mjs";
+import { browserFailureLine, browserPreparationLine } from "./browser-diagnostics.mjs";
 import { eventLine } from "./ci-result.mjs";
 import { runTestProcess } from "./test-process.mjs";
 
@@ -88,18 +89,28 @@ async function execute(name: string, probe = false, capture = false, guardFailur
         {
           cwd: process.cwd(),
           env,
-          // Reuse the owned-process deadline/teardown; fixture work has the existing
-          // 30-second schema-setup bound, separate from real server readiness.
+          // Fresh browser schema/credentials share the expanded schema fixture allowance.
+          // This outer child budget is separate from real server readiness and SQL bounds.
           cleanup: true,
-          timeout: 30000,
+          timeout: SCHEMA_SETUP_TIMEOUT_MS,
           onSpawn: (process) => {
             active = process;
           },
         },
       );
       prepared = setup.exitCode === 0 && !interrupted;
+      const durationMs = Date.now() - setupStarted;
       console.log(
-        `BROWSER fixture preparation: ${prepared ? "PASS" : "FAIL"} (${setup.category}, ${Date.now() - setupStarted}ms)`,
+        browserPreparationLine({
+          kind: "wrapper",
+          state: prepared ? "success" : "failed",
+          category: setup.category,
+          configuredTimeoutMs: SCHEMA_SETUP_TIMEOUT_MS,
+          durationMs,
+        }),
+      );
+      console.log(
+        `BROWSER fixture preparation: ${prepared ? "PASS" : "FAIL"} (${setup.category}, ${durationMs}ms)`,
       );
     }
     const result = prepared
