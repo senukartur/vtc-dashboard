@@ -27,6 +27,7 @@ try {
             config.telemetry,
             config.manualReports,
             config.qualifications,
+            config.events,
           ),
         }
       : {}),

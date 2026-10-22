@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "b3398279-69ce-4714-84cc-b447eb2b8136",
+  "id": "09084106-f26c-42ed-9fa3-6a66cd693175",
   "prevId": "1a381ddd-d778-4fb3-9b3a-84a1d9077141",
   "tables": {
     "audit_entries": {
@@ -37,7 +37,7 @@
         },
         "subject_kind": {
           "name": "subject_kind",
-          "type": "enum('company','user','trip','catalog','application','invitation','qualification')",
+          "type": "enum('company','user','trip','catalog','application','invitation','qualification','event')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -4896,25 +4896,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "source_adapter_version": {
-          "name": "source_adapter_version",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 1
-        },
-        "legacy_catalog_revision_id": {
-          "name": "legacy_catalog_revision_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false,
-          "generated": {
-            "as": "IF(`source_adapter_version` = 1, `catalog_revision_id`, NULL)",
-            "type": "stored"
-          }
-        },
         "entity_id": {
           "name": "entity_id",
           "type": "binary(36)",
@@ -4964,20 +4945,11 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "trip_trailer_adapter_scope_fk": {
-          "name": "trip_trailer_adapter_scope_fk",
+        "trip_trailer_source_catalog_fk": {
+          "name": "trip_trailer_source_catalog_fk",
           "tableFrom": "trip_fact_trailers",
           "tableTo": "trip_facts",
-          "columnsFrom": ["trip_fact_id", "source_adapter_version"],
-          "columnsTo": ["id", "adapter_version"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "trip_trailer_legacy_source_catalog_fk": {
-          "name": "trip_trailer_legacy_source_catalog_fk",
-          "tableFrom": "trip_fact_trailers",
-          "tableTo": "trip_facts",
-          "columnsFrom": ["trip_fact_id", "legacy_catalog_revision_id"],
+          "columnsFrom": ["trip_fact_id", "catalog_revision_id"],
           "columnsTo": ["id", "catalog_revision_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -5095,13 +5067,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "origin_catalog_revision_id": {
-          "name": "origin_catalog_revision_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "origin_entity_id": {
           "name": "origin_entity_id",
           "type": "binary(36)",
@@ -5111,13 +5076,6 @@
         },
         "origin_fact_id": {
           "name": "origin_fact_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "destination_catalog_revision_id": {
-          "name": "destination_catalog_revision_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": false,
@@ -5137,13 +5095,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "cargo_catalog_revision_id": {
-          "name": "cargo_catalog_revision_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "cargo_entity_id": {
           "name": "cargo_entity_id",
           "type": "binary(36)",
@@ -5153,13 +5104,6 @@
         },
         "cargo_fact_id": {
           "name": "cargo_fact_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "adr_catalog_revision_id": {
-          "name": "adr_catalog_revision_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": false,
@@ -5282,11 +5226,6 @@
           "columns": ["id", "catalog_revision_id"],
           "isUnique": true
         },
-        "trip_fact_adapter_scope": {
-          "name": "trip_fact_adapter_scope",
-          "columns": ["id", "adapter_version"],
-          "isUnique": true
-        },
         "trip_fact_history": {
           "name": "trip_fact_history",
           "columns": ["canonical_trip_id", "id"],
@@ -5321,33 +5260,11 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "trip_origin_individual_pin_fk": {
-          "name": "trip_origin_individual_pin_fk",
-          "tableFrom": "trip_facts",
-          "tableTo": "catalog_facts",
-          "columnsFrom": ["origin_fact_id", "origin_catalog_revision_id", "origin_entity_id"],
-          "columnsTo": ["id", "revision_id", "entity_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "trip_fact_origin_pin_fk": {
           "name": "trip_fact_origin_pin_fk",
           "tableFrom": "trip_facts",
           "tableTo": "catalog_facts",
           "columnsFrom": ["origin_fact_id", "catalog_revision_id", "origin_entity_id"],
-          "columnsTo": ["id", "revision_id", "entity_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "trip_destination_individual_pin_fk": {
-          "name": "trip_destination_individual_pin_fk",
-          "tableFrom": "trip_facts",
-          "tableTo": "catalog_facts",
-          "columnsFrom": [
-            "destination_fact_id",
-            "destination_catalog_revision_id",
-            "destination_entity_id"
-          ],
           "columnsTo": ["id", "revision_id", "entity_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -5361,29 +5278,11 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "trip_cargo_individual_pin_fk": {
-          "name": "trip_cargo_individual_pin_fk",
-          "tableFrom": "trip_facts",
-          "tableTo": "catalog_facts",
-          "columnsFrom": ["cargo_fact_id", "cargo_catalog_revision_id", "cargo_entity_id"],
-          "columnsTo": ["id", "revision_id", "entity_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "trip_fact_cargo_pin_fk": {
           "name": "trip_fact_cargo_pin_fk",
           "tableFrom": "trip_facts",
           "tableTo": "catalog_facts",
           "columnsFrom": ["cargo_fact_id", "catalog_revision_id", "cargo_entity_id"],
-          "columnsTo": ["id", "revision_id", "entity_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "trip_adr_individual_pin_fk": {
-          "name": "trip_adr_individual_pin_fk",
-          "tableFrom": "trip_facts",
-          "tableTo": "catalog_facts",
-          "columnsFrom": ["adr_fact_id", "adr_catalog_revision_id", "adr_entity_id"],
           "columnsTo": ["id", "revision_id", "entity_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -5406,29 +5305,25 @@
       },
       "uniqueConstraints": {},
       "checkConstraint": {
-        "trip_fact_format2_pin_mode": {
-          "name": "trip_fact_format2_pin_mode",
-          "value": "`trip_facts`.`adapter_version` <> 2 OR `trip_facts`.`catalog_revision_id` IS NULL"
-        },
         "trip_fact_trailer_count": {
           "name": "trip_fact_trailer_count",
           "value": "`trip_facts`.`trailer_count` <= 10"
         },
         "trip_fact_origin_shape": {
           "name": "trip_fact_origin_shape",
-          "value": "(`trip_facts`.`origin_entity_id` IS NULL AND `trip_facts`.`origin_fact_id` IS NULL AND `trip_facts`.`origin_catalog_revision_id` IS NULL) OR (`trip_facts`.`origin_entity_id` IS NOT NULL AND `trip_facts`.`origin_fact_id` IS NOT NULL AND ((`trip_facts`.`catalog_revision_id` IS NOT NULL AND (`trip_facts`.`origin_catalog_revision_id` IS NULL OR `trip_facts`.`origin_catalog_revision_id` = `trip_facts`.`catalog_revision_id`)) OR (`trip_facts`.`catalog_revision_id` IS NULL AND `trip_facts`.`origin_catalog_revision_id` IS NOT NULL)))"
+          "value": "(`trip_facts`.`origin_entity_id` IS NULL AND `trip_facts`.`origin_fact_id` IS NULL) OR (`trip_facts`.`origin_entity_id` IS NOT NULL AND `trip_facts`.`origin_fact_id` IS NOT NULL AND `trip_facts`.`catalog_revision_id` IS NOT NULL)"
         },
         "trip_fact_destination_shape": {
           "name": "trip_fact_destination_shape",
-          "value": "(`trip_facts`.`destination_entity_id` IS NULL AND `trip_facts`.`destination_fact_id` IS NULL AND `trip_facts`.`destination_catalog_revision_id` IS NULL) OR (`trip_facts`.`destination_entity_id` IS NOT NULL AND `trip_facts`.`destination_fact_id` IS NOT NULL AND ((`trip_facts`.`catalog_revision_id` IS NOT NULL AND (`trip_facts`.`destination_catalog_revision_id` IS NULL OR `trip_facts`.`destination_catalog_revision_id` = `trip_facts`.`catalog_revision_id`)) OR (`trip_facts`.`catalog_revision_id` IS NULL AND `trip_facts`.`destination_catalog_revision_id` IS NOT NULL)))"
+          "value": "(`trip_facts`.`destination_entity_id` IS NULL AND `trip_facts`.`destination_fact_id` IS NULL) OR (`trip_facts`.`destination_entity_id` IS NOT NULL AND `trip_facts`.`destination_fact_id` IS NOT NULL AND `trip_facts`.`catalog_revision_id` IS NOT NULL)"
         },
         "trip_fact_cargo_shape": {
           "name": "trip_fact_cargo_shape",
-          "value": "(`trip_facts`.`cargo_entity_id` IS NULL AND `trip_facts`.`cargo_fact_id` IS NULL AND `trip_facts`.`cargo_catalog_revision_id` IS NULL) OR (`trip_facts`.`cargo_entity_id` IS NOT NULL AND `trip_facts`.`cargo_fact_id` IS NOT NULL AND ((`trip_facts`.`catalog_revision_id` IS NOT NULL AND (`trip_facts`.`cargo_catalog_revision_id` IS NULL OR `trip_facts`.`cargo_catalog_revision_id` = `trip_facts`.`catalog_revision_id`)) OR (`trip_facts`.`catalog_revision_id` IS NULL AND `trip_facts`.`cargo_catalog_revision_id` IS NOT NULL)))"
+          "value": "(`trip_facts`.`cargo_entity_id` IS NULL AND `trip_facts`.`cargo_fact_id` IS NULL) OR (`trip_facts`.`cargo_entity_id` IS NOT NULL AND `trip_facts`.`cargo_fact_id` IS NOT NULL AND `trip_facts`.`catalog_revision_id` IS NOT NULL)"
         },
         "trip_fact_adr_shape": {
           "name": "trip_fact_adr_shape",
-          "value": "(`trip_facts`.`adr_entity_id` IS NULL AND `trip_facts`.`adr_fact_id` IS NULL AND `trip_facts`.`adr_catalog_revision_id` IS NULL) OR (`trip_facts`.`adr_entity_id` IS NOT NULL AND `trip_facts`.`adr_fact_id` IS NOT NULL AND ((`trip_facts`.`catalog_revision_id` IS NOT NULL AND (`trip_facts`.`adr_catalog_revision_id` IS NULL OR `trip_facts`.`adr_catalog_revision_id` = `trip_facts`.`catalog_revision_id`)) OR (`trip_facts`.`catalog_revision_id` IS NULL AND `trip_facts`.`adr_catalog_revision_id` IS NOT NULL)))"
+          "value": "(`trip_facts`.`adr_entity_id` IS NULL AND `trip_facts`.`adr_fact_id` IS NULL) OR (`trip_facts`.`adr_entity_id` IS NOT NULL AND `trip_facts`.`adr_fact_id` IS NOT NULL AND `trip_facts`.`catalog_revision_id` IS NOT NULL)"
         },
         "trip_fact_start_supported": {
           "name": "trip_fact_start_supported",
@@ -6016,121 +5911,296 @@
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "manual_blob_generations": {
-      "name": "manual_blob_generations",
+    "event_attendance_revisions": {
+      "name": "event_attendance_revisions",
       "columns": {
-        "evidence_id": {
-          "name": "evidence_id",
+        "id": {
+          "name": "id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "generation": {
-          "name": "generation",
+        "event_id": {
+          "name": "event_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "state": {
-          "name": "state",
-          "type": "enum('tracked','deleting')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'tracked'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "datetime(3)",
+        "event_revision_id": {
+          "name": "event_revision_id",
+          "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "lease_until": {
-          "name": "lease_until",
-          "type": "datetime(3)",
+        "member_id": {
+          "name": "member_id",
+          "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "next_check_at": {
-          "name": "next_check_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "delete_attempt": {
-          "name": "delete_attempt",
+        "version": {
+          "name": "version",
           "type": "int unsigned",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "deletion_job_id": {
-          "name": "deletion_job_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
-        "updated_at": {
-          "name": "updated_at",
+        "sequence": {
+          "name": "sequence",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recorded_at": {
+          "name": "recorded_at",
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('attended','not_attended')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "varchar(2048)",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
       "indexes": {
-        "manual_generation_due": {
-          "name": "manual_generation_due",
-          "columns": ["state", "next_check_at", "evidence_id", "generation"],
+        "event_attendance_rev_version": {
+          "name": "event_attendance_rev_version",
+          "columns": ["event_id", "member_id", "version"],
+          "isUnique": true
+        },
+        "event_attendance_order": {
+          "name": "event_attendance_order",
+          "columns": ["event_id", "sequence", "member_id"],
           "isUnique": false
         }
       },
       "foreignKeys": {
-        "manual_blob_generations_evidence_id_manual_evidence_id_fk": {
-          "name": "manual_blob_generations_evidence_id_manual_evidence_id_fk",
-          "tableFrom": "manual_blob_generations",
-          "tableTo": "manual_evidence",
-          "columnsFrom": ["evidence_id"],
+        "event_attendance_rev_event_fk": {
+          "name": "event_attendance_rev_event_fk",
+          "tableFrom": "event_attendance_revisions",
+          "tableTo": "events",
+          "columnsFrom": ["event_id"],
           "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_attendance_rev_definition_fk": {
+          "name": "event_attendance_rev_definition_fk",
+          "tableFrom": "event_attendance_revisions",
+          "tableTo": "event_revisions",
+          "columnsFrom": ["event_revision_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_attendance_rev_member_fk": {
+          "name": "event_attendance_rev_member_fk",
+          "tableFrom": "event_attendance_revisions",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_attendance_rev_actor_fk": {
+          "name": "event_attendance_rev_actor_fk",
+          "tableFrom": "event_attendance_revisions",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["actor_id"],
+          "columnsTo": ["user_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "manual_blob_generations_evidence_id_generation_pk": {
-          "name": "manual_blob_generations_evidence_id_generation_pk",
-          "columns": ["evidence_id", "generation"]
+        "event_attendance_revisions_id": {
+          "name": "event_attendance_revisions_id",
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "manual_commands": {
-      "name": "manual_commands",
+    "event_attendances": {
+      "name": "event_attendances",
       "columns": {
-        "owner_id": {
-          "name": "owner_id",
+        "event_id": {
+          "name": "event_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "scope": {
-          "name": "scope",
-          "type": "varbinary(128)",
+        "member_id": {
+          "name": "member_id",
+          "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "command_key": {
-          "name": "command_key",
+        "current_revision_id": {
+          "name": "current_revision_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "event_attendance_event_fk": {
+          "name": "event_attendance_event_fk",
+          "tableFrom": "event_attendances",
+          "tableTo": "events",
+          "columnsFrom": ["event_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_attendance_member_fk": {
+          "name": "event_attendance_member_fk",
+          "tableFrom": "event_attendances",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "event_attendances_event_id_member_id_pk": {
+          "name": "event_attendances_event_id_member_id_pk",
+          "columns": ["event_id", "member_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "event_catalog_pins": {
+      "name": "event_catalog_pins",
+      "columns": {
+        "revision_id": {
+          "name": "revision_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "field": {
+          "name": "field",
+          "type": "enum('origin','destination','cargo','trailer')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fact_id": {
+          "name": "fact_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "catalog_revision_id": {
+          "name": "catalog_revision_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "event_pin_revision_fk": {
+          "name": "event_pin_revision_fk",
+          "tableFrom": "event_catalog_pins",
+          "tableTo": "event_revisions",
+          "columnsFrom": ["revision_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_pin_catalog_fk": {
+          "name": "event_pin_catalog_fk",
+          "tableFrom": "event_catalog_pins",
+          "tableTo": "catalog_facts",
+          "columnsFrom": ["fact_id", "catalog_revision_id", "entity_id"],
+          "columnsTo": ["id", "revision_id", "entity_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "event_catalog_pins_revision_id_field_pk": {
+          "name": "event_catalog_pins_revision_id_field_pk",
+          "columns": ["revision_id", "field"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "event_commands": {
+      "name": "event_commands",
+      "columns": {
+        "actor_id": {
+          "name": "actor_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route": {
+          "name": "route",
+          "type": "enum('create','update','cancel','response','attendance')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
@@ -6150,8 +6220,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "created_at": {
-          "name": "created_at",
+        "recorded_at": {
+          "name": "recorded_at",
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
@@ -6160,27 +6230,27 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "manual_commands_owner_id_identity_memberships_user_id_fk": {
-          "name": "manual_commands_owner_id_identity_memberships_user_id_fk",
-          "tableFrom": "manual_commands",
+        "event_command_actor_fk": {
+          "name": "event_command_actor_fk",
+          "tableFrom": "event_commands",
           "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
+          "columnsFrom": ["actor_id"],
           "columnsTo": ["user_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "manual_commands_owner_id_scope_command_key_pk": {
-          "name": "manual_commands_owner_id_scope_command_key_pk",
-          "columns": ["owner_id", "scope", "command_key"]
+        "event_commands_actor_id_route_target_id_key_pk": {
+          "name": "event_commands_actor_id_route_target_id_key_pk",
+          "columns": ["actor_id", "route", "target_id", "key"]
         }
       },
       "uniqueConstraints": {},
       "checkConstraint": {}
     },
-    "manual_correction_history": {
-      "name": "manual_correction_history",
+    "event_response_revisions": {
+      "name": "event_response_revisions",
       "columns": {
         "id": {
           "name": "id",
@@ -6189,16 +6259,44 @@
           "notNull": true,
           "autoincrement": false
         },
-        "request_id": {
-          "name": "request_id",
+        "response_id": {
+          "name": "response_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "status": {
-          "name": "status",
-          "type": "enum('pending','resolved','declined')",
+        "event_id": {
+          "name": "event_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -6210,630 +6308,78 @@
           "notNull": true,
           "autoincrement": false
         },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(4000)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_correction_history_page": {
-          "name": "manual_correction_history_page",
-          "columns": ["request_id", "recorded_at", "id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_correction_history_request_fk": {
-          "name": "manual_correction_history_request_fk",
-          "tableFrom": "manual_correction_history",
-          "tableTo": "manual_correction_requests",
-          "columnsFrom": ["request_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_correction_history_id": {
-          "name": "manual_correction_history_id",
-          "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_correction_requests": {
-      "name": "manual_correction_requests",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trip_id": {
-          "name": "trip_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "base_trip_version": {
-          "name": "base_trip_version",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "base_revision_id": {
-          "name": "base_revision_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(4000)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "status": {
           "name": "status",
-          "type": "enum('pending','resolved','declined')",
+          "type": "enum('unanswered','participating','declined')",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "requested_at": {
-          "name": "requested_at",
-          "type": "datetime(3)",
+        "reason": {
+          "name": "reason",
+          "type": "varchar(2048)",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         }
       },
       "indexes": {
-        "manual_correction_trip_page": {
-          "name": "manual_correction_trip_page",
-          "columns": ["trip_id", "requested_at", "id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_correction_requests_trip_id_trips_id_fk": {
-          "name": "manual_correction_requests_trip_id_trips_id_fk",
-          "tableFrom": "manual_correction_requests",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_correction_owner_fk": {
-          "name": "manual_correction_owner_fk",
-          "tableFrom": "manual_correction_requests",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_correction_revision_fk": {
-          "name": "manual_correction_revision_fk",
-          "tableFrom": "manual_correction_requests",
-          "tableTo": "manual_revisions",
-          "columnsFrom": ["base_revision_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_correction_requests_id": {
-          "name": "manual_correction_requests_id",
-          "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_draft_evidence": {
-      "name": "manual_draft_evidence",
-      "columns": {
-        "draft_id": {
-          "name": "draft_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "evidence_id": {
-          "name": "evidence_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "hold_until": {
-          "name": "hold_until",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_draft_evidence_reference": {
-          "name": "manual_draft_evidence_reference",
-          "columns": ["evidence_id", "draft_id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_draft_evidence_draft_id_manual_drafts_id_fk": {
-          "name": "manual_draft_evidence_draft_id_manual_drafts_id_fk",
-          "tableFrom": "manual_draft_evidence",
-          "tableTo": "manual_drafts",
-          "columnsFrom": ["draft_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_draft_evidence_evidence_id_manual_evidence_id_fk": {
-          "name": "manual_draft_evidence_evidence_id_manual_evidence_id_fk",
-          "tableFrom": "manual_draft_evidence",
-          "tableTo": "manual_evidence",
-          "columnsFrom": ["evidence_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_draft_evidence_draft_id_evidence_id_pk": {
-          "name": "manual_draft_evidence_draft_id_evidence_id_pk",
-          "columns": ["draft_id", "evidence_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_draft_history": {
-      "name": "manual_draft_history",
-      "columns": {
-        "draft_id": {
-          "name": "draft_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "snapshot": {
-          "name": "snapshot",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "manual_draft_history_draft_id_manual_drafts_id_fk": {
-          "name": "manual_draft_history_draft_id_manual_drafts_id_fk",
-          "tableFrom": "manual_draft_history",
-          "tableTo": "manual_drafts",
-          "columnsFrom": ["draft_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_draft_history_draft_id_version_pk": {
-          "name": "manual_draft_history_draft_id_version_pk",
-          "columns": ["draft_id", "version"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_drafts": {
-      "name": "manual_drafts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "version": {
-          "name": "version",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "enum('editing','submitted')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fields": {
-          "name": "fields",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "target_trip": {
-          "name": "target_trip",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "submitted_report_id": {
-          "name": "submitted_report_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_draft_owner_page": {
-          "name": "manual_draft_owner_page",
-          "columns": ["owner_id", "created_at", "id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_drafts_owner_id_identity_memberships_user_id_fk": {
-          "name": "manual_drafts_owner_id_identity_memberships_user_id_fk",
-          "tableFrom": "manual_drafts",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_drafts_submitted_report_id_manual_reports_id_fk": {
-          "name": "manual_drafts_submitted_report_id_manual_reports_id_fk",
-          "tableFrom": "manual_drafts",
-          "tableTo": "manual_reports",
-          "columnsFrom": ["submitted_report_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_drafts_id": {
-          "name": "manual_drafts_id",
-          "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_evidence": {
-      "name": "manual_evidence",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "enum('processing','ready','rejected','deleting','expired')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "generation": {
-          "name": "generation",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "original_name": {
-          "name": "original_name",
-          "type": "varchar(256)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "byte_length": {
-          "name": "byte_length",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "varbinary(32)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "varbinary(32)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lease_token": {
-          "name": "lease_token",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lease_until": {
-          "name": "lease_until",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "deletion_job_id": {
-          "name": "deletion_job_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "delete_attempt": {
-          "name": "delete_attempt",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expired_at": {
-          "name": "expired_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "next_check_at": {
-          "name": "next_check_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_evidence_recovery": {
-          "name": "manual_evidence_recovery",
-          "columns": ["state", "lease_until", "id"],
-          "isUnique": false
-        },
-        "manual_evidence_orphans": {
-          "name": "manual_evidence_orphans",
-          "columns": ["state", "updated_at", "id"],
-          "isUnique": false
-        },
-        "manual_evidence_retention_scan": {
-          "name": "manual_evidence_retention_scan",
-          "columns": ["state", "next_check_at", "id"],
-          "isUnique": false
-        },
-        "manual_evidence_generation": {
-          "name": "manual_evidence_generation",
-          "columns": ["id", "generation"],
+        "event_response_rev_version": {
+          "name": "event_response_rev_version",
+          "columns": ["response_id", "version"],
           "isUnique": true
+        },
+        "event_response_order": {
+          "name": "event_response_order",
+          "columns": ["event_id", "sequence", "member_id"],
+          "isUnique": false
         }
       },
       "foreignKeys": {
-        "manual_evidence_owner_id_identity_memberships_user_id_fk": {
-          "name": "manual_evidence_owner_id_identity_memberships_user_id_fk",
-          "tableFrom": "manual_evidence",
+        "event_response_rev_event_fk": {
+          "name": "event_response_rev_event_fk",
+          "tableFrom": "event_response_revisions",
+          "tableTo": "events",
+          "columnsFrom": ["event_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_response_rev_member_fk": {
+          "name": "event_response_rev_member_fk",
+          "tableFrom": "event_response_revisions",
           "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_response_rev_actor_fk": {
+          "name": "event_response_rev_actor_fk",
+          "tableFrom": "event_response_revisions",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["actor_id"],
           "columnsTo": ["user_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
-        "manual_evidence_id": {
-          "name": "manual_evidence_id",
+        "event_response_revisions_id": {
+          "name": "event_response_revisions_id",
           "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
       "checkConstraint": {
-        "manual_evidence_ready_shape": {
-          "name": "manual_evidence_ready_shape",
-          "value": "`manual_evidence`.`state` NOT IN ('ready','deleting','expired') OR (`manual_evidence`.`sha256` IS NOT NULL AND `manual_evidence`.`fingerprint` IS NOT NULL AND `manual_evidence`.`byte_length` > 0)"
+        "event_decline_reason": {
+          "name": "event_decline_reason",
+          "value": "(`event_response_revisions`.`status`='declined' AND `event_response_revisions`.`reason` IS NOT NULL AND CHAR_LENGTH(TRIM(`event_response_revisions`.`reason`))>0) OR (`event_response_revisions`.`status`<>'declined' AND `event_response_revisions`.`reason` IS NULL)"
         }
       }
     },
-    "manual_evidence_refs": {
-      "name": "manual_evidence_refs",
-      "columns": {
-        "evidence_id": {
-          "name": "evidence_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "revision_id": {
-          "name": "revision_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "report_id": {
-          "name": "report_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "trip_id": {
-          "name": "trip_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_refs_trip": {
-          "name": "manual_refs_trip",
-          "columns": ["trip_id", "evidence_id"],
-          "isUnique": false
-        },
-        "manual_refs_revision": {
-          "name": "manual_refs_revision",
-          "columns": ["revision_id", "evidence_id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_evidence_refs_evidence_id_manual_evidence_id_fk": {
-          "name": "manual_evidence_refs_evidence_id_manual_evidence_id_fk",
-          "tableFrom": "manual_evidence_refs",
-          "tableTo": "manual_evidence",
-          "columnsFrom": ["evidence_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_evidence_refs_revision_id_manual_revisions_id_fk": {
-          "name": "manual_evidence_refs_revision_id_manual_revisions_id_fk",
-          "tableFrom": "manual_evidence_refs",
-          "tableTo": "manual_revisions",
-          "columnsFrom": ["revision_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_evidence_refs_trip_id_trips_id_fk": {
-          "name": "manual_evidence_refs_trip_id_trips_id_fk",
-          "tableFrom": "manual_evidence_refs",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_ref_report_revision_fk": {
-          "name": "manual_ref_report_revision_fk",
-          "tableFrom": "manual_evidence_refs",
-          "tableTo": "manual_revisions",
-          "columnsFrom": ["report_id", "revision_id"],
-          "columnsTo": ["report_id", "id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_ref_report_trip_fk": {
-          "name": "manual_ref_report_trip_fk",
-          "tableFrom": "manual_evidence_refs",
-          "tableTo": "manual_reports",
-          "columnsFrom": ["report_id", "trip_id"],
-          "columnsTo": ["id", "trip_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_evidence_refs_evidence_id_revision_id_pk": {
-          "name": "manual_evidence_refs_evidence_id_revision_id_pk",
-          "columns": ["evidence_id", "revision_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_reports": {
-      "name": "manual_reports",
+    "event_responses": {
+      "name": "event_responses",
       "columns": {
         "id": {
           "name": "id",
@@ -6842,15 +6388,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "owner_id": {
-          "name": "owner_id",
+        "event_id": {
+          "name": "event_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "trip_id": {
-          "name": "trip_id",
+        "member_id": {
+          "name": "member_id",
           "type": "binary(36)",
           "primaryKey": false,
           "notNull": true,
@@ -6867,12 +6413,321 @@
           "name": "current_revision_id",
           "type": "binary(36)",
           "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('unanswered','participating','declined')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "event_response_member": {
+          "name": "event_response_member",
+          "columns": ["event_id", "member_id"],
+          "isUnique": true
+        },
+        "event_participants_page": {
+          "name": "event_participants_page",
+          "columns": ["event_id", "status", "member_id"],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "event_response_event_fk": {
+          "name": "event_response_event_fk",
+          "tableFrom": "event_responses",
+          "tableTo": "events",
+          "columnsFrom": ["event_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_response_member_fk": {
+          "name": "event_response_member_fk",
+          "tableFrom": "event_responses",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "event_responses_id": {
+          "name": "event_responses_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {}
+    },
+    "event_revisions": {
+      "name": "event_revisions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category": {
+          "name": "category",
+          "type": "enum('created','updated','cancelled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('scheduled','cancelled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "game": {
+          "name": "game",
+          "type": "enum('ets2','ats')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "server": {
+          "name": "server",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organizer": {
+          "name": "organizer",
+          "type": "varchar(256)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meeting_location": {
+          "name": "meeting_location",
+          "type": "varchar(2048)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "route": {
+          "name": "route",
+          "type": "varchar(2048)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "meeting_at": {
+          "name": "meeting_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ends_at": {
+          "name": "ends_at",
+          "type": "datetime(3)",
+          "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "revision_number": {
-          "name": "revision_number",
+        "visibility": {
+          "name": "visibility",
+          "type": "enum('public','members')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prescribed_mass_kg": {
+          "name": "prescribed_mass_kg",
+          "type": "decimal(38,18)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "private_reason": {
+          "name": "private_reason",
+          "type": "varchar(2048)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "event_revision_version": {
+          "name": "event_revision_version",
+          "columns": ["event_id", "version"],
+          "isUnique": true
+        },
+        "event_revision_sequence": {
+          "name": "event_revision_sequence",
+          "columns": ["event_id", "sequence"],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "event_revision_event_fk": {
+          "name": "event_revision_event_fk",
+          "tableFrom": "event_revisions",
+          "tableTo": "events",
+          "columnsFrom": ["event_id"],
+          "columnsTo": ["id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "event_revision_actor_fk": {
+          "name": "event_revision_actor_fk",
+          "tableFrom": "event_revisions",
+          "tableTo": "identity_memberships",
+          "columnsFrom": ["actor_id"],
+          "columnsTo": ["user_id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "event_revisions_id": {
+          "name": "event_revisions_id",
+          "columns": ["id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraint": {
+        "event_time_order": {
+          "name": "event_time_order",
+          "value": "`event_revisions`.`meeting_at`<=`event_revisions`.`starts_at` AND (`event_revisions`.`ends_at` IS NULL OR `event_revisions`.`ends_at`>=`event_revisions`.`starts_at`)"
+        },
+        "event_mass_nonnegative": {
+          "name": "event_mass_nonnegative",
+          "value": "`event_revisions`.`prescribed_mass_kg` IS NULL OR `event_revisions`.`prescribed_mass_kg`>=0"
+        }
+      }
+    },
+    "events": {
+      "name": "events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
           "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "change_sequence": {
+          "name": "change_sequence",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attendance_version": {
+          "name": "attendance_version",
+          "type": "int unsigned",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "current_revision_id": {
+          "name": "current_revision_id",
+          "type": "binary(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "game": {
+          "name": "game",
+          "type": "enum('ets2','ats')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "visibility": {
+          "name": "visibility",
+          "type": "enum('public','members')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "enum('scheduled','cancelled')",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "starts_at": {
+          "name": "starts_at",
+          "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
@@ -6886,215 +6741,31 @@
         }
       },
       "indexes": {
-        "manual_report_trip_identity": {
-          "name": "manual_report_trip_identity",
-          "columns": ["id", "trip_id"],
-          "isUnique": true
-        },
-        "manual_report_owner_page": {
-          "name": "manual_report_owner_page",
-          "columns": ["owner_id", "created_at", "id"],
+        "event_member_page": {
+          "name": "event_member_page",
+          "columns": ["starts_at", "id"],
           "isUnique": false
         },
-        "manual_report_trip_page": {
-          "name": "manual_report_trip_page",
-          "columns": ["trip_id", "created_at", "id"],
+        "event_public_page": {
+          "name": "event_public_page",
+          "columns": ["visibility", "starts_at", "id"],
           "isUnique": false
         }
       },
-      "foreignKeys": {
-        "manual_reports_owner_id_identity_memberships_user_id_fk": {
-          "name": "manual_reports_owner_id_identity_memberships_user_id_fk",
-          "tableFrom": "manual_reports",
-          "tableTo": "identity_memberships",
-          "columnsFrom": ["owner_id"],
-          "columnsTo": ["user_id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_reports_trip_id_trips_id_fk": {
-          "name": "manual_reports_trip_id_trips_id_fk",
-          "tableFrom": "manual_reports",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_report_current_revision_fk": {
-          "name": "manual_report_current_revision_fk",
-          "tableFrom": "manual_reports",
-          "tableTo": "manual_revisions",
-          "columnsFrom": ["id", "current_revision_id"],
-          "columnsTo": ["report_id", "id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {
-        "manual_reports_id": {
-          "name": "manual_reports_id",
+        "events_id": {
+          "name": "events_id",
           "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
       "checkConstraint": {
-        "manual_report_version": {
-          "name": "manual_report_version",
-          "value": "`manual_reports`.`version` > 0 AND `manual_reports`.`revision_number` > 0"
+        "event_versions_positive": {
+          "name": "event_versions_positive",
+          "value": "`events`.`version`>0 AND `events`.`change_sequence`>0 AND `events`.`attendance_version`>0"
         }
       }
-    },
-    "manual_review_gates": {
-      "name": "manual_review_gates",
-      "columns": {
-        "trip_id": {
-          "name": "trip_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "latest_decision_at": {
-          "name": "latest_decision_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "under_review": {
-          "name": "under_review",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_review_retention": {
-          "name": "manual_review_retention",
-          "columns": ["under_review", "latest_decision_at", "trip_id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_review_gates_trip_id_trips_id_fk": {
-          "name": "manual_review_gates_trip_id_trips_id_fk",
-          "tableFrom": "manual_review_gates",
-          "tableTo": "trips",
-          "columnsFrom": ["trip_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_review_gates_trip_id": {
-          "name": "manual_review_gates_trip_id",
-          "columns": ["trip_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
-    },
-    "manual_revisions": {
-      "name": "manual_revisions",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "report_id": {
-          "name": "report_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "number": {
-          "name": "number",
-          "type": "int unsigned",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "format": {
-          "name": "format",
-          "type": "enum('legacy','extended')",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fields": {
-          "name": "fields",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_record_id": {
-          "name": "source_record_id",
-          "type": "binary(36)",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "datetime(3)",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "manual_revision_number": {
-          "name": "manual_revision_number",
-          "columns": ["report_id", "number"],
-          "isUnique": true
-        },
-        "manual_revision_report_id": {
-          "name": "manual_revision_report_id",
-          "columns": ["report_id", "id"],
-          "isUnique": true
-        },
-        "manual_revision_page": {
-          "name": "manual_revision_page",
-          "columns": ["report_id", "submitted_at", "id"],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "manual_revisions_report_id_manual_reports_id_fk": {
-          "name": "manual_revisions_report_id_manual_reports_id_fk",
-          "tableFrom": "manual_revisions",
-          "tableTo": "manual_reports",
-          "columnsFrom": ["report_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "manual_revisions_source_record_id_source_messages_id_fk": {
-          "name": "manual_revisions_source_record_id_source_messages_id_fk",
-          "tableFrom": "manual_revisions",
-          "tableTo": "source_messages",
-          "columnsFrom": ["source_record_id"],
-          "columnsTo": ["id"],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "manual_revisions_id": {
-          "name": "manual_revisions_id",
-          "columns": ["id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraint": {}
     }
   },
   "views": {},

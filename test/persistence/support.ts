@@ -92,6 +92,14 @@ export async function reset(connection: Connection) {
     "manual_reports",
     "manual_review_gates",
     "manual_evidence",
+    "event_commands",
+    "event_catalog_pins",
+    "event_responses",
+    "event_attendances",
+    "event_attendance_revisions",
+    "event_response_revisions",
+    "event_revisions",
+    "events",
     "telemetry_commands",
     "telemetry_installations",
     "telemetry_limits",
@@ -195,8 +203,12 @@ export async function catalogsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(7);
 }
 
+export async function eventsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(11);
+}
+
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -230,6 +242,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
   if (count === 11 && entries[10]?.tag !== "0010_qualifications")
     throw new Error("PUBLISHED_QUALIFICATION_PREFIX_REQUIRED");
+  if (count === 12 && entries[11]?.tag !== "0011_tearful_infant_terrible")
+    throw new Error("PUBLISHED_EVENTS_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -299,5 +313,5 @@ export async function qualificationsPriorFolder(): Promise<string> {
 }
 
 export async function manualPriorFolder(): Promise<string> {
-  return publishedPrefixFolder(11);
+  return publishedPrefixFolder(12);
 }

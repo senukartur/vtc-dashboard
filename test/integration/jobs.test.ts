@@ -475,90 +475,121 @@ test("actual MySQL deadlock and lockwait roll back before bounded whole-transact
 
 test("exhausted local transaction retries use durable backoff, recover once and respect final attempt exhaustion", async () =>
   safe(async () => {
-    let calls = 0;
-    const queue = createQueue(unit, [
-      {
-        kind: "acceptance.counter",
-        consumer: "acceptance.counter",
-        version: 1,
-        mode: "local",
-        validate: fixtureReference,
-        local: async (tx, input) => {
-          calls++;
-          const reference = fixtureReference(input);
-          await unit.client(tx).execute(sql`SET SESSION innodb_lock_wait_timeout=1`);
-          await unit
-            .client(tx)
-            .execute(
-              sql`INSERT INTO synthetic_job_counter VALUES (${Buffer.from(runId)}, ${reference.sequence}, 1, 1)`,
-            );
-          await unit
-            .client(tx)
-            .execute(
-              sql`UPDATE synthetic_job_counter SET touches=touches+1 WHERE run_id=${Buffer.from(runId)} AND sequence=999`,
-            );
+    let now = Date.parse("2026-10-22T12:00:00.000Z");
+    const clockUnit = createUnitOfWork(guardedSettings());
+    const fixtureUnit: UnitOfWork = {
+      client: (tx) => clockUnit.client(tx),
+      close: () => clockUnit.close(),
+      run: (command) =>
+        clockUnit.run(async (tx) => {
+          const client = clockUnit.client(tx);
+          try {
+            await client.execute(sql`SET SESSION timestamp=${now / 1000}`);
+            return await command(tx);
+          } finally {
+            await client.execute(sql`SET SESSION timestamp=DEFAULT`);
+          }
+        }),
+    };
+    try {
+      await control.execute("SET SESSION timestamp=?", [now / 1000]);
+      let calls = 0;
+      const queue = createQueue(fixtureUnit, [
+        {
+          kind: "acceptance.counter",
+          consumer: "acceptance.counter",
+          version: 1,
+          mode: "local",
+          validate: fixtureReference,
+          local: async (tx, input) => {
+            calls++;
+            const reference = fixtureReference(input);
+            await fixtureUnit.client(tx).execute(sql`SET SESSION innodb_lock_wait_timeout=1`);
+            await fixtureUnit
+              .client(tx)
+              .execute(
+                sql`INSERT INTO synthetic_job_counter VALUES (${Buffer.from(runId)}, ${reference.sequence}, 1, 1)`,
+              );
+            await fixtureUnit
+              .client(tx)
+              .execute(
+                sql`UPDATE synthetic_job_counter SET touches=touches+1 WHERE run_id=${Buffer.from(runId)} AND sequence=999`,
+              );
+          },
         },
-      },
-    ]);
-    await control.execute("INSERT INTO synthetic_job_counter VALUES (?,999,1,0)", [
-      Buffer.from(runId),
-    ]);
-    async function blockEffect(sequence: number, maxAttempts: number) {
-      await unit.run((tx) => queue.enqueue(tx, { ...job(sequence), maxAttempts }));
-      const claim = required(await queue.claim());
-      await control.beginTransaction();
-      try {
-        await control.execute(
-          "SELECT * FROM synthetic_job_counter WHERE run_id=? AND sequence=999 FOR UPDATE",
-          [Buffer.from(runId)],
+      ]);
+      await control.execute("INSERT INTO synthetic_job_counter VALUES (?,999,1,0)", [
+        Buffer.from(runId),
+      ]);
+      async function blockEffect(sequence: number, maxAttempts: number) {
+        await fixtureUnit.run((tx) =>
+          queue.enqueue(tx, {
+            ...job(sequence),
+            availableAt: new Date(now).toISOString(),
+            maxAttempts,
+          }),
         );
-        await queue.execute(claim);
-      } finally {
-        await control.commit();
+        const claim = required(await queue.claim());
+        await control.beginTransaction();
+        try {
+          await control.execute(
+            "SELECT * FROM synthetic_job_counter WHERE run_id=? AND sequence=999 FOR UPDATE",
+            [Buffer.from(runId)],
+          );
+          await queue.execute(claim);
+        } finally {
+          await control.commit();
+        }
+        return claim;
       }
-      return claim;
+      const first = await blockEffect(1, 2);
+      expect(calls).toBe(3);
+      const [rows] = await control.query<RowDataPacket[]>(
+        "SELECT state,failure,attempts,lease_token,lease_until,TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(3),available_at) remaining FROM durable_jobs",
+      );
+      expect(rows[0]).toMatchObject({
+        state: "ready",
+        failure: "retryable",
+        attempts: 1,
+        lease_token: null,
+        lease_until: null,
+      });
+      expect(Number(rows[0]?.remaining)).toBe(1000000);
+      expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toBeNull();
+      const [effects] = await control.query<RowDataPacket[]>(
+        "SELECT sequence,touches FROM synthetic_job_counter",
+      );
+      expect(effects.map((row) => [row.sequence, row.touches])).toEqual([[999, 0]]);
+      expect(await queue.claim()).toBeNull();
+      now += 1001;
+      await control.execute("SET SESSION timestamp=?", [now / 1000]);
+      const recovered = required(await queue.claim());
+      expect(recovered.id).toBe(first.id);
+      expect(recovered.attempts).toBe(2);
+      await queue.execute(recovered);
+      expect(calls).toBe(4);
+      expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toEqual({
+        jobId: first.id,
+      });
+      await blockEffect(2, 1);
+      expect(calls).toBe(7);
+      expect((await queue.inspect()).failures[0]?.failure).toBe("exhausted");
+      expect(await queue.receipt("acceptance.counter", job(2).effectKey)).toBeNull();
+      const [final] = await control.query<RowDataPacket[]>(
+        "SELECT sequence,touches FROM synthetic_job_counter ORDER BY sequence",
+      );
+      expect(final.map((row) => [row.sequence, row.touches])).toEqual([
+        [1, 1],
+        [999, 1],
+      ]);
+      await cleanup();
+    } finally {
+      try {
+        await control.query("SET SESSION timestamp=DEFAULT");
+      } finally {
+        await fixtureUnit.close();
+      }
     }
-    const first = await blockEffect(1, 2);
-    expect(calls).toBe(3);
-    const [rows] = await control.query<RowDataPacket[]>(
-      "SELECT state,failure,attempts,lease_token,lease_until,TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(3),available_at) remaining FROM durable_jobs",
-    );
-    expect(rows[0]).toMatchObject({
-      state: "ready",
-      failure: "retryable",
-      attempts: 1,
-      lease_token: null,
-      lease_until: null,
-    });
-    expect(Number(rows[0]?.remaining)).toBeGreaterThan(0);
-    expect(Number(rows[0]?.remaining)).toBeLessThanOrEqual(1000000);
-    expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toBeNull();
-    const [effects] = await control.query<RowDataPacket[]>(
-      "SELECT sequence,touches FROM synthetic_job_counter",
-    );
-    expect(effects.map((row) => [row.sequence, row.touches])).toEqual([[999, 0]]);
-    expect(await queue.claim()).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    const recovered = required(await queue.claim());
-    expect(recovered.id).toBe(first.id);
-    expect(recovered.attempts).toBe(2);
-    await queue.execute(recovered);
-    expect(calls).toBe(4);
-    expect(await queue.receipt("acceptance.counter", job(1).effectKey)).toEqual({
-      jobId: first.id,
-    });
-    await blockEffect(2, 1);
-    expect(calls).toBe(7);
-    expect((await queue.inspect()).failures[0]?.failure).toBe("exhausted");
-    expect(await queue.receipt("acceptance.counter", job(2).effectKey)).toBeNull();
-    const [final] = await control.query<RowDataPacket[]>(
-      "SELECT sequence,touches FROM synthetic_job_counter ORDER BY sequence",
-    );
-    expect(final.map((row) => [row.sequence, row.touches])).toEqual([
-      [1, 1],
-      [999, 1],
-    ]);
-    await cleanup();
   }));
 
 test("pre-COMMIT connection loss backs off local work without replaying external callbacks or arbitrary failures", async () =>

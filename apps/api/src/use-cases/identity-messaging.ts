@@ -3,6 +3,7 @@ import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
 import type { CatalogConfig } from "../modules/catalogs/artifact.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
+import { createEvents, type EventsConfig } from "../modules/events/service.js";
 import {
   createExternalIdentities,
   steamProjection,
@@ -49,6 +50,7 @@ export function composeIdentity(
   telemetryConfig?: TelemetryConfig,
   manualConfig?: ManualConfig,
   qualificationsConfig?: QualificationsConfig,
+  eventsConfig?: EventsConfig,
 ) {
   let identity: Identity;
   if (telemetryConfig && (!externalEnabled || !tripsConfig))
@@ -146,6 +148,11 @@ export function composeIdentity(
   return {
     identity,
     ...(manualReports ? { manualReports } : {}),
+    ...(eventsConfig
+      ? {
+          events: createEvents(unit, eventsConfig, { identity, ...(catalogs ? { catalogs } : {}) }),
+        }
+      : {}),
     ...(qualificationsConfig && trips
       ? {
           qualifications: createQualifications(unit, qualificationsConfig, {

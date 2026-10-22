@@ -1,16 +1,16 @@
-import { readFile, writeFile, rm } from "node:fs/promises";
 import assert from "node:assert/strict";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { databaseFailureContext, migrationLockName, migrationFolder, runMigrations } from "@vtc/db";
+import { databaseFailureContext, migrationFolder, migrationLockName, runMigrations } from "@vtc/db";
 import type { RowDataPacket } from "mysql2/promise";
 import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   fixtureRoot,
-  manualPriorFolder,
   guardedSettings,
   hasCode,
+  manualPriorFolder,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
@@ -70,7 +70,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 12);
+      assert.equal(await runMigrations(settings), 13);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -126,7 +126,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 12);
+      assert.equal(await runMigrations(settings), 13);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -235,7 +235,7 @@ await recoveryTest(
     try {
       await reset(connection);
       folder = await manualPriorFolder();
-      assert.equal(await runMigrations(settings, { folder }), 11);
+      assert.equal(await runMigrations(settings, { folder }), 12);
       await connection.query(
         "INSERT INTO audit_entries(id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id) VALUES ('02500000-0000-4000-8000-000000000001','system',NULL,'configuration.changed','company','02500000-0000-4000-8000-000000000002','2026-01-01 00:00:00.000','operator_request',NULL)",
       );
@@ -243,7 +243,7 @@ await recoveryTest(
         await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
       );
       const entry = journal.entries.at(-1);
-      assert.equal(entry.idx, 11);
+      assert.equal(entry.idx, 12);
       const sql = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
       const marker = sql
         .split("--> statement-breakpoint")
@@ -275,7 +275,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 12);
+      assert.equal(history.length, 13);
       assert.equal(history.at(-1)?.state, "applying");
       const [sentinel] = await connection.query<RowDataPacket[]>(
         "SELECT COUNT(*) n FROM audit_entries WHERE id='02500000-0000-4000-8000-000000000001'",
@@ -299,7 +299,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 12);
+      assert.equal(await runMigrations(guardedSettings()), 13);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_origin_shape','trip_fact_destination_shape','trip_fact_cargo_shape','trip_fact_adr_shape')",

@@ -1438,6 +1438,29 @@ export function createIdentity(
       for (const id of targetIds) if (!locked.has(id)) throw identityError(404);
       return { companyId: current.id, members: locked };
     },
+    async eventContextInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      targetIds: string[] = [],
+      capability = "company.read",
+    ) {
+      const current = await lockCompany(tx);
+      const locked = await lockMembers(tx, [...targetIds, actor.userId]);
+      await checkActor(tx, actor, current, locked.get(actor.userId));
+      requireCapability(actor, capability);
+      for (const id of targetIds) if (!locked.has(id)) throw identityError(404);
+      return { companyId: current.id, members: locked };
+    },
+    async eventRosterInTransaction(tx: TxContext, after: string | null, limit: number) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 101)
+        throw new Error("EVENT_ROSTER_BOUND_EXCEEDED");
+      return client(tx)
+        .select({ id: membership.userId })
+        .from(membership)
+        .where(after ? gt(membership.userId, applicationId(after)) : undefined)
+        .orderBy(membership.userId)
+        .limit(limit);
+    },
     async completeTraineeInTransaction(tx: TxContext, actor: Actor, targetId: string) {
       const current = await lockCompany(tx);
       const locked = await lockMembers(tx, [actor.userId, targetId]);

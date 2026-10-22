@@ -12779,6 +12779,31 @@
                 "type": "null"
               }
             ]
+          },
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "organizer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meetingLocation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "meetingAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
           }
         },
         "required": [
@@ -12791,7 +12816,12 @@
           "endsAt",
           "status",
           "origin",
-          "destination"
+          "destination",
+          "server",
+          "organizer",
+          "meetingLocation",
+          "route",
+          "meetingAt"
         ],
         "additionalProperties": false
       },
@@ -13052,6 +13082,31 @@
                 "type": "null"
               }
             ]
+          },
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "organizer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meetingLocation": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "meetingAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
           }
         },
         "required": [
@@ -13065,7 +13120,12 @@
           "destinationCityId",
           "prescribedCargoId",
           "prescribedMassKg",
-          "prescribedTrailerTypeId"
+          "prescribedTrailerTypeId",
+          "server",
+          "organizer",
+          "meetingLocation",
+          "route",
+          "meetingAt"
         ],
         "additionalProperties": false
       },
@@ -13097,12 +13157,25 @@
               "attended",
               "not_attended"
             ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "member",
           "response",
-          "attendance"
+          "attendance",
+          "note"
         ],
         "additionalProperties": false
       },
@@ -13145,7 +13218,9 @@
                 "note"
               ],
               "additionalProperties": false
-            }
+            },
+            "minItems": 1,
+            "maxItems": 100
           }
         },
         "required": [
