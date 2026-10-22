@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { databaseFailureContext, migrationLockName, runMigrations } from "@vtc/db";
+import { databaseFailureContext, migrationFolder, migrationLockName, runMigrations } from "@vtc/db";
 import type { RowDataPacket } from "mysql2/promise";
 import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
@@ -9,6 +10,7 @@ import {
   fixtureRoot,
   guardedSettings,
   hasCode,
+  manualPriorFolder,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
@@ -68,7 +70,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 12);
+      assert.equal(await runMigrations(settings), 13);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -124,7 +126,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 12);
+      assert.equal(await runMigrations(settings), 13);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -223,3 +225,92 @@ for (const target of ["insert", "finalize"] as const) {
     },
   );
 }
+
+await recoveryTest(
+  "actual manual migration partial DDL is sticky and preserves legacy audit evidence until a controlled restore",
+  async () => {
+    const connection = await testConnection(),
+      settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reset(connection);
+      folder = await manualPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 12);
+      await connection.query(
+        "INSERT INTO audit_entries(id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id) VALUES ('02500000-0000-4000-8000-000000000001','system',NULL,'configuration.changed','company','02500000-0000-4000-8000-000000000002','2026-01-01 00:00:00.000','operator_request',NULL)",
+      );
+      const journal = JSON.parse(
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      const entry = journal.entries.at(-1);
+      assert.equal(entry.idx, 12);
+      const sql = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
+      const marker = sql
+        .split("--> statement-breakpoint")
+        .find((statement) => statement.includes("ADD CONSTRAINT `trip_origin_individual_pin_fk`"))
+        ?.trim();
+      assert.ok(marker);
+      assert.ok(sql.includes(marker));
+      await writeFile(
+        join(folder, `${entry.tag}.sql`),
+        sql.replace(
+          marker,
+          `${marker}\n--> statement-breakpoint\nALTER TABLE synthetic_manual_missing ADD COLUMN fault INT;`,
+        ),
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const [checks] = await connection.query<RowDataPacket[]>(
+        "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='trip_fact_origin_shape'",
+      );
+      assert.equal(checks.length, 1);
+      const [addedPin] = await connection.query<RowDataPacket[]>(
+        "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='trip_origin_individual_pin_fk'",
+      );
+      assert.equal(addedPin.length, 1);
+      const [legacy] = await connection.query<RowDataPacket[]>(
+        "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='trip_fact_origin_pin_fk'",
+      );
+      assert.equal(legacy.length, 1);
+      const [history] = await connection.query<RowDataPacket[]>(
+        "SELECT state FROM _vtc_migrations ORDER BY version",
+      );
+      assert.equal(history.length, 13);
+      assert.equal(history.at(-1)?.state, "applying");
+      const [sentinel] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM audit_entries WHERE id='02500000-0000-4000-8000-000000000001'",
+      );
+      assert.equal(Number(sentinel[0]?.n), 1);
+      await assert.rejects(
+        runMigrations(settings, { folder, lockTimeoutSeconds: 0 }),
+        /MIGRATION_RECOVERY_REQUIRED/,
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true, force: true });
+    }
+  },
+);
+await recoveryTest(
+  "manual partial-DDL recovery restores the known synthetic baseline and applies full strict schema",
+  async () => {
+    const connection = await testConnection();
+    try {
+      // Empty is this disposable fixture's consistent pre-deployment baseline. The
+      // interrupted schema is never replayed or stamped as applied.
+      await reset(connection);
+      assert.equal(await runMigrations(guardedSettings()), 13);
+      assert.equal(await runMigrations(guardedSettings()), 0);
+      const [checks] = await connection.query<RowDataPacket[]>(
+        "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_origin_shape','trip_fact_destination_shape','trip_fact_cargo_shape','trip_fact_adr_shape')",
+      );
+      assert.equal(checks.length, 4);
+      const [foreign] = await connection.query<RowDataPacket[]>(
+        "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('manual_report_current_revision_fk','manual_ref_report_revision_fk','manual_ref_report_trip_fk')",
+      );
+      assert.equal(foreign.length, 3);
+    } finally {
+      await connection.end();
+    }
+  },
+);

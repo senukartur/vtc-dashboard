@@ -143,12 +143,16 @@ export const tripFacts = mysqlTable(
     endUtc: utcColumn("end_utc"),
     endBasis: basis("end_basis").notNull(),
     endVerified: boolean("end_verified").notNull(),
+    originCatalogRevisionId: idColumn("origin_catalog_revision_id"),
     originEntityId: idColumn("origin_entity_id"),
     originFactId: idColumn("origin_fact_id"),
+    destinationCatalogRevisionId: idColumn("destination_catalog_revision_id"),
     destinationEntityId: idColumn("destination_entity_id"),
     destinationFactId: idColumn("destination_fact_id"),
+    cargoCatalogRevisionId: idColumn("cargo_catalog_revision_id"),
     cargoEntityId: idColumn("cargo_entity_id"),
     cargoFactId: idColumn("cargo_fact_id"),
+    adrCatalogRevisionId: idColumn("adr_catalog_revision_id"),
     adrEntityId: idColumn("adr_entity_id"),
     adrFactId: idColumn("adr_fact_id"),
     cargoMassKg: decimalColumn("cargo_mass_kg"),
@@ -169,11 +173,26 @@ export const tripFacts = mysqlTable(
   (t) => [
     uniqueIndex("trip_fact_message").on(t.messageId),
     uniqueIndex("trip_fact_catalog_scope").on(t.id, t.catalogRevisionId),
+    uniqueIndex("trip_fact_adapter_scope").on(t.id, t.adapterVersion),
+    check(
+      "trip_fact_format2_pin_mode",
+      sql`${t.adapterVersion} <> 2 OR ${t.catalogRevisionId} IS NULL`,
+    ),
     index("trip_fact_history").on(t.canonicalTripId, t.id),
     check("trip_fact_trailer_count", sql`${t.trailerCount} <= 10`),
     foreignKey({
+      name: "trip_origin_individual_pin_fk",
+      columns: [t.originFactId, t.originCatalogRevisionId, t.originEntityId],
+      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+    }).onDelete("restrict"),
+    foreignKey({
       name: "trip_fact_origin_pin_fk",
       columns: [t.originFactId, t.catalogRevisionId, t.originEntityId],
+      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_destination_individual_pin_fk",
+      columns: [t.destinationFactId, t.destinationCatalogRevisionId, t.destinationEntityId],
       foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
     }).onDelete("restrict"),
     foreignKey({
@@ -182,8 +201,18 @@ export const tripFacts = mysqlTable(
       foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
     }).onDelete("restrict"),
     foreignKey({
+      name: "trip_cargo_individual_pin_fk",
+      columns: [t.cargoFactId, t.cargoCatalogRevisionId, t.cargoEntityId],
+      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+    }).onDelete("restrict"),
+    foreignKey({
       name: "trip_fact_cargo_pin_fk",
       columns: [t.cargoFactId, t.catalogRevisionId, t.cargoEntityId],
+      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_adr_individual_pin_fk",
+      columns: [t.adrFactId, t.adrCatalogRevisionId, t.adrEntityId],
       foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
     }).onDelete("restrict"),
     foreignKey({
@@ -193,15 +222,15 @@ export const tripFacts = mysqlTable(
     }).onDelete("restrict"),
     ...(
       [
-        ["origin", t.originEntityId, t.originFactId],
-        ["destination", t.destinationEntityId, t.destinationFactId],
-        ["cargo", t.cargoEntityId, t.cargoFactId],
-        ["adr", t.adrEntityId, t.adrFactId],
+        ["origin", t.originEntityId, t.originFactId, t.originCatalogRevisionId],
+        ["destination", t.destinationEntityId, t.destinationFactId, t.destinationCatalogRevisionId],
+        ["cargo", t.cargoEntityId, t.cargoFactId, t.cargoCatalogRevisionId],
+        ["adr", t.adrEntityId, t.adrFactId, t.adrCatalogRevisionId],
       ] as const
-    ).map(([name, entity, fact]) =>
+    ).map(([name, entity, fact, pin]) =>
       check(
         `trip_fact_${name}_shape`,
-        sql`(${entity} IS NULL AND ${fact} IS NULL) OR (${entity} IS NOT NULL AND ${fact} IS NOT NULL AND ${t.catalogRevisionId} IS NOT NULL)`,
+        sql`(${entity} IS NULL AND ${fact} IS NULL AND ${pin} IS NULL) OR (${entity} IS NOT NULL AND ${fact} IS NOT NULL AND ((${t.catalogRevisionId} IS NOT NULL AND (${pin} IS NULL OR ${pin} = ${t.catalogRevisionId})) OR (${t.catalogRevisionId} IS NULL AND ${pin} IS NOT NULL)))`,
       ),
     ),
     check(
@@ -227,6 +256,11 @@ export const tripFactTrailers = mysqlTable(
       .references(() => tripFacts.id, { onDelete: "restrict" }),
     position: int("position", { unsigned: true }).notNull(),
     catalogRevisionId: idColumn("catalog_revision_id"),
+    sourceAdapterVersion: int("source_adapter_version", { unsigned: true }).notNull().default(1),
+    legacyCatalogRevisionId: idColumn("legacy_catalog_revision_id").generatedAlwaysAs(
+      sql.raw("IF(`source_adapter_version` = 1, `catalog_revision_id`, NULL)"),
+      { mode: "stored" },
+    ),
     entityId: idColumn("entity_id"),
     catalogFactId: idColumn("catalog_fact_id"),
     sourceField: varchar("source_field", { length: 128 }),
@@ -240,8 +274,13 @@ export const tripFactTrailers = mysqlTable(
       foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
     }).onDelete("restrict"),
     foreignKey({
-      name: "trip_trailer_source_catalog_fk",
-      columns: [t.tripFactId, t.catalogRevisionId],
+      name: "trip_trailer_adapter_scope_fk",
+      columns: [t.tripFactId, t.sourceAdapterVersion],
+      foreignColumns: [tripFacts.id, tripFacts.adapterVersion],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "trip_trailer_legacy_source_catalog_fk",
+      columns: [t.tripFactId, t.legacyCatalogRevisionId],
       foreignColumns: [tripFacts.id, tripFacts.catalogRevisionId],
     }).onDelete("restrict"),
     check("trip_trailer_position", sql`${t.position} < 10`),

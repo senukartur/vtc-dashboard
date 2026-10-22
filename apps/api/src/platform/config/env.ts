@@ -5,6 +5,7 @@ import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissi
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
 import { type EventsConfig, validateEventsConfig } from "../../modules/events/service.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
+import { type ManualConfig, validateManualConfig } from "../../modules/manual-reports/service.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
 import {
   type QualificationsConfig,
@@ -12,6 +13,7 @@ import {
 } from "../../modules/qualifications/service.js";
 import { type TelemetryConfig, validateTelemetryConfig } from "../../modules/telemetry/service.js";
 import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
+import { rootsOverlap } from "../blob-storage/roots.js";
 import { exactProxyAddress } from "../http/ingress.js";
 
 const port = z.coerce.number().int().min(1).max(65535);
@@ -183,6 +185,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           catalogs?.cursorKey,
           mail?.key,
           input.TELEMETRY_CURSOR_KEY,
+          input.MANUAL_REPORTS_KEY,
         ].includes(qualifications.cursorKey) ||
         (admissions &&
           Buffer.from(qualifications.cursorKey, "hex").equals(
@@ -222,6 +225,50 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let manualReports: ManualConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.MANUAL_REPORTS_ENABLED))
+    throw new Error("Invalid environment fields: MANUAL_REPORTS_ENABLED");
+  if (input.MANUAL_REPORTS_ENABLED === "true") {
+    try {
+      if (!identity || !trips || !catalogs) throw Error();
+      manualReports = {
+        key: input.MANUAL_REPORTS_KEY ?? "",
+        maxFilesPerReport: Number(input.MANUAL_MAX_FILES_PER_REPORT),
+        policyRevision: Number(input.MANUAL_POLICY_REVISION),
+        orphanGraceMs: Number(input.MANUAL_ORPHAN_GRACE_MS),
+        ...(input.MANUAL_EVIDENCE_ROOT
+          ? {
+              storage: {
+                root: input.MANUAL_EVIDENCE_ROOT,
+                maxFileBytes: Number(input.MANUAL_MAX_FILE_BYTES),
+                maxPixels: Number(input.MANUAL_MAX_PIXELS),
+                timeoutMs: Number(input.MANUAL_UPLOAD_TIMEOUT_MS),
+              },
+            }
+          : {}),
+      };
+      validateManualConfig(manualReports);
+      if (
+        [
+          identity.secret,
+          trips.cursorKey,
+          catalogs.cursorKey,
+          telemetry?.cursorKey,
+          qualifications?.cursorKey,
+          mail?.key,
+        ].includes(manualReports.key) ||
+        (admissions &&
+          Buffer.from(manualReports.key, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw Error();
+      if (manualReports.storage && rootsOverlap(manualReports.storage.root, env.WEB_ROOT))
+        throw Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: MANUAL_REPORTS_ENABLED, MANUAL_REPORTS_KEY, MANUAL_MAX_FILES_PER_REPORT, MANUAL_POLICY_REVISION, MANUAL_ORPHAN_GRACE_MS, MANUAL_EVIDENCE_ROOT, MANUAL_MAX_FILE_BYTES, MANUAL_MAX_PIXELS, MANUAL_UPLOAD_TIMEOUT_MS, TRIPS_ENABLED, CATALOGS_ENABLED",
+      );
+    }
+  }
   let events: EventsConfig | undefined;
   if (![undefined, "true", "false"].includes(input.EVENTS_ENABLED))
     throw new Error("Invalid environment fields: EVENTS_ENABLED");
@@ -238,6 +285,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
           trips?.cursorKey,
           qualifications?.cursorKey,
           telemetry?.cursorKey,
+          manualReports?.key,
         ].includes(events.cursorKey) ||
         (admissions &&
           Buffer.from(events.cursorKey, "hex").equals(Buffer.from(admissions.key, "base64url")))
@@ -250,6 +298,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     }
   }
   return {
+    manualReports,
     events,
     qualifications,
     telemetry,

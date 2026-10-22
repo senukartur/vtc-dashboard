@@ -71,8 +71,27 @@ export async function testConnection(): Promise<Connection> {
 }
 
 export async function reset(connection: Connection) {
+  const [pointer] = await connection.query<RowDataPacket[]>(
+    "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='manual_report_current_revision_fk'",
+  );
+  if (pointer.length)
+    await connection.query(
+      "ALTER TABLE manual_reports DROP FOREIGN KEY manual_report_current_revision_fk",
+    );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
-  for (const name of [
+  const tables = [
+    "manual_blob_generations",
+    "manual_commands",
+    "manual_draft_history",
+    "manual_draft_evidence",
+    "manual_drafts",
+    "manual_correction_history",
+    "manual_correction_requests",
+    "manual_evidence_refs",
+    "manual_revisions",
+    "manual_reports",
+    "manual_review_gates",
+    "manual_evidence",
     "event_commands",
     "event_catalog_pins",
     "event_responses",
@@ -150,9 +169,8 @@ export async function reset(connection: Connection) {
     "synthetic_recovery_kept",
     "synthetic_recovery_missing",
     "_vtc_migrations",
-  ]) {
-    await connection.query(`DROP TABLE IF EXISTS ${name}`);
-  }
+  ];
+  await connection.query(`DROP TABLE IF EXISTS ${tables.join(",")}`);
 }
 
 interface Journal {
@@ -190,7 +208,7 @@ export async function eventsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -216,12 +234,16 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_EXTERNAL_IDENTITIES_PREFIX_REQUIRED");
   if (count === 8 && entries[7]?.tag !== "0007_nice_gateway")
     throw new Error("PUBLISHED_CATALOG_PREFIX_REQUIRED");
+  if (count === 10 && entries[9]?.tag !== "0009_slimy_exiles")
+    throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
   if (count === 9 && entries[8]?.tag !== "0008_stale_prowler")
     throw new Error("PUBLISHED_TRIP_PREFIX_REQUIRED");
   if (count === 10 && entries[9]?.tag !== "0009_slimy_exiles")
     throw new Error("PUBLISHED_TELEMETRY_PREFIX_REQUIRED");
   if (count === 11 && entries[10]?.tag !== "0010_qualifications")
-    throw new Error("PUBLISHED_QUALIFICATIONS_PREFIX_REQUIRED");
+    throw new Error("PUBLISHED_QUALIFICATION_PREFIX_REQUIRED");
+  if (count === 12 && entries[11]?.tag !== "0011_tearful_infant_terrible")
+    throw new Error("PUBLISHED_EVENTS_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -288,4 +310,8 @@ export async function telemetryPriorFolder(): Promise<string> {
 
 export async function qualificationsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(10);
+}
+
+export async function manualPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(12);
 }

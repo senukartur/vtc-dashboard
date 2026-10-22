@@ -107,6 +107,7 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    volumes: [evidence:/app/private-evidence]
     networks: [database, mail-egress]
     logging: *logs
   proxy:

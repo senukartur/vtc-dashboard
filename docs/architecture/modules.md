@@ -46,4 +46,6 @@ VTC-022 implements the [canonical trip/source foundation](../development/trips.m
 
 VTC-023 [telemetry ingestion](../development/telemetry.md) owns tokens, safe issuance commands, registrations and shared persistent admission. It calls identity/external credential facades and the existing trip/source transaction facade; the source message remains the durable receipt. Optional identity invalidation is injected above both modules.
 
+
+VTC-025 now implements [manual reports and private evidence](../development/manual-reports.md) as an owning coordinator over identity/catalog/trips facades. Drafts create no trip; immutable submissions/revisions attach to one canonical trip; accepted edits become correction requests. VTC-029 still owns decisions and contribution recalculation.
 VTC-028 implements [qualification history/progression](../development/qualifications.md) and a narrow trips-owned contribution register. Qualifications reads/writes it only through the trips facade, and role transition remains identity-owned. Internal reviewed decision coordinators must replace effective decision/current fact and contribution on the same transaction; there is no new public acceptance command. Synchronous qualification progress does not depend on a first outbox subscriber or future analytics projection.

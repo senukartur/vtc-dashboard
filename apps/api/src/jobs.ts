@@ -1,7 +1,9 @@
 import { createUnitOfWork } from "@vtc/db";
 import { cleanupAdmissions } from "./modules/admissions/service.js";
 import { cleanupCatalogs } from "./modules/catalogs/service.js";
+import { manualCleanupPending } from "./modules/manual-reports/service.js";
 import { cleanupMail } from "./modules/messaging/service.js";
+import { BlobFailure } from "./platform/blob-storage/filesystem.js";
 import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
@@ -32,6 +34,10 @@ await ownedCli(async () => {
           config.admissions,
           config.externalIdentities,
           config.catalogs,
+          config.trips,
+          config.telemetry,
+          config.manualReports,
+          config.qualifications,
         )
       : undefined;
     const messaging = composed?.messaging;
@@ -47,9 +53,41 @@ await ownedCli(async () => {
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
     if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
+    let manualCleanup: "not_run" | "complete" | "configuration_pending" | "storage_unavailable" =
+      "not_run";
+    if (mode === "run") {
+      try {
+        manualCleanup =
+          (await composed?.manualReports?.maintenance(abort.signal)) ??
+          ((await manualCleanupPending(unit)) ? "configuration_pending" : "complete");
+      } catch (error) {
+        if (
+          unknownCommit(error) ||
+          abort.signal.aborted ||
+          !(error instanceof BlobFailure) ||
+          error.category !== "unavailable" ||
+          "cause" in error
+        )
+          throw error;
+        manualCleanup = "storage_unavailable";
+        console.error(
+          JSON.stringify({ event: "manual_cleanup_failed", category: "storage_unavailable" }),
+        );
+        process.exitCode = 1;
+      }
+    }
+    if (manualCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
+      );
     const queue =
       composed?.jobsQueue ??
-      createQueue(unit, [], [], undefined, ["mail.deliver", "catalog.import"]);
+      createQueue(unit, [], [], undefined, [
+        "mail.deliver",
+        "catalog.import",
+        "manual.evidence-delete",
+        "manual.generation-delete",
+      ]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(
       JSON.stringify({
@@ -57,6 +95,7 @@ await ownedCli(async () => {
         mailMode: config.mail?.mode ?? "disabled",
         mailCleanup,
         admissionsCleanup,
+        manualCleanup,
         ...result,
       }),
     );

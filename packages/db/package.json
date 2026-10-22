@@ -44,6 +44,10 @@
       "types": "./dist/schema/telemetry/index.d.ts",
       "default": "./dist/schema/telemetry/index.js"
     },
+    "./manual-reports-schema": {
+      "types": "./dist/schema/manual-reports/index.d.ts",
+      "default": "./dist/schema/manual-reports/index.js"
+    },
     "./events-schema": {
       "types": "./dist/schema/events/index.d.ts",
       "default": "./dist/schema/events/index.js"

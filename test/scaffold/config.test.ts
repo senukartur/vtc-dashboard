@@ -157,6 +157,7 @@ test("qualification activation requires identity/trips and an independent cursor
     { TRIPS_ENABLED: "false" },
     { QUALIFICATIONS_CURSOR_KEY: "" },
     { QUALIFICATIONS_CURSOR_KEY: "a".repeat(64) },
+    { MANUAL_REPORTS_KEY: "b".repeat(64) },
   ])
     assert.throws(() => readConfig({ ...input, ...changes }));
 });

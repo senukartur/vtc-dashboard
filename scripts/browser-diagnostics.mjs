@@ -56,3 +56,129 @@ export function browserFailureLine(value) {
   if (!failure) throw new Error("INVALID_BROWSER_FAILURE");
   return `${browserFailurePrefix}${JSON.stringify(failure)}`;
 }
+
+export const browserPreparationPrefix = "VTC_BROWSER_PREPARATION ";
+const preparationPhases = [
+  "ownership",
+  "synthetic_ddl",
+  "ownership_close",
+  "migrations",
+  "bootstrap",
+  "credential_hash",
+  "credential_insert",
+  "unit_close",
+];
+const preparationCategories = [
+  "completed",
+  "nonzero-exit",
+  "signal-exit",
+  "spawn-error",
+  "pipe-error",
+  "deadline",
+];
+const databaseOperations = [
+  "connection_open",
+  "session_configuration",
+  "session_charset",
+  "migration_lock",
+  "migration_baseline",
+  "migration_autocommit",
+  "migration_journal_create",
+  "migration_history_read",
+  "migration_journal_insert",
+  "migration_statement",
+  "migration_journal_finalize",
+];
+const milliseconds = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 86400000;
+function fields(value, required, optional = []) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => required.includes(key) || optional.includes(key))
+  );
+}
+
+// Preparation is a separate diagnostic channel, never a browser assertion failure record.
+export function safeBrowserPreparation(value) {
+  if (
+    fields(value, ["kind", "state", "category", "configuredTimeoutMs", "durationMs"]) &&
+    value.kind === "wrapper" &&
+    ["success", "failed"].includes(value.state) &&
+    preparationCategories.includes(value.category) &&
+    (value.state !== "success" || value.category === "completed") &&
+    milliseconds(value.durationMs) &&
+    milliseconds(value.configuredTimeoutMs) &&
+    value.configuredTimeoutMs > 0
+  )
+    return {
+      kind: "wrapper",
+      state: value.state,
+      category: value.category,
+      configuredTimeoutMs: value.configuredTimeoutMs,
+      durationMs: value.durationMs,
+    };
+  if (
+    !fields(
+      value,
+      ["kind", "phase", "state", "durationMs", "totalDurationMs"],
+      ["credential", "applied", "databaseOperation"],
+    ) ||
+    value.kind !== "phase" ||
+    !preparationPhases.includes(value.phase) ||
+    !["started", "success", "failed"].includes(value.state) ||
+    !milliseconds(value.durationMs) ||
+    !milliseconds(value.totalDurationMs)
+  )
+    return undefined;
+  const result = {
+    kind: "phase",
+    phase: value.phase,
+    state: value.state,
+    durationMs: value.durationMs,
+    totalDurationMs: value.totalDurationMs,
+  };
+  if (Object.hasOwn(value, "credential")) {
+    if (
+      !["credential_hash", "credential_insert"].includes(value.phase) ||
+      ![1, 2, 3].includes(value.credential)
+    )
+      return undefined;
+    result.credential = value.credential;
+  }
+  if (Object.hasOwn(value, "applied")) {
+    if (
+      value.phase !== "migrations" ||
+      value.state !== "success" ||
+      !Number.isSafeInteger(value.applied) ||
+      value.applied < 0
+    )
+      return undefined;
+    result.applied = value.applied;
+  }
+  if (Object.hasOwn(value, "databaseOperation")) {
+    const context = value.databaseOperation;
+    if (
+      value.state !== "failed" ||
+      !fields(context, ["operation", "wireDeadlineMs", "elapsedMs"]) ||
+      !databaseOperations.includes(context.operation) ||
+      !milliseconds(context.wireDeadlineMs) ||
+      context.wireDeadlineMs < 1 ||
+      !milliseconds(context.elapsedMs)
+    )
+      return undefined;
+    result.databaseOperation = {
+      operation: context.operation,
+      wireDeadlineMs: context.wireDeadlineMs,
+      elapsedMs: context.elapsedMs,
+    };
+  }
+  return result;
+}
+
+export function browserPreparationLine(value) {
+  const preparation = safeBrowserPreparation(value);
+  if (!preparation) throw new Error("INVALID_BROWSER_PREPARATION");
+  return `${browserPreparationPrefix}${JSON.stringify(preparation)}`;
+}

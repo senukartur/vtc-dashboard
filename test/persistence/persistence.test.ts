@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -16,6 +16,7 @@ import {
   decimal38_18,
   decimalColumn,
   idColumn,
+  migrationFolder,
   migrationLockName,
   newId,
   opaqueBytes,
@@ -33,26 +34,31 @@ import {
 import { eq, type SQL, sql } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import type { RowDataPacket } from "mysql2/promise";
+import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
+import { bounded, until } from "../support/concurrency.ts";
+import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   admissionsPriorFolder,
   auditOnlyFolder,
   catalogsPriorFolder,
+  eventsPriorFolder,
   extendedFixtureFolder,
   externalIdentitiesPriorFolder,
-  eventsPriorFolder,
   fixtureRoot,
   guardedSettings,
   hasCode,
   hasMessage,
   identityFoundationFolder,
   jobsPriorFolder,
+  manualPriorFolder,
   messagingPriorFolder,
   qualificationsPriorFolder,
   reset,
   root,
+  SCHEMA_SETUP_TIMEOUT_MS,
   telemetryPriorFolder,
   testConnection,
   tripsPriorFolder,
@@ -164,6 +170,194 @@ async function cooperatingMigrations(
   });
 }
 
+async function serializedFreshMigrations(
+  settings: ReturnType<typeof guardedSettings>,
+  connection: Awaited<ReturnType<typeof testConnection>>,
+) {
+  const journal = JSON.parse(
+    await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+  ) as {
+    entries: { when: number; tag: string }[];
+  };
+  assert.equal(journal.entries.length, 13);
+  const expectedHistory = await Promise.all(
+    journal.entries.map(async (entry) => ({
+      version: String(entry.when),
+      hash: createHash("sha256")
+        .update(await readFile(join(migrationFolder, `${entry.tag}.sql`)))
+        .digest("hex"),
+      state: "applied",
+    })),
+  );
+  const expectedTables = Object.keys(
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0012_snapshot.json"), "utf8"))
+      .tables,
+  ).sort();
+  assert.equal(expectedTables.length, 82);
+  const gate = await journalAckGate("finalize", 13);
+  const lock = migrationLockName(settings.database);
+  const history = async () => {
+    const [rows] = await connection.query<RowDataPacket[]>({
+      sql: "SELECT CAST(version AS CHAR) version,CAST(hash AS CHAR) hash,state,CAST(started_at AS CHAR) startedAt,CAST(applied_at AS CHAR) appliedAt FROM _vtc_migrations ORDER BY version",
+      timeout: 1000,
+    });
+    return rows;
+  };
+  const lockOwner = async () => {
+    const [rows] = await connection.query<RowDataPacket[]>({
+      sql: "SELECT IS_USED_LOCK(?) owner",
+      values: [lock],
+      timeout: 1000,
+    });
+    return rows[0]?.owner;
+  };
+  const tables = async () => {
+    const [rows] = await connection.query<RowDataPacket[]>({
+      sql: "SELECT TABLE_NAME name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_TYPE='BASE TABLE' AND TABLE_NAME<>'_vtc_migrations' ORDER BY TABLE_NAME",
+      timeout: 1000,
+    });
+    return rows.map((row) => String(row.name)).sort();
+  };
+  const observe = async (caller: 0 | 1) => {
+    const started = performance.now();
+    try {
+      const applied = await runMigrations(gate.settings, { lockTimeoutSeconds: 30 });
+      console.log(
+        JSON.stringify({
+          event: "persistence_migration_concurrency",
+          phase: "fresh",
+          caller,
+          state: "fulfilled",
+          applied,
+          lockTimeoutSeconds: 30,
+          durationMs: Math.round(performance.now() - started),
+        }),
+      );
+      return { state: "fulfilled" as const, applied };
+    } catch (error) {
+      const category =
+        error instanceof Error && error.message === "MIGRATION_LOCK_UNAVAILABLE"
+          ? "lock_unavailable"
+          : "unclassified";
+      console.log(
+        JSON.stringify({
+          event: "persistence_migration_concurrency",
+          phase: "fresh",
+          caller,
+          state: "rejected",
+          category,
+          lockTimeoutSeconds: 30,
+          durationMs: Math.round(performance.now() - started),
+          databaseOperation: databaseFailureContext(error),
+        }),
+      );
+      return { state: "rejected" as const };
+    }
+  };
+  const first = observe(0);
+  let second: ReturnType<typeof observe> | undefined;
+  let secondSettled = false;
+  let completed = false;
+  const started = performance.now();
+  const milestone = (
+    phase:
+      | "final_journal_held"
+      | "history_verified"
+      | "waiter_forwarded"
+      | "waiter_blocked"
+      | "ack_released"
+      | "settled",
+  ) =>
+    console.log(
+      JSON.stringify({
+        event: "persistence_migration_serialization",
+        phase,
+        state: "success",
+        durationMs: Math.round(performance.now() - started),
+        lockTimeoutSeconds: 30,
+        journalReceiptMs: 5000,
+        holdSafetyMs: 2000,
+        waiterForwardMs: 1000,
+      }),
+    );
+  try {
+    await Promise.race([
+      bounded(gate.withheld, "fresh_final_journal_ack", SCHEMA_SETUP_TIMEOUT_MS),
+      first.then(() => {
+        throw new Error("FRESH_MIGRATION_ENDED_BEFORE_FINAL_ACK_GATE");
+      }),
+    ]);
+    assert.equal(gate.facts.finalizations, 13);
+    assert.equal(gate.facts.okPackets, 1);
+    milestone("final_journal_held");
+    const before = await history();
+    assert.deepEqual(
+      before.map(({ version, hash, state }) => ({ version, hash, state })),
+      expectedHistory,
+    );
+    assert.deepEqual(await tables(), expectedTables);
+    const owner = await lockOwner();
+    assert.ok(
+      Number(owner) > 0,
+      "first migrator owns the real named lock after its committed final journal write",
+    );
+    milestone("history_verified");
+    second = observe(1).finally(() => {
+      secondSettled = true;
+    });
+    await bounded(gate.waiterForwarded, "fresh_waiter_forwarded", 1000);
+    milestone("waiter_forwarded");
+    await delay(100);
+    assert.equal(
+      secondSettled,
+      false,
+      "actual waiter remains incomplete while first owns the lock",
+    );
+    assert.equal(gate.facts.waiterRequests, 1);
+    assert.equal(gate.facts.waiterResponses, 0);
+    assert.equal(await lockOwner(), owner);
+    milestone("waiter_blocked");
+    assert.equal(
+      gate.facts.automaticRelease,
+      false,
+      "coordination must finish inside the two-second safety release",
+    );
+    gate.release();
+    milestone("ack_released");
+    const result = await Promise.all([first, second]);
+    assert.deepEqual(result, [
+      { state: "fulfilled", applied: 13 },
+      { state: "fulfilled", applied: 0 },
+    ]);
+    assert.equal(gate.facts.explicitReleases, 1);
+    assert.equal(gate.facts.automaticRelease, false);
+    assert.equal(gate.facts.waiterResponses, 1);
+    assert.equal(gate.facts.waiterResponseBeforeRelease, false);
+    assert.equal(gate.facts.inserts, 13);
+    assert.equal(gate.facts.finalizations, 13);
+    assert.deepEqual(
+      await history(),
+      before,
+      "waiter neither reapplies DDL nor rewrites any journal receipt",
+    );
+    assert.deepEqual(await tables(), expectedTables);
+    milestone("settled");
+    completed = true;
+  } finally {
+    try {
+      gate.release();
+      if (!completed) await gate.close();
+    } finally {
+      try {
+        await Promise.allSettled([first, ...(second ? [second] : [])]);
+      } finally {
+        if (completed) await gate.close();
+        await until(async () => (await lockOwner()) === null);
+      }
+    }
+  }
+}
+
 type MigrationContext = {
   settings: ReturnType<typeof guardedSettings>;
   connection: Awaited<ReturnType<typeof testConnection>>;
@@ -224,7 +418,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "INSERT INTO identity_challenges (id, user_id, purpose, proposed_email, email_epoch, access_epoch, credential_epoch, secret_hash, expires_at) VALUES (?, ?, 'email_change', 'synthetic-new@example.invalid', 1, 1, 1, ?, UTC_TIMESTAMP(3) + INTERVAL 10 MINUTE)",
           [challengeId, id, Buffer.alloc(32)],
         );
-        assert.equal(await runMigrations(settings), 10);
+        assert.equal(await runMigrations(settings), 11);
         assert.equal(await runMigrations(settings), 0);
         const [rows] = await connection.query<RowDataPacket[]>(
           "SELECT u.email_verified, c.proposed_email, c.current_email_confirmed, c.identity_epoch, c.consumed FROM identity_users u JOIN identity_challenges c ON c.user_id=u.id WHERE c.id=?",
@@ -252,7 +446,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 9);
+        assert.equal(await runMigrations(settings), 10);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 3",
@@ -280,7 +474,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 8);
+        assert.equal(await runMigrations(settings), 9);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 4",
@@ -308,7 +502,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 7);
+        assert.equal(await runMigrations(settings), 8);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 5",
@@ -344,7 +538,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 6);
+        assert.equal(await runMigrations(settings), 7);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 6",
@@ -392,7 +586,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 5);
+        assert.equal(await runMigrations(settings), 6);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 7",
@@ -419,7 +613,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 4);
+        assert.equal(await runMigrations(settings), 5);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 8",
@@ -446,7 +640,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 3);
+        assert.equal(await runMigrations(settings), 4);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 9",
@@ -539,7 +733,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [original] = await connection.query<RowDataPacket[]>(
           "SELECT HEX(id) id,HEX(user_id) userId,game,level,CAST(assigned_at AS CHAR) assignedAt FROM qualification_initial_assignments ORDER BY id",
         );
-        assert.equal(await runMigrations(settings), 2);
+        assert.equal(await runMigrations(settings), 3);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 10",
@@ -578,6 +772,108 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
     },
   );
   publishedUpgrade(
+    "manual reports preserve exact twelve-migration prefix, sentinels and restrictive report/revision/trip relationships",
+    async ({ settings, connection, unit, audit }) => {
+      await reset(connection);
+      const folder = await manualPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder }), 12);
+        const id = await unit.run((tx) => audit.append(tx, auditInput()));
+        const identity = createIdentity(
+          unit,
+          {
+            secret: randomBytes(32).toString("hex"),
+            origin: "http://127.0.0.1:4173",
+            production: false,
+          },
+          { accessEvents: identityAccessEvents(unit) },
+        );
+        const password = "Fictional-event-upgrade-passphrase-42";
+        await identity.bootstrap({
+          email: "event-upgrade@example.invalid",
+          name: "Fictional Event Upgrade Director",
+          password,
+        });
+        const login = await identity.login("event-upgrade@example.invalid", password);
+        const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
+        const director = await identity.authenticate(new Headers({ cookie }));
+        let instant = Date.parse("2026-10-22T12:00:00.000Z");
+        const events = createEvents(
+          unit,
+          { cursorKey: randomBytes(32).toString("hex") },
+          { identity },
+          () => new Date(instant),
+        );
+        const createKey = newId(),
+          eventInput = {
+            title: "Fictional upgrade convoy",
+            description: "Fictional retained event history",
+            game: "ets2" as const,
+            server: "Fictional server",
+            organizer: "Fictional organizer",
+            meetingLocation: "Fictional meeting location",
+            route: "Fictional route",
+            meetingAt: "2026-10-22T12:00:30.000Z",
+            startsAt: "2026-10-22T12:01:00.000Z",
+            endsAt: null,
+            visibility: "members" as const,
+            originCityId: null,
+            destinationCityId: null,
+            prescribedCargoId: null,
+            prescribedMassKg: null,
+            prescribedTrailerTypeId: null,
+          },
+          event = await events.create(director, createKey, eventInput),
+          eventId = event.data.event.id;
+        await events.respond(director, eventId, newId(), 1, { response: "participating" });
+        instant += 60000;
+        await events.setAttendance(director, eventId, newId(), 1, {
+          members: [{ memberId: director.userId, attendance: "attended", note: null }],
+        });
+        const eventBefore = await events.get(director, eventId),
+          historyBefore = await events.history(director, eventId),
+          replayBefore = await events.create(director, createKey, eventInput);
+        assert.equal(historyBefore.definitions.length, 1);
+        assert.equal(historyBefore.responses.length, 1);
+        assert.equal(historyBefore.attendance.length, 1);
+        const [before] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+        );
+        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 0);
+        const [after] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 12",
+        );
+        assert.deepEqual(after, before);
+        assert.deepEqual(await events.get(director, eventId), eventBefore);
+        assert.deepEqual(await events.history(director, eventId), historyBefore);
+        assert.deepEqual(await events.create(director, createKey, eventInput), replayBefore);
+        const [eventReceipts] = await connection.query<RowDataPacket[]>(
+          "SELECT COUNT(*) n FROM event_commands",
+        );
+        assert.equal(Number(eventReceipts[0]?.n), 3);
+        const [saved] = await connection.execute<RowDataPacket[]>(
+          "SELECT COUNT(*) count FROM audit_entries WHERE id=?",
+          [Buffer.from(id)],
+        );
+        assert.equal(String(saved[0]?.count), "1");
+        const [constraints] = await connection.query<RowDataPacket[]>(
+          "SELECT CONSTRAINT_NAME,DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'manual_%'",
+        );
+        assert.ok(constraints.length >= 23);
+        assert.ok(constraints.every((row) => row.DELETE_RULE === "RESTRICT"));
+        for (const name of [
+          "manual_report_current_revision_fk",
+          "manual_ref_report_trip_fk",
+          "manual_ref_report_revision_fk",
+        ])
+          assert.ok(constraints.some((row) => row.CONSTRAINT_NAME === name));
+      } finally {
+        await rm(folder, { recursive: true });
+      }
+    },
+  );
+  publishedUpgrade(
     "events upgrades exact eleven-migration prefix and preserves populated history",
     async ({ settings, connection, unit, audit }) => {
       await reset(connection);
@@ -588,7 +884,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 2);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 11",
@@ -621,7 +917,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
       try {
         assert.equal(await runMigrations(settings, { folder }), 1);
         const id = await unit.run((tx) => audit.append(tx, auditInput()));
-        assert.equal(await runMigrations(settings), 11);
+        assert.equal(await runMigrations(settings), 12);
         assert.equal(await runMigrations(settings), 0);
         const [saved] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM audit_entries WHERE id = ?",
@@ -643,6 +939,7 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
   const other = createUnitOfWork(settings);
   const audit = createAudit(unit);
   let extended: string | undefined;
+  let freshSchemaReady = false;
   try {
     await t.test(
       "destructive fixtures require synthetic name, test mode and explicit acknowledgment",
@@ -671,13 +968,19 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         await readiness.close();
       }
       await reset(connection);
-      assert.equal(await runMigrations(settings), 12);
+      await serializedFreshMigrations(settings, connection);
       assert.equal(await runMigrations(settings), 0);
       const [tables] = await connection.query<RowDataPacket[]>(
         "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
       );
       assert.equal(tables[0]?.ENGINE, "InnoDB");
+      freshSchemaReady = true;
     });
+    assert.equal(
+      freshSchemaReady,
+      true,
+      "FRESH_SCHEMA_AND_SERIALIZATION_REQUIRED_BEFORE_LATER_FIXTURES",
+    );
 
     await t.test(
       "additive migration from committed prior fixture preserves sentinel and rejects history drift",
@@ -688,7 +991,7 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 12);
+        assert.equal(await runMigrations(settings, { folder: extended }), 13);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -1044,14 +1347,8 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        // The extended fixture retains its synthetic prior entry plus twelve current migrations.
-        assert.equal(String(history[0]?.count), "13");
-        await reset(connection);
-        assert.deepEqual((await cooperatingMigrations(settings, "fresh")).sort(), [0, 12]);
-        const [singleApply] = await connection.query<RowDataPacket[]>(
-          "SELECT COUNT(*) AS count FROM _vtc_migrations WHERE state = 'applied'",
-        );
-        assert.equal(String(singleApply[0]?.count), "12");
+        // The extended fixture retains its synthetic prior entry plus thirteen current migrations.
+        assert.equal(String(history[0]?.count), "14");
       },
     );
   } finally {

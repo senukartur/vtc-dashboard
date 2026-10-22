@@ -59,7 +59,18 @@ export interface TripsPorts {
     | "labelsInTransaction"
   >;
   // VTC-025 supplies a caller-transaction check of immutable validated evidence references.
-  manualEvidence?: (tx: TxContext, ownerId: string, payload: unknown) => Promise<void>;
+  manualEvidence?: (
+    tx: TxContext,
+    ownerId: string,
+    payload: unknown,
+    tripId: string,
+  ) => Promise<void>;
+  manualProjection?: (
+    tx: TxContext,
+    tripIds: string[],
+  ) => Promise<
+    Map<string, { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }>
+  >;
   events?: ReturnType<typeof createOutbox>;
 }
 export interface SourceContext {
@@ -215,6 +226,7 @@ export function createTrips(
     provider: Provider,
     payload: unknown,
     context: SourceContext,
+    previousManualRevisionId?: string,
   ) {
     context = {
       ownerUserId: context.ownerUserId,
@@ -255,10 +267,6 @@ export function createTrips(
     // Eligibility precedes any receipt lookup, including exact replays.
     const access = await ports.identity.accessState(tx, context.ownerUserId);
     if (!access.active || !access.canSubmitTrips) throw identityError(403);
-    if (provider === "manual") {
-      if (!ports.manualEvidence) throw identityError(503);
-      await ports.manualEvidence(tx, context.ownerUserId, immutablePayload);
-    }
     const [existing] = await c(tx)
       .select()
       .from(sourceTrips)
@@ -283,7 +291,7 @@ export function createTrips(
           eq(sourceMessages.eventKey, sourceKey(key.eventKey)),
         ),
       )
-      .for("update");
+      .for("share");
     if (event) {
       if (!existing || event.sourceTripId !== existing.id || !event.sha256.equals(hash))
         throw identityError(409);
@@ -338,6 +346,41 @@ export function createTrips(
     const [trip] = await c(tx).select().from(trips).where(eq(trips.id, tripId)).for("update");
     if (!trip || trip.ownerId !== context.ownerUserId || trip.game !== key.game)
       throw identityError(409);
+    if (provider === "manual") {
+      if (!ports.manualEvidence) throw identityError(503);
+      await ports.manualEvidence(tx, context.ownerUserId, immutablePayload, tripId);
+    }
+    let supersede = false;
+    if (previousManualRevisionId) {
+      if (provider !== "manual" || !existing || !context.canonical || trip.decision === "accepted")
+        throw identityError(409);
+      const [previousMessage] = await c(tx)
+        .select()
+        .from(sourceMessages)
+        .where(
+          and(
+            eq(sourceMessages.sourceTripId, existing.id),
+            eq(sourceMessages.eventKey, sourceKey(applicationId(previousManualRevisionId))),
+          ),
+        )
+        .for("share");
+      if (
+        !previousMessage ||
+        Number(previousMessage.revision) !== Number(existing.latestRevision) ||
+        key.revision !== Number(existing.latestRevision) + 1
+      )
+        throw identityError(409, "VERSION_CONFLICT");
+      if (trip.currentFactId) {
+        const [currentManual] = await c(tx)
+          .select({ id: tripFacts.id })
+          .from(tripFacts)
+          .where(
+            and(eq(tripFacts.messageId, previousMessage.id), eq(tripFacts.id, trip.currentFactId)),
+          )
+          .for("share");
+        supersede = !!currentManual;
+      }
+    }
     const [revision] = await c(tx)
       .select({ id: sourceMessages.id })
       .from(sourceMessages)
@@ -347,7 +390,7 @@ export function createTrips(
           eq(sourceMessages.revision, String(key.revision)),
         ),
       )
-      .for("update");
+      .for("share");
     if (revision) throw identityError(409);
     const messageId = newId(),
       factId = newId(),
@@ -367,7 +410,7 @@ export function createTrips(
     const previous = current?.evidence;
     const newer = !existing || key.revision > Number(existing.latestRevision);
     const conflicts =
-      previous && (newer || fact.outcome !== "open") ? differing(previous, fact) : [];
+      previous && !supersede && (newer || fact.outcome !== "open") ? differing(previous, fact) : [];
     if (conflicts.length)
       fact.reasonCodes = [...new Set([...fact.reasonCodes, ...conflicts])].sort();
     await c(tx)
@@ -383,7 +426,12 @@ export function createTrips(
         deliveryMode: key.deliveryMode,
       });
     await c(tx).insert(sourcePayloads).values({ messageId, content });
-    await factsRepository.insert(tx, tripId, fact, adapter.version);
+    await factsRepository.insert(
+      tx,
+      tripId,
+      fact,
+      adapter.versionFor?.(immutablePayload) ?? adapter.version,
+    );
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
     if (!newer && conflicts.length === 0)
       return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
@@ -567,9 +615,104 @@ export function createTrips(
   }
   return {
     config,
+    async summaryInTransaction(tx: TxContext, tripId: string, locale: "en" | "ru") {
+      const [row] = await c(tx)
+        .select()
+        .from(trips)
+        .where(eq(trips.id, applicationId(tripId)));
+      if (!row) throw identityError(404);
+      const [result] = await summaries(tx, [row], locale);
+      if (!result) throw new Error("TRIP_SUMMARY_MISSING");
+      return result;
+    },
     contributions: createContributionRegister(unit),
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
     storeInTransaction: store,
+    async reserveManualInTransaction(tx: TxContext, ownerId: string, game: "ets2" | "ats") {
+      const access = await ports.identity.accessState(tx, ownerId);
+      if (!access.active || !access.canSubmitTrips) throw identityError(403);
+      const id = newId();
+      await c(tx).insert(trips).values({
+        id,
+        ownerId,
+        game,
+        version: 1,
+        outcome: "open",
+        recording: "unknown",
+        decision: "unassessed",
+        reviewReasons: [],
+        createdAt: at(),
+      });
+      return id;
+    },
+    async manualGateInTransaction(
+      tx: TxContext,
+      ownerId: string,
+      tripId: string,
+      expectedVersion?: number,
+      telemetry = false,
+    ) {
+      const [row] = await c(tx)
+        .select()
+        .from(trips)
+        .where(eq(trips.id, applicationId(tripId)))
+        .for("update");
+      if (!row || row.ownerId !== ownerId) throw identityError(404);
+      if (expectedVersion !== undefined && row.version !== expectedVersion)
+        throw identityError(409, "VERSION_CONFLICT");
+      if (telemetry) {
+        const [source] = await c(tx)
+          .select({ id: sourceTrips.id })
+          .from(sourceTrips)
+          .where(
+            and(eq(sourceTrips.canonicalTripId, tripId), eq(sourceTrips.provider, "ets2telemetry")),
+          )
+          .for("share");
+        if (!source) throw identityError(409);
+      }
+      return row;
+    },
+    async statesInTransaction(tx: TxContext, tripIds: string[], lock: boolean | "share" = false) {
+      const ids = [...new Set(tripIds)].sort(),
+        rows: Trip[] = [];
+      // Every batch follows the same total order before evidence is locked.
+      for (let start = 0; start < ids.length; start += 100) {
+        const query = c(tx)
+          .select()
+          .from(trips)
+          .where(inArray(trips.id, ids.slice(start, start + 100)))
+          .orderBy(trips.id);
+        rows.push(...(await (lock ? query.for(lock === "share" ? "share" : "update") : query)));
+      }
+      return rows;
+    },
+    async manualPendingInTransaction(tx: TxContext, tripId: string, correction = false) {
+      const [row] = await c(tx).select().from(trips).where(eq(trips.id, tripId)).for("update");
+      if (!row) throw identityError(404);
+      if (
+        (correction && row.decision !== "accepted") ||
+        (!correction && row.decision === "accepted")
+      )
+        throw identityError(409);
+      await c(tx)
+        .update(trips)
+        .set({
+          reviewHold: true,
+          ...(correction
+            ? { correctionPending: true, version: row.version + 1 }
+            : { decision: "pending_review" as const }),
+        })
+        .where(eq(trips.id, tripId));
+      return correction ? row.version + 1 : row.version;
+    },
+    supersedeManualInTransaction(
+      tx: TxContext,
+      payload: unknown,
+      context: SourceContext,
+      previousRevisionId: string,
+    ) {
+      return store(tx, "manual", payload, context, applicationId(previousRevisionId));
+    },
     async eventContextInTransaction(tx: TxContext, sourceRecordId: string) {
       const [row] = await c(tx)
         .select({
@@ -663,12 +806,15 @@ export function createTrips(
         if (!row || (!privateRead && row.decision !== "accepted")) throw identityError(404);
         const [summary] = await summaries(tx, [row], current.locale);
         if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
+        const projection = privateRead
+          ? (await ports.manualProjection?.(tx, [row.id]))?.get(row.id)
+          : undefined;
         return privateRead
           ? {
               view: "private",
               summary,
-              manualRevision: null,
-              evidence: [],
+              manualRevision: projection?.manualRevision ?? null,
+              evidence: projection?.evidence ?? [],
               decisions: [],
               pendingProposalId: null,
               reviewReasonCodes: row.reviewReasons,

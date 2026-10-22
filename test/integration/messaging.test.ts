@@ -43,12 +43,13 @@ import {
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
-import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
 let control: Connection, unit: UnitOfWork;
+const diagnostic = identityDiagnostics("messaging");
 let instant = Date.now();
 const now = () => new Date(instant);
 const config: MessagingConfig = {
@@ -141,15 +142,19 @@ async function execute(mail: Messaging) {
 }
 const rejected: Outcome = { state: "rejected", category: "authentication", retryAfterMs: null };
 beforeAll(
-  async () =>
+  () =>
     safe(async () => {
-      control = await testConnection();
-      await reset(control);
-      await runMigrations(guardedSettings());
-      await control.query(
-        "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
+      control = await diagnostic.phase("connection", () => testConnection());
+      await diagnostic.phase("reset", () => reset(control));
+      await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
+      await diagnostic.phase("synthetic_ddl", () =>
+        control.query(
+          "CREATE TABLE synthetic_mail_owner (id BINARY(36) PRIMARY KEY,current_generation INT NOT NULL) ENGINE=InnoDB",
+        ),
       );
-      unit = createUnitOfWork(guardedSettings());
+      await diagnostic.phase("unit", async () => {
+        unit = createUnitOfWork(guardedSettings());
+      });
     }),
   SCHEMA_SETUP_TIMEOUT_MS,
 );
@@ -167,8 +172,11 @@ beforeEach(async () =>
   }),
 );
 afterAll(async () => {
-  await unit?.close();
-  await control?.end();
+  try {
+    await unit?.close();
+  } finally {
+    await control?.end();
+  }
 });
 afterEach(async () =>
   safe(async () => {

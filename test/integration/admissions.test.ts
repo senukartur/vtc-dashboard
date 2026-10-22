@@ -67,7 +67,7 @@ import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 
-const diagnostic = identityDiagnostics("admission");
+const diagnostic = identityDiagnostics("admissions");
 const origin = "http://127.0.0.1:4173",
   password = "Synthetic-onboarding-passphrase-42";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
@@ -248,21 +248,31 @@ beforeAll(async () => {
   control = await diagnostic.phase("connection", () => testConnection());
   await diagnostic.phase("reset", () => reset(control));
   await diagnostic.phase("migrations", () => runMigrations(guardedSettings()));
-  unit = createUnitOfWork(guardedSettings());
+  unit = await diagnostic.phase("unit", async () =>
+    diagnostic.unit(createUnitOfWork(guardedSettings()), control, true),
+  );
   ({ identity, admissions, messaging } = harness());
-  await identity.bootstrap({
-    email: "admissions-director@example.invalid",
-    name: "Fictional Director",
-    password,
-  });
-  const login = await identity.login("admissions-director@example.invalid", password);
-  director = await identity.authenticate(
-    new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+  await diagnostic.phase("bootstrap", () =>
+    identity.bootstrap({
+      email: "admissions-director@example.invalid",
+      name: "Fictional Director",
+      password,
+    }),
+  );
+  const login = await diagnostic.phase("login", () =>
+    identity.login("admissions-director@example.invalid", password),
+  );
+  director = await diagnostic.phase("authentication", () =>
+    identity.authenticate(
+      new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+    ),
   );
   // Keep this synthetic administrative session valid while testing invitation-clock boundaries.
-  await control.execute(
-    "UPDATE identity_sessions SET expires_at=UTC_TIMESTAMP(3)+INTERVAL 30 DAY WHERE id=?",
-    [director.sessionId],
+  await diagnostic.phase("session_extension", () =>
+    control.execute(
+      "UPDATE identity_sessions SET expires_at=UTC_TIMESTAMP(3)+INTERVAL 30 DAY WHERE id=?",
+      [director.sessionId],
+    ),
   );
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
@@ -492,7 +502,9 @@ test("reissue removes old hash/ciphertext/mail and copy, redeemer and worker rej
   instant++;
   expect(await status(admissions.copy(director, replacement.id, 1))).toBe(409);
   expect(await status(admissions.redeem("pre:expiry", newId(), token, password))).toBe(409);
-  await admissions.purge();
+  await diagnostic.scope({ caseId: "admissions_reissue_expiry", step: "purge" }, () =>
+    admissions.purge(),
+  );
   const [expired] = await unit.run((tx) =>
     unit.client(tx).select().from(invitations).where(eq(invitations.id, replacement.id)),
   );
@@ -1041,12 +1053,39 @@ test("anonymous and unauthorized HTTP floods cannot charge staff quotas; current
       }
     }
     expect(await count("admissions_limits")).toBe(0);
-    const cookies = await Promise.all(
-      [0, 1].map(async () => {
-        const login = await identity.login("admissions-director@example.invalid", password);
-        return login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+    const logins = await Promise.allSettled(
+      [0, 1].map(async (ordinal) => {
+        const started = performance.now();
+        try {
+          const login = await identity.login("admissions-director@example.invalid", password);
+          console.log(
+            JSON.stringify({
+              event: "admission_quota_login",
+              ordinal,
+              durationMs: Math.round(performance.now() - started),
+              status: "fulfilled",
+            }),
+          );
+          return login.cookies.map((c) => c.split(";", 1)[0]).join("; ");
+        } catch (error) {
+          console.log(
+            JSON.stringify({
+              event: "admission_quota_login",
+              ordinal,
+              durationMs: Math.round(performance.now() - started),
+              status: "rejected",
+            }),
+          );
+          diagnostic.failure(error, performance.now() - started);
+          throw error;
+        }
       }),
     );
+    // Settle both concurrent operations before propagating any uncertain outcome.
+    const cookies = logins.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    });
     const directorActors = await Promise.all(
       cookies.map((cookie) => identity.authenticate(new Headers({ cookie }))),
     );

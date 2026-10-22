@@ -14,6 +14,8 @@ export const auditOperations = [
   "invitation.redeemed",
   "steam.linked",
   "steam.replaced",
+  "manual.submitted",
+  "manual.correction_requested",
 ] as const;
 export const auditReasons = [
   "operator_request",

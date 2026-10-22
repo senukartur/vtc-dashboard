@@ -79,10 +79,29 @@ const cookies = (values: readonly string[]) =>
     .map((value) => value.split(";")[0])
     .filter(Boolean)
     .join("; ");
-async function signIn(email: string) {
-  const result = await safe(identity.login(email, password));
+async function signIn(email: string, scope?: { role: "member" | "director"; mask?: number }) {
+  const result = scope
+    ? await diagnostic.scope(
+        {
+          caseId: "role_matrix",
+          step: scope.role === "member" ? "member_login" : "director_login",
+          ...(scope.mask === undefined ? {} : { mask: scope.mask }),
+        },
+        () => safe(identity.login(email, password)),
+      )
+    : await safe(identity.login(email, password));
   const headers = new Headers({ cookie: cookies(result.cookies) });
-  return { ...result, headers, actor: await safe(identity.authenticate(headers)) };
+  const actor = scope
+    ? await diagnostic.scope(
+        {
+          caseId: "role_matrix",
+          step: scope.role === "member" ? "member_authentication" : "director_authentication",
+          ...(scope.mask === undefined ? {} : { mask: scope.mask }),
+        },
+        () => safe(identity.authenticate(headers)),
+      )
+    : await safe(identity.authenticate(headers));
+  return { ...result, headers, actor };
 }
 async function addMember(assigned: readonly AssignableRole[] = ["driver"]) {
   const id = newId(),
@@ -275,8 +294,11 @@ test("every role combination is additive, deputies match administration and all 
     const assigned = (["trainee", "driver", "dispatcher", "deputy_director"] as const).filter(
       (_role, i) => mask & (1 << i),
     );
-    const member = await addMember(assigned),
-      login = await signIn(member.email);
+    const member = await diagnostic.scope(
+        { caseId: "role_matrix", step: "member_seed", mask },
+        () => addMember(assigned),
+      ),
+      login = await signIn(member.email, { role: "member", mask });
     expect(login.actor.capabilities.includes("company.read")).toBe(true);
     expect(login.actor.capabilities.includes("trips.read_own_private")).toBe(true);
     expect(login.actor.capabilities.includes("trips.submit_own")).toBe(
@@ -289,12 +311,18 @@ test("every role combination is additive, deputies match administration and all 
     if (assigned.some((r) => r === "dispatcher" || r === "deputy_director"))
       expect(() => guardManualReview(login.actor, member.id)).toThrow("SELF_REVIEW_FORBIDDEN");
   }
-  const [director] = await unit.run((tx) => unit.client(tx).select().from(company));
-  if (!director) throw new Error("SYNTHETIC_DIRECTOR_MISSING");
-  const [row] = await unit.run((tx) =>
-    unit.client(tx).select().from(user).where(eq(user.id, director.directorUserId)),
+  const email = await diagnostic.scope(
+    { caseId: "role_matrix", step: "director_lookup" },
+    async () => {
+      const [director] = await unit.run((tx) => unit.client(tx).select().from(company));
+      if (!director) throw new Error("SYNTHETIC_DIRECTOR_MISSING");
+      const [row] = await unit.run((tx) =>
+        unit.client(tx).select().from(user).where(eq(user.id, director.directorUserId)),
+      );
+      return row?.email ?? "";
+    },
   );
-  const login = await signIn(row?.email ?? "");
+  const login = await signIn(email, { role: "director" });
   expect(() => guardManualReview(login.actor, login.actor.userId)).toThrow("SELF_REVIEW_FORBIDDEN");
 });
 

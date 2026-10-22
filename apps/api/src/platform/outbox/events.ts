@@ -87,6 +87,61 @@ export interface TripEvent {
   causationId: string | null;
   data: { sourceRecordId: string; tripId: string; factRevisionId: string };
 }
+export interface ManualEvent {
+  eventId: string;
+  type: "manual.draft_saved" | "manual.report_submitted" | "manual.correction_requested";
+  schemaVersion: 1;
+  aggregate: { kind: "manual_draft" | "manual_report" | "trip"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: null;
+  data: { resourceId: string; tripId: string | null };
+}
+export function manualEvent(value: unknown): ManualEvent {
+  const p = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(p.aggregate, ["kind", "id", "version"]),
+    d = closed(p.data, ["resourceId", "tripId"]);
+  const kinds = {
+    "manual.draft_saved": "manual_draft",
+    "manual.report_submitted": "manual_report",
+    "manual.correction_requested": "trip",
+  };
+  if (
+    !Object.hasOwn(kinds, p.type as string) ||
+    a.kind !== kinds[p.type as keyof typeof kinds] ||
+    p.schemaVersion !== 1 ||
+    p.causationId !== null ||
+    (p.type === "manual.draft_saved" && d.tripId !== null) ||
+    (p.type !== "manual.draft_saved" && d.tripId === null)
+  )
+    throw new Error("INVALID_MANUAL_EVENT");
+  return {
+    eventId: applicationId(p.eventId as string),
+    type: p.type as ManualEvent["type"],
+    schemaVersion: 1,
+    aggregate: {
+      kind: a.kind as ManualEvent["aggregate"]["kind"],
+      id: applicationId(a.id as string),
+      version: positive(a.version),
+    },
+    occurredAt: utcIso(utcDateTime(p.occurredAt as string)),
+    correlationId: applicationId(p.correlationId as string),
+    causationId: null,
+    data: {
+      resourceId: applicationId(d.resourceId as string),
+      tripId: d.tripId === null ? null : applicationId(d.tripId as string),
+    },
+  };
+}
 export function tripEvent(value: unknown): TripEvent {
   const e = closed(value, [
     "eventId",
@@ -387,12 +442,14 @@ export function createOutbox(unit: UnitOfWork) {
         | AdmissionsEvent
         | CatalogEvent
         | TripEvent
+        | ManualEvent
         | QualificationEvent
         | CompanyEvent,
     ): Promise<void> {
       const client = unit.client(tx);
-      const e =
-        input.type === "member.access_changed"
+      const e = input.type.startsWith("manual.")
+        ? manualEvent(input)
+        : input.type === "member.access_changed"
           ? accessEvent(input)
           : input.type === "catalog.published"
             ? catalogEvent(input)

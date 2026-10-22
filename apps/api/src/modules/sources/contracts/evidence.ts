@@ -93,7 +93,8 @@ export interface AdapterContext {
 // Future providers implement this same boundary after their own reviewed contract/registration.
 export interface TripSourceAdapter {
   readonly provider: Provider;
-  readonly version: 1;
+  readonly version: 1 | 2;
+  versionFor?(payload: unknown): 1 | 2;
   identity(payload: unknown): SourceIdentity;
   normalize(payload: unknown, context: AdapterContext): Promise<NormalizedTripEvidence>;
 }

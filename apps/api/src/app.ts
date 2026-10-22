@@ -14,6 +14,8 @@ import { registerExternalIdentityRoutes } from "./modules/external-identities/ht
 import type { ExternalIdentities } from "./modules/external-identities/service.js";
 import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
+import { registerManualRoutes } from "./modules/manual-reports/http.js";
+import type { ManualReports } from "./modules/manual-reports/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
 import { registerQualificationRoutes } from "./modules/qualifications/http.js";
@@ -34,6 +36,7 @@ const errorCodes: Readonly<Record<number, string>> = {
   405: "METHOD_NOT_ALLOWED",
   406: "NOT_ACCEPTABLE",
   409: "STATE_CONFLICT",
+  410: "EVIDENCE_EXPIRED",
   412: "PRECONDITION_FAILED",
   413: "PAYLOAD_TOO_LARGE",
   415: "UNSUPPORTED_MEDIA_TYPE",
@@ -51,6 +54,7 @@ export interface AppOptions {
   catalogs?: Catalogs;
   trips?: Trips;
   telemetry?: TelemetryService;
+  manualReports?: ManualReports;
   qualifications?: Qualifications;
   events?: Events;
   checkReadiness: () => Promise<boolean>;
@@ -60,6 +64,7 @@ export interface AppOptions {
 }
 
 export async function createApp(options: AppOptions) {
+  if (options.manualReports) await options.manualReports.initialize(options.webRoot);
   const app = Fastify({
     logger: false,
     bodyLimit: 64 * 1024,
@@ -94,10 +99,14 @@ export async function createApp(options: AppOptions) {
         "VERSION_CONFLICT",
         "IDEMPOTENCY_CONFLICT",
         "SELF_REVIEW_FORBIDDEN",
+        "EVIDENCE_TRANSITION",
+        "EVIDENCE_EXPIRED",
+        "DEPENDENCY_UNAVAILABLE",
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");
     if (status === 429) reply.header("Retry-After", "60");
+    if (status === 503) reply.header("Retry-After", "1");
     if (status >= 500)
       console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));
     reply.code(status).send({
@@ -151,7 +160,18 @@ export async function createApp(options: AppOptions) {
   if (options.identity && options.externalIdentities)
     await registerExternalIdentityRoutes(app, options.identity, options.externalIdentities);
   if (options.identity && options.catalogs)
-    await registerCatalogRoutes(app, options.identity, options.catalogs);
+    await app.register(async (scope) =>
+      registerCatalogRoutes(scope, options.identity as Identity, options.catalogs as Catalogs),
+    );
+  if (options.identity && options.manualReports) {
+    await app.register(async (scope) =>
+      registerManualRoutes(
+        scope,
+        options.identity as Identity,
+        options.manualReports as ManualReports,
+      ),
+    );
+  }
   if (options.identity && options.trips)
     await registerTripRoutes(app, options.identity, options.trips);
   if (options.identity && options.telemetry)

@@ -1,15 +1,20 @@
-import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
+import { databaseFailureContext, type UnitOfWork } from "@vtc/db";
 import type { Connection, RowDataPacket } from "mysql2/promise";
+import { type GenerationPhase, scopedTransactionLine } from "./manual-generation-diagnostics.ts";
 
 type Fixture =
   | "identity"
   | "admission"
+  | "admissions"
   | "availability"
   | "email"
   | "reset"
   | "concurrency"
-  | "external";
+  | "external"
+  | "messaging"
+  | "generation_worker";
 type Phase =
   | "connection"
   | "reset"
@@ -17,6 +22,10 @@ type Phase =
   | "synthetic_ddl"
   | "bootstrap"
   | "verification"
+  | "login"
+  | "authentication"
+  | "session_extension"
+  | "unit"
   | "operation"
   | "transaction";
 const codes = new Set([
@@ -90,13 +99,39 @@ export function safeIdentityFailure(error: unknown) {
   return result;
 }
 
+type RoleScope = {
+  caseId: "role_matrix";
+  step:
+    | "member_seed"
+    | "member_login"
+    | "member_authentication"
+    | "director_lookup"
+    | "director_login"
+    | "director_authentication";
+  mask?: number;
+};
+export type IdentityDiagnosticScope =
+  | RoleScope
+  | { caseId: "admissions_reissue_expiry"; step: "purge" }
+  | { caseId: "generation_worker"; step: GenerationPhase };
+
 export function identityDiagnostics(fixture: Fixture) {
   let captured = false;
+  const scopes = new AsyncLocalStorage<IdentityDiagnosticScope & { ordinal: number }>();
+  const scopeFields = (scope = scopes.getStore()) =>
+    scope
+      ? {
+          caseId: scope.caseId,
+          step: scope.step,
+          ...("mask" in scope && scope.mask !== undefined ? { mask: scope.mask } : {}),
+        }
+      : {};
   const emit = (
     phase: Phase,
     state: "started" | "success" | "failed",
     durationMs: number | null,
     error?: unknown,
+    context = scopeFields(),
   ) =>
     console.log(
       JSON.stringify({
@@ -105,10 +140,53 @@ export function identityDiagnostics(fixture: Fixture) {
         phase,
         state,
         durationMs,
+        ...context,
         ...(state === "failed" ? safeIdentityFailure(error) : {}),
       }),
     );
   return {
+    scope<T>(input: IdentityDiagnosticScope, work: () => Promise<T>): Promise<T> {
+      const role = input.caseId === "role_matrix";
+      const admitted =
+        input.caseId === "admissions_reissue_expiry" &&
+        input.step === "purge" &&
+        fixture === "admissions";
+      const generation =
+        input.caseId === "generation_worker" &&
+        fixture === "generation_worker" &&
+        ["guard", "composition", "initialize", "maintenance", "pass", "close"].includes(input.step);
+      if (
+        Object.keys(input).some(
+          (key) => !(role ? ["caseId", "step", "mask"] : ["caseId", "step"]).includes(key),
+        ) ||
+        (!admitted &&
+          !generation &&
+          (!role ||
+            ![
+              "member_seed",
+              "member_login",
+              "member_authentication",
+              "director_lookup",
+              "director_login",
+              "director_authentication",
+            ].includes(input.step))) ||
+        ("mask" in input &&
+          input.mask !== undefined &&
+          (!Number.isSafeInteger(input.mask) || input.mask < 0 || input.mask > 15))
+      )
+        throw new Error("INVALID_IDENTITY_DIAGNOSTIC_SCOPE");
+      const copied: IdentityDiagnosticScope =
+        input.caseId === "role_matrix"
+          ? {
+              caseId: input.caseId,
+              step: input.step,
+              ...(input.mask === undefined ? {} : { mask: input.mask }),
+            }
+          : input.caseId === "admissions_reissue_expiry"
+            ? { caseId: input.caseId, step: "purge" }
+            : { caseId: input.caseId, step: input.step };
+      return scopes.run({ ...copied, ordinal: 0 }, work);
+    },
     failure(error: unknown, durationMs: number | null = null) {
       emit("operation", "failed", durationMs === null ? null : Math.round(durationMs), error);
     },
@@ -124,7 +202,7 @@ export function identityDiagnostics(fixture: Fixture) {
         throw Object.assign(new Error("IDENTITY_FIXTURE_PHASE_FAILED"), safeIdentityFailure(error));
       }
     },
-    unit(unit: UnitOfWork, control?: Connection): UnitOfWork {
+    unit(unit: UnitOfWork, control?: Connection, traceTransactions = false): UnitOfWork {
       const delay = monitorEventLoopDelay({ resolution: 10 });
       delay.enable();
       return {
@@ -134,70 +212,135 @@ export function identityDiagnostics(fixture: Fixture) {
           await unit.close();
         },
         async run(command) {
+          const scope = scopes.getStore();
+          const context = {
+            ...scopeFields(scope),
+            ...(scope ? { transactionOrdinal: ++scope.ordinal } : {}),
+          };
           const started = performance.now();
-          const utilization = performance.eventLoopUtilization();
-          try {
-            return await unit.run(command);
-          } catch (error) {
-            emit("transaction", "failed", Math.round(performance.now() - started), error);
-            if (
-              !captured &&
-              safeIdentityFailure(error).codes.includes("TRANSACTION_COMMIT_OUTCOME_UNKNOWN")
-            ) {
-              captured = true;
+          const trace = (
+            boundary:
+              | "invoked"
+              | "callback_entered"
+              | "callback_returned"
+              | "callback_threw"
+              | "fulfilled"
+              | "rejected",
+            error?: unknown,
+          ) => {
+            if (!traceTransactions || !scope || scope.caseId === "role_matrix") return;
+            try {
               console.log(
-                JSON.stringify({
-                  event: "identity_fixture_unknown_commit",
+                scopedTransactionLine({
+                  event: "identity_fixture_transaction",
                   fixture,
-                  eventLoopMaximumMs: Math.round(delay.max / 1_000_000),
-                  eventLoopMeanMs: Number.isFinite(delay.mean)
-                    ? Math.round(delay.mean / 1_000_000)
-                    : 0,
-                  eventLoopUtilization: performance.eventLoopUtilization(utilization).utilization,
+                  ...context,
+                  boundary,
+                  durationMs: Math.round(performance.now() - started),
+                  ...(boundary === "callback_threw" || boundary === "rejected"
+                    ? safeIdentityFailure(error)
+                    : {}),
                 }),
               );
-              if (control) {
-                const captureStarted = performance.now();
-                try {
-                  const [rows] = await control.query<RowDataPacket[]>({
-                    sql: "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit','Innodb_log_waits','Innodb_os_log_fsyncs','Innodb_os_log_pending_fsyncs','Innodb_os_log_pending_writes','Threads_running')",
-                    timeout: 500,
-                  });
-                  const allowed = new Set([
-                    "Com_commit",
-                    "Innodb_log_waits",
-                    "Innodb_os_log_fsyncs",
-                    "Innodb_os_log_pending_fsyncs",
-                    "Innodb_os_log_pending_writes",
-                    "Threads_running",
-                  ]);
-                  const counters = Object.fromEntries(
-                    rows
-                      .filter(
-                        (row) => allowed.has(row.Variable_name) && /^\d+$/.test(String(row.Value)),
-                      )
-                      .map((row) => [row.Variable_name, Number(row.Value)]),
-                  );
-                  console.log(
-                    JSON.stringify({
-                      event: "identity_fixture_commit_status",
-                      fixture,
-                      durationMs: Math.round(performance.now() - captureStarted),
-                      counters,
-                    }),
-                  );
-                } catch (captureError) {
-                  console.log(
-                    JSON.stringify({
-                      event: "identity_fixture_commit_status",
-                      fixture,
-                      durationMs: Math.round(performance.now() - captureStarted),
-                      state: "unavailable",
-                      ...safeIdentityFailure(captureError),
-                    }),
-                  );
+            } catch {
+              // Diagnostics cannot replace the original callback result or exception.
+            }
+          };
+          const utilization = performance.eventLoopUtilization();
+          trace("invoked");
+          try {
+            const result = await unit.run(
+              !traceTransactions || !scope || scope.caseId === "role_matrix"
+                ? command
+                : async (tx) => {
+                    trace("callback_entered");
+                    try {
+                      const result = await command(tx);
+                      trace("callback_returned");
+                      return result;
+                    } catch (error) {
+                      trace("callback_threw", error);
+                      throw error;
+                    }
+                  },
+            );
+            trace("fulfilled");
+            return result;
+          } catch (error) {
+            trace("rejected", error);
+            try {
+              emit(
+                "transaction",
+                "failed",
+                Math.round(performance.now() - started),
+                error,
+                context,
+              );
+              if (
+                !captured &&
+                safeIdentityFailure(error).codes.includes("TRANSACTION_COMMIT_OUTCOME_UNKNOWN")
+              ) {
+                captured = true;
+                console.log(
+                  JSON.stringify({
+                    event: "identity_fixture_unknown_commit",
+                    fixture,
+                    ...context,
+                    eventLoopMaximumMs: Math.round(delay.max / 1_000_000),
+                    eventLoopMeanMs: Number.isFinite(delay.mean)
+                      ? Math.round(delay.mean / 1_000_000)
+                      : 0,
+                    eventLoopUtilization: performance.eventLoopUtilization(utilization).utilization,
+                  }),
+                );
+                if (control) {
+                  const captureStarted = performance.now();
+                  try {
+                    const [rows] = await control.query<RowDataPacket[]>({
+                      sql: "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_commit','Innodb_log_waits','Innodb_os_log_fsyncs','Innodb_os_log_pending_fsyncs','Innodb_os_log_pending_writes','Threads_running')",
+                      timeout: 500,
+                    });
+                    const allowed = new Set([
+                      "Com_commit",
+                      "Innodb_log_waits",
+                      "Innodb_os_log_fsyncs",
+                      "Innodb_os_log_pending_fsyncs",
+                      "Innodb_os_log_pending_writes",
+                      "Threads_running",
+                    ]);
+                    const counters = Object.fromEntries(
+                      rows
+                        .filter(
+                          (row) =>
+                            allowed.has(row.Variable_name) && /^\d+$/.test(String(row.Value)),
+                        )
+                        .map((row) => [row.Variable_name, Number(row.Value)]),
+                    );
+                    console.log(
+                      JSON.stringify({
+                        event: "identity_fixture_commit_status",
+                        fixture,
+                        ...context,
+                        durationMs: Math.round(performance.now() - captureStarted),
+                        counters,
+                      }),
+                    );
+                  } catch (captureError) {
+                    console.log(
+                      JSON.stringify({
+                        event: "identity_fixture_commit_status",
+                        fixture,
+                        ...context,
+                        durationMs: Math.round(performance.now() - captureStarted),
+                        state: "unavailable",
+                        ...safeIdentityFailure(captureError),
+                      }),
+                    );
+                  }
                 }
               }
+            } catch {
+              // Preserve the original transaction failure even if diagnostics fail.
             }
             throw error;
           }

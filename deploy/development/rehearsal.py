@@ -20,6 +20,8 @@ import urllib.request
 import uuid
 import zipfile
 
+mode = os.environ.get('REHEARSAL_MODE', 'full')
+assert mode in ['full', 'manual-only']
 base = pathlib.Path('/opt/vtc-development')
 subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
 subprocess.run(['python3', '/source/test_activation.py'], check=True, timeout=30)
@@ -180,6 +182,20 @@ for name, value in config['volumes'].items():
 for name, value in config['networks'].items():
     value['name'] = f'{project}_{name}'
     value['labels'] = label
+# One-shot proofs never compete with the serving app's fixed trusted-ingress IP.
+# These clones exist only in this synthetic allocation, with the same role files
+# and resource/security bounds. The codec needs no network or DB environment.
+for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs')]:
+    proof = json.loads(json.dumps(config['services'][source]))
+    proof['profiles'] = ['tools']
+    proof['restart'] = 'no'
+    proof['networks'] = {'database': {}}
+    if name == 'manual-codec':
+        proof.pop('networks')
+        proof['network_mode'] = 'none'
+        proof.pop('env_file', None)
+        proof['environment'] = {'NODE_OPTIONS': '--max-old-space-size=128'}
+    config['services'][name] = proof
 config['volumes']['operator-files'] = {'name': volume, 'external': True}
 
 
@@ -257,14 +273,20 @@ ops.activation.grants(ops, revision)
 ops.activation.ingress(ops)
 compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision)
 sql('CREATE TABLE vtc.rehearsal_reference (id INT PRIMARY KEY, evidence_sha CHAR(64) NOT NULL) ENGINE=InnoDB;')
+manual_proof_run = uuid.uuid4().hex
 sentinel = b'fictional-evidence-sentinel-vtc011\n'
 checksum = hashlib.sha256(sentinel).hexdigest()
 sql(f"INSERT INTO vtc.rehearsal_reference VALUES (1, '{checksum}');")
 compose(['up', '-d', '--no-deps', 'app', 'probe', 'proxy'], revision=revision)
 ops.ready(revision)
 ops.run(['docker', 'run', '--rm', '--network', 'none', '--user', '1000', '--mount',
-         f'type=volume,source={project}_evidence,target=/app/private-evidence', f'vtc-dashboard:{revision}',
-         'node', '-e', "require('node:fs').writeFileSync('/app/private-evidence/sentinel.txt','fictional-evidence-sentinel-vtc011\\n')"])
+         f'type=volume,source={project}_evidence,target=/app/private-evidence', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', f'vtc-dashboard:{revision}',
+         'node', '-e', "require('node:fs').writeFileSync('/app/private-evidence/sentinel.txt','fictional-evidence-sentinel-vtc011\\n');require('node:fs').writeFileSync('/app/private-evidence/.manual-rehearsal-guard',process.env.MANUAL_REHEARSAL_RUN,{mode:0o600,flag:'wx'})"])
+# Distinct production containers share only the established persistent evidence mount.
+for phase in ['write', 'read', 'remove']:
+    compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
+             'node', 'operations/manual-codec-smoke.mjs', phase], revision=revision)
+    print(f'Manual production codec phase: {phase} PASS (full decode, original bytes, offline notice integrity, uid/root mode)', flush=True)
 runtime_negative = """const mysql=require('mysql2/promise'); const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'}); for(const sql of ['CREATE TABLE forbidden (id INT)','SET GLOBAL max_connections=99','SELECT * FROM mysql.user','SELECT * FROM _vtc_migrations','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','DELETE FROM identity_verifications','UPDATE external_steam_accounts SET steam_id=steam_id','DELETE FROM external_steam_accounts','UPDATE external_steam_changes SET reason=reason','DELETE FROM external_steam_changes','UPDATE event_commands SET result=result','DELETE FROM event_commands','UPDATE event_revisions SET title=title','DELETE FROM event_revisions','UPDATE event_response_revisions SET status=status','DELETE FROM event_response_revisions','UPDATE event_attendance_revisions SET status=status','DELETE FROM event_attendance_revisions','UPDATE event_catalog_pins SET label=label','DELETE FROM event_catalog_pins','UPDATE _vtc_migrations SET state=\\'applying\\'']) {let denied=false;try{await c.query(sql)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
 compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_negative.replace("const mysql=require('mysql2/promise');", "import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');")], revision=revision)
 runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
@@ -365,151 +387,185 @@ with ops.lock():
     ops.activation.config_operation(ops, revision, image_id, 'rollback')
 assert sql('SELECT COUNT(*) FROM vtc.identity_company;').strip() == b'0'
 print('Identity ingress rehearsal: exact Caddy peer, spoof overwrite, distinct noncolliding durable source slots, 21st denial/global isolation and recreation passed', flush=True)
-acceptance_input = base / 'private/acceptance-input.env'
-acceptance_input.write_text('VTC_ACCEPTANCE_RECIPIENT=synthetic@example.invalid\n')
-os.chmod(acceptance_input, 0o600)
-with ops.lock():
-    # No pre-existing derived role name is adoptable, even with the requested run label.
-    for role in ['runtime', 'jobs', 'migrator']:
-        for matching_label in [True, False]:
-            preexisting_run = str(uuid.uuid4())
-            preexisting_suffix = preexisting_run.replace('-', '')[:16]
-            preexisting_name = f'{project}-identity-{preexisting_suffix}-{role}'
-            fixture_id = ops.run(['docker', 'run', '-d', '--name', preexisting_name,
-                                 '--label', f'vtc011.rehearsal={project}', '--label',
-                                 f'vtc.identity-acceptance={preexisting_run if matching_label else uuid.uuid4()}',
-                                 '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
-                                 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
-            expect_failure(lambda: ops.identity_acceptance.operation(ops, revision, image_id,
-                           'prepare', preexisting_run, local_fixture=True))
-            retained = json.loads(ops.run(['docker', 'inspect', fixture_id]))[0]
-            assert retained['Id'] == fixture_id and retained['State']['Running']
-            assert not (base / 'state/identity-acceptance').exists()
-            assert not (base / f'private/acceptance-{preexisting_run}').exists()
-            assert sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vtc_accept_{preexisting_suffix}';").strip() == b'0'
-            assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User IN ('vtc_ar_{preexisting_suffix}','vtc_aw_{preexisting_suffix}','vtc_am_{preexisting_suffix}');").strip() == b'0'
-            ops.run(['docker', 'rm', '-f', fixture_id], timeout=20)
-    print('Acceptance name preflight: existing runtime/jobs/migrator IDs and running state preserved for same/wrong run labels before allocation', flush=True)
-    activation_run = str(uuid.uuid4())
-    invoke = lambda mode, identity=activation_run: ops.identity_acceptance.operation(ops, revision, image_id, mode, identity, local_fixture=True)
-    invoke('prepare')
-    expect_failure(lambda: invoke('prepare'))
-    expect_failure(lambda: invoke('inspect', str(uuid.uuid4())))
-    expect_failure(lambda: ops.jobs_locked(revision, image_id))
-    runtime_fixture = base / f'private/acceptance-{activation_run}/runtime.env'
-    runtime_fixture_bytes = runtime_fixture.read_bytes()
-    runtime_fixture.write_text('\n'.join(line for line in runtime_fixture_bytes.decode().splitlines()
-                                        if not line.startswith('VTC_ACCEPTANCE_RECIPIENT=')) + '\n')
-    try:
+if mode == 'full':
+    acceptance_input = base / 'private/acceptance-input.env'
+    acceptance_input.write_text('VTC_ACCEPTANCE_RECIPIENT=synthetic@example.invalid\n')
+    os.chmod(acceptance_input, 0o600)
+    with ops.lock():
+        # No pre-existing derived role name is adoptable, even with the requested run label.
+        for role in ['runtime', 'jobs', 'migrator']:
+            for matching_label in [True, False]:
+                preexisting_run = str(uuid.uuid4())
+                preexisting_suffix = preexisting_run.replace('-', '')[:16]
+                preexisting_name = f'{project}-identity-{preexisting_suffix}-{role}'
+                fixture_id = ops.run(['docker', 'run', '-d', '--name', preexisting_name,
+                                     '--label', f'vtc011.rehearsal={project}', '--label',
+                                     f'vtc.identity-acceptance={preexisting_run if matching_label else uuid.uuid4()}',
+                                     '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                                     'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
+                expect_failure(lambda: ops.identity_acceptance.operation(ops, revision, image_id,
+                               'prepare', preexisting_run, local_fixture=True))
+                retained = json.loads(ops.run(['docker', 'inspect', fixture_id]))[0]
+                assert retained['Id'] == fixture_id and retained['State']['Running']
+                assert not (base / 'state/identity-acceptance').exists()
+                assert not (base / f'private/acceptance-{preexisting_run}').exists()
+                assert sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vtc_accept_{preexisting_suffix}';").strip() == b'0'
+                assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User IN ('vtc_ar_{preexisting_suffix}','vtc_aw_{preexisting_suffix}','vtc_am_{preexisting_suffix}');").strip() == b'0'
+                ops.run(['docker', 'rm', '-f', fixture_id], timeout=20)
+        print('Acceptance name preflight: existing runtime/jobs/migrator IDs and running state preserved for same/wrong run labels before allocation', flush=True)
+        activation_run = str(uuid.uuid4())
+        invoke = lambda mode, identity=activation_run: ops.identity_acceptance.operation(ops, revision, image_id, mode, identity, local_fixture=True)
+        invoke('prepare')
+        expect_failure(lambda: invoke('prepare'))
+        expect_failure(lambda: invoke('inspect', str(uuid.uuid4())))
+        expect_failure(lambda: ops.jobs_locked(revision, image_id))
+        runtime_fixture = base / f'private/acceptance-{activation_run}/runtime.env'
+        runtime_fixture_bytes = runtime_fixture.read_bytes()
+        runtime_fixture.write_text('\n'.join(line for line in runtime_fixture_bytes.decode().splitlines()
+                                            if not line.startswith('VTC_ACCEPTANCE_RECIPIENT=')) + '\n')
+        try:
+            expect_failure(lambda: invoke('produce'))
+            failed_producer = json.loads((base / 'state/identity-acceptance').read_text())
+            runtime_name = f"{project}-identity-{activation_run.replace('-', '')[:16]}-runtime"
+            assert failed_producer['phase'] == 'prepared'
+            assert failed_producer['containers'][runtime_name]['phase'] == 'removed'
+            assert not ops.run(['docker', 'ps', '-aq', '--filter',
+                               f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
+        finally:
+            runtime_fixture.write_bytes(runtime_fixture_bytes)
+        # The positively owned sentinel/schema/runtime role remains the existing acceptance allocation.
+        # Opt in only this local, fictional fixture to real Events commands under the same grant matrix.
+        runtime_fixture.write_bytes(runtime_fixture_bytes + b'VTC_EVENTS_ACCEPTANCE=synthetic-only\n')
+        invoke('produce')
+        events_result = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+        assert events_result.get('eventsVerified') is True
+        print('Events restricted runtime: create/edit/cancel, own RSVP, attendance, immutable history and exact replay passed with SELECT+INSERT-only receipts/history', flush=True)
         expect_failure(lambda: invoke('produce'))
-        failed_producer = json.loads((base / 'state/identity-acceptance').read_text())
-        runtime_name = f"{project}-identity-{activation_run.replace('-', '')[:16]}-runtime"
-        assert failed_producer['phase'] == 'prepared'
-        assert failed_producer['containers'][runtime_name]['phase'] == 'removed'
-        assert not ops.run(['docker', 'ps', '-aq', '--filter',
-                           f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
-    finally:
-        runtime_fixture.write_bytes(runtime_fixture_bytes)
-    # The positively owned sentinel/schema/runtime role remains the existing acceptance allocation.
-    # Opt in only this local, fictional fixture to real Events commands under the same grant matrix.
-    runtime_fixture.write_bytes(runtime_fixture_bytes + b'VTC_EVENTS_ACCEPTANCE=synthetic-only\n')
-    invoke('produce')
-    events_result = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-    assert events_result.get('eventsVerified') is True
-    print('Events restricted runtime: create/edit/cancel, own RSVP, attendance, immutable history and exact replay passed with SELECT+INSERT-only receipts/history', flush=True)
-    expect_failure(lambda: invoke('produce'))
-    invoke('inspect')
-    pending = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-    assert pending['state'] == 'queued' and pending['retainedPayload']
-    invoke('worker')
-    invoke('inspect')
-    accepted = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-    assert accepted['state'] == 'simulated' and accepted['purgedPayload'] and accepted['attempts'] == 1
-    invoke('worker')
-    invoke('inspect')
-    assert json.loads((base / 'state/identity-acceptance-last.json').read_text()) == accepted
-    invoke('cleanup')
-    assert not (base / 'state/identity-acceptance').exists()
-    # Fresh pre-existing resources must fail before allocating or mutating anything else.
-    collision_run = str(uuid.uuid4())
-    collision_suffix = collision_run.replace('-', '')[:16]
-    collision_schema = f'vtc_accept_{collision_suffix}'
-    collision_account = f'vtc_ar_{collision_suffix}'
-    sql(f'CREATE DATABASE {collision_schema}; CREATE TABLE {collision_schema}.sentinel (id INT PRIMARY KEY); INSERT INTO {collision_schema}.sentinel VALUES (1);')
-    expect_failure(lambda: invoke('prepare', collision_run))
-    assert not (base / 'state/identity-acceptance').exists()
-    assert sql(f'SELECT id FROM {collision_schema}.sentinel;').strip() == b'1'
-    sql(f'DROP DATABASE {collision_schema};')
-    sql(f"CREATE USER '{collision_account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
-    expect_failure(lambda: invoke('prepare', collision_run))
-    assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{collision_account}';").strip() == b'1'
-    assert not (base / 'state/identity-acceptance').exists()
-    sql(f"DROP USER '{collision_account}'@'%';")
-    # An interrupted prepared window remains bound, can be cleaned and cannot be adopted.
-    invoke('prepare', collision_run)
-    expect_failure(lambda: invoke('produce', str(uuid.uuid4())))
-    collision_container = f'{project}-identity-{collision_suffix}-runtime'
-    owned_collision_id = ops.run(['docker', 'run', '-d', '--name', collision_container,
-                                 '--label', f'vtc011.rehearsal={project}', '--label',
-                                 f'vtc.identity-acceptance={uuid.uuid4()}', '--network', 'none',
-                                 image_id, 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
-    expect_failure(lambda: invoke('produce', collision_run))
-    expect_failure(lambda: invoke('cleanup', collision_run))
-    collision_info = json.loads(ops.run(['docker', 'inspect', owned_collision_id]))[0]
-    assert collision_info['State']['Running'] and (base / 'state/identity-acceptance').exists()
-    # Only this harness created the conflicting fixture; the acceptance wrapper refused it.
-    ops.run(['docker', 'rm', '-f', owned_collision_id], timeout=20)
-    invoke('cleanup', collision_run)
-    # Inject an actual Docker name collision after preflight but immediately before create.
-    # The migrator case specifically exercises failed creation during allocating/finally.
-    for role in ['runtime', 'jobs', 'migrator']:
-        for matching_label in [True, False]:
-            race_run = str(uuid.uuid4())
-            race_suffix = race_run.replace('-', '')[:16]
-            race_name = f'{project}-identity-{race_suffix}-{role}'
-            race_invoke = lambda mode: invoke(mode, race_run)
-            if role != 'migrator':
-                race_invoke('prepare')
-                if role == 'jobs':
-                    race_invoke('produce')
-            original_run = ops.run
-            race_ids = []
-            def create_race(args, **kwargs):
-                if args[:2] == ['docker', 'create'] and '--name' in args and args[args.index('--name') + 1] == race_name:
-                    assert not race_ids
-                    race_ids.append(original_run(['docker', 'run', '-d', '--name', race_name,
-                        '--label', f'vtc011.rehearsal={project}', '--label',
-                        f'vtc.identity-acceptance={race_run if matching_label else uuid.uuid4()}',
-                        '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
-                        'node', '-e', 'setInterval(()=>{},1000)']).decode().strip())
-                return original_run(args, **kwargs)
-            ops.run = create_race
-            try:
-                expect_failure(lambda: race_invoke('prepare' if role == 'migrator' else
-                                                  'worker' if role == 'jobs' else 'produce'))
-            finally:
-                ops.run = original_run
-            assert len(race_ids) == 1
-            race_state = json.loads((base / 'state/identity-acceptance').read_text())
-            intent = race_state['containers'][race_name]
-            assert intent['phase'] == 'creating' and 'id' not in intent
-            expect_failure(lambda: race_invoke('cleanup'))
-            retained = json.loads(ops.run(['docker', 'inspect', race_ids[0]]))[0]
-            assert retained['Id'] == race_ids[0] and retained['State']['Running']
-            ops.run(['docker', 'rm', '-f', race_ids[0]], timeout=20)
-            expect_failure(lambda: race_invoke('cleanup'))
-            # Test-only root investigation: the harness created and removed the foreign
-            # object, observed create rejection, and verifies no CID receipt/unknown object.
-            # The operator has no automatic uncertain-creation reconciliation command.
-            receipt = base / race_state['directory'] / intent['receipt']
-            assert not receipt.exists() or receipt.read_text().strip() == ''
-            assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
-            race_state['containers'].pop(race_name)
-            ops.atomic_json(base / 'state/identity-acceptance', race_state)
-            race_invoke('cleanup')
-    print('Acceptance create races: same/wrong-run runtime/jobs/migrator IDs and state preserved, failed migrator create never cleans a collision, uncertain markers retained', flush=True)
-    ops.jobs_locked(revision, image_id)
-print('Identity durable acceptance rehearsal: restricted native bootstrap/login/challenge, terminated producer, ordinary separate worker, purge, duplicate pass and owned cleanup passed; no provider call', flush=True)
+        invoke('inspect')
+        pending = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+        assert pending['state'] == 'queued' and pending['retainedPayload']
+        invoke('worker')
+        invoke('inspect')
+        accepted = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+        assert accepted['state'] == 'simulated' and accepted['purgedPayload'] and accepted['attempts'] == 1
+        invoke('worker')
+        invoke('inspect')
+        assert json.loads((base / 'state/identity-acceptance-last.json').read_text()) == accepted
+        invoke('cleanup')
+        assert not (base / 'state/identity-acceptance').exists()
+        # Fresh pre-existing resources must fail before allocating or mutating anything else.
+        collision_run = str(uuid.uuid4())
+        collision_suffix = collision_run.replace('-', '')[:16]
+        collision_schema = f'vtc_accept_{collision_suffix}'
+        collision_account = f'vtc_ar_{collision_suffix}'
+        sql(f'CREATE DATABASE {collision_schema}; CREATE TABLE {collision_schema}.sentinel (id INT PRIMARY KEY); INSERT INTO {collision_schema}.sentinel VALUES (1);')
+        expect_failure(lambda: invoke('prepare', collision_run))
+        assert not (base / 'state/identity-acceptance').exists()
+        assert sql(f'SELECT id FROM {collision_schema}.sentinel;').strip() == b'1'
+        sql(f'DROP DATABASE {collision_schema};')
+        sql(f"CREATE USER '{collision_account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
+        expect_failure(lambda: invoke('prepare', collision_run))
+        assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{collision_account}';").strip() == b'1'
+        assert not (base / 'state/identity-acceptance').exists()
+        sql(f"DROP USER '{collision_account}'@'%';")
+        # An interrupted prepared window remains bound, can be cleaned and cannot be adopted.
+        invoke('prepare', collision_run)
+        expect_failure(lambda: invoke('produce', str(uuid.uuid4())))
+        collision_container = f'{project}-identity-{collision_suffix}-runtime'
+        owned_collision_id = ops.run(['docker', 'run', '-d', '--name', collision_container,
+                                     '--label', f'vtc011.rehearsal={project}', '--label',
+                                     f'vtc.identity-acceptance={uuid.uuid4()}', '--network', 'none',
+                                     image_id, 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
+        expect_failure(lambda: invoke('produce', collision_run))
+        expect_failure(lambda: invoke('cleanup', collision_run))
+        collision_info = json.loads(ops.run(['docker', 'inspect', owned_collision_id]))[0]
+        assert collision_info['State']['Running'] and (base / 'state/identity-acceptance').exists()
+        # Only this harness created the conflicting fixture; the acceptance wrapper refused it.
+        ops.run(['docker', 'rm', '-f', owned_collision_id], timeout=20)
+        invoke('cleanup', collision_run)
+        # Inject an actual Docker name collision after preflight but immediately before create.
+        # The migrator case specifically exercises failed creation during allocating/finally.
+        for role in ['runtime', 'jobs', 'migrator']:
+            for matching_label in [True, False]:
+                race_run = str(uuid.uuid4())
+                race_suffix = race_run.replace('-', '')[:16]
+                race_name = f'{project}-identity-{race_suffix}-{role}'
+                race_invoke = lambda mode: invoke(mode, race_run)
+                if role != 'migrator':
+                    race_invoke('prepare')
+                    if role == 'jobs':
+                        race_invoke('produce')
+                original_run = ops.run
+                race_ids = []
+                def create_race(args, **kwargs):
+                    if args[:2] == ['docker', 'create'] and '--name' in args and args[args.index('--name') + 1] == race_name:
+                        assert not race_ids
+                        race_ids.append(original_run(['docker', 'run', '-d', '--name', race_name,
+                            '--label', f'vtc011.rehearsal={project}', '--label',
+                            f'vtc.identity-acceptance={race_run if matching_label else uuid.uuid4()}',
+                            '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                            'node', '-e', 'setInterval(()=>{},1000)']).decode().strip())
+                    return original_run(args, **kwargs)
+                ops.run = create_race
+                try:
+                    expect_failure(lambda: race_invoke('prepare' if role == 'migrator' else
+                                                      'worker' if role == 'jobs' else 'produce'))
+                finally:
+                    ops.run = original_run
+                assert len(race_ids) == 1
+                race_state = json.loads((base / 'state/identity-acceptance').read_text())
+                intent = race_state['containers'][race_name]
+                assert intent['phase'] == 'creating' and 'id' not in intent
+                expect_failure(lambda: race_invoke('cleanup'))
+                retained = json.loads(ops.run(['docker', 'inspect', race_ids[0]]))[0]
+                assert retained['Id'] == race_ids[0] and retained['State']['Running']
+                ops.run(['docker', 'rm', '-f', race_ids[0]], timeout=20)
+                expect_failure(lambda: race_invoke('cleanup'))
+                # Test-only root investigation: the harness created and removed the foreign
+                # object, observed create rejection, and verifies no CID receipt/unknown object.
+                # The operator has no automatic uncertain-creation reconciliation command.
+                receipt = base / race_state['directory'] / intent['receipt']
+                assert not receipt.exists() or receipt.read_text().strip() == ''
+                assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
+                race_state['containers'].pop(race_name)
+                ops.atomic_json(base / 'state/identity-acceptance', race_state)
+                race_invoke('cleanup')
+        print('Acceptance create races: same/wrong-run runtime/jobs/migrator IDs and state preserved, failed migrator create never cleans a collision, uncertain markers retained', flush=True)
+        ops.jobs_locked(revision, image_id)
+    print('Identity durable acceptance rehearsal: restricted native bootstrap/login/challenge, terminated producer, ordinary separate worker, purge, duplicate pass and owned cleanup passed; no provider call', flush=True)
+# Prepared feature grants are applied ONLY inside this synthetic allocation, then
+# revoked. This does not change activation-grants.json or hosted control state.
+sql("CREATE TABLE vtc.synthetic_manual_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL) ENGINE=InnoDB;")
+sql(f"INSERT INTO vtc.synthetic_manual_guard VALUES (1,'{manual_proof_run}');")
+for role in ['runtime', 'jobs']:
+    sql(f"GRANT SELECT ON vtc.synthetic_manual_guard TO 'vtc_{role}'@'%';")
+manual_grants = json.loads((base / 'manual-grants.prepared.json').read_text())
+for role, tables in manual_grants.items():
+    assert role in ['runtime', 'jobs']
+    for table, permissions in tables.items():
+        assert re.fullmatch('[a-z_]+', table)
+        assert all(p in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'UPDATE(source_record_id)', 'UPDATE(lease_until,updated_at)'] for p in permissions)
+        sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_{role}'@'%';")
+try:
+    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
+        print(f'Manual restricted grants phase: {phase} STARTED', flush=True)
+        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                 'node', 'operations/manual-grants-smoke.mjs', phase], revision=revision)
+        print(f'Manual restricted grants phase: {phase} PASS', flush=True)
+finally:
+    for role, tables in manual_grants.items():
+        for table, permissions in tables.items():
+            sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+    for role in ['runtime', 'jobs']:
+        sql(f"REVOKE SELECT ON vtc.synthetic_manual_guard FROM 'vtc_{role}'@'%';")
+    sql("DROP TABLE vtc.synthetic_manual_guard;")
+compose(['run', '--rm', '--no-deps', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
+         'node', '--input-type=module', '-e', "import {readFileSync,unlinkSync} from 'node:fs';const p='/app/private-evidence/.manual-rehearsal-guard';if(readFileSync(p,'utf8')!==process.env.MANUAL_REHEARSAL_RUN)throw Error('MANUAL_SYNTHETIC_VOLUME_REQUIRED');unlinkSync(p);"], revision=revision)
+print('Manual restricted grants: runtime draft/upload/submission/review seam; separate worker shared-lock reservation/expiry, denied exclusive locks and immutable writes passed; hosted activation pending', flush=True)
+if mode == 'manual-only':
+    print('Focused manual production rehearsal passed; baseline acceptance and remaining regressions NOT RUN', flush=True)
+    sys.exit(0)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
     ops.tick_locked(revision, image_id)
