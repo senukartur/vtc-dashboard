@@ -49,6 +49,7 @@ import {
 } from "../../apps/api/src/modules/reconciliation/service.ts";
 import { decimal } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
+import { tripMatchDiscovery } from "../../apps/api/src/modules/trips/reconciliation.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import { retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
@@ -733,6 +734,109 @@ test(
         durationMs: Math.round(performance.now() - started),
       }),
     );
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+test(
+  "EXPLAIN measures the actual production discovery predicate with current aliases, mixed sources and evidence branches",
+  async () => {
+    const composed = productionComposition(),
+      ids = lowRootIds(105);
+    await seedTelemetry(ids);
+    const target = ids[104] as string,
+      alias = ids[103] as string;
+    await composed.manualReports.submitReport(owner, newId(), {
+      fields: fields(await image()),
+      targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
+    });
+    await composed.reconciliation.merge(director, newId(), {
+      primaryTripId: target,
+      secondaryTripId: alias,
+      primaryVersion: (await state(target))?.version as number,
+      secondaryVersion: (await state(alias))?.version as number,
+      reason: "Fictional reviewed duplicate source snapshots for query-plan coverage",
+    });
+    expect((await state(alias))?.aliasOf).toBe(target);
+    const root = await state(ids[0] as string),
+      groupRoot = await state(target);
+    if (!root || !groupRoot) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    const evidence = await unit.run((tx) =>
+      composed.trips.reconciliation.matchingEvidence(tx, [root.id]),
+    );
+    const mixedMembers = await unit.run((tx) => composed.trips.groups.members(tx, [target]));
+    const mixed = await unit.run((tx) =>
+      composed.trips.reconciliation.matchingEvidence(
+        tx,
+        mixedMembers.map((t) => t.id),
+      ),
+    );
+    expect(mixed.facts.map((f) => f.provider).sort()).toEqual([
+      "ets2telemetry",
+      "ets2telemetry",
+      "manual",
+    ]);
+    const known = structuredClone(evidence.facts[0]);
+    if (!known) throw new Error("SYNTHETIC_EVIDENCE_REQUIRED");
+    // Synthetic known bindings exercise every catalog predicate; they do not assert
+    // that unresolved persisted evidence has acquired verified catalog identity.
+    for (const field of ["origin", "destination", "cargo"] as const)
+      known[field] = {
+        status: "known",
+        value: { entityId: newId(), catalogRevisionId: newId(), factRevisionId: newId() },
+        sourceRecordId: known.sourceRecordId,
+        sourceField: `synthetic.${field}`,
+      };
+    const scenarios = [
+      { name: "unknown", root, evidence, cursor: null },
+      {
+        name: "known_bindings_cursor",
+        root,
+        evidence: { facts: [known], complete: true },
+        cursor: ids[50] as string,
+      },
+      { name: "mixed_current_group", root: groupRoot, evidence: mixed, cursor: null },
+      {
+        name: "incomplete",
+        root,
+        evidence: { facts: [known], complete: false },
+        cursor: ids[50] as string,
+      },
+    ];
+    for (const scenario of scenarios) {
+      const query = await unit.run(async (tx) =>
+        tripMatchDiscovery(
+          unit,
+          tx,
+          scenario.root,
+          scenario.evidence,
+          101,
+          scenario.cursor,
+        ).toSQL(),
+      );
+      const [plan] = await control.query<RowDataPacket[]>(`EXPLAIN ${query.sql}`, query.params);
+      expect(plan.length).toBeGreaterThan(0);
+      for (const table of ["trips", "s", "m", "sm", "f"])
+        expect(plan.some((row) => row.table === table)).toBe(true);
+      console.log(
+        JSON.stringify({
+          event: "reconciliation_discovery_plan",
+          scenario: scenario.name,
+          fixtureOriginalRoots: ids.length,
+          steps: plan.map((row) => ({
+            table: row.table,
+            access: row.type,
+            key: row.key,
+            possibleKeys: row.possible_keys,
+            estimatedRows: String(row.rows),
+            fullScan: row.type === "ALL",
+            indexScan: row.type === "index",
+            filesort: String(row.Extra).includes("Using filesort"),
+            temporary: String(row.Extra).includes("Using temporary"),
+          })),
+        }),
+      );
+    }
   },
   SCHEMA_SETUP_TIMEOUT_MS,
 );

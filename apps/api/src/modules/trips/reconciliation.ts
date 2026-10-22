@@ -26,6 +26,46 @@ export interface GroupSnapshot {
   facts: string[];
   selection: ReturnType<typeof selectQuality>["provenance"];
 }
+export function tripMatchDiscovery(
+  unit: UnitOfWork,
+  tx: TxContext,
+  root: TripState,
+  evidence: { facts: NormalizedTripEvidence[]; complete: boolean },
+  limit: number,
+  cursor: string | null,
+) {
+  // EXISTS examines every latest original source in each effective group before LIMIT.
+  // Unknown IDs and incomplete root evidence are possibilities, never exclusion proof.
+  const compatible =
+    evidence.complete && evidence.facts.length
+      ? sql.join(
+          evidence.facts.map(
+            (f) => sql`(s.provider <> ${f.provider}
+            AND ${f.origin.status === "known" ? sql`(f.origin_entity_id IS NULL OR f.origin_entity_id = ${f.origin.value.entityId})` : sql`TRUE`}
+            AND ${f.destination.status === "known" ? sql`(f.destination_entity_id IS NULL OR f.destination_entity_id = ${f.destination.value.entityId})` : sql`TRUE`}
+            AND ${f.cargo.status === "known" ? sql`(f.cargo_entity_id IS NULL OR f.cargo_entity_id = ${f.cargo.value.entityId})` : sql`TRUE`})`,
+          ),
+          sql` OR `,
+        )
+      : sql`TRUE`;
+  return unit
+    .client(tx)
+    .select()
+    .from(trips)
+    .where(
+      and(
+        eq(trips.ownerId, root.ownerId),
+        eq(trips.game, root.game),
+        isNull(trips.aliasOf),
+        sql`${trips.id} <> ${root.id}`,
+        cursor ? lt(sql`${cursor}`, trips.id) : undefined,
+        sql`EXISTS (SELECT 1 FROM source_trips s JOIN trips m ON m.id = s.canonical_trip_id JOIN source_messages sm ON sm.source_trip_id = s.id AND sm.revision = s.latest_revision JOIN trip_facts f ON f.message_id = sm.id WHERE COALESCE(m.alias_of,m.id) = ${trips.id} AND (${compatible}) FOR SHARE)`,
+      ),
+    )
+    .orderBy(trips.id)
+    .limit(limit)
+    .for("update");
+}
 export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
@@ -333,36 +373,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
       limit: number,
       cursor: string | null,
     ) {
-      // EXISTS examines every latest original source in each effective group before LIMIT.
-      // Unknown IDs and incomplete root evidence are possibilities, never exclusion proof.
-      const compatible =
-        evidence.complete && evidence.facts.length
-          ? sql.join(
-              evidence.facts.map(
-                (f) => sql`(s.provider <> ${f.provider}
-            AND ${f.origin.status === "known" ? sql`(f.origin_entity_id IS NULL OR f.origin_entity_id = ${f.origin.value.entityId})` : sql`TRUE`}
-            AND ${f.destination.status === "known" ? sql`(f.destination_entity_id IS NULL OR f.destination_entity_id = ${f.destination.value.entityId})` : sql`TRUE`}
-            AND ${f.cargo.status === "known" ? sql`(f.cargo_entity_id IS NULL OR f.cargo_entity_id = ${f.cargo.value.entityId})` : sql`TRUE`})`,
-              ),
-              sql` OR `,
-            )
-          : sql`TRUE`;
-      return c(tx)
-        .select()
-        .from(trips)
-        .where(
-          and(
-            eq(trips.ownerId, root.ownerId),
-            eq(trips.game, root.game),
-            isNull(trips.aliasOf),
-            sql`${trips.id} <> ${root.id}`,
-            cursor ? lt(sql`${cursor}`, trips.id) : undefined,
-            sql`EXISTS (SELECT 1 FROM source_trips s JOIN trips m ON m.id = s.canonical_trip_id JOIN source_messages sm ON sm.source_trip_id = s.id AND sm.revision = s.latest_revision JOIN trip_facts f ON f.message_id = sm.id WHERE COALESCE(m.alias_of,m.id) = ${trips.id} AND (${compatible}) FOR SHARE)`,
-          ),
-        )
-        .orderBy(trips.id)
-        .limit(limit)
-        .for("update");
+      return tripMatchDiscovery(unit, tx, root, evidence, limit, cursor);
     },
   };
 }

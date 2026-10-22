@@ -10,7 +10,7 @@ import {
 import { company, membership, roles } from "@vtc/db/identity-schema";
 import { eq, mailCommands, mailDeliveries, sql } from "@vtc/db/messaging-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
-import type { Connection, RowDataPacket } from "mysql2/promise";
+import type { Connection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import {
   afterEach,
   beforeEach,
@@ -238,23 +238,125 @@ test("fictional recipient follows encrypted/template/local worker path, preserve
     ).rejects.toMatchObject({ statusCode: 409 });
   }));
 
-test("maximum technical rejection payload stores and renders without truncating escaped or four-byte text", async () =>
-  safe(async () => {
-    const mail = service();
-    for (const reason of ["&".repeat(8000), "🚚".repeat(4000)]) {
+test.each([
+  ["escaped", "&".repeat(8000)],
+  ["four_byte", "🚚".repeat(4000)],
+] as const)(
+  "maximum technical rejection payload stores and renders without truncating %s text",
+  async (variant, reason) =>
+    safe(async () => {
+      const provider = localProvider(),
+        calls: { request: unknown; key: string }[] = [],
+        mail = service({
+          ...provider,
+          async send(request, key, signal) {
+            calls.push({ request, key });
+            return provider.send(request, key, signal);
+          },
+        });
       const id = await seed(
         mail,
         input({ owner: "admissions", kind: "rejection", userId: null, reason }),
       );
-      const ciphertext = required((await delivery(id))?.ciphertext),
+      const original = required(await delivery(id)),
+        ciphertext = required(original.ciphertext),
         decoded = mailCrypto(config.key).open(id, ciphertext);
       expect(decoded.intent.reason === reason).toBe(true);
       expect(decoded.request.text.includes(reason)).toBe(true);
       expect(ciphertext.length).toBeGreaterThan(65000);
-      await execute(mail);
+      let jobId: string | undefined,
+        firstAttemptAt: string | null = null;
+      // A slow encrypted preparation may safely defer before provider I/O. Follow only
+      // that durable no-call retry, without extending the original five-attempt policy.
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        const claim = await execute(mail),
+          current = required(await delivery(id));
+        jobId ??= claim.id;
+        firstAttemptAt ??= current.firstAttemptAt;
+        expect(claim.id).toBe(jobId);
+        expect(claim.consumer.toString()).toBe("messaging.mail");
+        expect(claim.effectKey.toString()).toBe(id);
+        expect(claim.reference).toEqual({ deliveryId: id });
+        expect(claim.maxAttempts).toBe(5);
+        expect(claim.attempts).toBe(attempt);
+        expect(current.attempts).toBe(attempt);
+        expect(current.firstAttemptAt).toBe(firstAttemptAt);
+        expect(current.expiresAt).toBe(original.expiresAt);
+        expect(current.fingerprint.equals(original.fingerprint)).toBe(true);
+        if (current.state === "simulated") break;
+        expect(current).toMatchObject({
+          state: "retryable",
+          category: "not_started",
+          ciphertext,
+          payloadExpiresAt: original.payloadExpiresAt,
+          nextAttemptAt: new Date(instant + 1000).toISOString(),
+        });
+        expect(calls).toHaveLength(0);
+        expect(
+          JSON.stringify(mailCrypto(config.key).open(id, required(current.ciphertext))) ===
+            JSON.stringify(decoded),
+        ).toBe(true);
+        const job = required(
+          await unit.run(
+            async (tx) =>
+              (
+                await unit.client(tx).select().from(durableJobs).where(eq(durableJobs.id, claim.id))
+              )[0],
+          ),
+        );
+        expect(job).toMatchObject({
+          state: "ready",
+          failure: "retryable",
+          attempts: attempt,
+          maxAttempts: 5,
+          reference: { deliveryId: id },
+          leaseToken: null,
+          leaseUntil: null,
+        });
+        expect(attempt).toBeLessThan(job.maxAttempts);
+        console.log(
+          JSON.stringify({
+            event: "mail_maximum_payload_retry",
+            category: "not_started",
+            attempt,
+            variant,
+          }),
+        );
+        instant = Date.parse(required(current.nextAttemptAt)) + 1;
+        const [due] = await control.execute<ResultSetHeader>(
+          "UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3) WHERE id=? AND state='ready' AND failure='retryable' AND attempts=?",
+          [Buffer.from(claim.id), attempt],
+        );
+        expect(due.affectedRows).toBe(1);
+      }
       expect((await delivery(id))?.state).toBe("simulated");
-    }
-  }));
+      expect((await delivery(id))?.category).toBeNull();
+      expect((await delivery(id))?.ciphertext).toBeNull();
+      expect((await delivery(id))?.payloadExpiresAt).toBeNull();
+      expect((await delivery(id))?.nextAttemptAt).toBeNull();
+      const completed = required(
+        await unit.run(
+          async (tx) =>
+            (
+              await unit
+                .client(tx)
+                .select()
+                .from(durableJobs)
+                .where(eq(durableJobs.id, required(jobId)))
+            )[0],
+        ),
+      );
+      expect(completed).toMatchObject({
+        state: "completed",
+        failure: null,
+        leaseToken: null,
+        leaseUntil: null,
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.key).toBe(`messaging.mail:${id}`);
+      expect(JSON.stringify(calls[0]?.request) === JSON.stringify(decoded.request)).toBe(true);
+    }),
+);
 
 test("provider credential changes cannot reuse a retry in another idempotency namespace", async () =>
   safe(async () => {
