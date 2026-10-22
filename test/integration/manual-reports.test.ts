@@ -1,6 +1,16 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
@@ -17,6 +27,7 @@ import { membership } from "@vtc/db/identity-schema";
 import {
   eq,
   manualBlobGenerations,
+  manualCommands,
   manualEvidence,
   manualEvidenceReferences,
   manualReports,
@@ -48,6 +59,7 @@ import { createQualifications } from "../../apps/api/src/modules/qualifications/
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import {
+  BlobFailure,
   createPrivateFilesystem,
   type PrivateBlobs,
 } from "../../apps/api/src/platform/blob-storage/filesystem.ts";
@@ -2721,5 +2733,337 @@ test("unavailable due manual storage reports failure while real local mail compl
     }
     await verifyRoot(ownedRoot);
     await rm(ownedRoot, { recursive: true });
+  }
+});
+
+test.each([
+  "unavailable",
+  "cancelled",
+  "non_blob",
+  "unknown_commit",
+  "wrapped_cause",
+  "wrapped_unknown_commit",
+  "status_bearing",
+] as const)(
+  "expired upload recovery preserves %s failure ownership without consuming new bytes",
+  async (scenario) => {
+    const key = newId(),
+      image = await upload(key);
+    const [original] = await unit.run((tx) => unit.client(tx).select().from(manualEvidence));
+    if (!original) throw Error("SYNTHETIC_UPLOAD_REQUIRED");
+    const uncertain = new TransactionCommitOutcomeUnknownError(Error("SYNTHETIC_RECEIPT_LOSS"));
+    const failure =
+      scenario === "non_blob"
+        ? Error("SYNTHETIC_INSPECTION_FAILURE")
+        : scenario === "unknown_commit"
+          ? uncertain
+          : scenario === "wrapped_cause"
+            ? Object.assign(new BlobFailure("unavailable"), {
+                cause: Error("SYNTHETIC_WRAPPED_FAILURE"),
+              })
+            : scenario === "wrapped_unknown_commit"
+              ? Object.assign(new BlobFailure("unavailable"), { cause: uncertain })
+              : scenario === "status_bearing"
+                ? Object.assign(new BlobFailure("unavailable"), { statusCode: 409 })
+                : new BlobFailure(scenario === "cancelled" ? "cancelled" : "unavailable");
+    let inspected = 0,
+      puts = 0,
+      consumed = 0;
+    const module = createManualReports(
+      unit,
+      manualConfig,
+      {
+        identity,
+        catalogs,
+        trips: tripService,
+        blobs: {
+          ...blobs,
+          async inspect() {
+            inspected++;
+            throw failure;
+          },
+          async put(...args) {
+            puts++;
+            return blobs.put(...args);
+          },
+        },
+      },
+      now,
+    );
+    async function* untouched() {
+      consumed++;
+      yield pngBytes();
+    }
+    const boundaryToken = newId();
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(manualEvidence)
+        .set({
+          state: "processing",
+          leaseToken: boundaryToken,
+          leaseUntil: new Date(instant + manualConfig.storage.timeoutMs).toISOString(),
+        })
+        .where(eq(manualEvidence.id, image.id)),
+    );
+    await expect(
+      module.upload(owner, key, "synthetic.png", untouched(), "image/png"),
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      publicCode: "DEPENDENCY_UNAVAILABLE",
+    });
+    expect(inspected).toBe(0);
+    const expire = () =>
+      unit.run((tx) =>
+        unit
+          .client(tx)
+          .update(manualEvidence)
+          .set({
+            leaseUntil: new Date(instant - 1).toISOString(),
+          })
+          .where(eq(manualEvidence.id, image.id)),
+      );
+    await expire();
+    const replay = module.upload(owner, key, "synthetic.png", untouched(), "image/png");
+    if (scenario === "unavailable" || scenario === "cancelled")
+      await expect(replay).rejects.toMatchObject({
+        statusCode: 503,
+        publicCode: "DEPENDENCY_UNAVAILABLE",
+      });
+    else await expect(replay).rejects.toBe(failure);
+    expect(inspected).toBe(1);
+    expect(puts).toBe(0);
+    expect(consumed).toBe(0);
+    const [retained] = await unit.run((tx) => unit.client(tx).select().from(manualEvidence));
+    expect(retained).toMatchObject({
+      id: image.id,
+      state: "processing",
+      generation: original.generation,
+    });
+    expect(retained?.leaseToken).not.toBe(boundaryToken);
+    expect(retained?.leaseToken).not.toBeNull();
+    expect(retained?.leaseUntil).toBe(
+      new Date(instant + manualConfig.storage.timeoutMs).toISOString(),
+    );
+    const commands = await unit.run((tx) => unit.client(tx).select().from(manualCommands));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ key, result: { id: image.id } });
+    await expire();
+    // Shared maintenance recovery keeps its original classified error boundary.
+    await expect(module.recoverUpload(image.id)).rejects.toBe(failure);
+    expect(inspected).toBe(2);
+    expect(puts).toBe(0);
+    expect(consumed).toBe(0);
+  },
+);
+
+test("built HTTP expired upload replay reports unavailable storage as retryable and recovers the same identity", async ({
+  signal,
+}) => {
+  const ownedRoot = resolve(root, "upload-recovery-status"),
+    heldRoot = resolve(root, "upload-recovery-status.offline");
+  expect(
+    ownedRoot.startsWith(resolve(root) + sep) && heldRoot.startsWith(resolve(root) + sep),
+  ).toBe(true);
+  await mkdir(ownedRoot, { mode: 0o700 });
+  const owned = await lstat(ownedRoot);
+  const verifyRoot = async (path: string) => {
+    expect([ownedRoot, heldRoot]).toContain(path);
+    const stat = await lstat(path);
+    expect(stat.isDirectory() && !stat.isSymbolicLink()).toBe(true);
+    expect([stat.dev, stat.ino]).toEqual([owned.dev, owned.ino]);
+  };
+  let displaced = false,
+    app: Awaited<ReturnType<typeof createApp>> | undefined;
+  const clients = new Set<ReturnType<typeof request>>();
+  const stop = () => {
+    for (const client of clients) client.destroy();
+  };
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    signal.throwIfAborted();
+    const { createApp: builtApp }: { createApp: typeof createApp } = await import(
+      pathToFileURL(resolve("apps/api/dist/app.js")).href
+    );
+    const {
+      createManualReports: builtManual,
+    }: { createManualReports: typeof createManualReports } = await import(
+      pathToFileURL(resolve("apps/api/dist/modules/manual-reports/service.js")).href
+    );
+    const module = builtManual(
+      unit,
+      { ...manualConfig, storage: { ...manualConfig.storage, root: ownedRoot } },
+      { identity, catalogs, trips: tripService },
+      now,
+    );
+    app = await builtApp({
+      identity,
+      manualReports: module,
+      trips: tripService,
+      checkReadiness: async () => true,
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw Error("SYNTHETIC_LISTENER_REQUIRED");
+    const port = address.port;
+    async function http(
+      path: string,
+      method = "GET",
+      headers: Record<string, string> = {},
+      body?: Buffer,
+    ) {
+      signal.throwIfAborted();
+      return new Promise<{
+        status: number;
+        headers: import("node:http").IncomingHttpHeaders;
+        body: Buffer;
+      }>((accept, reject) => {
+        const fail = () => reject(Error("SYNTHETIC_RECOVERY_HTTP_FAILURE"));
+        const client = request(
+          { host: "127.0.0.1", port, path, method, headers, agent: false },
+          (response) => {
+            const chunks: Buffer[] = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.once("error", fail);
+            response.once("aborted", fail);
+            response.once("end", () =>
+              accept({
+                status: response.statusCode ?? 0,
+                headers: response.headers,
+                body: Buffer.concat(chunks),
+              }),
+            );
+          },
+        );
+        clients.add(client);
+        client.once("close", () => clients.delete(client));
+        client.once("error", fail);
+        client.end(body);
+      });
+    }
+    const csrf = JSON.parse(
+      (await http("/api/v1/auth/csrf", "GET", { cookie: ownerCookie })).body.toString(),
+    ).data.token as string;
+    const key = newId(),
+      boundary = "synthetic-recovery-status-boundary";
+    const headers = {
+      cookie: ownerCookie,
+      origin: identityConfig.origin,
+      "x-csrf-token": csrf,
+      "idempotency-key": key,
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    };
+    const body = Buffer.concat([
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="synthetic.png"\r\nContent-Type: image/png\r\n\r\n`,
+      ),
+      pngBytes(),
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const first = await http("/api/v1/evidence", "POST", headers, body);
+    expect(first.status).toBe(202);
+    const image = JSON.parse(first.body.toString()).data as S["Evidence"];
+    const row = async () =>
+      (
+        await unit.run((tx) =>
+          unit.client(tx).select().from(manualEvidence).where(eq(manualEvidence.id, image.id)),
+        )
+      )[0];
+    const original = await row();
+    if (!original) throw Error("SYNTHETIC_UPLOAD_REQUIRED");
+    expect(original.state).toBe("ready");
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(manualEvidence)
+        .set({
+          state: "processing",
+          leaseToken: newId(),
+          leaseUntil: new Date(instant - 1).toISOString(),
+        })
+        .where(eq(manualEvidence.id, image.id)),
+    );
+    await verifyRoot(ownedRoot);
+    expect((await readdir(root)).includes("upload-recovery-status.offline")).toBe(false);
+    await rename(ownedRoot, heldRoot);
+    displaced = true;
+    const unavailable = await http("/api/v1/evidence", "POST", headers, body);
+    expect(unavailable.status).toBe(503);
+    expect(JSON.parse(unavailable.body.toString()).error).toMatchObject({
+      code: "DEPENDENCY_UNAVAILABLE",
+      retryable: true,
+    });
+    expect(unavailable.headers["retry-after"]).toBe("1");
+    expect(unavailable.headers["cache-control"]).toBe("no-store");
+    const retained = await row();
+    expect(retained).toMatchObject({
+      id: image.id,
+      state: "processing",
+      generation: original.generation,
+    });
+    expect(retained?.leaseToken).not.toBeNull();
+    expect(retained?.leaseUntil).toBe(
+      new Date(instant + manualConfig.storage.timeoutMs).toISOString(),
+    );
+    await verifyRoot(heldRoot);
+    const filename = `${image.id}.${original.generation}.blob`;
+    expect(await readdir(heldRoot)).toEqual([filename]);
+    expect(await readFile(join(heldRoot, filename))).toEqual(pngBytes());
+    expect((await readdir(root)).includes("upload-recovery-status")).toBe(false);
+    await rename(heldRoot, ownedRoot);
+    displaced = false;
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(manualEvidence)
+        .set({ leaseUntil: new Date(instant - 1).toISOString() })
+        .where(eq(manualEvidence.id, image.id)),
+    );
+    const recovered = await http("/api/v1/evidence", "POST", headers, body);
+    expect(recovered.status).toBe(202);
+    expect(JSON.parse(recovered.body.toString()).data).toMatchObject({
+      id: image.id,
+      state: "ready",
+    });
+    expect(await row()).toMatchObject({
+      id: image.id,
+      generation: original.generation,
+      state: "ready",
+      leaseToken: null,
+      leaseUntil: null,
+    });
+    expect(await unit.run((tx) => unit.client(tx).select().from(manualEvidence))).toHaveLength(1);
+    const commands = await unit.run((tx) => unit.client(tx).select().from(manualCommands));
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({ key, result: { id: image.id } });
+    const downloaded = await http(`/api/v1/evidence/${image.id}/content`, "GET", {
+      cookie: ownerCookie,
+    });
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.body).toEqual(pngBytes());
+    expect(
+      (await http(`/api/v1/evidence/${image.id}/content`, "GET", { cookie: otherCookie })).status,
+    ).toBe(404);
+    expect(await readdir(ownedRoot)).toEqual([filename]);
+  } finally {
+    try {
+      const closure = Promise.all(
+        [...clients].map(
+          (client) => new Promise<void>((accept) => client.once("close", () => accept())),
+        ),
+      );
+      stop();
+      await closure;
+      await app?.close();
+    } finally {
+      signal.removeEventListener("abort", stop);
+      if (displaced) {
+        await verifyRoot(heldRoot);
+        expect((await readdir(root)).includes("upload-recovery-status")).toBe(false);
+        await rename(heldRoot, ownedRoot);
+      }
+      await verifyRoot(ownedRoot);
+      await rm(ownedRoot, { recursive: true });
+    }
   }
 });

@@ -1570,7 +1570,19 @@ export function createManualReports(
         )[0] as Evidence;
       });
       if (row.state === "processing" && row.leaseUntil && row.leaseUntil <= at()) {
-        await recoverUpload(row.id, signal);
+        try {
+          await recoverUpload(row.id, signal);
+        } catch (error) {
+          if (
+            unknownCommit(error) ||
+            !(error instanceof BlobFailure) ||
+            "cause" in error ||
+            "statusCode" in error ||
+            !["unavailable", "cancelled"].includes(error.category)
+          )
+            throw error;
+          throw manualError(503, "DEPENDENCY_UNAVAILABLE");
+        }
         row = (
           await run((tx) =>
             c(tx).select().from(manualEvidence).where(eq(manualEvidence.id, row.id)),
