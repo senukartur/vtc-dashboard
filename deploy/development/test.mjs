@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, writeFile } from "node:fs/promises";
+import { runRehearsalChild } from "./rehearsal-child.mjs";
 
 const args = process.argv.slice(2);
 if (args.length > 1 || (args.length === 1 && args[0] !== "--manual-only"))
@@ -16,17 +16,41 @@ const network = `${project}-operator`;
 await mkdir(`.local/development/${identity}`, { recursive: true });
 let operation = 0;
 async function docker(args, timeout = 600000, allowFailure = false) {
-  const log = await open(`.local/development/${identity}/${operation++}.log`, "w", 0o600);
-  const code = await new Promise((accept) => {
-    const child = spawn("docker", args, {
+  const index = operation++;
+  const log = await open(`.local/development/${identity}/${index}.log`, "w", 0o600);
+  const startedAt = new Date().toISOString();
+  console.log(
+    JSON.stringify({
+      event: "deployment_rehearsal_child",
+      operation: index,
+      state: "start",
+      startedAt,
+      timeoutMs: timeout,
+    }),
+  );
+  let outcome;
+  try {
+    outcome = await runRehearsalChild("docker", args, {
       stdio: ["ignore", log.fd, log.fd],
       timeout,
-      windowsHide: true,
     });
-    child.on("error", () => accept(1));
-    child.on("close", (status) => accept(status ?? 1));
-  });
-  await log.close();
+  } finally {
+    await log.close();
+  }
+  const metadata = {
+    event: "deployment_rehearsal_child",
+    operation: index,
+    state: "settled",
+    startedAt,
+    ...outcome,
+  };
+  await writeFile(
+    `.local/development/${identity}/${index}.lifecycle.json`,
+    JSON.stringify(metadata) + "\n",
+    { mode: 0o600 },
+  );
+  console.log(JSON.stringify(metadata));
+  const code = outcome.exitCode;
   if (code !== 0 && !allowFailure) throw new Error("REHEARSAL_OPERATION_FAILED");
   return code;
 }
@@ -79,7 +103,10 @@ try {
       `REHEARSAL_MODE=${mode}`,
       runner,
     ],
-    900000,
+    // FULL adds synthetic role/upgrade/recovery proofs: the observed aggregate
+    // reached dirty-migration at 876982ms before its 900000ms cutoff. Individual
+    // operation and production deadlines stay unchanged; manual mode retains its bound.
+    mode === "full" ? 1_000_000 : 900_000,
   );
   passed = true;
   console.log(
