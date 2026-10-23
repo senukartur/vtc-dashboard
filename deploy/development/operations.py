@@ -40,6 +40,77 @@ def digest(path):
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
+DIAGNOSTIC_BYTES = 65536
+MIGRATION_CODES = frozenset(['MIGRATION_EXECUTION_FAILED', 'MIGRATION_LOCK_UNAVAILABLE',
+    'MIGRATION_BASELINE_MISMATCH', 'MIGRATION_HISTORY_DRIFT', 'MIGRATION_RECOVERY_REQUIRED',
+    'INVALID_MIGRATION_ORDER', 'DATABASE_CONFIGURATION_MISSING', 'DATABASE_PORT_INVALID'])
+NATIVE_CODES = frozenset(['PROTOCOL_SEQUENCE_TIMEOUT', 'ETIMEDOUT', 'ER_LOCK_WAIT_TIMEOUT',
+    'ER_LOCK_DEADLOCK', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'PROTOCOL_CONNECTION_LOST',
+    'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'ER_CON_COUNT_ERROR',
+    'ER_TOO_MANY_USER_CONNECTIONS', 'ER_ACCESS_DENIED_ERROR', 'ER_DBACCESS_DENIED_ERROR',
+    'ER_BAD_DB_ERROR', 'ER_DUP_ENTRY', 'ER_NO_SUCH_TABLE', 'ER_TABLE_EXISTS_ERROR',
+    'ER_NO_REFERENCED_ROW_2', 'ER_ROW_IS_REFERENCED_2'])
+DATABASE_OPERATIONS = frozenset(['connection_open', 'session_configuration', 'session_charset',
+    'migration_lock', 'migration_baseline', 'migration_autocommit', 'migration_journal_create',
+    'migration_history_read', 'migration_journal_insert', 'migration_statement', 'migration_journal_finalize'])
+
+
+def migration_diagnostics(data):
+    records = []
+    if not isinstance(data, bytes):
+        return records
+    for line in data[-DIAGNOSTIC_BYTES:].splitlines()[-64:]:
+        if len(line) > 4096:
+            continue
+        try:
+            value = json.loads(line)
+        except (ValueError, UnicodeError, RecursionError):
+            continue
+        if not isinstance(value, dict) or value.get('event') != 'database.migration_failed':
+            continue
+        code = value.get('code')
+        record = {'code': code if isinstance(code, str) and code in MIGRATION_CODES else 'MIGRATION_EXECUTION_FAILED',
+                  'nativeCodes': []}
+        codes = value.get('nativeCodes')
+        if isinstance(codes, list):
+            for native in codes[:8]:
+                if isinstance(native, str) and native in NATIVE_CODES and native not in record['nativeCodes']:
+                    record['nativeCodes'].append(native)
+        context = value.get('databaseOperation')
+        if isinstance(context, dict) and isinstance(context.get('operation'), str) and context['operation'] in DATABASE_OPERATIONS:
+            deadline, elapsed = context.get('wireDeadlineMs'), context.get('elapsedMs')
+            if type(deadline) is int and 0 < deadline <= 9007199254740991 and type(elapsed) is int and 0 <= elapsed <= 9007199254740991:
+                record['databaseOperation'] = {'operation': context['operation'], 'wireDeadlineMs': deadline, 'elapsedMs': elapsed}
+        records.append(record)
+        if len(records) == 8:
+            break
+    return records
+
+
+def failed_child(outcome, started, timeout, error_file, stdout=b'', returncode=None):
+    # Only bounded private tails are retained. Public diagnostics reconstruct fixed fields.
+    streams = []
+    with open(error_file, 'rb') as source:
+        source.seek(0, os.SEEK_END)
+        source.seek(max(0, source.tell() - DIAGNOSTIC_BYTES))
+        streams.append(('stderr', source.read(DIAGNOSTIC_BYTES)))
+    streams.append(('stdout', stdout[-DIAGNOSTIC_BYTES:] if isinstance(stdout, bytes) else b''))
+    migrations = []
+    for name, content in streams:
+        path = BASE / f'state/last-failed-child.{name}'
+        with open(path, 'wb') as target:
+            os.chmod(path, 0o600)
+            target.write(content)
+        migrations.extend(migration_diagnostics(content))
+    record = {'event': 'operation_child_failed', 'outcome': outcome,
+              'exitCode': returncode if type(returncode) is int and returncode >= 0 else None,
+              'signal': -returncode if type(returncode) is int and returncode < 0 else None,
+              'elapsedMs': round((time.monotonic() - started) * 1000),
+              'deadlineMs': round(timeout * 1000), 'migrations': migrations[:8]}
+    atomic_json(BASE / 'state/last-failed-child.json', record)
+    print(json.dumps(record), file=sys.stderr, flush=True)
+
+
 def run(args, *, revision=None, image_id=None, project=PROJECT, data=None, timeout=180, output=None):
     env = dict(os.environ, VTC_REVISION=revision or 'local')
     if image_id is not None:
@@ -47,16 +118,21 @@ def run(args, *, revision=None, image_id=None, project=PROJECT, data=None, timeo
         env['VTC_IMAGE_ID'] = image_id
     (BASE / 'state').mkdir(mode=0o700, exist_ok=True)
     error_file = BASE / 'state/last-child.stderr'
-    # Private, overwritten diagnostic only; never returned through the receiver or CI report.
+    started = time.monotonic()
     with open(error_file, 'wb') as errors:
         os.chmod(error_file, 0o600)
-        result = subprocess.run(args, cwd=BASE, env=env, input=data,
-                                stdout=output or subprocess.PIPE, stderr=errors,
-                                timeout=timeout, check=False)
+        try:
+            result = subprocess.run(args, cwd=BASE, env=env, input=data,
+                                    stdout=output or subprocess.PIPE, stderr=errors,
+                                    timeout=timeout, check=False)
+        except (subprocess.TimeoutExpired, OSError) as error:
+            errors.flush()
+            failed_child('timeout' if isinstance(error, subprocess.TimeoutExpired) else 'spawn_error',
+                         started, timeout, error_file, getattr(error, 'stdout', b''))
+            raise
     if result.returncode != 0:
-        # Later owned-container cleanup must not erase the failed child's private diagnostic.
-        shutil.copyfile(error_file, BASE / 'state/last-failed-child.stderr')
-        os.chmod(BASE / 'state/last-failed-child.stderr', 0o600)
+        failed_child('signal' if result.returncode < 0 else 'exit', started, timeout,
+                     error_file, result.stdout, result.returncode)
     require(result.returncode == 0, 'OPERATION_CHILD_FAILED')
     return result.stdout
 

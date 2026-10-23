@@ -32,6 +32,20 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
             self.assertGreaterEqual(record['sinceStartMs'], 0)
             self.assertRegex(record['startedAt'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
 
+    def test_initial_startup_phases_wrap_the_original_bounded_operations(self):
+        phases = {node.items[0].context_expr.args[0].value: node for node in self.source.body
+                  if isinstance(node, ast.With) and isinstance(node.items[0].context_expr, ast.Call)
+                  and isinstance(node.items[0].context_expr.func, ast.Name)
+                  and node.items[0].context_expr.func.id == 'rehearsal_phase'}
+        startup = phases['initial-database-startup'].body
+        migration = phases['initial-migration'].body
+        self.assertEqual(len(startup), 1)
+        self.assertEqual(len(migration), 1)
+        self.assertEqual(ast.literal_eval(startup[0].value.args[0]), ['up', '-d', '--wait', 'db'])
+        self.assertEqual(ast.literal_eval(migration[0].value.args[0]), ['run', '--rm', '--no-deps', 'migrate'])
+        self.assertEqual(next(k.value.value for k in startup[0].value.keywords if k.arg == 'timeout'), 240)
+        self.assertNotIn('timeout', [k.arg for k in migration[0].value.keywords])
+
     def test_failures_are_timed_rethrown_and_redacted(self):
         for error, category in [(AssertionError('private-evidence'), 'assertion'),
                                 (subprocess.TimeoutExpired('private-command', 1, output='private-output'), 'timeout'),

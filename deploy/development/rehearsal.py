@@ -282,8 +282,10 @@ def tick_process():
         raise SystemExit(1)
 
 
-compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
-compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+with rehearsal_phase('initial-database-startup'):
+    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
+with rehearsal_phase('initial-migration'):
+    compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
 ops.jobs_grants_locked(revision)
 # Exercise the known existing-installation SELECT revocation, not only fresh setup.
 sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")
