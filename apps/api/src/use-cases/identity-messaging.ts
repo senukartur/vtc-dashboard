@@ -34,6 +34,11 @@ import {
   invalidateTelemetryCredentials,
   type TelemetryConfig,
 } from "../modules/telemetry/service.js";
+import {
+  createTripDecisions,
+  type TripDecisions,
+  type TripDecisionsConfig,
+} from "../modules/trip-decisions/service.js";
 import { createTrips, type TripsConfig } from "../modules/trips/service.js";
 import { createQueue } from "../platform/jobs/queue.js";
 import {
@@ -55,6 +60,7 @@ export function composeIdentity(
   qualificationsConfig?: QualificationsConfig,
   eventsConfig?: EventsConfig,
   reconciliationConfig?: ReconciliationConfig,
+  tripDecisionsConfig?: TripDecisionsConfig,
 ) {
   let identity: Identity;
   let qualifications: Qualifications | undefined, reconciliation: Reconciliation | undefined;
@@ -64,6 +70,17 @@ export function composeIdentity(
     throw new Error("TELEMETRY_PREREQUISITES_REQUIRED");
   if (qualificationsConfig && !tripsConfig)
     throw new Error("QUALIFICATIONS_PREREQUISITES_REQUIRED");
+  let tripDecisions: TripDecisions | undefined;
+  if (
+    tripDecisionsConfig &&
+    (!tripsConfig ||
+      !qualificationsConfig ||
+      !manualConfig ||
+      !eventsConfig ||
+      !catalogConfig ||
+      !reconciliationConfig)
+  )
+    throw new Error("TRIP_DECISIONS_PREREQUISITES_REQUIRED");
   let admissions: Admissions | undefined;
   const messaging = mail
     ? createMessaging(
@@ -115,15 +132,37 @@ export function composeIdentity(
   const trips = tripsConfig
     ? createTrips(unit, tripsConfig, {
         identity,
-        ...(reconciliationConfig
+        ...(reconciliationConfig || tripDecisionsConfig
           ? {
               prepare: async (tx, ownerId, game) => {
                 if (!qualifications) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
                 await qualifications.prepareInTransaction(tx, [{ ownerId, game }]);
               },
               sourceStored: async (tx, tripId, sourceRecordId) => {
-                if (!reconciliation) throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
-                await reconciliation.refreshInTransaction(tx, tripId, sourceRecordId);
+                if (reconciliationConfig && !reconciliation)
+                  throw new Error("RECONCILIATION_COMPOSITION_INCOMPLETE");
+                await reconciliation?.refreshInTransaction(tx, tripId, sourceRecordId);
+                if (tripDecisionsConfig && !tripDecisions)
+                  throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                await tripDecisions?.assessInTransaction(tx, tripId);
+              },
+            }
+          : {}),
+        ...(tripDecisionsConfig
+          ? {
+              decisionProjection: (tx, id, actor) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                return tripDecisions.privateProjectionInTransaction(tx, id, actor);
+              },
+              correctionRequested: async (tx, id, requestId, actor, reason) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                await tripDecisions.correctionRequestedInTransaction(
+                  tx,
+                  id,
+                  requestId,
+                  actor,
+                  reason,
+                );
               },
             }
           : {}),
@@ -161,8 +200,38 @@ export function composeIdentity(
           trips,
           qualifications,
           ...(manualReports ? { manual: manualReports } : {}),
+          ...(tripDecisionsConfig
+            ? {
+                workflowChanged: async (tx, id) => {
+                  if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                  await tripDecisions.assessInTransaction(tx, id);
+                },
+              }
+            : {}),
         })
       : undefined;
+  const events = eventsConfig
+    ? createEvents(unit, eventsConfig, {
+        identity,
+        ...(catalogs ? { catalogs } : {}),
+        ...(tripDecisionsConfig
+          ? {
+              tripChanged: async (tx, eventId, generation) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                await tripDecisions.eventChangedInTransaction(tx, eventId, generation);
+              },
+            }
+          : {}),
+      })
+    : undefined;
+  if (tripDecisionsConfig && trips && qualifications && manualReports && events)
+    tripDecisions = createTripDecisions(unit, tripDecisionsConfig, {
+      identity,
+      trips,
+      qualifications,
+      manual: manualReports,
+      events,
+    });
   const jobsQueue = createQueue(
     unit,
     [
@@ -170,6 +239,7 @@ export function composeIdentity(
       ...(catalogs ? [catalogs.handler] : []),
       ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
       ...(reconciliation ? [reconciliation.handler] : []),
+      ...(tripDecisions ? [tripDecisions.handler] : []),
     ],
     [],
     undefined,
@@ -177,6 +247,7 @@ export function composeIdentity(
       ...(!messaging ? ["mail.deliver"] : []),
       ...(!catalogs ? ["catalog.import"] : []),
       ...(!reconciliation ? ["reconciliation.search"] : []),
+      ...(!tripDecisions ? ["trips.reevaluate"] : []),
       ...(!manualReports?.config.storage
         ? ["manual.evidence-delete", "manual.generation-delete"]
         : []),
@@ -186,11 +257,8 @@ export function composeIdentity(
   return {
     identity,
     ...(manualReports ? { manualReports } : {}),
-    ...(eventsConfig
-      ? {
-          events: createEvents(unit, eventsConfig, { identity, ...(catalogs ? { catalogs } : {}) }),
-        }
-      : {}),
+    ...(events ? { events } : {}),
+    ...(tripDecisions ? { tripDecisions } : {}),
     ...(qualifications ? { qualifications } : {}),
     ...(reconciliation ? { reconciliation } : {}),
     ...(telemetryConfig && trips && externalIdentities

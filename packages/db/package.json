@@ -55,6 +55,10 @@
     "./reconciliation-schema": {
       "types": "./dist/schema/reconciliation/index.d.ts",
       "default": "./dist/schema/reconciliation/index.js"
+    },
+    "./trip-decisions-schema": {
+      "types": "./dist/schema/trip-decisions/index.d.ts",
+      "default": "./dist/schema/trip-decisions/index.js"
     }
   },
   "files": [

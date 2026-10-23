@@ -185,7 +185,7 @@ for name, value in config['networks'].items():
 # One-shot proofs never compete with the serving app's fixed trusted-ingress IP.
 # These clones exist only in this synthetic allocation, with the same role files
 # and resource/security bounds. The codec needs no network or DB environment.
-for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs')]:
+for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs'), ('trip-decision-seed', 'migrate')]:
     proof = json.loads(json.dumps(config['services'][source]))
     proof['profiles'] = ['tools']
     proof['restart'] = 'no'
@@ -566,6 +566,46 @@ print('Manual restricted grants: runtime draft/upload/submission/review seam; se
 if mode == 'manual-only':
     print('Focused manual production rehearsal passed; baseline acceptance and remaining regressions NOT RUN', flush=True)
     sys.exit(0)
+# The default FULL rehearsal proves prepared adjudication grants only in this owned schema.
+# Baseline activation permissions are subtracted so cleanup revokes only this proof's deltas.
+sql("CREATE TABLE vtc.synthetic_trip_decision_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
+sql(f"INSERT INTO vtc.synthetic_trip_decision_guard VALUES (1,'{manual_proof_run}',NULL);")
+for role in ['runtime', 'jobs']:
+    sql(f"GRANT SELECT ON vtc.synthetic_trip_decision_guard TO 'vtc_{role}'@'%';")
+compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'trip-decision-seed',
+         'node', 'operations/trip-decisions-grants-smoke.mjs', 'seed'], revision=revision)
+prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
+baseline = json.loads((base / 'activation-grants.json').read_text())
+deltas = {}
+for role in ['runtime', 'jobs']:
+    combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
+    for table, permissions in prepared[role].items():
+        combined.setdefault(table, set()).update(permissions)
+    deltas[role] = {}
+    for table, permissions in combined.items():
+        permissions -= set(baseline[role].get(table, []))
+        if not permissions:
+            continue
+        assert re.fullmatch('[a-z_]+', table)
+        assert all(re.fullmatch(r'SELECT|INSERT|UPDATE|DELETE|UPDATE\([a-z_,]+\)', p) for p in permissions)
+        deltas[role][table] = sorted(permissions)
+        sql(f"GRANT {','.join(sorted(permissions))} ON vtc.{table} TO 'vtc_{role}'@'%';")
+try:
+    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
+        print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
+        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                 'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
+        print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+finally:
+    for role, tables in deltas.items():
+        for table, permissions in tables.items():
+            sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+    for role in ['runtime', 'jobs']:
+        sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
+    sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
+print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
     ops.tick_locked(revision, image_id)

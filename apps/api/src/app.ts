@@ -24,6 +24,8 @@ import { registerQualificationRoutes } from "./modules/qualifications/http.js";
 import type { Qualifications } from "./modules/qualifications/service.js";
 import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
 import type { TelemetryService } from "./modules/telemetry/service.js";
+import { registerTripDecisionRoutes } from "./modules/trip-decisions/http.js";
+import type { TripDecisions } from "./modules/trip-decisions/service.js";
 import { registerTripRoutes } from "./modules/trips/http.js";
 import type { Trips } from "./modules/trips/service.js";
 import { ingressTrust } from "./platform/http/ingress.js";
@@ -60,6 +62,7 @@ export interface AppOptions {
   qualifications?: Qualifications;
   events?: Events;
   reconciliation?: Reconciliation;
+  tripDecisions?: TripDecisions;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -189,6 +192,14 @@ export async function createApp(options: AppOptions) {
         scope,
         options.identity as Identity,
         options.reconciliation as Reconciliation,
+      ),
+    );
+  if (options.identity && options.tripDecisions)
+    await app.register((scope) =>
+      registerTripDecisionRoutes(
+        scope,
+        options.identity as Identity,
+        options.tripDecisions as TripDecisions,
       ),
     );
   if (options.webRoot) {

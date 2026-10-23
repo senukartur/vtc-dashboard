@@ -7,6 +7,7 @@ import type { RowDataPacket } from "mysql2/promise";
 import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
+  decisionsPriorFolder,
   fixtureRoot,
   guardedSettings,
   hasCode,
@@ -110,7 +111,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 14);
+      assert.equal(await runMigrations(settings), 15);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -166,7 +167,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 14);
+      assert.equal(await runMigrations(settings), 15);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -340,7 +341,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 14);
+      assert.equal(await runMigrations(guardedSettings()), 15);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_origin_shape','trip_fact_destination_shape','trip_fact_cargo_shape','trip_fact_adr_shape')",
@@ -430,13 +431,65 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 14);
+        assert.equal(await runMigrations(settings), 15);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
       });
     } finally {
       await reconciliationPhase("baseline_restore", "cleanup", () => connection.end());
+    }
+  },
+);
+
+await recoveryTest(
+  "trip decision DDL failure remains sticky after retained fact-shape alteration",
+  async () => {
+    const connection = await testConnection(),
+      settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reset(connection);
+      folder = await decisionsPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 14);
+      const journal = JSON.parse(
+          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+        ),
+        entry = journal.entries.at(-1);
+      assert.equal(entry.idx, 14);
+      const source = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
+      await writeFile(
+        join(folder, `${entry.tag}.sql`),
+        source +
+          "\n--> statement-breakpoint\nALTER TABLE synthetic_decision_missing ADD COLUMN fault INT;\n",
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const [columns] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trip_facts' AND COLUMN_NAME='resolution_revision_id'",
+      );
+      assert.equal(columns.length, 1);
+      const [history] = await connection.query<RowDataPacket[]>(
+        "SELECT state FROM _vtc_migrations ORDER BY version DESC LIMIT 1",
+      );
+      assert.equal(history[0]?.state, "applying");
+      await assert.rejects(runMigrations(settings, { folder }), /MIGRATION_RECOVERY_REQUIRED/);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+);
+await recoveryTest(
+  "trip decision partial-DDL recovery reconstructs only the known disposable baseline",
+  async () => {
+    const connection = await testConnection();
+    try {
+      await reset(connection);
+      assert.equal(await runMigrations(guardedSettings()), 15);
+      assert.equal(await runMigrations(guardedSettings()), 0);
+    } finally {
+      await connection.end();
     }
   },
 );

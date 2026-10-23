@@ -78,8 +78,23 @@ export async function reset(connection: Connection) {
     await connection.query(
       "ALTER TABLE manual_reports DROP FOREIGN KEY manual_report_current_revision_fk",
     );
+  const [resolutionPointer] = await connection.query<RowDataPacket[]>(
+    "SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='trip_facts_resolution_revision_id_trip_resolutions_id_fk'",
+  );
+  if (resolutionPointer.length)
+    await connection.query(
+      "ALTER TABLE trip_facts DROP FOREIGN KEY trip_facts_resolution_revision_id_trip_resolutions_id_fk",
+    );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   const tables = [
+    "trip_decision_commands",
+    "trip_proposal_reviews",
+    "trip_proposals",
+    "trip_decisions",
+    "trip_review_work",
+    "trip_event_associations",
+    "trip_decision_catchup",
+    "trip_resolutions",
     "reconciliation_searches",
     "reconciliation_commands",
     "reconciliation_history",
@@ -214,7 +229,7 @@ export async function eventsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -324,4 +339,8 @@ export async function manualPriorFolder(): Promise<string> {
 
 export async function reconciliationPriorFolder(): Promise<string> {
   return publishedPrefixFolder(13);
+}
+
+export async function decisionsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(14);
 }

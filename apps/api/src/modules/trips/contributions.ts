@@ -25,7 +25,7 @@ export interface ContributionChange {
 export interface Attribution {
   assignmentId: string | null;
   ruleVersionId: string | null;
-  attributionBasis: "actual_start" | "manual_confirmation" | "unresolved";
+  attributionBasis: "actual_start" | "manual_confirmation" | "staff_resolution" | "unresolved";
   attributionAt: string | null;
 }
 export interface ContributionContext {

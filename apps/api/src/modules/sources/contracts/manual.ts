@@ -170,6 +170,25 @@ export const manualAdapter: TripSourceAdapter = {
         "trailerTypeId",
         extended?.fields.trailerType,
       );
+    let adrCategory = unknown<PinnedEntity>("cargo_adr_unknown");
+    if (cargo.status === "known") {
+      const cargoFact = await context.catalogs?.pinnedInTransaction(
+        context.tx,
+        cargo.value.catalogRevisionId,
+        cargo.value.entityId,
+      );
+      if (cargoFact?.adrCategoryId)
+        adrCategory = await selected(
+          cargoFact.adrCategoryId,
+          "adr_category",
+          "catalog.cargo.adrCategoryId",
+          {
+            status: "resolved",
+            entityId: cargoFact.adrCategoryId,
+            catalogRevisionId: cargo.value.catalogRevisionId,
+          },
+        );
+    }
     const result: NormalizedTripEvidence = {
       sourceRecordId: id,
       factRevisionId: context.factRevisionId,
@@ -193,6 +212,7 @@ export const manualAdapter: TripSourceAdapter = {
       cargoDamageFraction: unknown("not_supported"),
       money: null,
       provenance: {
+        eventId: extended?.fields.eventId ?? null,
         reportId: p.reportId,
         revisionId: p.revisionId,
         revision: p.revision,
@@ -200,7 +220,7 @@ export const manualAdapter: TripSourceAdapter = {
       },
       wholeTripDistanceSupported: false,
       trailers: { complete: true, items: [trailer] },
-      adrCategory: unknown("cargo_adr_unknown"),
+      adrCategory,
       ruleContextComplete: false,
       reasonCodes: ["manual_review_required", "manual_times_unknown"],
     };

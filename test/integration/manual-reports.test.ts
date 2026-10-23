@@ -1084,7 +1084,7 @@ test("published resolved pins remain legacy-compatible and invalid null/cross-pi
       .client(tx)
       .select()
       .from(sourceMessages)
-      .where(eq(sourceMessages.id, fact.messageId));
+      .where(eq(sourceMessages.id, fact.messageId as string));
     if (!message) throw Error("SYNTHETIC_MESSAGE_REQUIRED");
     await unit
       .client(tx)
@@ -1106,7 +1106,7 @@ test("published resolved pins remain legacy-compatible and invalid null/cross-pi
       .client(tx)
       .select()
       .from(sourceMessages)
-      .where(eq(sourceMessages.id, fact.messageId));
+      .where(eq(sourceMessages.id, fact.messageId as string));
     if (!message) throw Error("SYNTHETIC_MESSAGE_REQUIRED");
     await unit
       .client(tx)

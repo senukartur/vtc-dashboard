@@ -134,6 +134,84 @@ export function reconciliationEvent(value: unknown): ReconciliationEvent {
     },
   };
 }
+export interface TripProposalReviewedEvent {
+  eventId: string;
+  type: "trip.proposal_reviewed";
+  schemaVersion: 1;
+  aggregate: { kind: "trip"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { proposalId: string; reviewedRevisionId: string };
+}
+export function tripProposalReviewedEvent(value: unknown): TripProposalReviewedEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["proposalId", "reviewedRevisionId"]);
+  if (e.type !== "trip.proposal_reviewed" || e.schemaVersion !== 1 || a.kind !== "trip")
+    throw new Error("INVALID_TRIP_PROPOSAL_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: "trip.proposal_reviewed",
+    schemaVersion: 1,
+    aggregate: { kind: "trip", id: applicationId(a.id as string), version: positive(a.version) },
+    occurredAt: utcIso(utcDateTime(e.occurredAt as string)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      proposalId: applicationId(d.proposalId as string),
+      reviewedRevisionId: applicationId(d.reviewedRevisionId as string),
+    },
+  };
+}
+export interface TripDecisionEvent {
+  eventId: string;
+  type: "trip.decision_changed";
+  schemaVersion: 1;
+  aggregate: { kind: "trip"; id: string; version: number };
+  occurredAt: string;
+  correlationId: string;
+  causationId: string | null;
+  data: { decisionId: string; contributionVersion: number };
+}
+export function tripDecisionEvent(value: unknown): TripDecisionEvent {
+  const e = closed(value, [
+      "eventId",
+      "type",
+      "schemaVersion",
+      "aggregate",
+      "occurredAt",
+      "correlationId",
+      "causationId",
+      "data",
+    ]),
+    a = closed(e.aggregate, ["kind", "id", "version"]),
+    d = closed(e.data, ["decisionId", "contributionVersion"]);
+  if (e.type !== "trip.decision_changed" || e.schemaVersion !== 1 || a.kind !== "trip")
+    throw new Error("INVALID_TRIP_DECISION_EVENT");
+  return {
+    eventId: applicationId(e.eventId as string),
+    type: "trip.decision_changed",
+    schemaVersion: 1,
+    aggregate: { kind: "trip", id: applicationId(a.id as string), version: positive(a.version) },
+    occurredAt: utcIso(utcDateTime(e.occurredAt as string)),
+    correlationId: applicationId(e.correlationId as string),
+    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
+    data: {
+      decisionId: applicationId(d.decisionId as string),
+      contributionVersion: positive(d.contributionVersion),
+    },
+  };
+}
 export interface TripEvent {
   eventId: string;
   type: "source.snapshot_stored" | "trip.lifecycle_changed" | "trip.facts_changed";
@@ -495,6 +573,8 @@ export function createOutbox(unit: UnitOfWork) {
     async append(
       tx: TxContext,
       input:
+        | TripProposalReviewedEvent
+        | TripDecisionEvent
         | ReconciliationEvent
         | AccessEvent
         | AdmissionsEvent
@@ -506,26 +586,30 @@ export function createOutbox(unit: UnitOfWork) {
     ): Promise<void> {
       const client = unit.client(tx);
       const e =
-        input.type === "trip.correction_recorded"
-          ? reconciliationEvent(input)
-          : input.type.startsWith("manual.")
-            ? manualEvent(input)
-            : input.type === "member.access_changed"
-              ? accessEvent(input)
-              : input.type === "catalog.published"
-                ? catalogEvent(input)
-                : [
-                      "source.snapshot_stored",
-                      "trip.lifecycle_changed",
-                      "trip.facts_changed",
-                    ].includes(input.type)
-                  ? tripEvent(input)
-                  : input.type.startsWith("qualification.") ||
-                      input.type === "promotion.review_required"
-                    ? qualificationEvent(input)
-                    : input.type.startsWith("event.")
-                      ? companyEvent(input)
-                      : admissionsEvent(input);
+        input.type === "trip.proposal_reviewed"
+          ? tripProposalReviewedEvent(input)
+          : input.type === "trip.decision_changed"
+            ? tripDecisionEvent(input)
+            : input.type === "trip.correction_recorded"
+              ? reconciliationEvent(input)
+              : input.type.startsWith("manual.")
+                ? manualEvent(input)
+                : input.type === "member.access_changed"
+                  ? accessEvent(input)
+                  : input.type === "catalog.published"
+                    ? catalogEvent(input)
+                    : [
+                          "source.snapshot_stored",
+                          "trip.lifecycle_changed",
+                          "trip.facts_changed",
+                        ].includes(input.type)
+                      ? tripEvent(input)
+                      : input.type.startsWith("qualification.") ||
+                          input.type === "promotion.review_required"
+                        ? qualificationEvent(input)
+                        : input.type.startsWith("event.")
+                          ? companyEvent(input)
+                          : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.

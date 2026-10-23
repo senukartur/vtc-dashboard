@@ -16,6 +16,10 @@ import {
   validateQualificationsConfig,
 } from "../../modules/qualifications/service.js";
 import { type TelemetryConfig, validateTelemetryConfig } from "../../modules/telemetry/service.js";
+import {
+  type TripDecisionsConfig,
+  validateTripDecisionsConfig,
+} from "../../modules/trip-decisions/service.js";
 import { type TripsConfig, validateTripsConfig } from "../../modules/trips/service.js";
 import { rootsOverlap } from "../blob-storage/roots.js";
 import { exactProxyAddress } from "../http/ingress.js";
@@ -353,7 +357,46 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let tripDecisions: TripDecisionsConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.TRIP_DECISIONS_ENABLED))
+    throw new Error("Invalid environment fields: TRIP_DECISIONS_ENABLED");
+  if (input.TRIP_DECISIONS_ENABLED === "true")
+    try {
+      if (
+        !identity ||
+        !trips ||
+        !qualifications ||
+        !manualReports ||
+        !events ||
+        !catalogs ||
+        !reconciliation
+      )
+        throw new Error();
+      tripDecisions = { key: input.TRIP_DECISIONS_KEY ?? "" };
+      validateTripDecisionsConfig(tripDecisions);
+      if (
+        [
+          identity.secret,
+          mail?.key,
+          catalogs.cursorKey,
+          trips.cursorKey,
+          qualifications.cursorKey,
+          telemetry?.cursorKey,
+          manualReports.key,
+          events.cursorKey,
+          reconciliation.key,
+        ].includes(tripDecisions.key) ||
+        (admissions &&
+          Buffer.from(tripDecisions.key, "hex").equals(Buffer.from(admissions.key, "base64url")))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: TRIP_DECISIONS_ENABLED, TRIP_DECISIONS_KEY, IDENTITY_ENABLED, TRIPS_ENABLED, QUALIFICATIONS_ENABLED, MANUAL_REPORTS_ENABLED, EVENTS_ENABLED, CATALOGS_ENABLED, RECONCILIATION_ENABLED",
+      );
+    }
   return {
+    tripDecisions,
     reconciliation,
     manualReports,
     events,

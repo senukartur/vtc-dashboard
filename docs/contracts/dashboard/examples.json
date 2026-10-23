@@ -5200,6 +5200,90 @@
           "requestId": "synthetic-manual-contract"
         }
       }
+    },
+    {
+      "id": "decideTripProposal:reject-before-first-decision",
+      "operationId": "decideTripProposal",
+      "status": 200,
+      "request": {
+        "decision": "reject",
+        "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+        "reason": "Fictional insufficient evidence"
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "tripId": "41000000-0000-4000-8000-000000000001",
+          "kind": "resolution",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "authorId": "41000000-0000-4000-8000-000000000001",
+          "baseTripVersion": 1,
+          "baseFactRevisionId": null,
+          "reason": "Fictional supported correction",
+          "evidence": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "state": "processing",
+              "contentType": "synthetic-example",
+              "byteLength": 1,
+              "originalName": "synthetic-example"
+            }
+          ],
+          "changes": {
+            "actualDistanceM": "200000"
+          },
+          "state": "rejected",
+          "review": {
+            "decision": "reject",
+            "reviewedRevisionId": "41000000-0000-4000-8000-000000000001",
+            "reason": "Fictional insufficient evidence",
+            "reviewerId": "41000000-0000-4000-8000-000000000002",
+            "decidedAt": "2026-10-17T12:00:00.000Z"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getTripProposal:event-association",
+      "operationId": "getTripProposal",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "tripId": "41000000-0000-4000-8000-000000000001",
+          "kind": "correction_request",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "authorId": "41000000-0000-4000-8000-000000000001",
+          "baseTripVersion": 1,
+          "baseFactRevisionId": null,
+          "reason": "Fictional supported distance correction",
+          "evidence": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "state": "processing",
+              "contentType": "synthetic-example",
+              "byteLength": 1,
+              "originalName": "synthetic-example"
+            }
+          ],
+          "changes": null,
+          "state": "pending",
+          "review": null,
+          "eventAssociation": {
+            "eventId": "60000000-0000-4000-8000-000000000001",
+            "eventRevisionId": "60000000-0000-4000-8000-000000000002",
+            "attendanceRevisionId": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
     }
   ]
 }

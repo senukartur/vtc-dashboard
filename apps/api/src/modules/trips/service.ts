@@ -37,6 +37,7 @@ import type {
 } from "../sources/contracts/evidence.js";
 import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
+import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups } from "./groups.js";
@@ -52,6 +53,14 @@ export function validateTripsConfig(config: TripsConfig) {
 }
 export interface TripsPorts {
   prepare?: (tx: TxContext, ownerId: string, game: "ets2" | "ats") => Promise<void>;
+  decisionProjection?: (tx: TxContext, id: string, actor: Actor) => Promise<S["TripPrivate"]>;
+  correctionRequested?: (
+    tx: TxContext,
+    tripId: string,
+    requestId: string,
+    actor: Actor,
+    reason: string,
+  ) => Promise<void>;
   sourceStored?: (tx: TxContext, tripId: string, sourceRecordId: string) => Promise<void>;
   identity: Pick<
     Identity,
@@ -487,6 +496,7 @@ export function createTrips(
     );
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
     if (!newer && conflicts.length === 0) {
+      await c(tx).update(trips).set({ assessmentPending: true }).where(eq(trips.id, tripId));
       if (provider !== "manual") await ports.sourceStored?.(tx, tripId, messageId);
       return { tripId, sourceRecordId: messageId, firstReceivedAt, duplicate: false };
     }
@@ -495,7 +505,8 @@ export function createTrips(
         .update(sourceTrips)
         .set({ latestRevision: String(key.revision) })
         .where(eq(sourceTrips.id, sourceTripId));
-    const confirmed = trip.decision === "accepted";
+    const confirmed =
+      trip.decision === "accepted" || (trip.decision === "rejected" && provider !== "manual");
     const blocked = confirmed || conflicts.length > 0;
     const version = previous ? trip.version + 1 : trip.version;
     const reasons = [
@@ -523,6 +534,7 @@ export function createTrips(
       .set({
         ...update,
         version,
+        assessmentPending: true,
         reviewReasons: reasons,
         reviewHold: trip.reviewHold || conflicts.length > 0 || confirmed,
         correctionPending: trip.correctionPending || confirmed,
@@ -569,11 +581,13 @@ export function createTrips(
     const facts = await factsRepository.read(
       tx,
       rows.flatMap((row) => (row.currentFactId ? [row.currentFactId] : [])),
+      true,
     );
     const membership = rows.length
       ? await groups.members(
           tx,
           rows.map((row) => row.id),
+          "share",
         )
       : [];
     const sources = await c(tx)
@@ -686,12 +700,22 @@ export function createTrips(
   return {
     config,
     groups,
+    adjudication: createTripAdjudication(unit, ports.catalogs),
     reconciliation: createTripReconciliation(unit, now),
     prepareSourceInTransaction: async (tx: TxContext, owner: string, game: "ets2" | "ats") => {
       await ports.prepare?.(tx, owner, game);
     },
     manualStoredInTransaction: async (tx: TxContext, id: string, sourceRecordId: string) => {
       await ports.sourceStored?.(tx, id, sourceRecordId);
+    },
+    async correctionRequestedInTransaction(
+      tx: TxContext,
+      id: string,
+      requestId: string,
+      actor: Actor,
+      reason: string,
+    ) {
+      await ports.correctionRequested?.(tx, id, requestId, actor, reason);
     },
     async summaryInTransaction(tx: TxContext, tripId: string, locale: "en" | "ru") {
       const row = await groups.resolve(tx, tripId);
@@ -893,6 +917,8 @@ export function createTrips(
         if (!row || (!privateRead && row.decision !== "accepted")) throw identityError(404);
         const [summary] = await summaries(tx, [row], current.locale);
         if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
+        if (privateRead && ports.decisionProjection)
+          return ports.decisionProjection(tx, row.id, actor);
         const projection = privateRead
           ? (await ports.manualProjection?.(tx, [row.id]))?.get(row.id)
           : undefined;

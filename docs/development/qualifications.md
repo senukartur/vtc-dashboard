@@ -51,3 +51,5 @@ The single additive migration contains structural bootstrap and continuity-fence
 ## VTC-026 preparation and replacement
 
 [Reconciliation](reconciliation.md) calls the owning `prepareInTransaction` facade before mutating canonical rows. It locks company/current members and qualification assignments in established order. Apply/reverse then calls `replaceContributionsInTransaction` with current locked facts/group membership, captured authoritative manual confirmation and new monotonic contribution versions. Alias credits disappear atomically; restored independent credits recompute historical periods and promotion reviews without automatic demotion.
+
+VTC-029 consumes historical lookup and synchronous replacement through the [decision coordinator](trip-decisions.md). Staff-supported telemetry time preserves explicit `staff_resolution` attribution; first manual acceptance captures a stable confirmation instant. Current rule/assignment support participates in reviewed command guards; corrections keep promotion-proof alerts without automatic demotion.

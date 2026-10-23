@@ -24,7 +24,7 @@ export { and, asc, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from "drizz
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const provider = (name: string) => mysqlEnum(name, ["ets2telemetry", "manual"]);
 const basis = (name: string) =>
-  mysqlEnum(name, ["event", "checkpoint", "last-known", "receipt", "unknown"]);
+  mysqlEnum(name, ["event", "checkpoint", "last-known", "receipt", "unknown", "staff-resolution"]);
 const medium = customType<{ data: string; driverData: string }>({ dataType: () => "mediumtext" });
 
 export const trips = mysqlTable(
@@ -47,6 +47,8 @@ export const trips = mysqlTable(
       "accepted",
       "rejected",
     ]).notNull(),
+    adjudicationVersion: int("adjudication_version", { unsigned: true }).notNull().default(0),
+    assessmentPending: boolean("assessment_pending").notNull().default(true),
     correctionPending: boolean("correction_pending").notNull().default(false),
     currentFactId: idColumn("current_fact_id"),
     actualStart: utcColumn("actual_start"),
@@ -59,6 +61,7 @@ export const trips = mysqlTable(
   },
   (t) => [
     index("trip_group_members").on(t.aliasOf, t.id),
+    index("trip_assessment_pending").on(t.assessmentPending, t.aliasOf, t.id),
     index("trip_match_owner").on(t.ownerId, t.game, t.aliasOf, t.id),
     check("trip_alias_distinct", sql`${t.aliasOf} IS NULL OR ${t.aliasOf} <> ${t.id}`),
     index("trip_company_page").on(t.decision, t.createdAt, t.id),
@@ -132,9 +135,19 @@ export const tripFacts = mysqlTable(
   "trip_facts",
   {
     id: idColumn("id").primaryKey(),
-    messageId: idColumn("message_id")
-      .notNull()
-      .references(() => sourceMessages.id, { onDelete: "restrict" }),
+    kind: mysqlEnum("kind", ["source", "derived"]).notNull().default("source"),
+    baseFactId: idColumn("base_fact_id").references((): AnyMySqlColumn => tripFacts.id, {
+      onDelete: "restrict",
+    }),
+    resolutionRevisionId: idColumn("resolution_revision_id").references(
+      (): AnyMySqlColumn => tripResolutions.id,
+      { onDelete: "restrict" },
+    ),
+    derivedSourceMessageId: idColumn("derived_source_message_id").references(
+      () => sourceMessages.id,
+      { onDelete: "restrict" },
+    ),
+    messageId: idColumn("message_id").references(() => sourceMessages.id, { onDelete: "restrict" }),
     canonicalTripId: idColumn("canonical_trip_id")
       .notNull()
       .references(() => trips.id, { onDelete: "restrict" }),
@@ -178,6 +191,11 @@ export const tripFacts = mysqlTable(
     evidence: json("evidence").$type<unknown>().notNull(),
   },
   (t) => [
+    check(
+      "trip_fact_provenance_shape",
+      sql`(${t.kind} = 'source' AND ${t.messageId} IS NOT NULL AND ${t.baseFactId} IS NULL AND ${t.resolutionRevisionId} IS NULL AND ${t.derivedSourceMessageId} IS NULL) OR (${t.kind} = 'derived' AND ${t.messageId} IS NULL AND ${t.baseFactId} IS NOT NULL AND ${t.resolutionRevisionId} IS NOT NULL AND ${t.derivedSourceMessageId} IS NOT NULL AND ${t.baseFactId} <> ${t.id})`,
+    ),
+    uniqueIndex("trip_fact_resolution").on(t.resolutionRevisionId),
     uniqueIndex("trip_fact_message").on(t.messageId),
     uniqueIndex("trip_fact_catalog_scope").on(t.id, t.catalogRevisionId),
     uniqueIndex("trip_fact_adapter_scope").on(t.id, t.adapterVersion),
@@ -242,11 +260,11 @@ export const tripFacts = mysqlTable(
     ),
     check(
       "trip_fact_start_supported",
-      sql`${t.startVerified} = 0 OR (${t.startBasis} = 'event' AND ${t.startUtc} IS NOT NULL)`,
+      sql`${t.startVerified} = 0 OR ((${t.startBasis} = 'event' OR (${t.kind} = 'derived' AND ${t.startBasis} = 'staff-resolution')) AND ${t.startUtc} IS NOT NULL)`,
     ),
     check(
       "trip_fact_end_supported",
-      sql`${t.endVerified} = 0 OR (${t.endBasis} = 'event' AND ${t.endUtc} IS NOT NULL)`,
+      sql`${t.endVerified} = 0 OR ((${t.endBasis} = 'event' OR (${t.kind} = 'derived' AND ${t.endBasis} = 'staff-resolution')) AND ${t.endUtc} IS NOT NULL)`,
     ),
     check(
       "trip_fact_quantities",
@@ -340,6 +358,7 @@ export const tripContributions = mysqlTable(
       "actual_start",
       "manual_confirmation",
       "unresolved",
+      "staff_resolution",
     ]).notNull(),
     attributionAt: utcColumn("attribution_at"),
     actualDistanceM: decimalColumn("actual_distance_m"),
@@ -378,3 +397,21 @@ export const tripContributionHistory = mysqlTable(
   },
   (t) => [primaryKey({ columns: [t.tripId, t.version] })],
 );
+
+// Immutable, Trips-owned derivation provenance. Acceptance proposals reference this revision.
+export const tripResolutions = mysqlTable("trip_resolutions", {
+  id: idColumn("id").primaryKey(),
+  tripId: idColumn("trip_id")
+    .notNull()
+    .references(() => trips.id, { onDelete: "restrict" }),
+  baseFactId: idColumn("base_fact_id")
+    .notNull()
+    .references((): AnyMySqlColumn => tripFacts.id, { onDelete: "restrict" }),
+  authorId: idColumn("author_id")
+    .notNull()
+    .references(() => membership.userId, { onDelete: "restrict" }),
+  changes: json("changes").$type<unknown>().notNull(),
+  evidenceIds: json("evidence_ids").$type<string[]>().notNull(),
+  reason: varchar("reason", { length: 2048 }).notNull(),
+  createdAt: utcColumn("created_at").notNull(),
+});
