@@ -240,14 +240,15 @@ export function createQualifications(
     manualConfirmedAt?: string,
   ) {
     let instant: string | null = null,
-      basis: "actual_start" | "manual_confirmation" | "unresolved" = "unresolved";
+      basis: "actual_start" | "manual_confirmation" | "staff_resolution" | "unresolved" =
+        "unresolved";
     if (evidence.provider === "manual") {
       if (manualConfirmedAt) instant = date(manualConfirmedAt);
       basis = "manual_confirmation";
       if (instant && instant > at()) throw identityError(422);
     } else if (evidence.start.verifiedActual && evidence.start.utc) {
       instant = date(evidence.start.utc);
-      basis = "actual_start";
+      basis = evidence.start.basis === "staff-resolution" ? "staff_resolution" : "actual_start";
     }
     if (!instant)
       return {
@@ -283,7 +284,7 @@ export function createQualifications(
         .select()
         .from(qualificationPromotions)
         .where(eq(qualificationPromotions.sourceAssignmentId, id))
-        .for("update");
+        .for("share");
       if (!proof) continue;
       const totals = await ports.trips.contributions.totals(tx, id),
         required = !evaluateQualificationProgress(
@@ -669,6 +670,36 @@ export function createQualifications(
       });
     },
     lookupInTransaction: lookup,
+    async tripAssignmentsInTransaction(
+      tx: TxContext,
+      ownerId: string,
+      selectedGame: Game,
+      after: { id: string; time: string | null } | null = null,
+      limit = 101,
+    ) {
+      const rows = await c(tx)
+        .select()
+        .from(qualificationAssignments)
+        .where(
+          and(
+            eq(qualificationAssignments.userId, ownerId),
+            eq(qualificationAssignments.game, selectedGame),
+            after?.time
+              ? or(
+                  lt(qualificationAssignments.assignedAt, after.time),
+                  and(
+                    eq(qualificationAssignments.assignedAt, after.time),
+                    lt(qualificationAssignments.id, after.id),
+                  ),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
+        .limit(limit)
+        .for("share");
+      return rows.map((row) => ({ ...assignmentDto(row), endedAt: row.endedAt }));
+    },
     async replaceContributionsInTransaction(tx: TxContext, changes: readonly ContributionChange[]) {
       if (!changes.length || changes.length > 100) throw identityError(422);
       try {

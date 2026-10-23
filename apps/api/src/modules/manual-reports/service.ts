@@ -688,6 +688,33 @@ export function createManualReports(
     }
     return { items, nextCursor };
   }
+  async function correctionRequestForReview(
+    tx: TxContext,
+    actor: Actor,
+    tripId: string,
+    requestId: string,
+    pending = true,
+  ) {
+    await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
+    const members = await ports.trips.groups.members(tx, [tripId], true);
+    const [request] = await c(tx)
+      .select()
+      .from(manualCorrectionRequests)
+      .where(
+        and(
+          eq(manualCorrectionRequests.id, applicationId(requestId)),
+          inArray(
+            manualCorrectionRequests.tripId,
+            members.map((t) => t.id),
+          ),
+        ),
+      )
+      .for("update");
+    if (!request || !members.some((t) => t.ownerId === request.ownerId)) throw manualError(404);
+    if (pending && request.status !== "pending") throw manualError(409, "VERSION_CONFLICT");
+    await gateTripEvidence(tx, tripId);
+    return request;
+  }
   async function correctionDtos(
     tx: TxContext,
     rows: (typeof manualCorrectionRequests.$inferSelect)[],
@@ -1425,6 +1452,13 @@ export function createManualReports(
           const version = await ports.trips.manualPendingInTransaction(tx, id, true);
           await auditWrite(tx, actor, id, true);
           await emit(tx, "manual.correction_requested", id, version, requestId, id);
+          await ports.trips.correctionRequestedInTransaction(
+            tx,
+            id,
+            requestId,
+            actor,
+            value.reason,
+          );
           return { kind: "correction", id: requestId, version };
         },
         async (tx, r) => {
@@ -1718,6 +1752,142 @@ export function createManualReports(
         if (reserved.replay) await blobs.remove(reserved.key);
       }
     },
+    async reviewContextInTransaction(tx: TxContext, tripId: string) {
+      const members = await ports.trips.groups.members(tx, [tripId], true),
+        ids = members.map((t) => t.id);
+      const reports = await c(tx)
+        .select()
+        .from(manualReports)
+        .where(inArray(manualReports.tripId, ids))
+        .orderBy(manualReports.id)
+        .for("share");
+      const revisions = reports.length
+        ? await c(tx)
+            .select()
+            .from(manualRevisions)
+            .where(
+              inArray(
+                manualRevisions.id,
+                reports.flatMap((r) => (r.currentRevisionId ? [r.currentRevisionId] : [])),
+              ),
+            )
+            .for("share")
+        : [];
+      await gateTripEvidence(tx, tripId);
+      return {
+        reports: reports.map((r) => ({
+          id: r.id,
+          ownerId: r.ownerId,
+          revisionId: r.currentRevisionId,
+        })),
+        revisions: revisions.map(revisionDto),
+      };
+    },
+    async resolutionEvidenceInTransaction(
+      tx: TxContext,
+      tripId: string,
+      ownerId: string,
+      ids: string[],
+      validateReady = true,
+    ) {
+      if (ids.length > config.maxFilesPerReport || new Set(ids).size !== ids.length)
+        throw manualError(422);
+      const members = await ports.trips.groups.members(tx, [tripId], true);
+      const refs = ids.length
+        ? await c(tx)
+            .select()
+            .from(manualEvidenceReferences)
+            .where(inArray(manualEvidenceReferences.evidenceId, ids))
+            .for("share")
+        : [];
+      if (
+        ids.some(
+          (id) => !refs.some((r) => r.evidenceId === id && members.some((t) => t.id === r.tripId)),
+        )
+      )
+        throw manualError(422);
+      if (ids.length && validateReady) await evidenceGate(tx, ownerId, ids, true);
+      return ids.length
+        ? (
+            await c(tx)
+              .select()
+              .from(manualEvidence)
+              .where(inArray(manualEvidence.id, ids))
+              .for("share")
+          ).map(evidenceDto)
+        : [];
+    },
+    async hasPendingCorrectionsInTransaction(tx: TxContext, tripId: string) {
+      const members = await ports.trips.groups.members(tx, [tripId], true);
+      const [pending] = await c(tx)
+        .select({ id: manualCorrectionRequests.id })
+        .from(manualCorrectionRequests)
+        .where(
+          and(
+            inArray(
+              manualCorrectionRequests.tripId,
+              members.map((t) => t.id),
+            ),
+            eq(manualCorrectionRequests.status, "pending"),
+          ),
+        )
+        .limit(1)
+        .for("share");
+      return !!pending;
+    },
+    correctionRequestInTransaction: correctionRequestForReview,
+    async completeCorrectionInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      tripId: string,
+      requestId: string,
+      status: "resolved" | "declined",
+      explanation: string,
+      decidedAt: string,
+    ) {
+      const request = await correctionRequestForReview(tx, actor, tripId, requestId, false);
+      if (request.status !== "pending") return false;
+      if (!explanation.trim() || explanation.length > 4000) throw manualError(422);
+      const instant = utcIso(utcDateTime(decidedAt));
+      if (instant > at()) throw manualError(422);
+      await c(tx)
+        .update(manualCorrectionRequests)
+        .set({ status })
+        .where(eq(manualCorrectionRequests.id, request.id));
+      await c(tx).insert(manualCorrectionHistory).values({
+        id: newId(),
+        requestId: request.id,
+        status,
+        reason: explanation.trim(),
+        recordedAt: instant,
+      });
+      return true;
+    },
+    async groupDecisionInTransaction(tx: TxContext, tripId: string, decisionAt: string | null) {
+      await gateTripEvidence(tx, tripId);
+      for (const member of await ports.trips.groups.members(tx, [tripId], true)) {
+        const [old] = await c(tx)
+          .select()
+          .from(manualReviewGates)
+          .where(eq(manualReviewGates.tripId, member.id))
+          .for("update");
+        if (decisionAt && old?.latestDecisionAt && decisionAt < old.latestDecisionAt)
+          throw manualError(409);
+        await c(tx)
+          .insert(manualReviewGates)
+          .values({
+            tripId: member.id,
+            latestDecisionAt: decisionAt ?? old?.latestDecisionAt ?? null,
+            underReview: decisionAt === null,
+          })
+          .onDuplicateKeyUpdate({
+            set: {
+              latestDecisionAt: decisionAt ?? old?.latestDecisionAt ?? null,
+              underReview: decisionAt === null,
+            },
+          });
+      }
+    },
     validateSourceInTransaction: validateSource,
     projectionInTransaction: projection,
     async reconciliationGuardInTransaction(tx: TxContext, tripIds: string[], actorId?: string) {
@@ -1915,23 +2085,29 @@ export function createManualReports(
       { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
     >();
     if (!tripIds.length) return result;
-    const members = await ports.trips.groups.members(tx, tripIds);
+    const members = await ports.trips.groups.members(tx, tripIds, "share");
     const group = new Map(members.map((t) => [t.id, t.aliasOf ?? t.id]));
     const originalIds = members.map((t) => t.id);
     const reports = await c(tx)
       .select()
       .from(manualReports)
       .where(inArray(manualReports.tripId, originalIds))
-      .orderBy(desc(manualReports.createdAt), desc(manualReports.id));
+      .orderBy(desc(manualReports.createdAt), desc(manualReports.id))
+      .for("share");
     const ids = reports.flatMap((r) => (r.currentRevisionId ? [r.currentRevisionId] : [])),
       revisions = ids.length
-        ? await c(tx).select().from(manualRevisions).where(inArray(manualRevisions.id, ids))
+        ? await c(tx)
+            .select()
+            .from(manualRevisions)
+            .where(inArray(manualRevisions.id, ids))
+            .for("share")
         : [],
       refs = await c(tx)
         .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
         .from(manualEvidenceReferences)
         .innerJoin(manualEvidence, eq(manualEvidence.id, manualEvidenceReferences.evidenceId))
-        .where(inArray(manualEvidenceReferences.tripId, originalIds));
+        .where(inArray(manualEvidenceReferences.tripId, originalIds))
+        .for("share");
     for (const tripId of tripIds) {
       const report = reports.find((r) => group.get(r.tripId) === group.get(tripId)),
         revision = report ? revisions.find((r) => r.id === report.currentRevisionId) : null;

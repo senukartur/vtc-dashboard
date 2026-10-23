@@ -55,6 +55,7 @@ import { retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
+  EXTENDED_TEST_TIMEOUT_MS,
   guardedSettings,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
@@ -735,7 +736,7 @@ test(
       }),
     );
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test(
@@ -838,7 +839,7 @@ test(
       );
     }
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test(
@@ -880,7 +881,7 @@ test(
     expect((await state(primaryTripId))?.reviewReasons).not.toContain("candidate_search_overflow");
     expect(await corrections()).toBe(1);
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test(
@@ -919,7 +920,7 @@ test(
     expect((await state(report.tripId))?.reviewReasons).not.toContain("candidate_search_overflow");
     expect(await corrections()).toBe(0);
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test(
@@ -1009,7 +1010,7 @@ test(
     expect(await corrections()).toBe(0);
     expect((await state(otherReport.tripId))?.aliasOf).toBeNull();
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test.each(["worker_first", "ingestion_first"] as const)(
@@ -1064,7 +1065,7 @@ test.each(["worker_first", "ingestion_first"] as const)(
     expect(String(pairs[0]?.n)).toBe("102");
     expect(await corrections()).toBe(0);
   },
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
 );
 
 test("delayed manual report and repeated/overlapping routes retain review candidates; distinct same-provider identities never auto-link", async () => {

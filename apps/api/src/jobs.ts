@@ -40,8 +40,10 @@ await ownedCli(async () => {
           config.qualifications,
           config.events,
           config.reconciliation,
+          config.tripDecisions,
         )
       : undefined;
+    if (mode === "run") await composed?.tripDecisions?.catchup();
     const messaging = composed?.messaging;
     const admissionsCleanup =
       mode === "run" ? await cleanupAdmissions(unit, !!composed?.admissions) : "not_run";
@@ -90,6 +92,7 @@ await ownedCli(async () => {
         "manual.evidence-delete",
         "manual.generation-delete",
         "reconciliation.search",
+        "trips.reevaluate",
       ]);
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(

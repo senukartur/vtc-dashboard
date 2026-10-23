@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyMySqlColumn,
+  boolean,
   check,
   foreignKey,
   index,
@@ -25,6 +26,10 @@ export const events = mysqlTable(
     id: idColumn("id").primaryKey(),
     version: int("version", { unsigned: true }).notNull(),
     changeSequence: int("change_sequence", { unsigned: true }).notNull(),
+    tripAssessmentPending: boolean("trip_assessment_pending").notNull().default(false),
+    tripAssessmentGeneration: int("trip_assessment_generation", { unsigned: true })
+      .notNull()
+      .default(0),
     attendanceVersion: int("attendance_version", { unsigned: true }).notNull(),
     currentRevisionId: idColumn("current_revision_id"),
     game: mysqlEnum("game", ["ets2", "ats"]).notNull(),
@@ -35,6 +40,7 @@ export const events = mysqlTable(
   },
   (t) => [
     index("event_member_page").on(t.startsAt, t.id),
+    index("event_trip_assessment_pending").on(t.tripAssessmentPending, t.id),
     index("event_public_page").on(t.visibility, t.startsAt, t.id),
     check(
       "event_versions_positive",

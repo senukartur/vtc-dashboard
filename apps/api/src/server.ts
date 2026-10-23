@@ -29,6 +29,7 @@ try {
             config.qualifications,
             config.events,
             config.reconciliation,
+            config.tripDecisions,
           ),
         }
       : {}),

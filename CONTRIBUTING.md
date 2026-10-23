@@ -129,3 +129,5 @@ The [qualification guide](docs/development/qualifications.md) documents opt-in V
 [Events backend APIs](docs/development/events.md) are opt-in through `EVENTS_ENABLED` and an independent cursor key. They provide public/member views, voluntary RSVP and separate staff actual attendance; VTC-035 owns event UI and VTC-036 owns notifications/reminders.
 
 VTC-026 reconciliation is disabled by default. Its independent key, explicit optional rule settings, additive migration, lock/reversal rules and pending activation gates are documented in [reconciliation](docs/development/reconciliation.md). Use the isolated Linux launcher for MySQL and filesystem verification.
+
+[VTC-029 trip decisions](docs/development/trip-decisions.md) adds opt-in canonical adjudication/review, evidence-backed corrections, historical contribution replacement and bounded event/catch-up work. Read its migration/grant and post-activation rollback boundary before enabling `TRIP_DECISIONS_ENABLED`; source merge does not activate it.

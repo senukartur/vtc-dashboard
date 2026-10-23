@@ -10,7 +10,7 @@ export type Fact<T> =
 export type PinnedEntity = { entityId: string; catalogRevisionId: string; factRevisionId: string };
 export type ReportedTime = {
   utc: string | null;
-  basis: "event" | "checkpoint" | "last-known" | "receipt" | "unknown";
+  basis: "event" | "checkpoint" | "last-known" | "receipt" | "unknown" | "staff-resolution";
   verifiedActual: boolean;
 };
 export interface NormalizedTripEvidence {

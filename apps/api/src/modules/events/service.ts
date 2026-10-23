@@ -60,6 +60,7 @@ interface Ports {
   >;
   catalogs?: Pick<Catalogs, "eventReferencesInTransaction">;
   outbox?: ReturnType<typeof createOutbox>;
+  tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
 }
 export function createEvents(
   unit: UnitOfWork,
@@ -174,7 +175,8 @@ export function createEvents(
     const [row] = await c(tx)
       .select()
       .from(eventRevisions)
-      .where(eq(eventRevisions.id, applicationId(id)));
+      .where(eq(eventRevisions.id, applicationId(id)))
+      .for("share");
     if (!row) throw new Error("EVENT_REVISION_MISSING");
     return row;
   }
@@ -251,12 +253,14 @@ export function createEvents(
     const [row] = await c(tx)
       .select()
       .from(eventAttendances)
-      .where(and(eq(eventAttendances.eventId, eventId), eq(eventAttendances.memberId, memberId)));
+      .where(and(eq(eventAttendances.eventId, eventId), eq(eventAttendances.memberId, memberId)))
+      .for("share");
     if (!row) return null;
     const [r] = await c(tx)
       .select()
       .from(eventAttendanceRevisions)
-      .where(eq(eventAttendanceRevisions.id, row.currentRevisionId));
+      .where(eq(eventAttendanceRevisions.id, row.currentRevisionId))
+      .for("share");
     if (!r || r.eventId !== eventId || r.memberId !== memberId)
       throw new Error("EVENT_ATTENDANCE_REVISION_MISSING");
     return r;
@@ -270,7 +274,8 @@ export function createEvents(
     const references = await c(tx)
       .select()
       .from(eventCatalogPins)
-      .where(eq(eventCatalogPins.revisionId, r.id));
+      .where(eq(eventCatalogPins.revisionId, r.id))
+      .for("share");
     let ownResponse: ResponseRevision | null, ownAttendance: AttendanceRevision | null;
     if (receipt) {
       const [rr] = receipt.responseRevisionId
@@ -406,6 +411,22 @@ export function createEvents(
         category,
       },
     });
+    if (type !== "event.response_changed") {
+      await c(tx)
+        .update(events)
+        .set({
+          tripAssessmentPending: true,
+          tripAssessmentGeneration: sql`${events.tripAssessmentGeneration}+1`,
+        })
+        .where(eq(events.id, event.id));
+      const [support] = await c(tx)
+        .select({ generation: events.tripAssessmentGeneration })
+        .from(events)
+        .where(eq(events.id, event.id))
+        .for("share");
+      if (!support) throw new Error("EVENT_TRIP_GENERATION_MISSING");
+      await ports.tripChanged?.(tx, event.id, support.generation);
+    }
   }
   async function writeRevision(
     tx: TxContext,
@@ -483,7 +504,8 @@ export function createEvents(
     const p = await c(tx)
       .select()
       .from(eventCatalogPins)
-      .where(eq(eventCatalogPins.revisionId, r.id));
+      .where(eq(eventCatalogPins.revisionId, r.id))
+      .for("share");
     return {
       title: r.title,
       description: r.description,
@@ -506,6 +528,73 @@ export function createEvents(
   const checkVersion = (actual: number, expected: number) => {
     if (actual !== expected) throw identityError(412, "VERSION_CONFLICT");
   };
+  async function association(
+    tx: TxContext,
+    input: {
+      eventId: string;
+      memberId: string;
+      game: "ets2" | "ats";
+      eventRevisionId?: string;
+      attendanceRevisionId?: string;
+    },
+  ) {
+    const e = await lock(tx, input.eventId);
+    const r = await revision(tx, input.eventRevisionId ?? (e.currentRevisionId as string));
+    if (
+      r.eventId !== e.id ||
+      r.game !== input.game ||
+      e.game !== input.game ||
+      r.status !== "scheduled" ||
+      e.status !== "scheduled"
+    )
+      throw identityError(409);
+    let a: AttendanceRevision | null;
+    if (input.attendanceRevisionId) {
+      const [selected] = await c(tx)
+        .select()
+        .from(eventAttendanceRevisions)
+        .where(eq(eventAttendanceRevisions.id, applicationId(input.attendanceRevisionId)))
+        .for("share");
+      if (!selected) throw identityError(404);
+      a = selected;
+    } else a = await attendance(tx, e.id, input.memberId);
+    if (a && (a.memberId !== input.memberId || a.eventId !== e.id || a.eventRevisionId !== r.id))
+      throw identityError(409);
+    const p = await c(tx)
+      .select()
+      .from(eventCatalogPins)
+      .where(eq(eventCatalogPins.revisionId, r.id))
+      .for("share");
+    const latestAttendance = await attendance(tx, e.id, input.memberId);
+    const reviewRequired =
+      r.id !== e.currentRevisionId || (a !== null && a.id !== latestAttendance?.id);
+    const confirmedEvent: ConfirmedEventContext | null =
+      a?.status === "attended" && !reviewRequired
+        ? {
+            eventId: e.id,
+            eventRevisionId: r.id,
+            attendanceRevisionId: a.id,
+            attendanceStatus: "confirmed",
+            prescribedCargoId: p.find((v) => v.field === "cargo")?.entityId ?? null,
+            prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
+            prescribedTrailerTypeId: p.find((v) => v.field === "trailer")?.entityId ?? null,
+          }
+        : null;
+    return {
+      eventId: e.id,
+      eventRevisionId: r.id,
+      attendanceRevisionId: a?.id ?? null,
+      attendanceStatus:
+        a?.status === "attended"
+          ? ("confirmed" as const)
+          : a?.status === "not_attended"
+            ? ("declined" as const)
+            : ("unconfirmed" as const),
+      confirmedEvent,
+      reviewRequired,
+    };
+  }
+
   return {
     authorize: (actor: Actor, manage = false) =>
       run(async (tx) => {
@@ -521,6 +610,8 @@ export function createEvents(
             id: newId(),
             version: 1,
             changeSequence: 1,
+            tripAssessmentPending: false,
+            tripAssessmentGeneration: 0,
             attendanceVersion: 1,
             currentRevisionId: null,
             game: value.game,
@@ -998,6 +1089,34 @@ export function createEvents(
         .limit(limit);
       return rows.map((r) => r.memberId);
     },
+    async pendingTripInvalidationsInTransaction(tx: TxContext, limit = 25) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25)
+        throw new Error("EVENT_TRIP_INVALIDATION_BOUND_INVALID");
+      return c(tx)
+        .select({ eventId: events.id, generation: events.tripAssessmentGeneration })
+        .from(events)
+        .where(eq(events.tripAssessmentPending, true))
+        .orderBy(asc(events.id))
+        .limit(limit)
+        .for("share");
+    },
+    async tripInvalidationInTransaction(tx: TxContext, id: string) {
+      const [row] = await c(tx)
+        .select({ eventId: events.id, generation: events.tripAssessmentGeneration })
+        .from(events)
+        .where(eq(events.id, applicationId(id)))
+        .for("share");
+      if (!row) throw identityError(404);
+      return row;
+    },
+    async acknowledgeTripInvalidationInTransaction(tx: TxContext, id: string, generation: number) {
+      await c(tx)
+        .update(events)
+        .set({ tripAssessmentPending: false })
+        .where(
+          and(eq(events.id, applicationId(id)), eq(events.tripAssessmentGeneration, generation)),
+        );
+    },
     async generationInTransaction(tx: TxContext, eventId: string) {
       const [row] = await c(tx)
         .select({
@@ -1028,6 +1147,7 @@ export function createEvents(
       };
     },
     // Caller must acquire identity/company locks before trip locks, then invoke on that same tx.
+    currentAssociationInTransaction: association,
     async associateInTransaction(
       tx: TxContext,
       actor: Actor,
@@ -1046,59 +1166,7 @@ export function createEvents(
         !actor.capabilities.includes("trips.review")
       )
         throw identityError(404);
-      const e = await lock(tx, input.eventId);
-      const r = await revision(tx, input.eventRevisionId ?? (e.currentRevisionId as string));
-      if (
-        r.eventId !== e.id ||
-        r.game !== input.game ||
-        e.game !== input.game ||
-        r.status !== "scheduled" ||
-        e.status !== "scheduled"
-      )
-        throw identityError(409);
-      let a: AttendanceRevision | null;
-      if (input.attendanceRevisionId) {
-        const [selected] = await c(tx)
-          .select()
-          .from(eventAttendanceRevisions)
-          .where(eq(eventAttendanceRevisions.id, applicationId(input.attendanceRevisionId)));
-        if (!selected) throw identityError(404);
-        a = selected;
-      } else a = await attendance(tx, e.id, input.memberId);
-      if (a && (a.memberId !== input.memberId || a.eventId !== e.id || a.eventRevisionId !== r.id))
-        throw identityError(409);
-      const p = await c(tx)
-        .select()
-        .from(eventCatalogPins)
-        .where(eq(eventCatalogPins.revisionId, r.id));
-      const latestAttendance = await attendance(tx, e.id, input.memberId);
-      const reviewRequired =
-        r.id !== e.currentRevisionId || (a !== null && a.id !== latestAttendance?.id);
-      const confirmedEvent: ConfirmedEventContext | null =
-        a?.status === "attended" && !reviewRequired
-          ? {
-              eventId: e.id,
-              eventRevisionId: r.id,
-              attendanceRevisionId: a.id,
-              attendanceStatus: "confirmed",
-              prescribedCargoId: p.find((v) => v.field === "cargo")?.entityId ?? null,
-              prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
-              prescribedTrailerTypeId: p.find((v) => v.field === "trailer")?.entityId ?? null,
-            }
-          : null;
-      return {
-        eventId: e.id,
-        eventRevisionId: r.id,
-        attendanceRevisionId: a?.id ?? null,
-        attendanceStatus:
-          a?.status === "attended"
-            ? ("confirmed" as const)
-            : a?.status === "not_attended"
-              ? ("declined" as const)
-              : ("unconfirmed" as const),
-        confirmedEvent,
-        reviewRequired,
-      };
+      return association(tx, input);
     },
   };
 }

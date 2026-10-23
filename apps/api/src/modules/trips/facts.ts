@@ -1,7 +1,11 @@
+import { createSchemaValidator } from "../../platform/http/schemas.js";
+import { createTripGroups } from "./groups.js";
 import { applicationId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   asc,
   eq,
+  sql,
+  tripResolutions,
   inArray,
   sourceMessages,
   sourceTrips,
@@ -12,9 +16,19 @@ import { decimal } from "../sources/contracts/canonical.js";
 import type { Fact, NormalizedTripEvidence, PinnedEntity } from "../sources/contracts/evidence.js";
 
 export function createFactRepository(unit: UnitOfWork) {
-  const c = (tx: TxContext) => unit.client(tx);
+  const c = (tx: TxContext) => unit.client(tx),
+    groups = createTripGroups(unit),
+    validChanges = createSchemaValidator().compile({
+      $ref: "urn:vtc:browser:v1#/$defs/ResolutionChanges",
+    });
   return {
-    async insert(tx: TxContext, tripId: string, f: NormalizedTripEvidence, adapterVersion: number) {
+    async insert(
+      tx: TxContext,
+      tripId: string,
+      f: NormalizedTripEvidence,
+      adapterVersion: number,
+      derived?: { baseFactId: string; resolutionRevisionId: string },
+    ) {
       function pin(value: Fact<PinnedEntity>) {
         if (value.status === "unknown") return { entityId: null, factId: null, revisionId: null };
         return {
@@ -32,7 +46,11 @@ export function createFactRepository(unit: UnitOfWork) {
         .insert(tripFacts)
         .values({
           id: f.factRevisionId,
-          messageId: f.sourceRecordId,
+          kind: derived ? "derived" : "source",
+          messageId: derived ? null : f.sourceRecordId,
+          baseFactId: derived?.baseFactId ?? null,
+          resolutionRevisionId: derived?.resolutionRevisionId ?? null,
+          derivedSourceMessageId: derived ? f.sourceRecordId : null,
           canonicalTripId: tripId,
           adapterVersion,
           catalogRevisionId: f.catalogRevisionId,
@@ -103,28 +121,136 @@ export function createFactRepository(unit: UnitOfWork) {
           game: sourceTrips.game,
         })
         .from(tripFacts)
-        .innerJoin(sourceMessages, eq(sourceMessages.id, tripFacts.messageId))
+        .innerJoin(
+          sourceMessages,
+          eq(
+            sourceMessages.id,
+            sql`COALESCE(${tripFacts.messageId},${tripFacts.derivedSourceMessageId})`,
+          ),
+        )
         .innerJoin(sourceTrips, eq(sourceTrips.id, sourceMessages.sourceTripId))
         .where(inArray(tripFacts.id, unique));
       // A command may have locked a pointer committed after its RR snapshot began.
       // Read the complete immutable projection from that same current view.
       const rows = await (current ? rowsQuery.for("share") : rowsQuery);
+      const derived = rows.filter((r) => r.stored.kind === "derived"),
+        baseIds = [
+          ...new Set(derived.flatMap((r) => (r.stored.baseFactId ? [r.stored.baseFactId] : []))),
+        ],
+        resolutionIds = derived.flatMap((r) =>
+          r.stored.resolutionRevisionId ? [r.stored.resolutionRevisionId] : [],
+        );
+      const bases = baseIds.length
+        ? await c(tx).select().from(tripFacts).where(inArray(tripFacts.id, baseIds)).for("share")
+        : [];
+      const resolutions = resolutionIds.length
+        ? await c(tx)
+            .select()
+            .from(tripResolutions)
+            .where(inArray(tripResolutions.id, resolutionIds))
+            .for("share")
+        : [];
       const trailersQuery = c(tx)
         .select()
         .from(tripFactTrailers)
-        .where(inArray(tripFactTrailers.tripFactId, unique))
+        .where(inArray(tripFactTrailers.tripFactId, [...new Set([...unique, ...baseIds])]))
         .orderBy(asc(tripFactTrailers.position));
       const trailers = await (current ? trailersQuery.for("share") : trailersQuery);
       for (const row of rows) {
         const stored = row.stored,
-          metadata = stored.evidence as NormalizedTripEvidence;
+          metadata = stored.evidence as NormalizedTripEvidence,
+          messageId = stored.messageId ?? stored.derivedSourceMessageId;
+        if (!messageId) throw new Error("SOURCE_PROVENANCE_MISSING");
+        if (stored.kind === "derived") {
+          const resolution = resolutions.find((r) => r.id === stored.resolutionRevisionId),
+            base = bases.find((b) => b.id === stored.baseFactId);
+          if (
+            !resolution ||
+            !base ||
+            base.id === stored.id ||
+            base.baseFactId === stored.id ||
+            resolution.baseFactId !== base.id ||
+            resolution.tripId !== stored.canonicalTripId ||
+            (base.messageId ?? base.derivedSourceMessageId) !== messageId ||
+            !validChanges(resolution.changes) ||
+            !resolution.reason.trim()
+          )
+            throw new Error("DERIVED_PROVENANCE_INVALID");
+          const own = await groups.resolve(tx, stored.canonicalTripId, "share"),
+            previous = await groups.resolve(tx, base.canonicalTripId, "share");
+          if (own.id !== previous.id || own.ownerId !== row.ownerUserId || own.game !== row.game)
+            throw new Error("DERIVED_PROVENANCE_SCOPE_INVALID");
+          const changes = resolution.changes as Record<string, string>;
+          for (const [key, column] of [
+            ["actualDistanceM", "actualDistanceM"],
+            ["cargoMassKg", "cargoMassKg"],
+            ["actualStartAt", "startUtc"],
+            ["actualCompletedAt", "endUtc"],
+            ["originCityId", "originEntityId"],
+            ["destinationCityId", "destinationEntityId"],
+            ["cargoId", "cargoEntityId"],
+          ] as const) {
+            const actual = stored[column],
+              expected = changes[key] ?? base[column];
+            const quantity = column === "actualDistanceM" || column === "cargoMassKg";
+            if (
+              (actual === null ? null : quantity ? decimal(actual) : actual) !==
+              (expected === null ? null : quantity ? decimal(expected as string) : expected)
+            )
+              throw new Error("DERIVED_PROVENANCE_VALUE_MISMATCH");
+          }
+          for (const key of [
+            "outcome",
+            "recording",
+            "measuredSegmentM",
+            "plannedDistanceM",
+            "deliveredDistanceM",
+            "fuelUsedL",
+            "cargoDamageFraction",
+          ] as const)
+            if (stored[key] !== base[key]) throw new Error("DERIVED_PROVENANCE_VALUE_MISMATCH");
+          if (row.provider === "manual" && (changes.actualStartAt || changes.actualCompletedAt))
+            throw new Error("DERIVED_MANUAL_TIME_FORBIDDEN");
+          for (const [field, key] of [
+            ["start", "actualStartAt"],
+            ["end", "actualCompletedAt"],
+          ] as const) {
+            if (
+              changes[key] &&
+              (stored[`${field}Basis`] !== "staff-resolution" || !stored[`${field}Verified`])
+            )
+              throw new Error("DERIVED_TIME_PROVENANCE_INVALID");
+            if (
+              !changes[key] &&
+              (stored[`${field}Basis`] !== base[`${field}Basis`] ||
+                stored[`${field}Verified`] !== base[`${field}Verified`])
+            )
+              throw new Error("DERIVED_TIME_PROVENANCE_INVALID");
+          }
+          const actualTrailers = trailers.filter((t) => t.tripFactId === stored.id),
+            baseTrailers = trailers.filter((t) => t.tripFactId === base.id);
+          if (
+            changes.trailerTypeId
+              ? actualTrailers.length !== 1 ||
+                !stored.trailersComplete ||
+                actualTrailers[0]?.entityId !== changes.trailerTypeId
+              : stored.trailersComplete !== base.trailersComplete ||
+                JSON.stringify(
+                  actualTrailers.map((t) => [t.entityId, t.catalogFactId, t.catalogRevisionId]),
+                ) !==
+                  JSON.stringify(
+                    baseTrailers.map((t) => [t.entityId, t.catalogFactId, t.catalogRevisionId]),
+                  )
+          )
+            throw new Error("DERIVED_TRAILER_PROVENANCE_INVALID");
+        }
         if (![1, 2].includes(stored.adapterVersion))
           throw new Error("UNSUPPORTED_SOURCE_FACT_VERSION");
         if (!metadata || typeof metadata !== "object") throw new Error("SOURCE_PROVENANCE_MISSING");
         const unknown = <T>(meta: Fact<T>): Fact<T> => ({
           status: "unknown",
           reasonCode: meta?.status === "unknown" ? meta.reasonCode : "normalized_unknown",
-          sourceRecordId: stored.messageId,
+          sourceRecordId: messageId,
         });
         const known = <T>(value: T, meta: Fact<T>): Fact<T> => {
           if (meta?.status !== "known" || typeof meta.sourceField !== "string")
@@ -132,7 +258,7 @@ export function createFactRepository(unit: UnitOfWork) {
           return {
             status: "known",
             value,
-            sourceRecordId: stored.messageId,
+            sourceRecordId: messageId,
             sourceField: meta.sourceField,
           };
         };
@@ -159,7 +285,7 @@ export function createFactRepository(unit: UnitOfWork) {
             return {
               status: "unknown",
               reasonCode: t.unknownReason ?? "normalized_unknown",
-              sourceRecordId: stored.messageId,
+              sourceRecordId: messageId,
             };
           if (!t.catalogFactId || !t.catalogRevisionId || !t.sourceField)
             throw new Error("SOURCE_TRAILER_PIN_INCONSISTENT");
@@ -170,12 +296,12 @@ export function createFactRepository(unit: UnitOfWork) {
               factRevisionId: t.catalogFactId,
               catalogRevisionId: t.catalogRevisionId,
             },
-            sourceRecordId: stored.messageId,
+            sourceRecordId: messageId,
             sourceField: t.sourceField,
           };
         });
         const evidence: NormalizedTripEvidence = {
-          sourceRecordId: stored.messageId,
+          sourceRecordId: messageId,
           factRevisionId: stored.id,
           provider: row.provider,
           ownerUserId: row.ownerUserId,

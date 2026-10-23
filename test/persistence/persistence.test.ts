@@ -39,6 +39,7 @@ import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import { bounded, until } from "../support/concurrency.ts";
+import { seedPublishedEventsHistory } from "./published-events-fixture.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   admissionsPriorFolder,
@@ -57,9 +58,10 @@ import {
   messagingPriorFolder,
   qualificationsPriorFolder,
   reconciliationPriorFolder,
+  decisionsPriorFolder,
   reset,
   root,
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
   telemetryPriorFolder,
   testConnection,
   tripsPriorFolder,
@@ -180,7 +182,7 @@ async function serializedFreshMigrations(
   ) as {
     entries: { when: number; tag: string }[];
   };
-  assert.equal(journal.entries.length, 14);
+  assert.equal(journal.entries.length, 15);
   const expectedHistory = await Promise.all(
     journal.entries.map(async (entry) => ({
       version: String(entry.when),
@@ -191,11 +193,11 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0013_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0014_snapshot.json"), "utf8"))
       .tables,
   ).sort();
-  assert.equal(expectedTables.length, 88);
-  const gate = await journalAckGate("finalize", 14);
+  assert.equal(expectedTables.length, 96);
+  const gate = await journalAckGate("finalize", 15);
   const lock = migrationLockName(settings.database);
   const history = async () => {
     const [rows] = await connection.query<RowDataPacket[]>({
@@ -283,12 +285,12 @@ async function serializedFreshMigrations(
     );
   try {
     await Promise.race([
-      bounded(gate.withheld, "fresh_final_journal_ack", SCHEMA_SETUP_TIMEOUT_MS),
+      bounded(gate.withheld, "fresh_final_journal_ack", EXTENDED_TEST_TIMEOUT_MS),
       first.then(() => {
         throw new Error("FRESH_MIGRATION_ENDED_BEFORE_FINAL_ACK_GATE");
       }),
     ]);
-    assert.equal(gate.facts.finalizations, 14);
+    assert.equal(gate.facts.finalizations, 15);
     assert.equal(gate.facts.okPackets, 1);
     milestone("final_journal_held");
     const before = await history();
@@ -327,15 +329,15 @@ async function serializedFreshMigrations(
     milestone("ack_released");
     const result = await Promise.all([first, second]);
     assert.deepEqual(result, [
-      { state: "fulfilled", applied: 14 },
+      { state: "fulfilled", applied: 15 },
       { state: "fulfilled", applied: 0 },
     ]);
     assert.equal(gate.facts.explicitReleases, 1);
     assert.equal(gate.facts.automaticRelease, false);
     assert.equal(gate.facts.waiterResponses, 1);
     assert.equal(gate.facts.waiterResponseBeforeRelease, false);
-    assert.equal(gate.facts.inserts, 14);
-    assert.equal(gate.facts.finalizations, 14);
+    assert.equal(gate.facts.inserts, 15);
+    assert.equal(gate.facts.finalizations, 15);
     assert.deepEqual(
       await history(),
       before,
@@ -419,7 +421,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "INSERT INTO identity_challenges (id, user_id, purpose, proposed_email, email_epoch, access_epoch, credential_epoch, secret_hash, expires_at) VALUES (?, ?, 'email_change', 'synthetic-new@example.invalid', 1, 1, 1, ?, UTC_TIMESTAMP(3) + INTERVAL 10 MINUTE)",
           [challengeId, id, Buffer.alloc(32)],
         );
-        assert.equal(await runMigrations(settings), 12);
+        assert.equal(await runMigrations(settings), 13);
         assert.equal(await runMigrations(settings), 0);
         const [rows] = await connection.query<RowDataPacket[]>(
           "SELECT u.email_verified, c.proposed_email, c.current_email_confirmed, c.identity_epoch, c.consumed FROM identity_users u JOIN identity_challenges c ON c.user_id=u.id WHERE c.id=?",
@@ -447,7 +449,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 11);
+        assert.equal(await runMigrations(settings), 12);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 3",
@@ -475,7 +477,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 10);
+        assert.equal(await runMigrations(settings), 11);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 4",
@@ -503,7 +505,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 9);
+        assert.equal(await runMigrations(settings), 10);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 5",
@@ -539,7 +541,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 8);
+        assert.equal(await runMigrations(settings), 9);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 6",
@@ -587,7 +589,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 7);
+        assert.equal(await runMigrations(settings), 8);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 7",
@@ -614,7 +616,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 6);
+        assert.equal(await runMigrations(settings), 7);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 8",
@@ -641,7 +643,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 5);
+        assert.equal(await runMigrations(settings), 6);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 9",
@@ -734,7 +736,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [original] = await connection.query<RowDataPacket[]>(
           "SELECT HEX(id) id,HEX(user_id) userId,game,level,CAST(assigned_at AS CHAR) assignedAt FROM qualification_initial_assignments ORDER BY id",
         );
-        assert.equal(await runMigrations(settings), 4);
+        assert.equal(await runMigrations(settings), 5);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 10",
@@ -798,49 +800,40 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const login = await identity.login("event-upgrade@example.invalid", password);
         const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
         const director = await identity.authenticate(new Headers({ cookie }));
-        let instant = Date.parse("2026-10-22T12:00:00.000Z");
-        const events = createEvents(
+        const eventKey = randomBytes(32).toString("hex");
+        const eventInput = {
+          title: "Fictional upgrade convoy",
+          description: "Fictional retained event history",
+          game: "ets2" as const,
+          server: "Fictional server",
+          organizer: "Fictional organizer",
+          meetingLocation: "Fictional meeting location",
+          route: "Fictional route",
+          meetingAt: "2026-10-22T12:00:30.000Z",
+          startsAt: "2026-10-22T12:01:00.000Z",
+          endsAt: null,
+          visibility: "members" as const,
+          originCityId: null,
+          destinationCityId: null,
+          prescribedCargoId: null,
+          prescribedMassKg: null,
+          prescribedTrailerTypeId: null,
+        };
+        const fixture = await seedPublishedEventsHistory(
           unit,
-          { cursorKey: randomBytes(32).toString("hex") },
-          { identity },
-          () => new Date(instant),
+          director.userId,
+          eventKey,
+          eventInput,
         );
-        const createKey = newId(),
-          eventInput = {
-            title: "Fictional upgrade convoy",
-            description: "Fictional retained event history",
-            game: "ets2" as const,
-            server: "Fictional server",
-            organizer: "Fictional organizer",
-            meetingLocation: "Fictional meeting location",
-            route: "Fictional route",
-            meetingAt: "2026-10-22T12:00:30.000Z",
-            startsAt: "2026-10-22T12:01:00.000Z",
-            endsAt: null,
-            visibility: "members" as const,
-            originCityId: null,
-            destinationCityId: null,
-            prescribedCargoId: null,
-            prescribedMassKg: null,
-            prescribedTrailerTypeId: null,
-          },
-          event = await events.create(director, createKey, eventInput),
-          eventId = event.data.event.id;
-        await events.respond(director, eventId, newId(), 1, { response: "participating" });
-        instant += 60000;
-        await events.setAttendance(director, eventId, newId(), 1, {
-          members: [{ memberId: director.userId, attendance: "attended", note: null }],
-        });
-        const eventBefore = await events.get(director, eventId),
-          historyBefore = await events.history(director, eventId),
-          replayBefore = await events.create(director, createKey, eventInput);
+        const { eventId, createKey, eventBefore, historyBefore, replayBefore } = fixture;
+        const events = createEvents(unit, { cursorKey: eventKey }, { identity });
         assert.equal(historyBefore.definitions.length, 1);
         assert.equal(historyBefore.responses.length, 1);
         assert.equal(historyBefore.attendance.length, 1);
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 2);
+        assert.equal(await runMigrations(settings), 3);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 12",
@@ -849,6 +842,21 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         assert.deepEqual(await events.get(director, eventId), eventBefore);
         assert.deepEqual(await events.history(director, eventId), historyBefore);
         assert.deepEqual(await events.create(director, createKey, eventInput), replayBefore);
+        assert.deepEqual(
+          await events.respond(director, eventId, fixture.responseKey, 1, fixture.responseInput),
+          { data: { version: 2, response: "participating", declineReason: null }, version: 2 },
+        );
+        assert.deepEqual(
+          await events.setAttendance(
+            director,
+            eventId,
+            fixture.attendanceKey,
+            1,
+            fixture.attendanceInput,
+          ),
+          { data: { id: eventId, version: 2 }, version: 2 },
+        );
+        assert.deepEqual(await fixture.readReceipts(), fixture.receiptsBefore);
         const [eventReceipts] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) n FROM event_commands",
         );
@@ -885,7 +893,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 3);
+        assert.equal(await runMigrations(settings), 4);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 11",
@@ -921,7 +929,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 2);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 13",
@@ -961,6 +969,43 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
     },
   );
   publishedUpgrade(
+    "trip decisions upgrade exact fourteen-migration prefix and preserve source/history shape",
+    async ({ settings, connection, unit, audit }) => {
+      await reset(connection);
+      const folder = await decisionsPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder }), 14);
+        const id = await unit.run((tx) => audit.append(tx, auditInput()));
+        const [before] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+        );
+        assert.equal(await runMigrations(settings), 1);
+        assert.equal(await runMigrations(settings), 0);
+        const [after] = await connection.query<RowDataPacket[]>(
+          "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 14",
+        );
+        assert.deepEqual(after, before);
+        const [sentinel] = await connection.execute<RowDataPacket[]>(
+          "SELECT COUNT(*) n FROM audit_entries WHERE id=?",
+          [id],
+        );
+        assert.equal(Number(sentinel[0]?.n), 1);
+        const [columns] = await connection.query<RowDataPacket[]>(
+          "SELECT COLUMN_NAME,IS_NULLABLE,COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trip_facts' AND COLUMN_NAME IN ('message_id','kind') ORDER BY COLUMN_NAME",
+        );
+        assert.equal(columns[0]?.COLUMN_DEFAULT, "source");
+        assert.equal(columns[1]?.IS_NULLABLE, "YES");
+        const [foreign] = await connection.query<RowDataPacket[]>(
+          "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME IN ('trip_decisions','trip_proposals','trip_resolutions')",
+        );
+        assert.ok(foreign.length >= 18);
+        assert.ok(foreign.every((r) => r.DELETE_RULE === "RESTRICT"));
+      } finally {
+        await rm(folder, { recursive: true });
+      }
+    },
+  );
+  publishedUpgrade(
     "identity migration preserves existing published audit history",
     async ({ settings, connection, unit, audit }) => {
       await reset(connection);
@@ -968,7 +1013,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
       try {
         assert.equal(await runMigrations(settings, { folder }), 1);
         const id = await unit.run((tx) => audit.append(tx, auditInput()));
-        assert.equal(await runMigrations(settings), 13);
+        assert.equal(await runMigrations(settings), 14);
         assert.equal(await runMigrations(settings), 0);
         const [saved] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM audit_entries WHERE id = ?",
@@ -1042,7 +1087,7 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 14);
+        assert.equal(await runMigrations(settings, { folder: extended }), 15);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -1398,8 +1443,8 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        // The extended fixture retains its synthetic prior entry plus fourteen current migrations.
-        assert.equal(String(history[0]?.count), "15");
+        // The extended fixture retains its synthetic prior entry plus fifteen current migrations.
+        assert.equal(String(history[0]?.count), "16");
       },
     );
   } finally {

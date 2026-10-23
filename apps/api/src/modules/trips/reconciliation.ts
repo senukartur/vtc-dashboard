@@ -119,7 +119,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
     if (row.version >= 2147483647) throw identityError(409);
     await c(tx)
       .update(trips)
-      .set({ ...patch, version: row.version + 1 })
+      .set({ ...patch, version: row.version + 1, assessmentPending: true })
       .where(eq(trips.id, row.id));
     const [after] = await c(tx).select().from(trips).where(eq(trips.id, row.id)).for("update");
     if (!after) throw new Error("TRIP_GROUP_WRITE_MISSING");
@@ -274,6 +274,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         }
         if (
           !saved ||
+          row.adjudicationVersion !== (saved.adjudicationVersion ?? 0) ||
           row.decision !== saved.decision ||
           (row.decision === "accepted" &&
             (row.currentFactId !== saved.currentFactId || row.reportingAt !== saved.reportingAt))
@@ -288,6 +289,7 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
         const {
           id: _id,
           version: _version,
+          adjudicationVersion: _adjudicationVersion,
           ownerId: _owner,
           game: _game,
           createdAt: _created,
@@ -344,7 +346,13 @@ export function createTripReconciliation(unit: UnitOfWork, now: () => Date) {
       if (pending) reasons.push("candidate_search_overflow");
       await c(tx)
         .update(trips)
-        .set({ reviewReasons: [...new Set(reasons)].sort() })
+        .set({
+          reviewReasons: [...new Set(reasons)].sort(),
+          assessmentPending:
+            row.reviewReasons.includes("candidate_search_overflow") !== pending
+              ? true
+              : row.assessmentPending,
+        })
         .where(eq(trips.id, row.id));
     },
     async searchEpoch(tx: TxContext, ownerId: string, game: "ets2" | "ats") {

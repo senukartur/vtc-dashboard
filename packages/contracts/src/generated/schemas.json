@@ -3078,6 +3078,15 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "correctionRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field."
         }
       },
       "required": [
@@ -3085,7 +3094,18 @@
         "evidenceIds"
       ],
       "additionalProperties": false,
-      "minProperties": 3
+      "minProperties": 3,
+      "if": {
+        "required": [
+          "correctionRequestId"
+        ],
+        "properties": {
+          "correctionRequestId": {}
+        }
+      },
+      "then": {
+        "minProperties": 4
+      }
     },
     "ProposalDecisionInput": {
       "type": "object",
@@ -3303,6 +3323,56 @@
               "type": "null"
             }
           ]
+        },
+        "eventAssociation": {
+          "description": "Immutable safe references selected by an event-association proposal. Omitted by older responses; null for proposals without an event association.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "eventId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "eventRevisionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "attendanceRevisionId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "eventId",
+                "eventRevisionId",
+                "attendanceRevisionId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "correctionRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "Immutable originating author correction request association, when present."
         }
       },
       "required": [
@@ -8248,6 +8318,16 @@
       ],
       "additionalProperties": false,
       "description": "Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs."
+    },
+    "EnvelopeTripProposalDecision": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EnvelopeDecision"
+        },
+        {
+          "$ref": "#/$defs/EnvelopeTripProposal"
+        }
+      ]
     }
   }
 }

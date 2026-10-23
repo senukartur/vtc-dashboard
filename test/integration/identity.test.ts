@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import {
   account,
@@ -6,6 +6,7 @@ import {
   challenges,
   company,
   eq,
+  limits,
   roles as memberRoles,
   membership,
   session,
@@ -867,7 +868,97 @@ test("missing mail/events refuse effects, event failure rolls back mutation and 
   ).rejects.toMatchObject({ statusCode: 500 });
 });
 
+test("prior conservative source-slot collisions exhaust persisted allowance while a fresh window restores controlled concurrency and bounded buckets", async () => {
+  const rateConfig = { ...config, secret: "fictional-rate-counter-fixture".repeat(2) };
+  const slot = (source: string) =>
+    createHmac("sha256", rateConfig.secret).update(source).digest()[0]!;
+  // A fixed fixture and the pigeonhole principle guarantee a collision without random retries.
+  const sources = new Map<number, string>();
+  let collision: [string, string] | undefined;
+  for (let i = 0; i <= 256; i++) {
+    const source = `synthetic-collision-${i}`,
+      prior = sources.get(slot(source));
+    if (prior !== undefined) {
+      collision = [prior, source];
+      break;
+    }
+    sources.set(slot(source), source);
+  }
+  if (!collision) throw new Error("SYNTHETIC_COLLISION_FIXTURE_MISSING");
+  const [priorSource, targetSource] = collision;
+  expect(priorSource).not.toBe(targetSource);
+  expect(slot(priorSource)).toBe(slot(targetSource));
+  const bucket = `source:login:${slot(targetSource)}`;
+  const first = createIdentity(unit, rateConfig, ports(), time);
+  const rows = () =>
+    unit.run((tx) =>
+      unit
+        .client(tx)
+        .select()
+        .from(limits)
+        .where(
+          sql`${limits.bucket} LIKE ${"source:login:%"} OR ${limits.bucket}=${"global:login"}`,
+        ),
+    );
+  const counts = async () => {
+    const current = (await rows()).filter((row) => row.window === Math.floor(instant / 60000));
+    return {
+      source: current.find((row) => row.bucket === bucket)?.count ?? 0,
+      global: current.find((row) => row.bucket === "global:login")?.count ?? 0,
+    };
+  };
+  const assertDenied = (result: PromiseSettledResult<void>) => {
+    expect(result.status).toBe("rejected");
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ statusCode: 429 });
+  };
+  instant += 60000;
+  expect(await counts()).toEqual({ source: 0, global: 0 });
+  await safe(first.rateLimit("login", priorSource));
+  expect(await counts()).toEqual({ source: 1, global: 1 });
+  for (let i = 0; i < 19; i++) await safe(first.rateLimit("login", targetSource));
+  expect(await counts()).toEqual({ source: 20, global: 20 });
+  const recreated = createIdentity(unit, rateConfig, ports(), time);
+  const exhausted = await Promise.allSettled([
+    safe(first.rateLimit("login", targetSource)),
+    safe(recreated.rateLimit("login", targetSource)),
+  ]);
+  expect(exhausted.filter((r) => r.status === "fulfilled")).toHaveLength(0);
+  expect(exhausted.filter((r) => r.status === "rejected")).toHaveLength(2);
+  exhausted.forEach(assertDenied);
+  expect(await counts()).toEqual({ source: 21, global: 20 });
+  // A new injected minute changes the controlled precondition, not the limiter or its state.
+  instant += 60000;
+  expect(await counts()).toEqual({ source: 0, global: 0 });
+  for (let i = 0; i < 19; i++) await safe(first.rateLimit("login", targetSource));
+  expect(await counts()).toEqual({ source: 19, global: 19 });
+  const freshRecreated = createIdentity(unit, rateConfig, ports(), time);
+  const fresh = await Promise.allSettled([
+    safe(first.rateLimit("login", targetSource)),
+    safe(freshRecreated.rateLimit("login", targetSource)),
+  ]);
+  expect(fresh.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(fresh.filter((r) => r.status === "rejected")).toHaveLength(1);
+  fresh.filter((r) => r.status === "rejected").forEach(assertDenied);
+  expect(await counts()).toEqual({ source: 21, global: 20 });
+  instant += 60000;
+  for (let i = 0; i < 256 * 2; i++) {
+    const result = await Promise.allSettled([
+      safe(first.rateLimit("login", `synthetic-attacker-${i}`)),
+    ]);
+    if (result[0]!.status === "rejected") assertDenied(result[0]!);
+  }
+  const persisted = await rows(),
+    sourceRows = persisted.filter((row) => row.bucket !== "global:login");
+  expect(sourceRows.length).toBeLessThanOrEqual(256);
+  expect(persisted.length).toBeLessThanOrEqual(257);
+  expect(persisted.length).toBeLessThan(256 * 2);
+  expect(sourceRows.every((row) => row.count <= 21)).toBe(true);
+  expect(persisted.find((row) => row.bucket === "global:login")?.count).toBe(201);
+});
+
 test("shared rate counters survive service recreation and concurrent requests; attacker-created bucket cardinality is bounded", async () => {
+  // Earlier API cases share these bounded slots and the login category budget.
+  instant += 60000;
   for (let i = 0; i < 19; i++) await safe(identity.rateLimit("login", "synthetic-rate-source"));
   const recreated = createIdentity(unit, config, ports(), time);
   const results = await Promise.allSettled(
@@ -875,6 +966,8 @@ test("shared rate counters survive service recreation and concurrent requests; a
   );
   expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
   expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+  for (const result of results)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ statusCode: 429 });
 });
 
 test("real API enforces structural schemas, current membership, CSRF/origin rotation, cookies and precise status envelopes", async () => {

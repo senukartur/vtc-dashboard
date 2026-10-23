@@ -1,4 +1,5 @@
 """Synthetic-only Docker rehearsal. Its root/socket privileges belong only to the operator test."""
+import contextlib
 import hashlib
 import ipaddress
 import importlib.util
@@ -20,9 +21,26 @@ import urllib.request
 import uuid
 import zipfile
 
+@contextlib.contextmanager
+def rehearsal_phase(name):
+    started = time.monotonic()
+    started_at = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    print(json.dumps({'event': 'deployment_rehearsal_phase', 'phase': name, 'state': 'start', 'startedAt': started_at, 'elapsedMs': 0, 'sinceStartMs': round((started - rehearsal_started) * 1000)}), flush=True)
+    try:
+        yield
+    except BaseException as error:
+        category = 'timeout' if isinstance(error, subprocess.TimeoutExpired) else 'assertion' if isinstance(error, AssertionError) else 'operation'
+        print(json.dumps({'event': 'deployment_rehearsal_phase', 'phase': name, 'state': 'fail', 'startedAt': started_at, 'category': category, 'sinceStartMs': round((time.monotonic() - rehearsal_started) * 1000), 'elapsedMs': round((time.monotonic() - started) * 1000)}), flush=True)
+        raise
+    else:
+        print(json.dumps({'event': 'deployment_rehearsal_phase', 'phase': name, 'state': 'pass', 'startedAt': started_at, 'sinceStartMs': round((time.monotonic() - rehearsal_started) * 1000), 'elapsedMs': round((time.monotonic() - started) * 1000)}), flush=True)
+
+
+rehearsal_started = time.monotonic()
 mode = os.environ.get('REHEARSAL_MODE', 'full')
 assert mode in ['full', 'manual-only']
 base = pathlib.Path('/opt/vtc-development')
+subprocess.run(['python3', '/source/test_rehearsal_diagnostics.py'], check=True, timeout=30)
 subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
 subprocess.run(['python3', '/source/test_activation.py'], check=True, timeout=30)
 subprocess.run(['python3', '/source/test_acceptance_containers.py'], check=True, timeout=30)
@@ -185,7 +203,7 @@ for name, value in config['networks'].items():
 # One-shot proofs never compete with the serving app's fixed trusted-ingress IP.
 # These clones exist only in this synthetic allocation, with the same role files
 # and resource/security bounds. The codec needs no network or DB environment.
-for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs')]:
+for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs'), ('trip-decision-seed', 'migrate')]:
     proof = json.loads(json.dumps(config['services'][source]))
     proof['profiles'] = ['tools']
     proof['restart'] = 'no'
@@ -264,8 +282,10 @@ def tick_process():
         raise SystemExit(1)
 
 
-compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
-compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+with rehearsal_phase('initial-database-startup'):
+    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
+with rehearsal_phase('initial-migration'):
+    compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
 ops.jobs_grants_locked(revision)
 # Exercise the known existing-installation SELECT revocation, not only fresh setup.
 sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")
@@ -566,6 +586,46 @@ print('Manual restricted grants: runtime draft/upload/submission/review seam; se
 if mode == 'manual-only':
     print('Focused manual production rehearsal passed; baseline acceptance and remaining regressions NOT RUN', flush=True)
     sys.exit(0)
+# The default FULL rehearsal proves prepared adjudication grants only in this owned schema.
+# Baseline activation permissions are subtracted so cleanup revokes only this proof's deltas.
+sql("CREATE TABLE vtc.synthetic_trip_decision_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
+sql(f"INSERT INTO vtc.synthetic_trip_decision_guard VALUES (1,'{manual_proof_run}',NULL);")
+for role in ['runtime', 'jobs']:
+    sql(f"GRANT SELECT ON vtc.synthetic_trip_decision_guard TO 'vtc_{role}'@'%';")
+compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'trip-decision-seed',
+         'node', 'operations/trip-decisions-grants-smoke.mjs', 'seed'], revision=revision)
+prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
+baseline = json.loads((base / 'activation-grants.json').read_text())
+deltas = {}
+for role in ['runtime', 'jobs']:
+    combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
+    for table, permissions in prepared[role].items():
+        combined.setdefault(table, set()).update(permissions)
+    deltas[role] = {}
+    for table, permissions in combined.items():
+        permissions -= set(baseline[role].get(table, []))
+        if not permissions:
+            continue
+        assert re.fullmatch('[a-z_]+', table)
+        assert all(re.fullmatch(r'SELECT|INSERT|UPDATE|DELETE|UPDATE\([a-z_,]+\)', p) for p in permissions)
+        deltas[role][table] = sorted(permissions)
+        sql(f"GRANT {','.join(sorted(permissions))} ON vtc.{table} TO 'vtc_{role}'@'%';")
+try:
+    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
+        print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
+        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                 'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
+        print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+finally:
+    for role, tables in deltas.items():
+        for table, permissions in tables.items():
+            sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+    for role in ['runtime', 'jobs']:
+        sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
+    sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
+print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
     ops.tick_locked(revision, image_id)
@@ -658,49 +718,53 @@ with ops.lock():
 completed_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
 assert b'\"mailCleanup\":\"completed\"' in completed_cleanup
 print('Durable jobs rehearsal: empty pass, duplicate seed, consumers, retry/chaining, shared identity reads, cleanup grant notice and denied writes passed', flush=True)
-with ops.lock():
-    ops.seed_synthetic_locked(revision)
-expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))
-expect_failure(lambda: ops.release_locked(image_archive, revision, 101, 1, 'auto', 'sha256:' + '0' * 64))
-assert ops.current()['runId'] == 100
-# Two actual release operations acquire the same lock and retain ordering/promotion.
-def deploy_release(run_id, queue):
+with rehearsal_phase('tail-seed-release-guards'):
     with ops.lock():
-        queue.put(run_id)
-        ops.release_locked(image_archive, revision, run_id, 1, 'auto', image_id)
-release_queue = multiprocessing.Queue()
-first_release = multiprocessing.Process(target=deploy_release, args=(101, release_queue))
-second_release = multiprocessing.Process(target=deploy_release, args=(102, release_queue))
-first_release.start()
-assert release_queue.get(timeout=10) == 101
-second_release.start()
-assert release_queue.get(timeout=120) == 102
-first_release.join(timeout=120); second_release.join(timeout=120)
-assert first_release.exitcode == 0 and second_release.exitcode == 0 and ops.current()['runId'] == 102
-# A healthy same-SHA rebuild can be accepted while retaining its predecessor by ID.
-rebuilt_context = io.BytesIO()
-rebuilt_dockerfile = f'FROM vtc-dashboard:{revision}\nLABEL vtc011.variant=healthy-rebuild\n'.encode()
-with tarfile.open(fileobj=rebuilt_context, mode='w') as archive:
-    entry = tarfile.TarInfo('Dockerfile'); entry.size = len(rebuilt_dockerfile)
-    archive.addfile(entry, io.BytesIO(rebuilt_dockerfile))
-rebuilt_tag = f'{project}:rebuilt'
-ops.run(['docker', 'build', '-t', rebuilt_tag, '-'], data=rebuilt_context.getvalue(), timeout=180)
-rebuilt_id = json.loads(ops.run(['docker', 'image', 'inspect', rebuilt_tag]))[0]['Id']
-assert rebuilt_id != image_id
-ops.run(['docker', 'tag', rebuilt_id, f'vtc-dashboard:{revision}'])
-rebuilt_archive = base / 'rebuilt-image.tar'
-ops.run(['docker', 'save', '--output', str(rebuilt_archive), f'vtc-dashboard:{revision}'])
-with ops.lock():
-    ops.release_locked(rebuilt_archive, revision, 103, 1, 'auto', rebuilt_id)
-assert ops.current()['imageId'] == rebuilt_id and ops.current()['runId'] == 103
-assert json.loads((base / 'state/previous.json').read_text())['imageId'] == image_id
-assert json.loads((base / 'state/exports' / ops.current()['backup'] / 'manifest.json').read_text())['imageId'] == image_id
-image_id = rebuilt_id
-image_archive = rebuilt_archive
-# A rebuilt artifact for the SAME source SHA has a different immutable image and
-# actually returns HTTP 503. Loading it deliberately overwrites the revision tag.
-unhealthy_tag = f'{project}:unhealthy'
-unhealthy_script = b"""import {createServer} from 'node:http';
+        ops.seed_synthetic_locked(revision)
+    expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))
+    expect_failure(lambda: ops.release_locked(image_archive, revision, 101, 1, 'auto', 'sha256:' + '0' * 64))
+    assert ops.current()['runId'] == 100
+with rehearsal_phase('tail-concurrent-releases'):
+    # Two actual release operations acquire the same lock and retain ordering/promotion.
+    def deploy_release(run_id, queue):
+        with ops.lock():
+            queue.put(run_id)
+            ops.release_locked(image_archive, revision, run_id, 1, 'auto', image_id)
+    release_queue = multiprocessing.Queue()
+    first_release = multiprocessing.Process(target=deploy_release, args=(101, release_queue))
+    second_release = multiprocessing.Process(target=deploy_release, args=(102, release_queue))
+    first_release.start()
+    assert release_queue.get(timeout=10) == 101
+    second_release.start()
+    assert release_queue.get(timeout=120) == 102
+    first_release.join(timeout=120); second_release.join(timeout=120)
+    assert first_release.exitcode == 0 and second_release.exitcode == 0 and ops.current()['runId'] == 102
+with rehearsal_phase('tail-healthy-rebuild'):
+    # A healthy same-SHA rebuild can be accepted while retaining its predecessor by ID.
+    rebuilt_context = io.BytesIO()
+    rebuilt_dockerfile = f'FROM vtc-dashboard:{revision}\nLABEL vtc011.variant=healthy-rebuild\n'.encode()
+    with tarfile.open(fileobj=rebuilt_context, mode='w') as archive:
+        entry = tarfile.TarInfo('Dockerfile'); entry.size = len(rebuilt_dockerfile)
+        archive.addfile(entry, io.BytesIO(rebuilt_dockerfile))
+    rebuilt_tag = f'{project}:rebuilt'
+    ops.run(['docker', 'build', '-t', rebuilt_tag, '-'], data=rebuilt_context.getvalue(), timeout=180)
+    rebuilt_id = json.loads(ops.run(['docker', 'image', 'inspect', rebuilt_tag]))[0]['Id']
+    assert rebuilt_id != image_id
+    ops.run(['docker', 'tag', rebuilt_id, f'vtc-dashboard:{revision}'])
+    rebuilt_archive = base / 'rebuilt-image.tar'
+    ops.run(['docker', 'save', '--output', str(rebuilt_archive), f'vtc-dashboard:{revision}'])
+    with ops.lock():
+        ops.release_locked(rebuilt_archive, revision, 103, 1, 'auto', rebuilt_id)
+    assert ops.current()['imageId'] == rebuilt_id and ops.current()['runId'] == 103
+    assert json.loads((base / 'state/previous.json').read_text())['imageId'] == image_id
+    assert json.loads((base / 'state/exports' / ops.current()['backup'] / 'manifest.json').read_text())['imageId'] == image_id
+    image_id = rebuilt_id
+    image_archive = rebuilt_archive
+with rehearsal_phase('tail-unhealthy-artifact'):
+    # A rebuilt artifact for the SAME source SHA has a different immutable image and
+    # actually returns HTTP 503. Loading it deliberately overwrites the revision tag.
+    unhealthy_tag = f'{project}:unhealthy'
+    unhealthy_script = b"""import {createServer} from 'node:http';
 import {writeFileSync} from 'node:fs';
 createServer((request,response)=>{
   if(request.url==='/health/ready') {
@@ -709,126 +773,136 @@ createServer((request,response)=>{
   } else response.writeHead(200).end('SYNTHETIC_LIVE');
 }).listen(3000,'0.0.0.0');
 """
-dockerfile = (f'FROM vtc-dashboard:{revision}\nCOPY --chown=node:node unhealthy.mjs /app/operations/unhealthy.mjs\n'
-              f'LABEL vtc011.rehearsal={project}\nCMD ["node","operations/unhealthy.mjs"]\n').encode()
-context_tar = io.BytesIO()
-with tarfile.open(fileobj=context_tar, mode='w') as archive:
-    for name, content in [('Dockerfile', dockerfile), ('unhealthy.mjs', unhealthy_script)]:
-        entry = tarfile.TarInfo(name); entry.size = len(content); archive.addfile(entry, io.BytesIO(content))
-ops.run(['docker', 'build', '-t', unhealthy_tag, '-'], data=context_tar.getvalue(), timeout=180)
-unhealthy_id = json.loads(ops.run(['docker', 'image', 'inspect', unhealthy_tag]))[0]['Id']
-assert unhealthy_id != image_id
-ops.run(['docker', 'tag', unhealthy_id, f'vtc-dashboard:{revision}'])
-unhealthy_archive = base / 'unhealthy-image.tar'
-ops.run(['docker', 'save', '--output', str(unhealthy_archive), f'vtc-dashboard:{revision}'])
-accepted_metadata = (base / 'state/current.json').read_bytes()
-accepted_previous = (base / 'state/previous.json').read_bytes()
-# Only the attempt count changes in this test; every attempt still performs the
-# production HTTP request. Production retains its 30-attempt bound.
-production_attempts = ops.READINESS_ATTEMPTS
-ops.READINESS_ATTEMPTS = 5
-with ops.lock():
-    expect_failure(lambda: ops.release_locked(unhealthy_archive, revision, 104, 1, 'auto', unhealthy_id))
-ops.READINESS_ATTEMPTS = production_attempts
-assert (base / 'state/current.json').read_bytes() == accepted_metadata
-assert (base / 'state/previous.json').read_bytes() == accepted_previous
-assert ops.current()['runId'] == 103 and ops.current()['imageId'] == image_id
-assert not (base / 'private/maintenance/enabled').exists() and not (base / 'state/recovery-required').exists()
-assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == unhealthy_id
-for service in ['app', 'probe']:
-    container = compose(['ps', '-q', service], revision=revision).decode().strip()
-    assert json.loads(ops.run(['docker', 'inspect', container]))[0]['Image'] == image_id
-assert json.loads(get('/_operations/readiness', token))['revision'] == revision
-assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
-compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
-ops.fenced(revision)
-with ops.lock():
-    export_id = ops.export_locked(revision)
-directory, manifest = ops.validate_export(export_id)
-assert manifest['evidenceFiles']['sentinel.txt']['sha256'] == checksum
-assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
-assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
-assert manifest['files']['database.sql']['bytes'] > 0
-# Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
-# This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
-copy_directory = base / 'private/copy-fixture'
-copy_directory.mkdir(mode=0o700)
-export_tar = copy_directory / 'export.tar'
-with tarfile.open(export_tar, 'w') as archive:
-    for name in ['database.sql', 'evidence.tar', 'manifest.json']:
-        archive.add(directory / name, arcname=name)
-key = base / 'private/recovery-test.key'
-encrypted = copy_directory / 'export.encrypted'
-decrypted = copy_directory / 'recovered.tar'
-for args, data in [(['key', str(key)], None), (['seal', str(encrypted), str(key)], export_tar.read_bytes()),
-                   (['open', str(encrypted), str(key), str(decrypted)], None)]:
-    subprocess.run(['node', str(base / 'recovery-copy.mjs'), *args], input=data, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-recovered_id = uuid.uuid4().hex
-recovered_directory = base / 'state/exports' / recovered_id
-recovered_directory.mkdir(mode=0o700)
-with tarfile.open(decrypted, 'r:') as archive:
-    assert set(archive.getnames()) == {'database.sql', 'evidence.tar', 'manifest.json'}
-    for entry in archive.getmembers():
-        assert entry.isfile()
-        (recovered_directory / entry.name).write_bytes(archive.extractfile(entry).read())
-with ops.lock():
-    restored_project = ops.restore_locked(recovered_id)
-# Restore helper stops destination after verifying ledger/files. Restart only that isolated DB for references.
-ops.fenced(revision)
-compose(['stop', 'db'], revision=revision)
-compose(['up', '-d', '--wait', 'db'], revision=revision, project=restored_project, timeout=120)
-restored_sql = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B', '-e',
-                        'SELECT evidence_sha FROM vtc.rehearsal_reference WHERE id=1; SELECT state FROM vtc._vtc_migrations; SELECT sequence FROM vtc_operations.heartbeat;'], revision=revision, project=restored_project)
-assert checksum.encode() in restored_sql and b'applied' in restored_sql and b'1' in restored_sql
-compose(['stop', 'db'], revision=revision, project=restored_project)
-compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
-# Damage detection must precede database/volume actions and must not mutate the active sentinel.
-original = (directory / 'database.sql').read_bytes()
-(directory / 'database.sql').write_bytes(original + b'corrupt')
-expect_failure(lambda: ops.restore_locked(export_id))
-(directory / 'database.sql').write_bytes(original)
-assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe'], revision=revision)
-ops.ready(revision)
-assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-sql("UPDATE vtc._vtc_migrations SET state='applying';")
-with ops.lock():
-    expect_failure(lambda: ops.release_locked(image_archive, revision, 105, 1, 'auto', image_id))
-assert ops.current()['runId'] == 103 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
-compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)  # Synthetic root-only inspection, writers remain fenced.
-assert b'applying' in sql('SELECT state FROM vtc._vtc_migrations;')
-expect_failure(lambda: compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision))
-# Real cross-process serialization of the same flock used by every release/export/cron command.
-def hold(queue):
+    dockerfile = (f'FROM vtc-dashboard:{revision}\nCOPY --chown=node:node unhealthy.mjs /app/operations/unhealthy.mjs\n'
+                  f'LABEL vtc011.rehearsal={project}\nCMD ["node","operations/unhealthy.mjs"]\n').encode()
+    context_tar = io.BytesIO()
+    with tarfile.open(fileobj=context_tar, mode='w') as archive:
+        for name, content in [('Dockerfile', dockerfile), ('unhealthy.mjs', unhealthy_script)]:
+            entry = tarfile.TarInfo(name); entry.size = len(content); archive.addfile(entry, io.BytesIO(content))
+    ops.run(['docker', 'build', '-t', unhealthy_tag, '-'], data=context_tar.getvalue(), timeout=180)
+    unhealthy_id = json.loads(ops.run(['docker', 'image', 'inspect', unhealthy_tag]))[0]['Id']
+    assert unhealthy_id != image_id
+    ops.run(['docker', 'tag', unhealthy_id, f'vtc-dashboard:{revision}'])
+    unhealthy_archive = base / 'unhealthy-image.tar'
+    ops.run(['docker', 'save', '--output', str(unhealthy_archive), f'vtc-dashboard:{revision}'])
+with rehearsal_phase('tail-unhealthy-release'):
+    accepted_metadata = (base / 'state/current.json').read_bytes()
+    accepted_previous = (base / 'state/previous.json').read_bytes()
+    # Only the attempt count changes in this test; every attempt still performs the
+    # production HTTP request. Production retains its 30-attempt bound.
+    production_attempts = ops.READINESS_ATTEMPTS
+    ops.READINESS_ATTEMPTS = 5
     with ops.lock():
-        queue.put(time.monotonic())
-        time.sleep(0.5)
-queue = multiprocessing.Queue()
-first = multiprocessing.Process(target=hold, args=(queue,))
-second = multiprocessing.Process(target=hold, args=(queue,))
-first.start()
-a = queue.get(timeout=5)
-second.start()
-b = queue.get(timeout=5)
-first.join(); second.join()
-assert b - a >= 0.45
-for name in ['../escape', '/absolute', 'nested/../../escape']:
-    archive = base / 'unsafe.tar'
+        expect_failure(lambda: ops.release_locked(unhealthy_archive, revision, 104, 1, 'auto', unhealthy_id))
+    ops.READINESS_ATTEMPTS = production_attempts
+    assert (base / 'state/current.json').read_bytes() == accepted_metadata
+    assert (base / 'state/previous.json').read_bytes() == accepted_previous
+    assert ops.current()['runId'] == 103 and ops.current()['imageId'] == image_id
+    assert not (base / 'private/maintenance/enabled').exists() and not (base / 'state/recovery-required').exists()
+    assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == unhealthy_id
+    for service in ['app', 'probe']:
+        container = compose(['ps', '-q', service], revision=revision).decode().strip()
+        assert json.loads(ops.run(['docker', 'inspect', container]))[0]['Image'] == image_id
+    assert json.loads(get('/_operations/readiness', token))['revision'] == revision
+    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+    evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
+    compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
+with rehearsal_phase('tail-export'):
+    ops.fenced(revision)
+    with ops.lock():
+        export_id = ops.export_locked(revision)
+    directory, manifest = ops.validate_export(export_id)
+    assert manifest['evidenceFiles']['sentinel.txt']['sha256'] == checksum
+    assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
+    assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
+    assert manifest['files']['database.sql']['bytes'] > 0
+with rehearsal_phase('tail-encrypted-copy'):
+    # Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
+    # This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
+    copy_directory = base / 'private/copy-fixture'
+    copy_directory.mkdir(mode=0o700)
+    export_tar = copy_directory / 'export.tar'
+    with tarfile.open(export_tar, 'w') as archive:
+        for name in ['database.sql', 'evidence.tar', 'manifest.json']:
+            archive.add(directory / name, arcname=name)
+    key = base / 'private/recovery-test.key'
+    encrypted = copy_directory / 'export.encrypted'
+    decrypted = copy_directory / 'recovered.tar'
+    for args, data in [(['key', str(key)], None), (['seal', str(encrypted), str(key)], export_tar.read_bytes()),
+                       (['open', str(encrypted), str(key), str(decrypted)], None)]:
+        subprocess.run(['node', str(base / 'recovery-copy.mjs'), *args], input=data, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    recovered_id = uuid.uuid4().hex
+    recovered_directory = base / 'state/exports' / recovered_id
+    recovered_directory.mkdir(mode=0o700)
+    with tarfile.open(decrypted, 'r:') as archive:
+        assert set(archive.getnames()) == {'database.sql', 'evidence.tar', 'manifest.json'}
+        for entry in archive.getmembers():
+            assert entry.isfile()
+            (recovered_directory / entry.name).write_bytes(archive.extractfile(entry).read())
+with rehearsal_phase('tail-restore'):
+    with ops.lock():
+        restored_project = ops.restore_locked(recovered_id)
+with rehearsal_phase('tail-restored-references'):
+    # Restore helper stops destination after verifying ledger/files. Restart only that isolated DB for references.
+    ops.fenced(revision)
+    compose(['stop', 'db'], revision=revision)
+    compose(['up', '-d', '--wait', 'db'], revision=revision, project=restored_project, timeout=120)
+    restored_sql = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B', '-e',
+                            'SELECT evidence_sha FROM vtc.rehearsal_reference WHERE id=1; SELECT state FROM vtc._vtc_migrations; SELECT sequence FROM vtc_operations.heartbeat;'], revision=revision, project=restored_project)
+    assert checksum.encode() in restored_sql and b'applied' in restored_sql and b'1' in restored_sql
+    compose(['stop', 'db'], revision=revision, project=restored_project)
+    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
+with rehearsal_phase('tail-corrupt-export'):
+    # Damage detection must precede database/volume actions and must not mutate the active sentinel.
+    original = (directory / 'database.sql').read_bytes()
+    (directory / 'database.sql').write_bytes(original + b'corrupt')
+    expect_failure(lambda: ops.restore_locked(export_id))
+    (directory / 'database.sql').write_bytes(original)
+    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+    compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe'], revision=revision)
+    ops.ready(revision)
+    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+with rehearsal_phase('tail-dirty-migration'):
+    sql("UPDATE vtc._vtc_migrations SET state='applying';")
+    with ops.lock():
+        expect_failure(lambda: ops.release_locked(image_archive, revision, 105, 1, 'auto', image_id))
+    assert ops.current()['runId'] == 103 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
+    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)  # Synthetic root-only inspection, writers remain fenced.
+    assert b'applying' in sql('SELECT state FROM vtc._vtc_migrations;')
+    expect_failure(lambda: compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision))
+with rehearsal_phase('tail-operation-lock'):
+    # Real cross-process serialization of the same flock used by every release/export/cron command.
+    def hold(queue):
+        with ops.lock():
+            queue.put(time.monotonic())
+            time.sleep(0.5)
+    queue = multiprocessing.Queue()
+    first = multiprocessing.Process(target=hold, args=(queue,))
+    second = multiprocessing.Process(target=hold, args=(queue,))
+    first.start()
+    a = queue.get(timeout=5)
+    second.start()
+    b = queue.get(timeout=5)
+    first.join(); second.join()
+    assert b - a >= 0.45
+with rehearsal_phase('tail-archive-fences'):
+    for name in ['../escape', '/absolute', 'nested/../../escape']:
+        archive = base / 'unsafe.tar'
+        with tarfile.open(archive, 'w') as output:
+            entry = tarfile.TarInfo(name); entry.size = 1; output.addfile(entry, io.BytesIO(b'x'))
+        expect_failure(lambda: ops.archive_safe(archive))
     with tarfile.open(archive, 'w') as output:
-        entry = tarfile.TarInfo(name); entry.size = 1; output.addfile(entry, io.BytesIO(b'x'))
+        entry = tarfile.TarInfo('link'); entry.type = tarfile.SYMTYPE; entry.linkname = '/outside'; output.addfile(entry)
     expect_failure(lambda: ops.archive_safe(archive))
-with tarfile.open(archive, 'w') as output:
-    entry = tarfile.TarInfo('link'); entry.type = tarfile.SYMTYPE; entry.linkname = '/outside'; output.addfile(entry)
-expect_failure(lambda: ops.archive_safe(archive))
-for command in ['sh', 'release $(id)', 'release ;id', 'release ' + 'a' * 40 + ' x 2 1 1 auto', 'export']:
-    os.environ['SSH_ORIGINAL_COMMAND'] = command
-    expect_failure(ops.receive)
-# Exercise bounded stdin failure without ever reaching Docker load or active state.
-for data, length, checksum in [(b'x', 2, hashlib.sha256(b'x').hexdigest()), (b'xx', 1, hashlib.sha256(b'x').hexdigest()), (b'x', 1, '0' * 64)]:
-    result = subprocess.run(['python3', str(base / 'operations.py'), 'receive'], input=data,
-                            env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 106 1 auto'),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-    assert result.returncode == 1 and ops.current()['runId'] == 103
+    for command in ['sh', 'release $(id)', 'release ;id', 'release ' + 'a' * 40 + ' x 2 1 1 auto', 'export']:
+        os.environ['SSH_ORIGINAL_COMMAND'] = command
+        expect_failure(ops.receive)
+with rehearsal_phase('tail-receive-fences'):
+    # Exercise bounded stdin failure without ever reaching Docker load or active state.
+    for data, length, checksum in [(b'x', 2, hashlib.sha256(b'x').hexdigest()), (b'xx', 1, hashlib.sha256(b'x').hexdigest()), (b'x', 1, '0' * 64)]:
+        result = subprocess.run(['python3', str(base / 'operations.py'), 'receive'], input=data,
+                                env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 106 1 auto'),
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        assert result.returncode == 1 and ops.current()['runId'] == 103
 print('Synthetic deployment rehearsal passed')

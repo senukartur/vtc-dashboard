@@ -61,3 +61,5 @@ The per-event change sequence orders immutable definition/RSVP/attendance histor
 ## VTC-026 correction event
 
 `trip.correction_recorded` v1 uses the canonical trip aggregate/current version and safe data `{reconciliationId,primaryTripId,secondaryTripId,reconciliationVersion}`. Apply/reverse persists it with membership, history, contribution replacement, receipt and audit. Private reasons, snapshots, report evidence and source payloads are excluded. Consumers must load current authorized state and use monotonic contribution/aggregate versions; no new consumer/subscription or notification delivery is claimed. See [reconciliation](../../development/reconciliation.md).
+
+`trip.proposal_reviewed` v1 is an Acceptance-owned safe event on canonical trip/version with only `{proposalId, reviewedRevisionId}`. Proposal review/audit/outbox commit together, including rejection before any terminal trip decision. It does not assert that the effective trip outcome or contribution changed; analytics and notification consumers remain unbound.

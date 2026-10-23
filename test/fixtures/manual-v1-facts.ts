@@ -21,6 +21,9 @@ export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx);
   return {
     async insert(tx: TxContext, tripId: string, f: NormalizedTripEvidence, adapterVersion: number) {
+      // Type bridge: the frozen writer cannot receive the later derived-time discriminator.
+      if (f.start.basis === "staff-resolution" || f.end.basis === "staff-resolution")
+        throw new Error("LEGACY_DERIVED_TIME_UNSUPPORTED");
       function pin(value: Fact<PinnedEntity>) {
         if (value.status === "unknown") return { entityId: null, factId: null };
         if (value.value.catalogRevisionId !== f.catalogRevisionId)

@@ -35,6 +35,7 @@ import {
   LeaseLostError,
   retryTransaction,
 } from "../../apps/api/src/platform/jobs/queue.ts";
+import { observeAcceptanceChild } from "../../apps/api/src/platform/jobs/acceptance-diagnostics.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { type AccessEvent, createOutbox } from "../../apps/api/src/platform/outbox/events.ts";
 import {
@@ -45,7 +46,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { barrier, bounded, deferred, until } from "../support/concurrency.ts";
-import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
+import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -53,6 +54,8 @@ const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfte
 let control: Connection;
 let unit: ReturnType<typeof createUnitOfWork>;
 const runId = newId();
+const diagnostic = identityDiagnostics("jobs");
+const setupDiagnostics = { preserveFailure: true } as const;
 function required<T>(value: T | null | undefined): T {
   if (value == null) throw new Error("FIXTURE_VALUE_MISSING");
   return value;
@@ -92,13 +95,26 @@ async function cleanup() {
 beforeAll(
   async () =>
     safe(async () => {
-      control = await testConnection();
-      await reset(control);
-      await runMigrations(guardedSettings());
-      await control.query(
-        "CREATE TABLE synthetic_job_counter (run_id BINARY(36) NOT NULL, sequence INT NOT NULL, stage INT NOT NULL, touches INT NOT NULL, PRIMARY KEY(run_id,sequence,stage)) ENGINE=InnoDB",
+      control = await diagnostic.phase("connection", testConnection, setupDiagnostics);
+      await diagnostic.phase("reset", () => reset(control), setupDiagnostics);
+      await diagnostic.phase(
+        "migrations",
+        () => runMigrations(guardedSettings()),
+        setupDiagnostics,
       );
-      unit = createUnitOfWork(guardedSettings());
+      await diagnostic.phase(
+        "synthetic_ddl",
+        () =>
+          control.query(
+            "CREATE TABLE synthetic_job_counter (run_id BINARY(36) NOT NULL, sequence INT NOT NULL, stage INT NOT NULL, touches INT NOT NULL, PRIMARY KEY(run_id,sequence,stage)) ENGINE=InnoDB",
+          ),
+        setupDiagnostics,
+      );
+      unit = await diagnostic.phase(
+        "unit",
+        async () => createUnitOfWork(guardedSettings()),
+        setupDiagnostics,
+      );
     }),
   SCHEMA_SETUP_TIMEOUT_MS,
 );
@@ -663,13 +679,19 @@ test("pre-COMMIT connection loss backs off local work without replaying external
     await cleanup();
   }));
 
-function child(mode: string) {
+function child(mode: "hang" | "run" | "crash-claim" | "crash-effect") {
   const proc = spawn(process.execPath, ["apps/api/dist/jobs-acceptance.js", mode, runId], {
     env: { ...process.env, VTC_JOBS_ACCEPTANCE: "synthetic-only", TZ: "Pacific/Honolulu" },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  return { proc, done: new Promise<number | null>((resolve) => proc.once("exit", resolve)) };
+  return {
+    proc,
+    done: observeAcceptanceChild(proc, (record) =>
+      console.log(JSON.stringify({ mode, ...record })),
+    ),
+  };
 }
+
 test("lost claim/effect COMMIT response never replays callbacks and reconciles durable receipt", async () =>
   safe(async () => {
     const base = createAcceptanceQueue(unit);

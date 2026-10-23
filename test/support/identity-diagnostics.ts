@@ -13,6 +13,7 @@ type Fixture =
   | "reset"
   | "concurrency"
   | "external"
+  | "jobs"
   | "messaging"
   | "generation_worker";
 type Phase =
@@ -190,7 +191,11 @@ export function identityDiagnostics(fixture: Fixture) {
     failure(error: unknown, durationMs: number | null = null) {
       emit("operation", "failed", durationMs === null ? null : Math.round(durationMs), error);
     },
-    async phase<T>(phase: Phase, work: () => Promise<T>): Promise<T> {
+    async phase<T>(
+      phase: Phase,
+      work: () => Promise<T>,
+      options: { preserveFailure?: true } = {},
+    ): Promise<T> {
       const started = performance.now();
       emit(phase, "started", 0);
       try {
@@ -199,6 +204,7 @@ export function identityDiagnostics(fixture: Fixture) {
         return result;
       } catch (error) {
         emit(phase, "failed", Math.round(performance.now() - started), error);
+        if (options.preserveFailure) throw error;
         throw Object.assign(new Error("IDENTITY_FIXTURE_PHASE_FAILED"), safeIdentityFailure(error));
       }
     },

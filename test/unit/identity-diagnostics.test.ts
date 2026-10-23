@@ -713,3 +713,57 @@ test("worker parsers reject private fields, malformed receipts and unsupported n
     }),
   ).toBeUndefined();
 });
+
+test("Jobs setup phase diagnostics retain original failures for the owning handler and redact their output", async () => {
+  const lines: string[] = [],
+    output = vi
+      .spyOn(console, "log")
+      .mockImplementation((value: unknown) => lines.push(String(value))),
+    diagnostic = identityDiagnostics("jobs"),
+    failure = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL_PASSWORD"), {
+      code: "ER_NO_SUCH_TABLE",
+      statusCode: 503,
+      sql: "SYNTHETIC_PRIVATE_SQL",
+      parameters: ["SYNTHETIC_PRIVATE_KEY"],
+    });
+  try {
+    expect(await diagnostic.phase("connection", async () => 7, { preserveFailure: true })).toBe(7);
+    await expect(
+      diagnostic.phase(
+        "migrations",
+        async () => {
+          throw failure;
+        },
+        { preserveFailure: true },
+      ),
+    ).rejects.toBe(failure);
+    expect(safeIdentityFailure(failure)).toEqual({
+      statusCode: 503,
+      codes: ["ER_NO_SUCH_TABLE"],
+      category: "unclassified",
+    });
+    expect(lines.every((line) => !line.includes("SYNTHETIC_PRIVATE"))).toBe(true);
+    const records = lines.map((line) => JSON.parse(line));
+    expect(records.map(({ fixture, phase, state }) => ({ fixture, phase, state }))).toEqual([
+      { fixture: "jobs", phase: "connection", state: "started" },
+      { fixture: "jobs", phase: "connection", state: "success" },
+      { fixture: "jobs", phase: "migrations", state: "started" },
+      { fixture: "jobs", phase: "migrations", state: "failed" },
+    ]);
+    expect(records[3]).toEqual({
+      event: "identity_fixture",
+      fixture: "jobs",
+      phase: "migrations",
+      state: "failed",
+      durationMs: expect.any(Number),
+      statusCode: 503,
+      codes: ["ER_NO_SUCH_TABLE"],
+      category: "unclassified",
+    });
+    expect(
+      records.every((record) => Number.isSafeInteger(record.durationMs) && record.durationMs >= 0),
+    ).toBe(true);
+  } finally {
+    output.mockRestore();
+  }
+});

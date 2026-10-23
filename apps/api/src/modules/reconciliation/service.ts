@@ -63,6 +63,7 @@ export function createReconciliation(
     qualifications: Qualifications;
     manual?: ManualReports;
     outbox?: ReturnType<typeof createOutbox>;
+    workflowChanged?: (tx: TxContext, tripId: string) => Promise<void>;
   },
   now = () => new Date(),
 ) {
@@ -182,6 +183,22 @@ export function createReconciliation(
       },
     });
   }
+  async function settleWorkflow(tx: TxContext, rootIds: string[]) {
+    for (const id of [...new Set(rootIds)].sort()) {
+      await startSearch(tx, id, false);
+      await ports.workflowChanged?.(tx, id);
+      const current = await ports.trips.groups.resolve(tx, id, true);
+      // The search and immutable reconciliation snapshot describe the same final
+      // projection, including assessment performed inside this caller transaction.
+      await c(tx)
+        .update(reconciliationSearches)
+        .set({
+          rootVersion: current.version,
+          epoch: await ports.trips.reconciliation.searchEpoch(tx, current.ownerId, current.game),
+        })
+        .where(eq(reconciliationSearches.tripId, current.id));
+    }
+  }
   async function apply(tx: TxContext, input: S["MergeInput"], actor: Actor | null) {
     const rows = await coordinator.prepare(
         tx,
@@ -200,10 +217,20 @@ export function createReconciliation(
     )
       throw identityError(409, "VERSION_CONFLICT");
     const snapshot = await ports.trips.reconciliation.apply(tx, primary, secondary);
+    await coordinator.replace(tx, snapshot.after, snapshot.credits);
+    await invalidate(
+      tx,
+      snapshot.after.map((t) => t.id),
+    );
+    await settleWorkflow(tx, [primary.id]);
+    snapshot.after = await ports.trips.groups.members(
+      tx,
+      snapshot.after.map((t) => t.id),
+      true,
+    );
     const p = snapshot.after.find((t) => t.id === primary.id),
       s = snapshot.after.find((t) => t.id === secondary.id);
     if (!p || !s) throw new Error("RECONCILIATION_WRITE_MISSING");
-    await coordinator.replace(tx, snapshot.after, snapshot.credits);
     const row: Row = {
       id: newId(),
       version: 1,
@@ -226,12 +253,7 @@ export function createReconciliation(
         snapshot,
         createdAt: at(),
       });
-    await invalidate(
-      tx,
-      snapshot.after.map((t) => t.id),
-    );
     await effects(tx, row, actor);
-    await startSearch(tx, p.id, false);
     return { data: dto(row), version: row.version };
   }
   async function authorize(tx: TxContext, actor: Actor) {
@@ -731,8 +753,21 @@ export function createReconciliation(
           const snapshot = history.snapshot as GroupSnapshot,
             restored = await ports.trips.reconciliation.reverse(tx, snapshot);
           await coordinator.replace(tx, restored, snapshot.credits);
-          const primary = restored.find((t) => t.id === row.primaryTripId),
-            secondary = restored.find((t) => t.id === row.secondaryTripId);
+          await invalidate(
+            tx,
+            restored.map((t) => t.id),
+          );
+          await settleWorkflow(
+            tx,
+            restored.filter((t) => !t.aliasOf).map((t) => t.id),
+          );
+          const settled = await ports.trips.groups.members(
+            tx,
+            restored.map((t) => t.id),
+            true,
+          );
+          const primary = settled.find((t) => t.id === row.primaryTripId),
+            secondary = settled.find((t) => t.id === row.secondaryTripId);
           if (!primary || !secondary) throw new Error("RECONCILIATION_REVERSE_MISSING");
           const updated: Row = {
             ...row,
@@ -742,22 +777,18 @@ export function createReconciliation(
             secondaryVersion: secondary.version,
           };
           await c(tx).update(reconciliations).set(updated).where(eq(reconciliations.id, id));
-          await c(tx).insert(reconciliationHistory).values({
-            reconciliationId: id,
-            version: updated.version,
-            actorId: actor.userId,
-            operation: "reverse",
-            reason: input.reason,
-            snapshot: { restored },
-            createdAt: at(),
-          });
-          await invalidate(
-            tx,
-            restored.map((t) => t.id),
-          );
+          await c(tx)
+            .insert(reconciliationHistory)
+            .values({
+              reconciliationId: id,
+              version: updated.version,
+              actorId: actor.userId,
+              operation: "reverse",
+              reason: input.reason,
+              snapshot: { restored: settled },
+              createdAt: at(),
+            });
           await effects(tx, updated, actor);
-          for (const root of restored.filter((t) => !t.aliasOf))
-            await startSearch(tx, root.id, false);
           return { data: dto(updated), version: updated.version };
         });
       });

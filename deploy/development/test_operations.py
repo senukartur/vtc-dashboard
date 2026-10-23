@@ -1,5 +1,9 @@
 """Focused control-flow tests; real child failures are also exercised by rehearsal.py."""
+import contextlib
+import io
 import json
+import signal
+import sys
 import pathlib
 import subprocess
 import tempfile
@@ -129,6 +133,82 @@ class TickTests(unittest.TestCase):
             ops.stop_owned_jobs('a' * 40)
         self.assertEqual([call.kwargs['timeout'] for call in run.call_args_list], [10, 10, 20, 10])
         self.assertEqual(run.call_args_list[2].args[0], ['docker', 'rm', '-f', identity])
+
+
+class ChildOutcomeTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.base = pathlib.Path(self.directory.name)
+        self.base_patch = patch.object(ops, 'BASE', self.base)
+        self.base_patch.start()
+        self.addCleanup(self.base_patch.stop)
+
+    def test_native_failure_retains_both_streams_and_safe_context_through_cleanup(self):
+        diagnostic = {'event': 'database.migration_failed', 'code': 'MIGRATION_EXECUTION_FAILED',
+                      'nativeCodes': ['PROTOCOL_SEQUENCE_TIMEOUT', 'private-host'],
+                      'databaseOperation': {'operation': 'migration_baseline', 'wireDeadlineMs': 1000,
+                                            'elapsedMs': 1001, 'sql': 'private-sql'},
+                      'message': 'private-password', 'args': ['private-path']}
+        for stream in ['stdout', 'stderr']:
+            captured = io.StringIO()
+            script = 'import sys; print(' + repr(json.dumps(diagnostic)) + ', file=sys.' + stream + '); print("private-output"); sys.exit(7)'
+            with self.assertRaisesRegex(RuntimeError, '^OPERATION_CHILD_FAILED$'), contextlib.redirect_stderr(captured):
+                ops.run([sys.executable, '-c', script], timeout=2)
+            record = json.loads(captured.getvalue())
+            self.assertEqual((record['outcome'], record['exitCode'], record['signal']), ('exit', 7, None))
+            self.assertEqual(record['migrations'], [{'code': 'MIGRATION_EXECUTION_FAILED',
+                'nativeCodes': ['PROTOCOL_SEQUENCE_TIMEOUT'], 'databaseOperation': {
+                    'operation': 'migration_baseline', 'wireDeadlineMs': 1000, 'elapsedMs': 1001}}])
+            self.assertNotIn('private-', captured.getvalue())
+            files = [self.base / ('state/last-failed-child.' + suffix) for suffix in ['json', 'stdout', 'stderr']]
+            before = [path.read_bytes() for path in files]
+            self.assertEqual(ops.run([sys.executable, '-c', 'print("cleanup")'], timeout=2), b'cleanup\n')
+            self.assertEqual([path.read_bytes() for path in files], before)
+            self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in files))
+
+    def test_failed_private_stream_retention_is_bounded(self):
+        captured = io.StringIO()
+        with self.assertRaisesRegex(RuntimeError, '^OPERATION_CHILD_FAILED$'), contextlib.redirect_stderr(captured):
+            ops.run([sys.executable, '-c', 'import sys; print("x" * 100000); print("y" * 100000, file=sys.stderr); sys.exit(3)'], timeout=2)
+        for suffix in ['stdout', 'stderr']:
+            self.assertEqual((self.base / ('state/last-failed-child.' + suffix)).stat().st_size, ops.DIAGNOSTIC_BYTES)
+        self.assertEqual(json.loads(captured.getvalue())['migrations'], [])
+
+    def test_malformed_unknown_and_oversized_child_records_are_not_forwarded(self):
+        payload = {'event': 'database.migration_failed', 'code': ['private-value'],
+                   'nativeCodes': ['ER_LOCK_DEADLOCK'] * 9 + ['ECONNRESET'],
+                   'databaseOperation': {'operation': 'migration_statement', 'wireDeadlineMs': True, 'elapsedMs': 0},
+                   'sql': 'private-sql'}
+        data = (b'private-prefix' * 65536 + b'\n' + b'x' * 4097 + b'\n' + b'{bad json\n' +
+                json.dumps(['private-value']).encode() + b'\n' + json.dumps(payload).encode())
+        result = ops.migration_diagnostics(data)
+        self.assertEqual(result, [{'code': 'MIGRATION_EXECUTION_FAILED', 'nativeCodes': ['ER_LOCK_DEADLOCK']}])
+        self.assertNotIn('private-', json.dumps(result))
+        self.assertEqual(ops.migration_diagnostics(None), [])
+        self.assertEqual(len(ops.migration_diagnostics((json.dumps(payload).encode() + b'\n') * 64)), 8)
+        payload['databaseOperation'] = {'operation': 'private-operation', 'wireDeadlineMs': 1, 'elapsedMs': 0}
+        self.assertNotIn('databaseOperation', ops.migration_diagnostics(json.dumps(payload).encode())[0])
+
+    def test_timeout_signal_spawn_failure_and_streamed_success_preserve_native_behavior(self):
+        captured = io.StringIO()
+        with self.assertRaises(subprocess.TimeoutExpired), contextlib.redirect_stderr(captured):
+            ops.run([sys.executable, '-c', 'import time; print("private-partial", flush=True); time.sleep(5)'], timeout=0.1)
+        self.assertEqual(json.loads(captured.getvalue())['outcome'], 'timeout')
+        self.assertIn(b'private-partial', (self.base / 'state/last-failed-child.stdout').read_bytes())
+        captured = io.StringIO()
+        with self.assertRaisesRegex(RuntimeError, '^OPERATION_CHILD_FAILED$'), contextlib.redirect_stderr(captured):
+            ops.run([sys.executable, '-c', 'import os, signal; os.kill(os.getpid(), signal.SIGTERM)'], timeout=2)
+        self.assertEqual(json.loads(captured.getvalue())['signal'], signal.SIGTERM)
+        captured = io.StringIO()
+        with self.assertRaises(FileNotFoundError), contextlib.redirect_stderr(captured):
+            ops.run(['/nonexistent-synthetic-child'], timeout=2)
+        self.assertEqual(json.loads(captured.getvalue())['outcome'], 'spawn_error')
+        with tempfile.TemporaryFile() as destination:
+            self.assertIsNone(ops.run([sys.executable, '-c', 'print("streamed")'], output=destination, timeout=2))
+            destination.seek(0)
+            self.assertEqual(destination.read(), b'streamed\n')
+        self.assertNotIn('private-', captured.getvalue())
 
 
 if __name__ == '__main__':

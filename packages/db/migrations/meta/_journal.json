@@ -99,6 +99,13 @@
       "when": 1792681894994,
       "tag": "0013_modern_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1792708484906,
+      "tag": "0014_mighty_the_hunter",
+      "breakpoints": true
     }
   ]
 }

@@ -2,8 +2,9 @@ import { applicationId, createUnitOfWork } from "@vtc/db";
 import { sql } from "@vtc/db/platform-schema";
 import { readConfig } from "./platform/config/env.js";
 import { createAcceptanceQueue, fixtureJob } from "./platform/jobs/acceptance.js";
+import { acceptanceFailure } from "./platform/jobs/acceptance-diagnostics.js";
 import { ownedCli } from "./platform/jobs/process.js";
-import { bounds, unknownCommit } from "./platform/jobs/queue.js";
+import { bounds } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
 
 await ownedCli(async () => {
@@ -69,12 +70,7 @@ await ownedCli(async () => {
       console.log(JSON.stringify({ event: "acceptance_consumed", processed }));
     } else console.log(JSON.stringify(await runPass(queue, abort.signal)));
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "acceptance_failed",
-        category: unknownCommit(error) ? "commit_outcome_unknown" : "operation_failed",
-      }),
-    );
+    console.error(JSON.stringify(acceptanceFailure(error)));
     process.exitCode = 1;
   } finally {
     try {

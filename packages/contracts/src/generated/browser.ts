@@ -2889,6 +2889,7 @@ export interface components {
             data: components["schemas"]["TripProposal"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeTripProposalDecision: components["schemas"]["EnvelopeDecision"] | components["schemas"]["EnvelopeTripProposal"];
         EnvelopeTripView: {
             data: components["schemas"]["TripView"];
             meta: components["schemas"]["Meta"];
@@ -3674,6 +3675,11 @@ export interface components {
             cargoMassKg?: string;
             /** Format: uuid */
             catalogRevisionId?: string;
+            /**
+             * Format: uuid
+             * @description Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field.
+             */
+            correctionRequestId?: string | null;
             /** Format: uuid */
             destinationCityId?: string;
             evidenceIds: string[];
@@ -3843,8 +3849,21 @@ export interface components {
             baseFactRevisionId: string | null;
             baseTripVersion: number;
             changes: components["schemas"]["ResolutionChanges"] | null;
+            /**
+             * Format: uuid
+             * @description Immutable originating author correction request association, when present.
+             */
+            correctionRequestId?: string | null;
             /** Format: date-time */
             createdAt: string;
+            /** @description Immutable safe references selected by an event-association proposal. Omitted by older responses; null for proposals without an event association. */
+            eventAssociation?: {
+                attendanceRevisionId: string | null;
+                /** Format: uuid */
+                eventId: string;
+                /** Format: uuid */
+                eventRevisionId: string;
+            } | null;
             evidence: components["schemas"]["Evidence"][];
             /** Format: uuid */
             id: string;
@@ -7686,7 +7705,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeDecision"];
+                    "application/json": components["schemas"]["EnvelopeTripProposalDecision"];
                 };
             };
             default: components["responses"]["Error"];
