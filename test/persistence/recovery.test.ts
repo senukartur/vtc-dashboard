@@ -374,8 +374,12 @@ await recoveryTest(
         const journal = JSON.parse(
             await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
           ),
-          entry = journal.entries.at(-1);
+          entry = journal.entries.find((candidate: { idx: number }) => candidate.idx === 13);
+        assert.equal(entry?.tag, "0013_modern_moon_knight");
         assert.equal(entry.idx, 13);
+        journal.entries = journal.entries.filter(
+          (candidate: { idx: number }) => candidate.idx <= 13,
+        );
         const original = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
         const marker = "ALTER TABLE `trips` ADD `alias_of` binary(36);";
         assert.ok(original.includes(marker));

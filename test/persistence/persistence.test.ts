@@ -39,6 +39,7 @@ import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { auditEntries } from "../../packages/db/src/schema/audit.ts";
 import { bounded, until } from "../support/concurrency.ts";
+import { seedPublishedEventsHistory } from "./published-events-fixture.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   admissionsPriorFolder,
@@ -799,42 +800,33 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const login = await identity.login("event-upgrade@example.invalid", password);
         const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
         const director = await identity.authenticate(new Headers({ cookie }));
-        let instant = Date.parse("2026-10-22T12:00:00.000Z");
-        const events = createEvents(
+        const eventKey = randomBytes(32).toString("hex");
+        const eventInput = {
+          title: "Fictional upgrade convoy",
+          description: "Fictional retained event history",
+          game: "ets2" as const,
+          server: "Fictional server",
+          organizer: "Fictional organizer",
+          meetingLocation: "Fictional meeting location",
+          route: "Fictional route",
+          meetingAt: "2026-10-22T12:00:30.000Z",
+          startsAt: "2026-10-22T12:01:00.000Z",
+          endsAt: null,
+          visibility: "members" as const,
+          originCityId: null,
+          destinationCityId: null,
+          prescribedCargoId: null,
+          prescribedMassKg: null,
+          prescribedTrailerTypeId: null,
+        };
+        const fixture = await seedPublishedEventsHistory(
           unit,
-          { cursorKey: randomBytes(32).toString("hex") },
-          { identity },
-          () => new Date(instant),
+          director.userId,
+          eventKey,
+          eventInput,
         );
-        const createKey = newId(),
-          eventInput = {
-            title: "Fictional upgrade convoy",
-            description: "Fictional retained event history",
-            game: "ets2" as const,
-            server: "Fictional server",
-            organizer: "Fictional organizer",
-            meetingLocation: "Fictional meeting location",
-            route: "Fictional route",
-            meetingAt: "2026-10-22T12:00:30.000Z",
-            startsAt: "2026-10-22T12:01:00.000Z",
-            endsAt: null,
-            visibility: "members" as const,
-            originCityId: null,
-            destinationCityId: null,
-            prescribedCargoId: null,
-            prescribedMassKg: null,
-            prescribedTrailerTypeId: null,
-          },
-          event = await events.create(director, createKey, eventInput),
-          eventId = event.data.event.id;
-        await events.respond(director, eventId, newId(), 1, { response: "participating" });
-        instant += 60000;
-        await events.setAttendance(director, eventId, newId(), 1, {
-          members: [{ memberId: director.userId, attendance: "attended", note: null }],
-        });
-        const eventBefore = await events.get(director, eventId),
-          historyBefore = await events.history(director, eventId),
-          replayBefore = await events.create(director, createKey, eventInput);
+        const { eventId, createKey, eventBefore, historyBefore, replayBefore } = fixture;
+        const events = createEvents(unit, { cursorKey: eventKey }, { identity });
         assert.equal(historyBefore.definitions.length, 1);
         assert.equal(historyBefore.responses.length, 1);
         assert.equal(historyBefore.attendance.length, 1);
@@ -850,6 +842,21 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         assert.deepEqual(await events.get(director, eventId), eventBefore);
         assert.deepEqual(await events.history(director, eventId), historyBefore);
         assert.deepEqual(await events.create(director, createKey, eventInput), replayBefore);
+        assert.deepEqual(
+          await events.respond(director, eventId, fixture.responseKey, 1, fixture.responseInput),
+          { data: { version: 2, response: "participating", declineReason: null }, version: 2 },
+        );
+        assert.deepEqual(
+          await events.setAttendance(
+            director,
+            eventId,
+            fixture.attendanceKey,
+            1,
+            fixture.attendanceInput,
+          ),
+          { data: { id: eventId, version: 2 }, version: 2 },
+        );
+        assert.deepEqual(await fixture.readReceipts(), fixture.receiptsBefore);
         const [eventReceipts] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) n FROM event_commands",
         );
