@@ -155,23 +155,58 @@ async function allocate(name: string, env: NodeJS.ProcessEnv) {
   const path = resolve(`.local/testing/${run}-${name}.json`);
   const owned: OwnedAllocation = { schema: false, user: false, file: false };
   const cleanup = () =>
-    cleanupAllocation(owned, {
-      lock: async () => {
-        if (lock) destroyTransport(lock);
+    cleanupAllocation(
+      owned,
+      {
+        lock: async () => {
+          if (lock) destroyTransport(lock);
+        },
+        schema: async () => {
+          await admin.query({
+            sql: `DROP DATABASE \`${database}\``,
+            timeout: SCHEMA_DROP_QUERY_TIMEOUT_MS,
+          });
+        },
+        user: async () => {
+          await admin.query({ sql: "DROP USER ?@'%'", values: [user], timeout: 2000 });
+        },
+        file: () => rm(path, { force: true }),
+        userAbsence: async () => {
+          const [rows] = await admin.query({
+            sql: "SELECT COUNT(*) AS count FROM mysql.user WHERE User = ? AND Host = ?",
+            values: [user, "%"],
+            timeout: 2000,
+          });
+          const count = (rows as { count: unknown }[])[0]?.count;
+          if (
+            !Array.isArray(rows) ||
+            rows.length !== 1 ||
+            !(
+              (typeof count === "number" && Number.isSafeInteger(count) && count >= 0) ||
+              (typeof count === "string" && /^[0-9]+$/.test(count))
+            )
+          )
+            throw new Error("TEST_OWNED_USER_ABSENCE_INVALID_RESULT");
+          return count === 0 || count === "0";
+        },
+        admin: () => admin.end(),
+        destroyAdmin: () => destroyTransport(admin),
       },
-      schema: async () => {
-        await admin.query({
-          sql: `DROP DATABASE \`${database}\``,
-          timeout: SCHEMA_DROP_QUERY_TIMEOUT_MS,
-        });
+      (diagnostic) => {
+        const allocation = [
+          "integration",
+          "persistence",
+          "recovery",
+          "e2e",
+          "isolationa",
+          "isolationb",
+          "wrongbaseline",
+        ].includes(name)
+          ? name
+          : "unknown";
+        console.log(JSON.stringify({ ...diagnostic, allocation }));
       },
-      user: async () => {
-        await admin.query({ sql: "DROP USER ?@'%'", values: [user], timeout: 2000 });
-      },
-      file: () => rm(path, { force: true }),
-      admin: () => admin.end(),
-      destroyAdmin: () => destroyTransport(admin),
-    });
+    );
   let phase = "baseline";
   try {
     // Fail closed on baseline drift BEFORE creating/resetting any schema.
