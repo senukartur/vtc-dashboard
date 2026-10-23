@@ -35,7 +35,11 @@ import {
   type MessagingConfig,
   mailExpirySweep,
 } from "../../apps/api/src/modules/messaging/service.ts";
-import { createQueue, LeaseLostError } from "../../apps/api/src/platform/jobs/queue.ts";
+import {
+  createQueue,
+  LeaseLostError,
+  retryTransaction,
+} from "../../apps/api/src/platform/jobs/queue.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
   guardedSettings,
@@ -204,7 +208,9 @@ test("domain/private intent/safe job commit and rollback atomically; concurrent 
     ).rejects.toThrow("SYNTHETIC_ROLLBACK");
     expect(await delivery(intent.generationId)).toBeUndefined();
     const id = await seed(mail, intent);
-    const ids = await Promise.all([1, 2].map(() => unit.run((tx) => mail.enqueue(tx, intent))));
+    const ids = await Promise.all(
+      [1, 2].map(() => retryTransaction(unit, (tx) => mail.enqueue(tx, intent))),
+    );
     expect(ids).toEqual([id, id]);
     await expect(
       unit.run((tx) => mail.enqueue(tx, { ...intent, recipient: "changed@example.invalid" })),
@@ -1422,3 +1428,140 @@ test(
       }
     }),
 );
+
+test("native deadlock rolls back the complete caller command before retrying domain intent and safe job exactly once", async () =>
+  safe(async () => {
+    const mail = service(),
+      intents = [input(), input()],
+      lockIds = [newId(), newId()].sort();
+    await unit.run(async (tx) => {
+      for (const id of lockIds)
+        await unit
+          .client(tx)
+          .execute(sql`INSERT INTO synthetic_mail_owner VALUES (${Buffer.from(id)},0)`);
+      for (const intent of intents)
+        await unit
+          .client(tx)
+          .execute(
+            sql`INSERT INTO synthetic_mail_owner VALUES (${Buffer.from(intent.generationId)},1)`,
+          );
+    });
+    let release!: () => void,
+      arrivals = 0,
+      nativeDeadlocks = 0,
+      rollbackChecks = 0;
+    const joined = new Promise<void>((r) => {
+      release = r;
+    });
+    async function rendezvous() {
+      if (++arrivals === 2) release();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          joined,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("SYNTHETIC_DEADLOCK_RENDEZVOUS_TIMEOUT")),
+              5000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    const observed: UnitOfWork = {
+      client: (tx) => unit.client(tx),
+      close: async () => {},
+      async run(command) {
+        try {
+          return await unit.run(command);
+        } catch (error) {
+          if (safeIdentityFailure(error).codes.includes("ER_LOCK_DEADLOCK")) nativeDeadlocks++;
+          throw error;
+        }
+      },
+    };
+    const attempts = [0, 0];
+    const results = await Promise.allSettled(
+      intents.map((intent, index) =>
+        retryTransaction(observed, async (tx) => {
+          const attempt = ++attempts[index]!,
+            own = lockIds[index]!,
+            other = lockIds[1 - index]!;
+          if (attempt > 1) {
+            // The retry host enters only after UnitOfWork finished the victim rollback.
+            const [domain] = await unit
+              .client(tx)
+              .execute(
+                sql`SELECT current_generation FROM synthetic_mail_owner WHERE id=${Buffer.from(own)}`,
+              );
+            expect(Number((domain as unknown as RowDataPacket[])[0]?.current_generation)).toBe(0);
+            expect(
+              await unit
+                .client(tx)
+                .select()
+                .from(mailDeliveries)
+                .where(eq(mailDeliveries.id, intent.generationId)),
+            ).toHaveLength(0);
+            const jobs = await unit.client(tx).select().from(durableJobs);
+            expect(
+              jobs.some(
+                (job) =>
+                  (job.reference as { deliveryId: string }).deliveryId === intent.generationId,
+              ),
+            ).toBe(false);
+            rollbackChecks++;
+          }
+          for (const id of attempt === 1 ? [own] : lockIds)
+            await unit
+              .client(tx)
+              .execute(
+                sql`SELECT current_generation FROM synthetic_mail_owner WHERE id=${Buffer.from(id)} FOR UPDATE`,
+              );
+          await unit
+            .client(tx)
+            .execute(
+              sql`UPDATE synthetic_mail_owner SET current_generation=current_generation+1 WHERE id=${Buffer.from(own)}`,
+            );
+          const id = await mail.enqueue(tx, intent);
+          if (attempt === 1) {
+            await rendezvous();
+            await unit
+              .client(tx)
+              .execute(
+                sql`SELECT current_generation FROM synthetic_mail_owner WHERE id=${Buffer.from(other)} FOR UPDATE`,
+              );
+          }
+          return id;
+        }).finally(() => release()),
+      ),
+    );
+    for (const result of results) if (result.status === "rejected") throw result.reason;
+    expect(nativeDeadlocks).toBe(1);
+    expect(rollbackChecks).toBe(1);
+    expect([...attempts].sort()).toEqual([1, 2]);
+    const [domain] = await control.execute<RowDataPacket[]>(
+      "SELECT current_generation FROM synthetic_mail_owner WHERE id IN (?,?) ORDER BY id",
+      lockIds.map((id) => Buffer.from(id)),
+    );
+    expect(domain.map((row) => Number(row.current_generation))).toEqual([1, 1]);
+    const deliveries = await unit.run((tx) => unit.client(tx).select().from(mailDeliveries)),
+      jobs = await unit.run((tx) => unit.client(tx).select().from(durableJobs));
+    expect(deliveries).toHaveLength(2);
+    expect(jobs).toHaveLength(2);
+    for (const intent of intents) {
+      expect(await retryTransaction(unit, (tx) => mail.enqueue(tx, intent))).toBe(
+        intent.generationId,
+      );
+      expect(
+        jobs.filter(
+          (job) => (job.reference as { deliveryId: string }).deliveryId === intent.generationId,
+        ),
+      ).toHaveLength(1);
+      const ciphertext = deliveries.find((row) => row.id === intent.generationId)?.ciphertext ?? "";
+      expect(ciphertext.includes(intent.recipient)).toBe(false);
+      expect(ciphertext.includes(intent.code!)).toBe(false);
+    }
+    expect(await unit.run((tx) => unit.client(tx).select().from(durableJobs))).toHaveLength(2);
+  }));
