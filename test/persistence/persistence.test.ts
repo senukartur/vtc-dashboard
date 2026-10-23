@@ -61,7 +61,7 @@ import {
   decisionsPriorFolder,
   reset,
   root,
-  SCHEMA_SETUP_TIMEOUT_MS,
+  EXTENDED_TEST_TIMEOUT_MS,
   telemetryPriorFolder,
   testConnection,
   tripsPriorFolder,
@@ -285,7 +285,7 @@ async function serializedFreshMigrations(
     );
   try {
     await Promise.race([
-      bounded(gate.withheld, "fresh_final_journal_ack", SCHEMA_SETUP_TIMEOUT_MS),
+      bounded(gate.withheld, "fresh_final_journal_ack", EXTENDED_TEST_TIMEOUT_MS),
       first.then(() => {
         throw new Error("FRESH_MIGRATION_ENDED_BEFORE_FINAL_ACK_GATE");
       }),

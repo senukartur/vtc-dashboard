@@ -11,9 +11,10 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Expanded 62-table setup measured 7.1s reset + 21.4s migration before fixture bootstrap.
-// Only the outer setup/teardown allowance changes; runtime/query/transaction bounds are unchanged.
-export const SCHEMA_SETUP_TIMEOUT_MS = 60000;
+// Fresh full-schema preparation now covers 97 tables including the ledger and 15 migrations.
+// The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
+export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
+export const EXTENDED_TEST_TIMEOUT_MS = 60000;
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 export const fixtureRoot = join(root, "test/fixtures/persistence");

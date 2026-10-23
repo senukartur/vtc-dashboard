@@ -8,6 +8,7 @@ import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   decisionsPriorFolder,
+  EXTENDED_TEST_TIMEOUT_MS,
   fixtureRoot,
   guardedSettings,
   hasCode,
@@ -59,8 +60,12 @@ async function reconciliationPhase<T>(
   }
 }
 
-async function recoveryTest(name: string, command: () => Promise<void>) {
-  await test(name, { timeout: SCHEMA_SETUP_TIMEOUT_MS, concurrency: false }, async () => {
+async function recoveryTest(
+  name: string,
+  command: () => Promise<void>,
+  timeout = EXTENDED_TEST_TIMEOUT_MS,
+) {
+  await test(name, { timeout, concurrency: false }, async () => {
     // Framework timeout does not cancel the callback or its connection cleanup.
     assert.equal(recoveryRunning, false, "RECOVERY_FIXTURE_CLEANUP_REQUIRED");
     recoveryRunning = true;
@@ -122,6 +127,7 @@ await recoveryTest(
       await connection.end();
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 
 await recoveryTest(
@@ -173,6 +179,7 @@ await recoveryTest(
       await connection.end();
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 
 for (const target of ["insert", "finalize"] as const) {
@@ -355,6 +362,7 @@ await recoveryTest(
       await connection.end();
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 
 await recoveryTest(
@@ -444,6 +452,7 @@ await recoveryTest(
       await reconciliationPhase("baseline_restore", "cleanup", () => connection.end());
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 
 await recoveryTest(
@@ -483,6 +492,7 @@ await recoveryTest(
       if (folder) await rm(folder, { recursive: true });
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
 await recoveryTest(
   "trip decision partial-DDL recovery reconstructs only the known disposable baseline",
@@ -496,4 +506,5 @@ await recoveryTest(
       await connection.end();
     }
   },
+  SCHEMA_SETUP_TIMEOUT_MS,
 );
