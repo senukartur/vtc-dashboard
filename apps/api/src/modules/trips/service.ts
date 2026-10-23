@@ -598,7 +598,8 @@ export function createTrips(
           sourceTrips.canonicalTripId,
           membership.map((row) => row.id),
         ),
-      );
+      )
+      .for("share");
     let labels = new Map<string, S["CatalogLabel"]>();
     if (ports.catalogs) {
       const pins = new Map<string, { revisionId: string; entityId: string }>();
@@ -718,7 +719,7 @@ export function createTrips(
       await ports.correctionRequested?.(tx, id, requestId, actor, reason);
     },
     async summaryInTransaction(tx: TxContext, tripId: string, locale: "en" | "ru") {
-      const row = await groups.resolve(tx, tripId);
+      const row = await groups.resolve(tx, tripId, "share");
       if (!row) throw identityError(404);
       const [result] = await summaries(tx, [row], locale);
       if (!result) throw new Error("TRIP_SUMMARY_MISSING");

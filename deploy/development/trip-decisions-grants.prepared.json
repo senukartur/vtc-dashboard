@@ -7,7 +7,8 @@
     "trip_resolutions": ["SELECT", "INSERT"],
     "trip_review_work": ["SELECT", "INSERT", "UPDATE"],
     "trip_event_associations": ["SELECT", "INSERT", "UPDATE"],
-    "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"]
+    "trip_decision_catchup": ["SELECT", "INSERT", "UPDATE"],
+    "manual_correction_requests": ["UPDATE(status)"]
   },
   "jobs": {
     "trip_decisions": ["SELECT", "INSERT"],
@@ -47,6 +48,7 @@
     "event_revisions": ["SELECT"],
     "event_attendances": ["SELECT"],
     "event_attendance_revisions": ["SELECT"],
-    "event_catalog_pins": ["SELECT"]
+    "event_catalog_pins": ["SELECT"],
+    "manual_correction_requests": ["SELECT"]
   }
 }

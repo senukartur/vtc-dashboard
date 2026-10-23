@@ -5284,6 +5284,42 @@
           "requestId": "synthetic-request-001"
         }
       }
+    },
+    {
+      "id": "getTripProposal:linked-correction-request",
+      "operationId": "getTripProposal",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "revisionId": "41000000-0000-4000-8000-000000000001",
+          "tripId": "41000000-0000-4000-8000-000000000001",
+          "kind": "resolution",
+          "createdAt": "2026-10-17T12:00:00.000Z",
+          "authorId": "41000000-0000-4000-8000-000000000001",
+          "baseTripVersion": 1,
+          "baseFactRevisionId": null,
+          "reason": "Fictional supported distance correction",
+          "evidence": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "state": "processing",
+              "contentType": "synthetic-example",
+              "byteLength": 1,
+              "originalName": "synthetic-example"
+            }
+          ],
+          "changes": {
+            "actualDistanceM": "12500.5"
+          },
+          "state": "pending",
+          "review": null,
+          "correctionRequestId": "dcae0000-0000-4000-8000-000000000001"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
     }
   ]
 }

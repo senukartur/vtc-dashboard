@@ -3078,6 +3078,15 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "correctionRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field."
         }
       },
       "required": [
@@ -3085,7 +3094,18 @@
         "evidenceIds"
       ],
       "additionalProperties": false,
-      "minProperties": 3
+      "minProperties": 3,
+      "if": {
+        "required": [
+          "correctionRequestId"
+        ],
+        "properties": {
+          "correctionRequestId": {}
+        }
+      },
+      "then": {
+        "minProperties": 4
+      }
     },
     "ProposalDecisionInput": {
       "type": "object",
@@ -3344,6 +3364,15 @@
               "type": "null"
             }
           ]
+        },
+        "correctionRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "Immutable originating author correction request association, when present."
         }
       },
       "required": [

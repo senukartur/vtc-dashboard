@@ -90,3 +90,16 @@ test("optional immutable event-association proposal refs retain old valid fixtur
     }),
   ).toBe(false);
 });
+
+test("optional correction request association requires actual changes and preserves omitted and null inputs", () => {
+  const resolution = validate.compile({ $ref: "urn:vtc:browser:v1#/$defs/ResolutionInput" });
+  const basic = { reason: "Fictional linked correction", evidenceIds: [] };
+  for (const correctionRequestId of [undefined, null, newId()]) {
+    const association = correctionRequestId === undefined ? {} : { correctionRequestId };
+    expect(resolution({ ...basic, ...association })).toBe(false);
+    expect(resolution({ ...basic, ...association, actualDistanceM: "100" })).toBe(true);
+  }
+  expect(resolution({ ...basic, correctionRequestId: "not-an-id", actualDistanceM: "100" })).toBe(
+    false,
+  );
+});

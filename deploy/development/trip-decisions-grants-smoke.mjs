@@ -57,6 +57,7 @@ const {
   catalogs,
   qualifications,
   trips: _tripService,
+  manualReports: manual,
   tripDecisions: service,
 } = composed;
 let step = "guard";
@@ -288,10 +289,18 @@ try {
         accepted,
       );
       step = "runtime_correction";
-      const proposal = await service.propose(actor, id, newId(), accepted.version, {
+      const ownerLogin = await identity.login("decision-proof-driver@example.invalid", password),
+        owner = await identity.authenticate(
+          new Headers({ cookie: ownerLogin.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+        );
+      const request = await manual.requestCorrection(owner, id, newId(), accepted.version, {
+        reason: "Fictional linked runtime request",
+      });
+      const proposal = await service.propose(actor, id, newId(), request.version, {
           reason: "Fictional supported distance correction",
           evidenceIds: [],
           actualDistanceM: "200000",
+          correctionRequestId: request.id,
         }),
         detail = await service.getProposal(actor, id, proposal.data.id),
         corrected = await service.proposalDecision(
@@ -307,13 +316,40 @@ try {
           },
         );
       assert.notEqual(corrected.data.basis.factRevisionId, review.data.factRevisionId);
+      const requestReadback = await manual.corrections(owner, id, {}, request.id);
+      assert.equal(requestReadback.data.status, "resolved");
+      assert.deepEqual(requestReadback.data.history.map((h) => h.status).sort(), [
+        "pending",
+        "resolved",
+      ]);
+      const related = await service.proposals(actor, id);
+      const originating = related.items.find(
+        (p) => p.kind === "correction_request" && p.correctionRequestId === request.id,
+      );
+      assert.equal(originating.state, "approved");
+      assert.equal(detail.data.correctionRequestId, request.id);
       const [credit] = await unit.run((tx) =>
         unit.client(tx).select().from(tripContributions).where(eq(tripContributions.tripId, id)),
       );
       assert.equal(credit.credited, true);
       assert.equal(credit.factId, corrected.data.basis.factRevisionId);
       assert.equal(credit.actualDistanceM, "200000.000000000000000000");
+      await manual.requestCorrection(owner, id, newId(), corrected.version, {
+        reason: "Fictional pending request observed by restricted worker",
+      });
     } else {
+      step = "worker_pending_requests";
+      assert.equal(
+        await unit.run(async (tx) => {
+          await identity.qualificationContextInTransaction(tx, []);
+          return manual.hasPendingCorrectionsInTransaction(tx, refs.runtimeTripId);
+        }),
+        true,
+      );
+      await assert.rejects(
+        connection.query("UPDATE manual_correction_requests SET status=status"),
+        (e) => [1044, 1142, 1143, 1227].includes(e.errno),
+      );
       step = "worker_catchup";
       await service.catchup();
       await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
@@ -340,6 +376,10 @@ try {
     step = "immutable_denials";
     for (const statement of [
       "CREATE TABLE forbidden_decision (id INT)",
+      "UPDATE manual_correction_requests SET reason=reason",
+      "DELETE FROM manual_correction_requests",
+      "UPDATE manual_correction_history SET reason=reason",
+      "DELETE FROM manual_correction_history",
       "UPDATE trip_decisions SET reason=reason",
       "DELETE FROM trip_decisions",
       "UPDATE trip_proposals SET reason=reason",

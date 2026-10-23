@@ -688,6 +688,33 @@ export function createManualReports(
     }
     return { items, nextCursor };
   }
+  async function correctionRequestForReview(
+    tx: TxContext,
+    actor: Actor,
+    tripId: string,
+    requestId: string,
+    pending = true,
+  ) {
+    await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
+    const members = await ports.trips.groups.members(tx, [tripId], true);
+    const [request] = await c(tx)
+      .select()
+      .from(manualCorrectionRequests)
+      .where(
+        and(
+          eq(manualCorrectionRequests.id, applicationId(requestId)),
+          inArray(
+            manualCorrectionRequests.tripId,
+            members.map((t) => t.id),
+          ),
+        ),
+      )
+      .for("update");
+    if (!request || !members.some((t) => t.ownerId === request.ownerId)) throw manualError(404);
+    if (pending && request.status !== "pending") throw manualError(409, "VERSION_CONFLICT");
+    await gateTripEvidence(tx, tripId);
+    return request;
+  }
   async function correctionDtos(
     tx: TxContext,
     rows: (typeof manualCorrectionRequests.$inferSelect)[],
@@ -1789,6 +1816,52 @@ export function createManualReports(
               .for("share")
           ).map(evidenceDto)
         : [];
+    },
+    async hasPendingCorrectionsInTransaction(tx: TxContext, tripId: string) {
+      const members = await ports.trips.groups.members(tx, [tripId], true);
+      const [pending] = await c(tx)
+        .select({ id: manualCorrectionRequests.id })
+        .from(manualCorrectionRequests)
+        .where(
+          and(
+            inArray(
+              manualCorrectionRequests.tripId,
+              members.map((t) => t.id),
+            ),
+            eq(manualCorrectionRequests.status, "pending"),
+          ),
+        )
+        .limit(1)
+        .for("share");
+      return !!pending;
+    },
+    correctionRequestInTransaction: correctionRequestForReview,
+    async completeCorrectionInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      tripId: string,
+      requestId: string,
+      status: "resolved" | "declined",
+      explanation: string,
+      decidedAt: string,
+    ) {
+      const request = await correctionRequestForReview(tx, actor, tripId, requestId, false);
+      if (request.status !== "pending") return false;
+      if (!explanation.trim() || explanation.length > 4000) throw manualError(422);
+      const instant = utcIso(utcDateTime(decidedAt));
+      if (instant > at()) throw manualError(422);
+      await c(tx)
+        .update(manualCorrectionRequests)
+        .set({ status })
+        .where(eq(manualCorrectionRequests.id, request.id));
+      await c(tx).insert(manualCorrectionHistory).values({
+        id: newId(),
+        requestId: request.id,
+        status,
+        reason: explanation.trim(),
+        recordedAt: instant,
+      });
+      return true;
     },
     async groupDecisionInTransaction(tx: TxContext, tripId: string, decisionAt: string | null) {
       await gateTripEvidence(tx, tripId);

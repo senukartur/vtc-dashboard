@@ -2042,3 +2042,499 @@ test("staff-supported telemetry time records explicit provenance and real histor
   expect(source[0]?.start_basis).toBe("unknown");
   expect(Boolean(source[0]?.start_verified)).toBe(false);
 });
+
+test("current reviewer GET stays coherent after ownership discovery establishes an old RR snapshot", async () => {
+  const trip = await receive(payload());
+  let ready!: () => void,
+    resume!: () => void,
+    gate = true;
+  const discovered = new Promise<void>((r) => {
+      ready = r;
+    }),
+    proceed = new Promise<void>((r) => {
+      resume = r;
+    });
+  const observed = createTripDecisions(
+    unit,
+    service.config,
+    {
+      identity,
+      qualifications,
+      manual,
+      events,
+      trips: {
+        ...tripsService,
+        contributions: {
+          ...tripsService.contributions,
+          owners: async (tx, ids) => {
+            const result = await tripsService.contributions.owners(tx, ids);
+            if (gate && ids.includes(trip.tripId)) {
+              gate = false;
+              ready();
+              await proceed;
+            }
+            return result;
+          },
+        },
+      },
+    },
+    now,
+  );
+  const app = await createApp({
+    identity,
+    trips: tripsService,
+    tripDecisions: observed,
+    checkReadiness: async () => true,
+  });
+  try {
+    await app.ready();
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
+  const response = app
+    .inject({ url: `/api/v1/trips/${trip.tripId}/review`, headers: { cookie: directorCookie } })
+    .then((r) => r);
+  let pendingId!: string;
+  try {
+    await Promise.race([
+      discovered,
+      response.then(() => {
+        throw Error("SYNTHETIC_REVIEW_RENDEZVOUS_NOT_REACHED");
+      }),
+    ]);
+    try {
+      await resolveDistance(trip.tripId, "200000");
+      const current = await state(trip.tripId);
+      pendingId = (
+        await service.propose(dispatcher, trip.tripId, newId(), current!.version, {
+          reason: "Fictional current pending request",
+          evidenceIds: [],
+          actualDistanceM: "210000",
+        })
+      ).data.id;
+    } finally {
+      resume();
+    }
+    const http = await response,
+      current = await state(trip.tripId),
+      detail = await service.review(director, trip.tripId);
+    expect(http.statusCode).toBe(200);
+    expect(http.headers.etag).toBe(`"v${current!.version}"`);
+    expect(http.json().data).toEqual(detail.data);
+    expect(http.json().data.trip.summary).toMatchObject({
+      version: current!.version,
+      decision: "accepted",
+      actualDistanceM: "200000",
+    });
+    expect(http.json().data.factRevisionId).toBe(current!.currentFactId);
+    expect(http.json().data.trip.pendingProposalId).toBe(pendingId);
+    expect(
+      http
+        .json()
+        .data.trip.decisions.some(
+          (d: S["Decision"]) => d.basis.factRevisionId === current!.currentFactId,
+        ),
+    ).toBe(true);
+    expect((await credit(trip.tripId))?.actualDistanceM).toBe("200000.000000000000000000");
+  } finally {
+    resume();
+    await response;
+    await app.close();
+  }
+});
+
+test("obsolete proposal closure retains current guards and every other pending hold across approval and direct decisions", async () => {
+  for (const order of ["approve-newest", "reject-oldest"]) {
+    const trip = await receive(payload());
+    async function propose(distance: string) {
+      const row = await state(trip.tripId),
+        result = await service.propose(dispatcher, trip.tripId, newId(), row!.version, {
+          reason: "Fictional distinct resolution",
+          evidenceIds: [],
+          actualDistanceM: distance,
+        });
+      return (await service.getProposal(dispatcher, trip.tripId, result.data.id)).data;
+    }
+    const a = await propose("150000"),
+      b = await propose("200000");
+    const commandKey = newId(),
+      reject = {
+        decision: "reject" as const,
+        reviewedRevisionId: a.revisionId,
+        reason: "Fictional obsolete request closure",
+      };
+    let row = (await state(trip.tripId))!;
+    await expect(
+      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version, {
+        ...reject,
+        decision: "approve",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(
+      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version - 1, reject),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(
+      service.proposalDecision(deputy, trip.tripId, a.id, newId(), row.version, {
+        ...reject,
+        reviewedRevisionId: newId(),
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    if (order === "approve-newest") {
+      await decideProposal(deputy, trip.tripId, b.id, newId(), row.version, {
+        decision: "approve",
+        reviewedRevisionId: b.revisionId,
+        reason: "Fictional current correction",
+      });
+      expect((await state(trip.tripId))?.reviewHold).toBe(true);
+      expect((await state(trip.tripId))?.correctionPending).toBe(true);
+    }
+    row = (await state(trip.tripId))!;
+    const beforeCredit = await credit(trip.tripId),
+      closed = await service.proposalDecision(
+        deputy,
+        trip.tripId,
+        a.id,
+        commandKey,
+        row.version,
+        reject,
+      );
+    expect((await service.getProposal(dispatcher, trip.tripId, a.id)).data.state).toBe("rejected");
+    expect(await credit(trip.tripId)).toEqual(beforeCredit);
+    expect(
+      await service.proposalDecision(deputy, trip.tripId, a.id, commandKey, row.version, reject),
+    ).toEqual(closed);
+    if (order === "reject-oldest") {
+      expect((await state(trip.tripId))?.reviewHold).toBe(true);
+      expect((await service.review(dispatcher, trip.tripId)).data.trip.pendingProposalId).toBe(
+        b.id,
+      );
+      await decide(trip.tripId);
+      expect((await state(trip.tripId))?.reviewHold).toBe(true);
+      const current = (await state(trip.tripId))!;
+      await service.proposalDecision(deputy, trip.tripId, b.id, newId(), current.version, {
+        decision: "reject",
+        reviewedRevisionId: b.revisionId,
+        reason: "Fictional remaining obsolete request closure",
+      });
+    }
+    const final = await state(trip.tripId),
+      review = await service.review(dispatcher, trip.tripId);
+    expect(final?.reviewHold).toBe(false);
+    expect(final?.correctionPending).toBe(false);
+    expect(review.data.trip.pendingProposalId).toBeNull();
+    const [work] = await control.execute<RowDataPacket[]>(
+      "SELECT pending FROM trip_review_work WHERE trip_id=?",
+      [trip.tripId],
+    );
+    expect(Number(work[0]?.pending)).toBe(0);
+  }
+});
+
+test("linked staff resolutions terminalize only their originating correction request and preserve immutable history and other holds", async () => {
+  for (const disposition of ["approve", "reject"] as const) {
+    const r = await report();
+    const accepted = await decide(r.tripId),
+      acceptedCredit = await credit(r.tripId);
+    const request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
+      reason: "Fictional owner correction request",
+    });
+    const initial = await service.review(dispatcher, r.tripId),
+      evidenceId = initial.data.trip.evidence[0]!.id;
+    const origins = await service.proposals(dispatcher, r.tripId),
+      origin = origins.items.find((p) => p.correctionRequestId === request.id)!;
+    expect(origin.id).not.toBe(request.id);
+    expect(origin.kind).toBe("correction_request");
+    await expect(
+      service.propose(dispatcher, r.tripId, newId(), initial.version, {
+        reason: "Fictional association alone",
+        evidenceIds: [evidenceId],
+        correctionRequestId: request.id,
+      }),
+    ).rejects.toMatchObject({ statusCode: 422 });
+    await expect(
+      service.propose(dispatcher, r.tripId, newId(), initial.version, {
+        reason: "Fictional wrong request",
+        evidenceIds: [evidenceId],
+        actualDistanceM: "200000",
+        correctionRequestId: newId(),
+      }),
+    ).rejects.toMatchObject({ statusCode: 404 });
+    const input = {
+      reason: "Fictional supported linked distance",
+      evidenceIds: [evidenceId],
+      actualDistanceM: "200000",
+      correctionRequestId: request.id,
+    };
+    const a = await service.propose(dispatcher, r.tripId, newId(), initial.version, input);
+    const beforeB = (await state(r.tripId))!;
+    const b = await service.propose(dispatcher, r.tripId, newId(), beforeB.version, input),
+      detail = await service.getProposal(dispatcher, r.tripId, b.data.id);
+    expect(detail.data.correctionRequestId).toBe(request.id);
+    expect(detail.data.changes).not.toHaveProperty("correctionRequestId");
+    const commandKey = newId(),
+      reviewInput = {
+        decision: disposition,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: "Fictional exact linked request disposition",
+      };
+    instant += 1000;
+    const result = await service.proposalDecision(
+      deputy,
+      r.tripId,
+      b.data.id,
+      commandKey,
+      detail.version,
+      reviewInput,
+    );
+    const readback = await manual.corrections(owner, r.tripId, {}, request.id);
+    if (!("data" in readback)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+    const terminal = disposition === "approve" ? "resolved" : "declined";
+    expect(readback.data).toMatchObject({
+      id: request.id,
+      status: terminal,
+      history: [{ status: "pending" }, { status: terminal, reason: reviewInput.reason }],
+    });
+    const originReview = (await service.getProposal(dispatcher, r.tripId, origin.id)).data;
+    expect(originReview.state).toBe(disposition === "approve" ? "approved" : "rejected");
+    expect(originReview.review).toMatchObject({
+      decision: disposition,
+      reviewedRevisionId: origin.revisionId,
+      reviewerId: deputy.userId,
+      reason: reviewInput.reason,
+    });
+    expect(originReview.review?.decidedAt).toBe(
+      (await service.getProposal(dispatcher, r.tripId, b.data.id)).data.review?.decidedAt,
+    );
+    expect((await state(r.tripId))?.reviewHold).toBe(true);
+    if (disposition === "approve") {
+      const c = await credit(r.tripId);
+      expect(c?.actualDistanceM).toBe("200000.000000000000000000");
+      expect(c?.factId).not.toBe(acceptedCredit?.factId);
+      const [facts] = await control.execute<RowDataPacket[]>(
+        "SELECT changes FROM trip_resolutions WHERE id=(SELECT resolution_id FROM trip_proposals WHERE id=?)",
+        [b.data.id],
+      );
+      const changes =
+        typeof facts[0]?.changes === "string" ? JSON.parse(facts[0].changes) : facts[0]?.changes;
+      expect(changes).not.toHaveProperty("correctionRequestId");
+    } else expect(await credit(r.tripId)).toEqual(acceptedCredit);
+    expect(
+      await service.proposalDecision(
+        deputy,
+        r.tripId,
+        b.data.id,
+        commandKey,
+        detail.version,
+        reviewInput,
+      ),
+    ).toEqual(result);
+    const older = await service.getProposal(dispatcher, r.tripId, a.data.id),
+      beforeClose = await credit(r.tripId);
+    await expect(
+      service.proposalDecision(deputy, r.tripId, older.data.id, newId(), older.version, {
+        decision: "approve",
+        reviewedRevisionId: older.data.revisionId,
+        reason: "Fictional cannot reopen handled request",
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await service.proposalDecision(deputy, r.tripId, older.data.id, newId(), older.version, {
+      decision: "reject",
+      reviewedRevisionId: older.data.revisionId,
+      reason: "Fictional obsolete linked proposal closed",
+    });
+    const finalRequest = await manual.corrections(owner, r.tripId, {}, request.id);
+    if (!("data" in finalRequest)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+    expect(finalRequest.data).toEqual(readback.data);
+    expect((await service.getProposal(dispatcher, r.tripId, origin.id)).data).toEqual(originReview);
+    expect(await credit(r.tripId)).toEqual(beforeClose);
+    expect((await state(r.tripId))?.reviewHold).toBe(false);
+    const app = await createApp({
+      identity,
+      trips: tripsService,
+      tripDecisions: service,
+      manualReports: manual,
+      checkReadiness: async () => true,
+    });
+    try {
+      const detailHttp = await app.inject({
+        url: `/api/v1/trips/${r.tripId}/correction-requests/${request.id}`,
+        headers: { cookie: directorCookie },
+      });
+      const listHttp = await app.inject({
+        url: `/api/v1/trips/${r.tripId}/correction-requests`,
+        headers: { cookie: directorCookie },
+      });
+      expect(detailHttp.statusCode).toBe(200);
+      expect(listHttp.statusCode).toBe(200);
+      expect(detailHttp.json().data).toEqual(readback.data);
+      expect(
+        listHttp.json().data.items.find((p: S["ManualCorrectionRequest"]) => p.id === request.id),
+      ).toEqual(readback.data);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("linked correction history and downstream failure roll back request, origin review, credit, retention and permanent receipt together", async () => {
+  for (const failure of ["history", "outbox"] as const) {
+    const r = await report(),
+      accepted = await decide(r.tripId),
+      request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
+        reason: "Fictional atomic request",
+      });
+    const workspace = await service.review(dispatcher, r.tripId),
+      proposal = await service.propose(dispatcher, r.tripId, newId(), workspace.version, {
+        reason: "Fictional atomic correction",
+        evidenceIds: [workspace.data.trip.evidence[0]!.id],
+        actualDistanceM: "200000",
+        correctionRequestId: request.id,
+      }),
+      detail = await service.getProposal(dispatcher, r.tripId, proposal.data.id),
+      commandKey = newId(),
+      input = {
+        decision: "approve" as const,
+        reviewedRevisionId: detail.data.revisionId,
+        reason: "Fictional atomic review",
+      };
+    async function snapshot() {
+      const [gate] = await control.execute<RowDataPacket[]>(
+        "SELECT * FROM manual_review_gates WHERE trip_id=?",
+        [r.tripId],
+      );
+      const [counts] = await control.execute<RowDataPacket[]>(
+        "SELECT (SELECT COUNT(*) FROM trip_proposal_reviews WHERE proposal_id IN (SELECT id FROM trip_proposals WHERE trip_id=?)) reviews,(SELECT COUNT(*) FROM trip_decision_commands WHERE actor_id=? AND `key`=?) receipts,(SELECT COUNT(*) FROM audit_entries) audit,(SELECT COUNT(*) FROM outbox_events) outbox",
+        [r.tripId, deputy.userId, commandKey],
+      );
+      return {
+        trip: await state(r.tripId),
+        credit: await credit(r.tripId),
+        request: await manual.corrections(owner, r.tripId, {}, request.id),
+        gate,
+        counts,
+      };
+    }
+    const before = await snapshot(),
+      table = failure === "history" ? "manual_correction_history" : "outbox_events",
+      predicate =
+        failure === "history"
+          ? `request_id<>${control.escape(request.id)} OR status='pending'`
+          : `aggregate_id<>${control.escape(r.tripId)} OR type<>'trip.proposal_reviewed'`;
+    await control.query(
+      `ALTER TABLE ${table} ADD CONSTRAINT synthetic_linked_failure CHECK (${predicate})`,
+    );
+    try {
+      await expect(
+        service.proposalDecision(
+          deputy,
+          r.tripId,
+          proposal.data.id,
+          commandKey,
+          detail.version,
+          input,
+        ),
+      ).rejects.toBeTruthy();
+    } finally {
+      await control.query(`ALTER TABLE ${table} DROP CHECK synthetic_linked_failure`);
+    }
+    expect(await snapshot()).toEqual(before);
+    const committed = await service.proposalDecision(
+      deputy,
+      r.tripId,
+      proposal.data.id,
+      commandKey,
+      detail.version,
+      input,
+    );
+    expect(
+      await service.proposalDecision(
+        deputy,
+        r.tripId,
+        proposal.data.id,
+        commandKey,
+        detail.version,
+        input,
+      ),
+    ).toEqual(committed);
+  }
+});
+
+test("direct author-request disposition, resolved rejected facts and null association replay retain exact lifecycle provenance", async () => {
+  const r = await report(),
+    accepted = await decide(r.tripId),
+    request = await manual.requestCorrection(owner, r.tripId, newId(), accepted.version, {
+      reason: "Fictional directly declined request",
+    });
+  const origin = (await service.proposals(dispatcher, r.tripId)).items.find(
+    (p) => p.correctionRequestId === request.id,
+  )!;
+  instant += 1000;
+  await service.proposalDecision(
+    deputy,
+    r.tripId,
+    origin.id,
+    newId(),
+    (await state(r.tripId))!.version,
+    {
+      decision: "reject",
+      reviewedRevisionId: origin.revisionId,
+      reason: "Fictional direct disposition",
+    },
+  );
+  const declined = await manual.corrections(owner, r.tripId, {}, request.id);
+  if (!("data" in declined)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+  expect(declined.data.status).toBe("declined");
+  expect(declined.data.history.map((h) => h.status)).toEqual(["pending", "declined"]);
+  const next = await manual.requestCorrection(
+    owner,
+    r.tripId,
+    newId(),
+    (await state(r.tripId))!.version,
+    { reason: "Fictional proven mass correction" },
+  );
+  const review = await service.review(dispatcher, r.tripId),
+    proposal = await service.propose(dispatcher, r.tripId, newId(), review.version, {
+      reason: "Fictional supported violation",
+      evidenceIds: [review.data.trip.evidence[0]!.id],
+      cargoMassKg: "21000",
+      correctionRequestId: next.id,
+    }),
+    detail = await service.getProposal(dispatcher, r.tripId, proposal.data.id);
+  instant += 1000;
+  const decision = await decideProposal(
+    deputy,
+    r.tripId,
+    proposal.data.id,
+    newId(),
+    detail.version,
+    {
+      decision: "approve",
+      reviewedRevisionId: detail.data.revisionId,
+      reason: "Fictional corrected facts prove rejection",
+    },
+  );
+  expect(decision.data.outcome).toBe("rejected");
+  const resolved = await manual.corrections(owner, r.tripId, {}, next.id);
+  if (!("data" in resolved)) throw Error("SYNTHETIC_CORRECTION_DETAIL_REQUIRED");
+  expect(resolved.data.status).toBe("resolved");
+  expect((await credit(r.tripId))?.credited).toBe(false);
+  const trip = await receive(payload()),
+    key = newId(),
+    version = (await state(trip.tripId))!.version,
+    value = {
+      reason: "Fictional optional association",
+      evidenceIds: [],
+      actualDistanceM: "150000",
+    };
+  const original = await service.propose(dispatcher, trip.tripId, key, version, value);
+  expect(
+    await service.propose(dispatcher, trip.tripId, key, version, {
+      ...value,
+      correctionRequestId: null,
+    }),
+  ).toEqual(original);
+  expect(
+    (await service.getProposal(dispatcher, trip.tripId, original.data.id)).data.correctionRequestId,
+  ).toBeNull();
+});

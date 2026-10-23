@@ -1497,8 +1497,13 @@ export function createIdentity(
         .select({ id: user.id, nickname: user.name, status: membership.status })
         .from(user)
         .innerJoin(membership, eq(membership.userId, user.id))
-        .where(inArray(user.id, unique));
-      const assigned = await client(tx).select().from(roles).where(inArray(roles.userId, unique));
+        .where(inArray(user.id, unique))
+        .for("share");
+      const assigned = await client(tx)
+        .select()
+        .from(roles)
+        .where(inArray(roles.userId, unique))
+        .for("share");
       return new Map(
         rows.map((row) => [
           row.id,

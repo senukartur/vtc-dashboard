@@ -233,6 +233,27 @@ export function createTripDecisions(
       .values({ tripId: row.id, supportHash: hash, reasons, pending, assessedAt: at() })
       .onDuplicateKeyUpdate({ set: { supportHash: hash, reasons, pending, assessedAt: at() } });
   }
+  async function hasPendingProposal(tx: TxContext, members: TripState[]) {
+    const [pending] = await c(tx)
+      .select({ id: tripProposals.id })
+      .from(tripProposals)
+      .leftJoin(tripProposalReviews, eq(tripProposalReviews.proposalId, tripProposals.id))
+      .where(
+        and(
+          inArray(
+            tripProposals.tripId,
+            members.map((t) => t.id),
+          ),
+          sql`${tripProposalReviews.proposalId} IS NULL`,
+        ),
+      )
+      .limit(1)
+      .for("share");
+    return (
+      !!pending ||
+      (await ports.manual.hasPendingCorrectionsInTransaction(tx, members[0]?.id as string))
+    );
+  }
   async function commitDecision(
     tx: TxContext,
     prepared: Awaited<ReturnType<typeof prepare>>,
@@ -254,15 +275,20 @@ export function createTripDecisions(
       (evaluation.decision !== "accepted" || s.eventInvalid || s.event?.reviewRequired)
     )
       throw identityError(409, "RESOLUTION_REQUIRED");
-    const basis = evaluationSnapshot(e, h, s.event?.confirmedEvent ?? null, manualConfirmedAt);
+    const basis = evaluationSnapshot(e, h, s.event?.confirmedEvent ?? null, manualConfirmedAt),
+      pending = await hasPendingProposal(tx, prepared.members);
     const changed = await ports.trips.adjudication.write(
       tx,
       row,
       {
         decision: outcome,
-        reviewHold: false,
-        correctionPending: false,
-        reviewReasons: outcome === "rejected" ? evaluation.reasons : [],
+        reviewHold: pending,
+        correctionPending: pending,
+        reviewReasons: pending
+          ? ["proposal_pending"]
+          : outcome === "rejected"
+            ? evaluation.reasons
+            : [],
         reportingAt: basis.reportingAt,
       },
       e,
@@ -304,6 +330,7 @@ export function createTripDecisions(
       };
     await c(tx).insert(tripDecisions).values(saved);
     await ports.manual.groupDecisionInTransaction(tx, row.id, decidedAt);
+    if (pending) await ports.manual.groupDecisionInTransaction(tx, row.id, null);
     await audit.append(tx, {
       actorKind: actor ? "user" : "system",
       actorId: actor?.userId ?? null,
@@ -329,7 +356,7 @@ export function createTripDecisions(
       changed,
       await ports.trips.groups.members(tx, [changed.id], true),
     );
-    await work(tx, changed, committedSupport.hash, [], false);
+    await work(tx, changed, committedSupport.hash, pending ? ["proposal_pending"] : [], pending);
     return { data: dto(saved, e), version: changed.version };
   }
   async function assess(tx: TxContext, id: string) {
@@ -529,6 +556,7 @@ export function createTripDecisions(
       revisionId: p.revisionId,
       tripId: p.tripId,
       kind: p.kind,
+      correctionRequestId: p.correctionRequestId,
       createdAt: p.createdAt,
       authorId: p.authorId,
       baseTripVersion: p.baseTripVersion,
@@ -581,7 +609,8 @@ export function createTripDecisions(
         ),
       )
       .orderBy(desc(tripProposals.createdAt), desc(tripProposals.id))
-      .limit(1);
+      .limit(1)
+      .for("share");
     return {
       view: "private",
       summary: await ports.trips.summaryInTransaction(
@@ -602,10 +631,12 @@ export function createTripDecisions(
     actor: Actor,
     raw: S["ResolutionInput"] | null,
     eventId: string | null,
-    correctionId?: string,
   ) {
     const { row, members } = prepared;
     if (!row.currentFactId) throw identityError(409);
+    const correctionRequestId = raw?.correctionRequestId ?? null;
+    if (correctionRequestId)
+      await ports.manual.correctionRequestInTransaction(tx, actor, row.id, correctionRequestId);
     const s = await support(tx, row, members, eventId ?? undefined),
       base = s.evidence.find((e) => e.factRevisionId === row.currentFactId);
     if (!base) throw identityError(409);
@@ -645,6 +676,7 @@ export function createTripDecisions(
     const {
       reason: explanation,
       evidenceIds: _ids,
+      correctionRequestId: _request,
       ...changes
     } = raw ?? { reason: "Event association requires review", evidenceIds: [] };
     await c(tx)
@@ -654,6 +686,7 @@ export function createTripDecisions(
         revisionId,
         tripId: row.id,
         kind: raw ? "resolution" : "correction_request",
+        correctionRequestId,
         authorId: actor.userId,
         baseTripVersion: changed.version,
         baseFactId: base.factRevisionId,
@@ -672,7 +705,7 @@ export function createTripDecisions(
       tx,
       changed,
       s.hash,
-      [correctionId ? "author_correction_requested" : "proposal_pending"],
+      [correctionRequestId ? "author_correction_requested" : "proposal_pending"],
       true,
     );
     await audit.append(tx, {
@@ -695,10 +728,12 @@ export function createTripDecisions(
   ) {
     const { row, members } = prepared;
     if (
-      p.tripId !== row.id ||
+      !members.some((member) => member.id === p.tripId) ||
       p.revisionId !== value.reviewedRevisionId ||
-      p.baseTripVersion !== row.version ||
-      p.baseFactId !== row.currentFactId
+      (value.decision === "approve" &&
+        (p.tripId !== row.id ||
+          p.baseTripVersion !== row.version ||
+          p.baseFactId !== row.currentFactId))
     )
       throw identityError(409, "VERSION_CONFLICT");
     const [old] = await c(tx)
@@ -708,8 +743,61 @@ export function createTripDecisions(
       .for("share");
     if (old) throw identityError(409, "VERSION_CONFLICT");
     const s = await support(tx, row, members, p.eventId ?? undefined);
-    if (!p.supportHash.equals(s.hash)) throw identityError(409, "VERSION_CONFLICT");
-    const decidedAt = at();
+    if (value.decision === "approve" && !p.supportHash.equals(s.hash))
+      throw identityError(409, "VERSION_CONFLICT");
+    const decidedAt = at(),
+      closedProposals = [p];
+    if (p.correctionRequestId) {
+      if (value.decision === "approve")
+        await ports.manual.correctionRequestInTransaction(tx, actor, row.id, p.correctionRequestId);
+      const terminalized = await ports.manual.completeCorrectionInTransaction(
+        tx,
+        actor,
+        row.id,
+        p.correctionRequestId,
+        value.decision === "approve" ? "resolved" : "declined",
+        reason(value.reason),
+        decidedAt,
+      );
+      if (terminalized) {
+        const origins = await c(tx)
+          .select({ proposal: tripProposals })
+          .from(tripProposals)
+          .leftJoin(tripProposalReviews, eq(tripProposalReviews.proposalId, tripProposals.id))
+          .where(
+            and(
+              eq(tripProposals.correctionRequestId, p.correctionRequestId),
+              eq(tripProposals.kind, "correction_request"),
+              sql`${tripProposalReviews.proposalId} IS NULL`,
+            ),
+          )
+          .for("share");
+        for (const { proposal: origin } of origins)
+          if (origin.id !== p.id) {
+            await c(tx)
+              .insert(tripProposalReviews)
+              .values({
+                proposalId: origin.id,
+                actorId: actor.userId,
+                outcome: value.decision,
+                reviewedRevisionId: origin.revisionId,
+                reason: reason(value.reason),
+                decidedAt,
+              });
+            closedProposals.push(origin);
+          }
+      }
+    }
+    await c(tx)
+      .insert(tripProposalReviews)
+      .values({
+        proposalId: p.id,
+        actorId: actor.userId,
+        outcome: value.decision,
+        reviewedRevisionId: value.reviewedRevisionId,
+        reason: reason(value.reason),
+        decidedAt,
+      });
     let result: { data: S["Decision"]; version: number } | undefined,
       reviewVersion = row.version;
     if (value.decision === "approve") {
@@ -749,25 +837,32 @@ export function createTripDecisions(
           ? await latest(tx, row.id)
           : undefined;
       const retained = await support(tx, row, members);
-      const remains = effective
-        ? retained.evidence.some(
-            (e) =>
-              e.factRevisionId !== row.currentFactId &&
-              !effective.supportingFacts.includes(e.factRevisionId),
-          ) ||
-          retained.eventInvalid ||
-          !!retained.event?.reviewRequired ||
-          (effective.eventId !== null &&
-            (retained.event?.eventRevisionId !== effective.eventRevisionId ||
-              retained.event?.attendanceRevisionId !== effective.attendanceRevisionId))
-        : row.decision === "pending_review";
+      const pending = await hasPendingProposal(tx, members),
+        sourceReview = effective
+          ? retained.evidence.some(
+              (e) =>
+                e.factRevisionId !== row.currentFactId &&
+                !effective.supportingFacts.includes(e.factRevisionId),
+            ) ||
+            retained.eventInvalid ||
+            !!retained.event?.reviewRequired ||
+            (effective.eventId !== null &&
+              (retained.event?.eventRevisionId !== effective.eventRevisionId ||
+                retained.event?.attendanceRevisionId !== effective.attendanceRevisionId))
+          : row.decision === "pending_review";
+      const reasons = [
+          ...(pending ? ["proposal_pending"] : []),
+          ...(sourceReview ? ["source_evidence_requires_review"] : []),
+          ...row.reviewReasons.filter((r) => r === "candidate_search_overflow"),
+        ],
+        remains = reasons.length > 0;
       const changed = await ports.trips.adjudication.write(
         tx,
         row,
         {
           reviewHold: remains,
           correctionPending: remains,
-          reviewReasons: remains ? ["source_evidence_requires_review"] : [],
+          reviewReasons: reasons,
         },
         undefined,
         true,
@@ -788,32 +883,25 @@ export function createTripDecisions(
         tx,
         changed,
         (await support(tx, changed, await ports.trips.groups.members(tx, [changed.id], true))).hash,
-        remains ? ["source_evidence_requires_review"] : [],
+        reasons,
         remains,
       );
     }
-    await c(tx)
-      .insert(tripProposalReviews)
-      .values({
-        proposalId: p.id,
-        actorId: actor.userId,
-        outcome: value.decision,
-        reviewedRevisionId: value.reviewedRevisionId,
-        reason: reason(value.reason),
-        decidedAt,
+
+    const version = result?.version ?? reviewVersion;
+    for (const closed of closedProposals) {
+      const eventId = newId();
+      await outbox.append(tx, {
+        eventId,
+        type: "trip.proposal_reviewed",
+        schemaVersion: 1,
+        aggregate: { kind: "trip", id: row.id, version },
+        occurredAt: decidedAt,
+        correlationId: eventId,
+        causationId: null,
+        data: { proposalId: closed.id, reviewedRevisionId: closed.revisionId },
       });
-    const version = result?.version ?? reviewVersion,
-      eventId = newId();
-    await outbox.append(tx, {
-      eventId,
-      type: "trip.proposal_reviewed",
-      schemaVersion: 1,
-      aggregate: { kind: "trip", id: row.id, version },
-      occurredAt: decidedAt,
-      correlationId: eventId,
-      causationId: null,
-      data: { proposalId: p.id, reviewedRevisionId: p.revisionId },
-    });
+    }
     return { data: result?.data ?? (await proposalDto(tx, p)), version };
   }
   const reference = (value: unknown) => {
@@ -969,7 +1057,7 @@ export function createTripDecisions(
       );
     },
     async privateProjectionInTransaction(tx: TxContext, id: string, actor: Actor) {
-      const row = await ports.trips.groups.resolve(tx, id);
+      const row = await ports.trips.groups.resolve(tx, id, "share");
       return privateProjection(tx, row, actor);
     },
     async review(actor: Actor, id: string) {
@@ -1104,7 +1192,10 @@ export function createTripDecisions(
       version: number,
       raw: S["ResolutionInput"],
     ) {
-      const value = input("ResolutionInput", raw);
+      const value = input("ResolutionInput", {
+        ...raw,
+        correctionRequestId: raw.correctionRequestId ?? null,
+      });
       reason(value.reason);
       return run(async (tx) => {
         const prepared = await prepare(tx, id, actor);
@@ -1164,7 +1255,8 @@ export function createTripDecisions(
               ),
             )
             .orderBy(desc(tripProposals.createdAt), desc(tripProposals.id))
-            .limit(paging.limit + 1);
+            .limit(paging.limit + 1)
+            .for("share");
         const result = paging.finish(rows, (r) => ({ id: r.id, time: r.createdAt }));
         return { ...result, items: await Promise.all(result.items.map((p) => proposalDto(tx, p))) };
       });

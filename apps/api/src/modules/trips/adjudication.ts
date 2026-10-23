@@ -108,7 +108,7 @@ export function createTripAdjudication(
       input: S["ResolutionInput"],
       createdAt: string,
     ) {
-      const { reason, evidenceIds, ...changes } = input;
+      const { reason, evidenceIds, correctionRequestId: _request, ...changes } = input;
       if (base.provider === "manual" && (changes.actualStartAt || changes.actualCompletedAt))
         throw identityError(422);
       if (
