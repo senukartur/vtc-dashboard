@@ -207,7 +207,14 @@ export function ReconciliationHistory({ tripId }: { tripId: string }) {
         {open && (
           <div className="stack">
             <p>{t("historyHelp")}</p>
-            <State query={query} />
+            <State
+              query={query}
+              refresh={() => {
+                setCursor(null);
+                setHistory([]);
+                if (!cursor) void query.refetch();
+              }}
+            />
             {query.data && !query.data.data.data.items.length && <p>{t("empty")}</p>}
             {query.data?.data.data.items.map((r) => (
               <ReverseMerge key={r.id} reconciliation={r} />

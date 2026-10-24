@@ -76,7 +76,12 @@ export const tripTranslations = {
     save: "Save draft",
     submit: "Submit for review",
     saved: "Draft saved on the server.",
-    submitted: "Report submitted. This does not grant accepted credit.",
+    submitReview:
+      "Send these exact report details for staff review. Submission does not grant accepted credit.",
+    draftTargetSave:
+      "Save the draft after changing or refreshing its telemetry target before submitting.",
+    comparisonUnavailable:
+      "A previous revision from the same report is unavailable for comparison.",
     report: "Manual report",
     revisions: "Immutable revisions",
     revision: "Revision",
@@ -284,7 +289,11 @@ export const tripTranslations = {
     save: "Сохранить черновик",
     submit: "Отправить на проверку",
     saved: "Черновик сохранён на сервере.",
-    submitted: "Отчёт отправлен. Принятый зачёт ещё не начислен.",
+    submitReview:
+      "Передайте эти данные отчёта на проверку сотруднику. Отправка не означает зачёт рейса.",
+    draftTargetSave:
+      "Сохраните черновик после выбора или обновления рейса телеметрии перед отправкой.",
+    comparisonUnavailable: "Предыдущая версия этого же отчёта недоступна для сравнения.",
     report: "Ручной отчёт",
     revisions: "Неизменяемые ревизии",
     revision: "Ревизия",

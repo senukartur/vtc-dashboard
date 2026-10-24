@@ -235,9 +235,21 @@ function ManualEditor({
     }
     return result;
   }
+  const targetNeedsSave =
+    !!draft &&
+    (target?.tripId !== draft.targetTrip?.tripId ||
+      target?.expectedVersion !== draft.targetTrip?.expectedVersion);
   const submission = payload(),
     complete = schema("ManualSubmissionFields").safeParse(submission).success && ready;
-  const guard = JSON.stringify([submission, target, reportEtag, draftEtag, tripVersion, accepted]);
+  const guard = JSON.stringify([
+    submission,
+    target,
+    draft?.targetTrip,
+    reportEtag,
+    draftEtag,
+    tripVersion,
+    accepted,
+  ]);
   return (
     <div className="stack trip-page">
       <header>
@@ -359,7 +371,14 @@ function ManualEditor({
           <Card>
             <EvidenceUpload
               ids={fields.evidenceIds ?? []}
-              onChange={(evidenceIds) => patch({ evidenceIds })}
+              onChange={(update) => {
+                setFields((previous) => ({
+                  ...previous,
+                  evidenceIds: update(previous.evidenceIds ?? []),
+                }));
+                setInvalid(false);
+                setSaved(false);
+              }}
               onReady={setReady}
             />
           </Card>
@@ -439,6 +458,7 @@ function ManualEditor({
               </div>
             </Card>
           )}
+          {targetNeedsSave && <p role="status">{t("draftTargetSave")}</p>}
           {invalid && <p role="alert">{t("invalid")}</p>}
           <Failure error={command.failure} seconds={command.seconds} />
           {saved && <p role="status">{t("saved")}</p>}
@@ -459,11 +479,13 @@ function ManualEditor({
               failure={command.failure}
               disabled={
                 accepted ||
+                targetNeedsSave ||
                 targetSummary?.decision === "accepted" ||
                 !complete ||
                 command.seconds > 0
               }
               onConfirm={async () => {
+                if (targetNeedsSave) return;
                 const body = report
                   ? { fields: submission, expectedTripVersion: tripVersion }
                   : draft
@@ -484,12 +506,12 @@ function ManualEditor({
                 return result;
               }}
             >
-              <p>{t("submitted")}</p>
+              <p>{t("submitReview")}</p>
               <Fields
                 values={{
                   game,
                   version: report?.version ?? draft?.version ?? null,
-                  target: target?.tripId ?? null,
+                  target: target?.tripId ?? t("noTarget"),
                   targetVersion: target?.expectedVersion ?? null,
                   reviewedRevisionId: report?.currentRevision.id ?? null,
                 }}

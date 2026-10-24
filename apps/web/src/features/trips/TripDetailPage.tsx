@@ -237,9 +237,18 @@ function PrivateHistory({ tripId }: { tripId: string }) {
         <State query={query} />
       )}
       {tab === "revisions" &&
-        revisions.data?.data.data.items.map((r, i, items) => (
-          <Revision key={r.id} revision={r} {...(items[i + 1] ? { previous: items[i + 1] } : {})} />
-        ))}
+        revisions.data?.data.data.items.map((r, _i, items) => {
+          const previous =
+            "reportId" in r
+              ? items.find(
+                  (other) =>
+                    "reportId" in other &&
+                    other.reportId === r.reportId &&
+                    other.number === r.number - 1,
+                )
+              : undefined;
+          return <Revision key={r.id} revision={r} {...(previous ? { previous } : {})} />;
+        })}
       {tab === "report" &&
         reports.data?.data.data.items.map((r) => (
           <article key={r.id} className="trip-revision">

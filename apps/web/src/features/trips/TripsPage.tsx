@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -14,16 +14,25 @@ export function TripsPage({ review = false }: { review?: boolean }) {
     staff = !!session.self?.capabilities.includes("trips.review");
   const filters = tripFilters(params, staff),
     scope = review ? "review" : filters.scope;
-  const [cursors, setCursors] = useState<string[]>([]),
-    [cursor, setCursor] = useState<string | null>(null);
+  const effective = {
+    ...filters,
+    scope,
+    decision: scope === "company" ? undefined : filters.decision,
+  };
+  const filterKey = queryString(effective);
+  const [page, setPage] = useState<{ key: string; cursor: string | null; cursors: string[] }>({
+    key: filterKey,
+    cursor: null,
+    cursors: [],
+  });
+  const { cursor, cursors } = page.key === filterKey ? page : { cursor: null, cursors: [] };
+  useEffect(() => setPage({ key: filterKey, cursor: null, cursors: [] }), [filterKey]);
   const query = useTripQuery(
-    `/trips?${queryString({ ...filters, scope, decision: scope === "company" ? undefined : filters.decision, limit: 25, cursor })}`,
+    `/trips?${queryString({ ...effective, limit: 25, cursor })}`,
     "EnvelopeListTripSummary",
     !review || staff,
   );
   function change(key: string, value: string) {
-    setCursor(null);
-    setCursors([]);
     setParams((previous) => {
       const next = new URLSearchParams(previous);
       if (value) next.set(key, value);
@@ -117,7 +126,13 @@ export function TripsPage({ review = false }: { review?: boolean }) {
             </div>
           )}
         </div>
-        <State query={query} />
+        <State
+          query={query}
+          refresh={() => {
+            setPage({ key: filterKey, cursor: null, cursors: [] });
+            if (!cursor) void query.refetch();
+          }}
+        />
         {query.data && (
           <>
             {!query.data.data.data.items.length && <p>{t("empty")}</p>}
@@ -128,12 +143,14 @@ export function TripsPage({ review = false }: { review?: boolean }) {
               next={query.data.data.data.nextCursor}
               hasPrevious={cursors.length > 0}
               onNext={(next) => {
-                setCursors([...cursors, cursor ?? ""]);
-                setCursor(next);
+                setPage({ key: filterKey, cursors: [...cursors, cursor ?? ""], cursor: next });
               }}
               onPrevious={() => {
-                setCursor(cursors.at(-1) || null);
-                setCursors(cursors.slice(0, -1));
+                setPage({
+                  key: filterKey,
+                  cursor: cursors.at(-1) || null,
+                  cursors: cursors.slice(0, -1),
+                });
               }}
             />
           </>

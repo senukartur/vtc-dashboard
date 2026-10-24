@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
+import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
@@ -205,22 +206,50 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await resetAccountLimits();
     phase = "TELEMETRY_ATTACHMENT";
     const telemetry = await fixture.telemetry(undefined, "started");
+    const countCanonical = () =>
+      fixture.unit.run(
+        async (tx) =>
+          (
+            await fixture.unit
+              .client(tx)
+              .select({ id: tripRows.id })
+              .from(tripRows)
+              .where(and(eq(tripRows.ownerId, fixture.userId), isNull(tripRows.aliasOf)))
+          ).length,
+      );
+    const beforeAttachment = await countCanonical();
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
     await fill(page, fixture);
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/reports\/drafts\//);
+    await page.reload();
+    await catalogLanguage(page);
     await page.locator("#manual-target").selectOption(telemetry.tripId);
+    await expect(
+      page.getByRole("button", { name: "Submit for review", exact: true }),
+    ).toBeDisabled();
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Submit for review", exact: true }),
+    ).toBeEnabled();
     const attempt = page.waitForResponse(
       (response) =>
-        response.url().endsWith("/api/v1/manual-reports") && response.request().method() === "POST",
+        new URL(response.url()).pathname.endsWith("/submission") &&
+        response.request().method() === "POST",
     );
     await confirm(page, "Submit for review");
     const submitted = await attempt;
     if (submitted.status() === 409) {
       await expect(page.getByRole("alert").filter({ hasText: "record changed" })).toBeVisible();
       await page.getByRole("button", { name: "Reload telemetry targets", exact: true }).click();
+      await page.getByRole("button", { name: "Save draft", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Submit for review", exact: true }),
+      ).toBeEnabled();
       const retry = page.waitForResponse(
         (response) =>
-          response.url().endsWith("/api/v1/manual-reports") &&
+          new URL(response.url()).pathname.endsWith("/submission") &&
           response.request().method() === "POST",
       );
       await confirm(page, "Submit for review");
@@ -233,6 +262,7 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await expect(page).toHaveURL(new RegExp(`/account/trips/${telemetry.tripId}$`));
     current = (await (await page.request.get(`/api/v1/trips/${telemetry.tripId}`)).json()).data;
     expect(current.summary.sourceKinds.sort()).toEqual(["ets2telemetry", "manual"]);
+    expect(await countCanonical()).toBe(beforeAttachment);
     await resetAccountLimits();
     phase = "DUPLICATE_MERGE";
     const source = await fixture.telemetry();

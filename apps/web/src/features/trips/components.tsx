@@ -166,6 +166,14 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
     session = useSession(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const label = (value: DTO["CatalogLabel"] | null) => (
+    <>
+      {value?.label ?? t("unknown")}
+      {value?.englishFallback && (
+        <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
+      )}
+    </>
+  );
   return (
     <article className="trip-row">
       <div>
@@ -186,16 +194,16 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
         <h2>
           {link ? (
             <Link to={`/account/trips/${trip.id}`}>
-              {trip.origin?.label ?? t("unknown")} → {trip.destination?.label ?? t("unknown")}
+              {label(trip.origin)} → {label(trip.destination)}
             </Link>
           ) : (
             <>
-              {trip.origin?.label ?? t("unknown")} → {trip.destination?.label ?? t("unknown")}
+              {label(trip.origin)} → {label(trip.destination)}
             </>
           )}
         </h2>
         <p>
-          {trip.owner.nickname} · {trip.cargo?.label ?? t("unknown")}
+          {trip.owner.nickname} · {label(trip.cargo)}
         </p>
         <p>{formatQuantity(trip.actualDistanceM, "km", locale)}</p>
         <small>
@@ -260,7 +268,15 @@ export function Revision({
 }) {
   const { t } = useTranslation("trips"),
     fields = revisionFields(revision),
-    prior = previous ? revisionFields(previous) : null;
+    lineage = "reportId" in revision ? revision.reportId : null,
+    prior =
+      previous &&
+      lineage &&
+      "reportId" in previous &&
+      previous.reportId === lineage &&
+      previous.number === revision.number - 1
+        ? revisionFields(previous)
+        : null;
   const selection = (value: DTO["ManualCatalogSelection"]) =>
     value.status === "resolved"
       ? `${value.entityId} · ${value.catalogRevisionId}`
@@ -278,7 +294,14 @@ export function Revision({
       <h3>
         {t("revision")} {revision.number}
       </h3>
-      <Fields values={{ reviewedRevisionId: revision.id, submittedAt: revision.submittedAt }} />
+      <Fields
+        values={{
+          report: lineage,
+          reviewedRevisionId: revision.id,
+          submittedAt: revision.submittedAt,
+        }}
+      />
+      {(!lineage || (revision.number > 1 && !prior)) && <p>{t("comparisonUnavailable")}</p>}
       {Object.entries(fields).map(([k, v]) => (
         <div key={k}>
           <strong>{t(k)}: </strong>

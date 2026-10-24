@@ -222,7 +222,7 @@ export function EvidenceUpload({
   onReady,
 }: {
   ids: string[];
-  onChange: (ids: string[]) => void;
+  onChange: (update: (ids: string[]) => string[]) => void;
   onReady: (ready: boolean) => void;
 }) {
   const { t } = useTranslation("trips"),
@@ -298,7 +298,7 @@ export function EvidenceUpload({
                   JSON.stringify([hash, file.name, file.type]),
                 );
                 if (result) {
-                  onChange([...new Set([...ids, result.data.data.id])]);
+                  onChange((current) => [...new Set([...current, result.data.data.id])]);
                   setFile(null);
                 }
               } catch {
@@ -319,7 +319,7 @@ export function EvidenceUpload({
           enabled={index === 0 || Object.hasOwn(states, ids[index - 1] ?? "")}
           key={id}
           id={id}
-          remove={() => onChange(ids.filter((i) => i !== id))}
+          remove={() => onChange((current) => current.filter((i) => i !== id))}
           update={setStates}
         />
       ))}
