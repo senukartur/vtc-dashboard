@@ -76,3 +76,5 @@ Current integration preserves VTC-028 qualification/contribution storage. The co
 [Reconciliation](reconciliation.md) preserves original report/revision/evidence references. The manual callback runs only after the immutable source revision, attachment references and pending state exist. Private projection, correction, review/reopen and retention include aliases and the full effective group. Latest decision timing and renewed review remain authoritative for the complete minimum calendar year. Deleting generations cannot be reused by merge/reversal.
 
 VTC-029 now calls the [group decision/evidence facades](trip-decisions.md) after the immutable manual revision/reference/pending callback boundary. All group authors are protected from self-review; decisions renew the entire group retention gate and pending work retains screenshots. Correction requests create separately identified Acceptance proposals. Source gameplay dates remain unknown.
+
+VTC-030 integrates the protected [trip reporting and review workspace](trip-workspace.md). Runtime/hosted activation and the exact-candidate verification/review gates remain separate from frontend implementation.

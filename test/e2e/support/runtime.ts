@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { browserTripConfig } from "./trip-config.ts";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createDatabase, createUnitOfWork } from "@vtc/db";
@@ -13,27 +15,37 @@ const [
   { readConfig },
   { createExternalIdentities },
   { steamProvider, truckersProvider },
-  { createCatalogs },
-  { catalogEvents },
-  { createQueue },
   { runPass },
-  { createImportHandler },
 ] = await Promise.all([
   built("app"),
   built("use-cases/identity-messaging"),
   built("platform/config/env"),
   built("modules/external-identities/service"),
   built("modules/external-identities/providers"),
-  built("modules/catalogs/service"),
-  built("platform/outbox/events"),
-  built("platform/jobs/queue"),
   built("platform/jobs/runner"),
-  built("modules/catalogs/importer"),
 ]);
 const config = readConfig(),
   database = createDatabase(config.database),
   unit = createUnitOfWork(config.database);
-const composition = composeIdentity(unit, config.identity, config.mail, config.admissions, true);
+const trips = browserTripConfig();
+await mkdir(trips.manual.storage.root, { recursive: true, mode: 0o700 });
+const compose = (target: typeof unit, worker = false) =>
+  composeIdentity(
+    target,
+    config.identity,
+    worker ? undefined : config.mail,
+    config.admissions,
+    true,
+    config.catalogs,
+    trips.trips,
+    undefined,
+    trips.manual,
+    trips.qualifications,
+    trips.events,
+    trips.reconciliation,
+    trips.decisions,
+  );
+const composition = compose(unit);
 const externalIdentities = createExternalIdentities(unit, composition.identity, {
   steam: steamProvider(
     async () => new Response("ns:http://specs.openid.net/auth/2.0\nis_valid:true\n"),
@@ -42,16 +54,10 @@ const externalIdentities = createExternalIdentities(unit, composition.identity, 
     Response.json({ error: true, descriptor: "Unable to find player with that ID." }),
   ),
 });
-const catalogs = createCatalogs(unit, config.catalogs, {
-  identity: composition.identity,
-  published: catalogEvents(unit).append,
-});
 // API and worker each retain the normal five-slot pool, like the two production
 // processes. Together with readiness (five), this harness bounds them to 15 slots.
 const workerUnit = createUnitOfWork(config.database);
-const queue = createQueue(workerUnit, [
-    createImportHandler(workerUnit, config.catalogs, () => new Date()),
-  ]),
+const queue = compose(workerUnit, true).jobsQueue,
   stop = new AbortController();
 let pass: Promise<unknown> | undefined;
 // This bounded synthetic worker is allocation-guarded and never shipped in the API.
@@ -69,7 +75,6 @@ const timer = setInterval(() => {
 const app = await createApp({
   ...composition,
   externalIdentities,
-  catalogs,
   checkReadiness: database.check,
   closeDatabase: async () => {
     clearInterval(timer);

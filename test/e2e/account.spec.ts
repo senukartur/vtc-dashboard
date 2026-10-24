@@ -559,7 +559,7 @@ test("controlled account preferences conflict requires refresh/review, wrong cod
   ).toBeVisible();
   await expect(page.getByText("member@example.invalid", { exact: true })).toHaveCount(0);
 });
-test("controlled current capabilities filter unavailable navigation equally for trainee/driver and add staff destinations without deputy succession", async ({
+test("controlled current capabilities expose integrated trip navigation equally for trainee/driver and staff destinations without deputy succession", async ({
   page,
 }) => {
   await mocks(page);
@@ -587,12 +587,14 @@ test("controlled current capabilities filter unavailable navigation equally for 
     const menu = page.getByRole("button", { name: "Open navigation" });
     if (await menu.isVisible()) await menu.click();
     await expect(
-      page.getByText("Trip reports · Unavailable", { exact: true }).filter({ visible: true }),
+      page.getByRole("link", { name: "Saved drafts", exact: true }).filter({ visible: true }),
     ).toBeVisible();
     await expect(page.getByText("Leadership transfer · Unavailable", { exact: true })).toHaveCount(
       0,
     );
-    await expect(page.getByRole("link", { name: "Report review" })).toHaveCount(0);
+    await expect(
+      page.getByRole("link", { name: "Review workspace", exact: true }).filter({ visible: true }),
+    ).toHaveCount(self.data.capabilities.includes("trips.review") ? 1 : 0);
     if (await page.getByRole("dialog").isVisible()) await page.keyboard.press("Escape");
   }
 });

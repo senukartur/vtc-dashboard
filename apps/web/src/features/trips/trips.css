@@ -1,0 +1,149 @@
+.trip-page {
+  max-width: 1240px;
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+.trip-heading,
+.trip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 24px;
+}
+.trip-heading {
+  flex-wrap: wrap;
+}
+.trip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.trip-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.trip-row {
+  padding-block: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.trip-row h2 {
+  margin-block: 12px 6px;
+  font-size: 1.15rem;
+}
+.trip-row p {
+  margin-block: 8px;
+}
+.trip-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.trip-facts dt {
+  color: var(--secondary);
+  font-size: 0.9rem;
+}
+.trip-facts dd {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+.trip-page fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  min-width: 0;
+}
+.trip-page legend {
+  padding-inline: 6px;
+  font-weight: 600;
+}
+.trip-page textarea {
+  min-height: 100px;
+  resize: vertical;
+  font: inherit;
+}
+.trip-page summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding-block: 12px;
+  font-weight: 600;
+}
+.trip-check {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+}
+.trip-check input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.trip-evidence,
+.trip-revision {
+  border-bottom: 1px solid var(--border);
+  padding-block: 16px;
+}
+.trip-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: start;
+}
+.trip-wrap {
+  overflow-wrap: anywhere;
+}
+.trip-code {
+  display: inline-block;
+  font-size: 0.85rem;
+  padding: 5px;
+  margin: 3px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.trip-change {
+  background: var(--inset);
+  padding: 12px;
+}
+.trip-change ins {
+  color: var(--accepted);
+}
+.dialog-content:has(.trip-wrap) {
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+@media (max-width: 760px) {
+  .trip-grid,
+  .trip-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .trip-row {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .trip-actions > .button {
+    flex: 1 1 auto;
+  }
+  .trip-page .card {
+    padding: 16px;
+  }
+}
+
+.trip-row > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+.trip-row > :last-child {
+  flex-shrink: 0;
+  min-width: 180px;
+}
+@media (max-width: 760px) {
+  .trip-row > :last-child {
+    min-width: 0;
+  }
+}
+.trip-page .trip-editor-body {
+  display: contents;
+}

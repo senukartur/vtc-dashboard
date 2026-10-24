@@ -1,3 +1,4 @@
+import { tripTranslations } from "../features/trips/translations.js";
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
 import { accountTranslations } from "../features/account/translations.js";
@@ -19,6 +20,7 @@ await i18next.use(initReactI18next).init({
       admissions: admissionsTranslations.en,
       account: accountTranslations.en,
       catalogs: catalogTranslations.en,
+      trips: tripTranslations.en,
     },
     ru: {
       core: core.ru,
@@ -26,6 +28,7 @@ await i18next.use(initReactI18next).init({
       admissions: admissionsTranslations.ru,
       account: accountTranslations.ru,
       catalogs: catalogTranslations.ru,
+      trips: tripTranslations.ru,
     },
   },
 });

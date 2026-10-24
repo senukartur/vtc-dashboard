@@ -46,13 +46,22 @@ export function Navigation({
               {t("catalogs:title")}
             </NavLink>
           )}
+          {[
+            ["company.read", "/account/trips", "title"],
+            ["trips.submit_own", "/account/reports", "drafts"],
+            ["trips.review", "/account/review", "review"],
+          ]
+            .filter(([cap]) => cap && session.self?.capabilities.includes(cap))
+            .map(([, path, label]) => (
+              <NavLink key={path} to={path ?? "/account/trips"} onClick={close}>
+                {t(`trips:${label}`)}
+              </NavLink>
+            ))}
           <Link to={publicPath(locale)} onClick={close}>
             {t("home")}
           </Link>
           {[
             ["company.read", "dashboard"],
-            ["trips.submit_own", "reports"],
-            ["trips.review", "review"],
             ["applications.manage", "administration"],
             ["leadership.transfer", "leadership"],
           ]
