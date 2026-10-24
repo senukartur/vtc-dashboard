@@ -81,6 +81,7 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
+import { manualJobsObservation } from "../support/manual-jobs-diagnostics.ts";
 import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
 import { childClose, fixtureSettlement } from "../support/fixture-settlement.ts";
 import {
@@ -1996,6 +1997,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
     },
   );
   const completion = childClose(child);
+  let lastTransaction: Record<string, unknown> | undefined;
   let receipt: { event: string; processed: number; pid: number } | undefined;
   let malformed = false,
     closed = false,
@@ -2023,6 +2025,7 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
         spawnFailed,
         firstStop,
         receiptState: receipt ? "valid" : !closed ? "pending" : malformed ? "malformed" : "missing",
+        ...(lastTransaction ? { lastTransaction } : {}),
       }),
     );
   const removeStreamListeners: (() => void)[] = [];
@@ -2044,15 +2047,15 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
         );
       } else if (record?.event === "identity_fixture_transaction") {
         const { event: _event, fixture: _fixture, caseId: _scope, step, ...facts } = record;
-        console.log(
-          generationProcessLine({
-            ...facts,
-            event: "manual_generation_transaction",
-            phase: step,
-            caseId,
-            ordinal,
-          }),
-        );
+        const line = generationProcessLine({
+          ...facts,
+          event: "manual_generation_transaction",
+          phase: step,
+          caseId,
+          ordinal,
+        });
+        lastTransaction = JSON.parse(line) as Record<string, unknown>;
+        console.log(line);
       } else if (stdout && value.trim()) malformed = true;
     };
     const onData = (chunk: Buffer | string) => {
@@ -2481,7 +2484,8 @@ test("draft-only composition pauses both manual deletion kinds without consuming
   expect(evidence[0]?.state).toBe("deleting");
 });
 
-async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
+async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number, ordinal: 1 | 2) {
+  const observation = manualJobsObservation(ordinal, deadline);
   if (performance.now() >= deadline) throw Error("SYNTHETIC_JOBS_FIXTURE_DEADLINE");
   const child = spawn(process.execPath, ["apps/api/dist/jobs.js", "run"], {
     windowsHide: true,
@@ -2495,15 +2499,27 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
     storageFailure = false;
   let exitCode: number | null = null;
   let result: { manualCleanup: string; processed: number } | undefined;
+  const emit = (state: Parameters<typeof observation.line>[0]) => {
+    try {
+      console.log(
+        observation.line(state, { closed, timedOut, spawnFailed, streamFailed, exitCode }),
+      );
+    } catch {
+      /* Preserve the original process outcome when diagnostics fail. */
+    }
+  };
+  emit("spawn");
   const completion = new Promise<void>((accept) => {
     child.once("close", (code) => {
       closed = true;
       exitCode = code;
+      emit("close");
       accept();
     });
   });
   child.once("error", () => {
     spawnFailed = true;
+    emit("spawn_error");
   });
   const stop = () => {
     if (!closed && child.pid !== undefined) child.kill("SIGTERM");
@@ -2512,6 +2528,7 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
   const watchdog = setTimeout(
     () => {
       timedOut = true;
+      emit("deadline");
       stop();
     },
     Math.max(1, deadline - performance.now()),
@@ -2519,6 +2536,7 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.once("error", () => {
       streamFailed = true;
+      emit("stream_error");
       stop();
     });
     let line = "",
@@ -2529,6 +2547,7 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
           if (!oversized) {
             try {
               const value = JSON.parse(line);
+              observation.accept(value);
               if (
                 value.event === "manual_cleanup_failed" &&
                 value.category === "storage_unavailable"
@@ -2564,6 +2583,9 @@ async function ownedJobsCli(environment: NodeJS.ProcessEnv, deadline: number) {
     expect(spawnFailed).toBe(false);
     expect(streamFailed).toBe(false);
     return { exitCode, storageFailure, result };
+  } catch (error) {
+    emit("failure");
+    throw error;
   } finally {
     clearTimeout(watchdog);
     if (!closed) {
@@ -2703,7 +2725,7 @@ it("unavailable due manual storage reports failure while real local mail complet
     expect((await readdir(root)).includes("jobs-storage-outage.offline")).toBe(false);
     await rename(ownedRoot, heldRoot);
     displaced = true;
-    const failed = await ownedJobsCli(environment, deadline);
+    const failed = await ownedJobsCli(environment, deadline, 1);
     expect(failed).toMatchObject({
       exitCode: 1,
       storageFailure: true,
@@ -2730,7 +2752,7 @@ it("unavailable due manual storage reports failure while real local mail complet
       "UPDATE manual_evidence SET lease_until=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 SECOND) WHERE id=? AND state='processing'",
       [Buffer.from(evidenceId)],
     );
-    const recovered = await ownedJobsCli(environment, deadline);
+    const recovered = await ownedJobsCli(environment, deadline, 2);
     expect(recovered).toMatchObject({
       exitCode: 0,
       storageFailure: false,

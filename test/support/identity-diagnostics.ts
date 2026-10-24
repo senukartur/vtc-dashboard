@@ -15,7 +15,8 @@ type Fixture =
   | "external"
   | "jobs"
   | "messaging"
-  | "generation_worker";
+  | "generation_worker"
+  | "reconciliation";
 type Phase =
   | "connection"
   | "reset"
@@ -114,7 +115,8 @@ type RoleScope = {
 export type IdentityDiagnosticScope =
   | RoleScope
   | { caseId: "admissions_reissue_expiry"; step: "purge" }
-  | { caseId: "generation_worker"; step: GenerationPhase };
+  | { caseId: "generation_worker"; step: GenerationPhase }
+  | { caseId: "reconciliation_root_submit"; step: "submit" };
 
 export function identityDiagnostics(fixture: Fixture) {
   let captured = false;
@@ -156,12 +158,18 @@ export function identityDiagnostics(fixture: Fixture) {
         input.caseId === "generation_worker" &&
         fixture === "generation_worker" &&
         ["guard", "composition", "initialize", "maintenance", "pass", "close"].includes(input.step);
+      const reconciliation =
+        fixture === "reconciliation" &&
+        input.caseId === "reconciliation_root_submit" &&
+        input.step === "submit";
       if (
+        (fixture === "reconciliation" && !reconciliation) ||
         Object.keys(input).some(
           (key) => !(role ? ["caseId", "step", "mask"] : ["caseId", "step"]).includes(key),
         ) ||
         (!admitted &&
           !generation &&
+          !reconciliation &&
           (!role ||
             ![
               "member_seed",
@@ -185,7 +193,9 @@ export function identityDiagnostics(fixture: Fixture) {
             }
           : input.caseId === "admissions_reissue_expiry"
             ? { caseId: input.caseId, step: "purge" }
-            : { caseId: input.caseId, step: input.step };
+            : input.caseId === "reconciliation_root_submit"
+              ? { caseId: input.caseId, step: "submit" }
+              : { caseId: input.caseId, step: input.step };
       return scopes.run({ ...copied, ordinal: 0 }, work);
     },
     failure(error: unknown, durationMs: number | null = null) {
@@ -210,7 +220,7 @@ export function identityDiagnostics(fixture: Fixture) {
     },
     unit(unit: UnitOfWork, control?: Connection, traceTransactions = false): UnitOfWork {
       const delay = monitorEventLoopDelay({ resolution: 10 });
-      delay.enable();
+      if (fixture !== "reconciliation") delay.enable();
       return {
         client: (tx) => unit.client(tx),
         async close() {
@@ -219,6 +229,8 @@ export function identityDiagnostics(fixture: Fixture) {
         },
         async run(command) {
           const scope = scopes.getStore();
+          // This fixture observes only its explicit submit scope, before the public 503 mapping.
+          if (fixture === "reconciliation" && !scope) return unit.run(command);
           const context = {
             ...scopeFields(scope),
             ...(scope ? { transactionOrdinal: ++scope.ordinal } : {}),
@@ -283,6 +295,7 @@ export function identityDiagnostics(fixture: Fixture) {
                 context,
               );
               if (
+                fixture !== "reconciliation" &&
                 !captured &&
                 safeIdentityFailure(error).codes.includes("TRANSACTION_COMMIT_OUTCOME_UNKNOWN")
               ) {

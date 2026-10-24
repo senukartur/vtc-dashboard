@@ -232,15 +232,17 @@ test("new diagnostic scopes require matching factory fixtures before invoking wo
   expect(work).not.toHaveBeenCalled();
 });
 
-test("only late ordinal1 receives the validated closed synthetic transaction flag", () => {
+test("progress ordinals0–4 and original late ordinal1 receive the validated closed synthetic transaction flag", () => {
   for (const caseId of ["generation_progress", "generation_late", "generation_retry"] as const)
     for (let ordinal = 0; ordinal < 5; ordinal++) {
       const args = generationTransactionArguments(caseId, ordinal);
       expect(args).toEqual(
-        caseId === "generation_late" && ordinal === 1 ? [generationTransactionFlag] : [],
+        caseId === "generation_progress" || (caseId === "generation_late" && ordinal === 1)
+          ? [generationTransactionFlag]
+          : [],
       );
       expect(generationTransactionTracing(args)).toBe(
-        caseId === "generation_late" && ordinal === 1,
+        caseId === "generation_progress" || (caseId === "generation_late" && ordinal === 1),
       );
     }
   for (const args of [
@@ -305,7 +307,7 @@ test("closed transaction transport retains receipts and rejects private or unbou
     expect(safeScopedTransactionRecord(invalid)).toBeUndefined();
   for (const invalid of [
     { ...parent, ordinal: 0 },
-    { ...parent, caseId: "generation_progress" },
+    { ...parent, caseId: "generation_retry" },
     { ...parent, fixture: "generation_worker" },
     { ...parent, pid: 42 },
   ])

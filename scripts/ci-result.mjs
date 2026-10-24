@@ -1,4 +1,5 @@
 import { browserFailurePrefix, safeBrowserFailure } from "./browser-diagnostics.mjs";
+import { safeTripFixture } from "./trip-fixture-diagnostics.mjs";
 
 // Public diagnostics are reconstructed from fixed values; raw child output is never retained.
 export const stages = [
@@ -58,11 +59,13 @@ export function eventLine(stage, exitCode, durationMs) {
 export function collectEvents() {
   const events = [];
   const browserFailures = [];
+  const fixtureDiagnostics = [];
   let pending = "";
   let oversized = false;
   return {
     events,
     browserFailures,
+    fixtureDiagnostics,
     push(chunk) {
       for (const part of String(chunk).split(/(\n)/)) {
         if (part === "\n") {
@@ -84,6 +87,14 @@ export function collectEvents() {
               /* Unstructured browser diagnostics remain private. */
             }
           }
+          if (!oversized && pending.startsWith("{")) {
+            try {
+              const diagnostic = safeTripFixture(JSON.parse(pending));
+              if (diagnostic && fixtureDiagnostics.length < 64) fixtureDiagnostics.push(diagnostic);
+            } catch {
+              /* Only closed fixture schemas can reach the public report. */
+            }
+          }
           pending = "";
           oversized = false;
         } else if (!oversized) {
@@ -97,7 +108,14 @@ export function collectEvents() {
     },
   };
 }
-export function qualityReport(exitCode, durationMs, events, probe, browserFailures = []) {
+export function qualityReport(
+  exitCode,
+  durationMs,
+  events,
+  probe,
+  browserFailures = [],
+  fixtureDiagnostics = [],
+) {
   const failures = browserFailures.map(safeBrowserFailure).filter(Boolean).slice(0, 32);
   if (
     !failures.length &&
@@ -121,5 +139,6 @@ export function qualityReport(exitCode, durationMs, events, probe, browserFailur
     ...(failedProbe ? { probeIdentity: `VTC008_${probe.toUpperCase()}_ASSERTION_PROBE` } : {}),
     stages: events.map(safeEvent).filter(Boolean).slice(0, 64),
     browserFailures: failures,
+    fixtureDiagnostics: fixtureDiagnostics.map(safeTripFixture).filter(Boolean).slice(0, 64),
   };
 }

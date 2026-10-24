@@ -64,8 +64,10 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vBefore, vAfter);
+const submitDiagnostic = identityDiagnostics("reconciliation");
 type S = components["schemas"];
 let control: Connection,
   unit: UnitOfWork,
@@ -133,7 +135,7 @@ async function member(assigned: ("driver" | "dispatcher" | "deputy_director")[] 
 }
 beforeAll(async () => {
   control = await testConnection();
-  unit = createUnitOfWork(guardedSettings());
+  unit = submitDiagnostic.unit(createUnitOfWork(guardedSettings()));
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
@@ -360,9 +362,12 @@ async function corrections() {
   );
   return Number(rows[0]?.n);
 }
-function productionComposition(reconciliationConfig: ReconciliationConfig = config) {
+function productionComposition(
+  reconciliationConfig: ReconciliationConfig = config,
+  compositionUnit = unit,
+) {
   const composed = composeIdentity(
-    unit,
+    compositionUnit,
     identityConfig,
     undefined,
     undefined,
@@ -689,10 +694,14 @@ test(
     const composed = productionComposition(),
       target = "f0000000-0000-4000-8000-000000000001";
     await seedTelemetry([target]);
-    await composed.manualReports.submitReport(owner, newId(), {
-      fields: fields(await image()),
-      targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
-    });
+    const submissionKey = newId(),
+      submission = {
+        fields: fields(await image()),
+        targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
+      };
+    await submitDiagnostic.scope({ caseId: "reconciliation_root_submit", step: "submit" }, () =>
+      composed.manualReports.submitReport(owner, submissionKey, submission),
+    );
     const aPayload = payload(),
       a = await receive(aPayload, owner, composed.trips);
     const oldPair = (await composed.reconciliation.list(director)).items[0];
@@ -738,6 +747,65 @@ test(
   },
   EXTENDED_TEST_TIMEOUT_MS,
 );
+
+test("submit diagnostics retain an uncertain receipt before public 503 after real MySQL settlement without automatic replay", async () => {
+  const evidenceId = await image(),
+    key = newId(),
+    input = { fields: fields(evidenceId) };
+  const native = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL"), {
+    code: "ETIMEDOUT",
+    sql: "SYNTHETIC_PRIVATE_INPUT",
+  });
+  const failure = new TransactionCommitOutcomeUnknownError(native),
+    diagnostic = identityDiagnostics("reconciliation");
+  let executions = 0;
+  const lost: UnitOfWork = {
+    client: (tx) => unit.client(tx),
+    close: async () => {},
+    async run(command) {
+      executions++;
+      await unit.run(command);
+      throw failure;
+    },
+  };
+  const observed = diagnostic.unit(lost),
+    composed = productionComposition(config, observed),
+    lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  try {
+    await expect(
+      diagnostic.scope({ caseId: "reconciliation_root_submit", step: "submit" }, () =>
+        composed.manualReports.submitReport(owner, key, input),
+      ),
+    ).rejects.toMatchObject({ statusCode: 503, publicCode: "DEPENDENCY_UNAVAILABLE" });
+    expect(executions).toBe(1);
+    const facts = lines.map((line) => JSON.parse(line));
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      event: "identity_fixture",
+      fixture: "reconciliation",
+      phase: "transaction",
+      state: "failed",
+      caseId: "reconciliation_root_submit",
+      step: "submit",
+      codes: ["TRANSACTION_COMMIT_OUTCOME_UNKNOWN", "ETIMEDOUT"],
+    });
+    expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+    expect(lines.join("\n")).not.toContain(evidenceId);
+    expect(lines.join("\n")).not.toContain(key);
+    const replay = await productionComposition().manualReports.submitReport(owner, key, input);
+    expect(replay.currentRevision.number).toBe(1);
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT (SELECT COUNT(*) FROM manual_commands) commands,(SELECT COUNT(*) FROM manual_revisions) revisions,(SELECT COUNT(*) FROM source_messages) messages",
+    );
+    expect(Number(rows[0]?.commands)).toBe(1);
+    expect(Number(rows[0]?.revisions)).toBe(1);
+    expect(Number(rows[0]?.messages)).toBe(1);
+  } finally {
+    output.mockRestore();
+    await observed.close();
+  }
+});
 
 test(
   "EXPLAIN measures the actual production discovery predicate with current aliases, mixed sources and evidence branches",
