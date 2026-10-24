@@ -233,9 +233,9 @@ export function EffectiveFacts({ facts }: { facts: DTO["EffectiveTripFacts"] | n
           factRevisionId: facts.factRevisionId,
           actualStartAt: formatUtc(facts.actualStartAt, locale, timezone),
           actualCompletedAt: formatUtc(facts.actualCompletedAt, locale, timezone),
-          actualDistanceM: formatQuantity(facts.actualDistanceM, "km", locale),
+          actualDistanceDisplay: formatQuantity(facts.actualDistanceM, "km", locale),
           plannedDistanceM: formatQuantity(facts.plannedDistanceM, "km", locale),
-          cargoMassKg: formatQuantity(facts.cargoMassKg, "t", locale),
+          cargoMassDisplay: formatQuantity(facts.cargoMassKg, "t", locale),
         }}
       />
       <p>{t("basisTime", { timezone })}</p>
