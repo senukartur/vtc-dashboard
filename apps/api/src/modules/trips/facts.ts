@@ -1,3 +1,4 @@
+import type { components } from "@vtc/contracts";
 import { createSchemaValidator } from "../../platform/http/schemas.js";
 import { createTripGroups } from "./groups.js";
 import { applicationId, type TxContext, type UnitOfWork } from "@vtc/db";
@@ -357,5 +358,36 @@ export function createFactRepository(unit: UnitOfWork) {
       }
       return result;
     },
+  };
+}
+
+/** Explicit normalized private projection; no raw payload, diagnostic text or money. */
+export function effectiveFacts(
+  f: NormalizedTripEvidence,
+): components["schemas"]["EffectiveTripFacts"] {
+  const pin = (value: Fact<PinnedEntity>) =>
+    value.status === "known"
+      ? {
+          entityId: value.value.entityId,
+          catalogRevisionId: value.value.catalogRevisionId,
+          factRevisionId: value.value.factRevisionId,
+        }
+      : null;
+  const quantity = (value: Fact<string>) => (value.status === "known" ? value.value : null);
+  return {
+    factRevisionId: f.factRevisionId,
+    provider: f.provider,
+    actualStartAt: f.start.verifiedActual ? f.start.utc : null,
+    actualCompletedAt: f.end.verifiedActual ? f.end.utc : null,
+    actualDistanceM: quantity(f.actualDistanceM),
+    plannedDistanceM: quantity(f.plannedDistanceM),
+    cargoMassKg: quantity(f.cargoMassKg),
+    origin: pin(f.origin),
+    destination: pin(f.destination),
+    cargo: pin(f.cargo),
+    trailers: f.trailers.items.map(pin),
+    trailersComplete: f.trailers.complete,
+    wholeTripDistanceSupported: f.wholeTripDistanceSupported,
+    ruleContextComplete: f.ruleContextComplete,
   };
 }

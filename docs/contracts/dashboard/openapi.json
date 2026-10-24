@@ -8566,6 +8566,57 @@
         ],
         "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
       }
+    },
+    "/api/v1/trips/{tripId}/reconciliations": {
+      "get": {
+        "operationId": "listTripReconciliations",
+        "tags": [
+          "trips"
+        ],
+        "summary": "Read bounded reconciliation history for the current canonical group",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "trips",
+        "x-owner-card": "VTC-030",
+        "x-capability": "trips.review",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListReconciliation"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "tripId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -11047,6 +11098,23 @@
                 "manual"
               ]
             }
+          },
+          "recording": {
+            "type": "string",
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ]
+          },
+          "reportingBasis": {
+            "type": "string",
+            "enum": [
+              "actual_completion",
+              "manual_confirmation",
+              "unknown"
+            ],
+            "description": "Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds."
           }
         },
         "required": [
@@ -11354,6 +11422,16 @@
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          "effectiveFacts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveTripFacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -16896,6 +16974,217 @@
             "$ref": "#/components/schemas/EnvelopeTripProposal"
           }
         ]
+      },
+      "EffectiveCatalogPin": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "catalogRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "entityId",
+          "catalogRevisionId",
+          "factRevisionId"
+        ],
+        "additionalProperties": false
+      },
+      "EffectiveTripFacts": {
+        "type": "object",
+        "properties": {
+          "factRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "ets2telemetry"
+            ]
+          },
+          "actualStartAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualCompletedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "plannedDistanceM": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargoMassKg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Decimal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveCatalogPin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trailers": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/EffectiveCatalogPin"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxItems": 10
+          },
+          "trailersComplete": {
+            "type": "boolean"
+          },
+          "wholeTripDistanceSupported": {
+            "type": "boolean"
+          },
+          "ruleContextComplete": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "factRevisionId",
+          "provider",
+          "actualStartAt",
+          "actualCompletedAt",
+          "actualDistanceM",
+          "plannedDistanceM",
+          "cargoMassKg",
+          "origin",
+          "destination",
+          "cargo",
+          "trailers",
+          "trailersComplete",
+          "wholeTripDistanceSupported",
+          "ruleContextComplete"
+        ],
+        "additionalProperties": false
+      },
+      "ListReconciliation": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reconciliation"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListReconciliation": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListReconciliation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {

@@ -2189,6 +2189,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trips/{tripId}/reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read bounded reconciliation history for the current canonical group */
+        get: operations["listTripReconciliations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips/{tripId}/resolution-proposals": {
         parameters: {
             query?: never;
@@ -2577,6 +2594,32 @@ export interface components {
             /** Format: uuid */
             reviewedRevisionId: string;
         };
+        EffectiveCatalogPin: {
+            /** Format: uuid */
+            catalogRevisionId: string;
+            /** Format: uuid */
+            entityId: string;
+            /** Format: uuid */
+            factRevisionId: string;
+        };
+        EffectiveTripFacts: {
+            actualCompletedAt: string | null;
+            actualDistanceM: components["schemas"]["Decimal"] | null;
+            actualStartAt: string | null;
+            cargo: components["schemas"]["EffectiveCatalogPin"] | null;
+            cargoMassKg: components["schemas"]["Decimal"] | null;
+            destination: components["schemas"]["EffectiveCatalogPin"] | null;
+            /** Format: uuid */
+            factRevisionId: string;
+            origin: components["schemas"]["EffectiveCatalogPin"] | null;
+            plannedDistanceM: components["schemas"]["Decimal"] | null;
+            /** @enum {string} */
+            provider: "manual" | "ets2telemetry";
+            ruleContextComplete: boolean;
+            trailers: (components["schemas"]["EffectiveCatalogPin"] | null)[];
+            trailersComplete: boolean;
+            wholeTripDistanceSupported: boolean;
+        };
         EmailChangeState: {
             pending: components["schemas"]["PendingEmailChange"] | null;
         };
@@ -2759,6 +2802,10 @@ export interface components {
         };
         EnvelopeListQualificationRuleVersion: {
             data: components["schemas"]["ListQualificationRuleVersion"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeListReconciliation: {
+            data: components["schemas"]["ListReconciliation"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeListSourceConnection: {
@@ -3154,6 +3201,10 @@ export interface components {
         };
         ListQualificationRuleVersion: {
             items: components["schemas"]["QualificationRuleVersion"][];
+            nextCursor: string | null;
+        };
+        ListReconciliation: {
+            items: components["schemas"]["Reconciliation"][];
             nextCursor: string | null;
         };
         ListSourceConnection: {
@@ -3835,6 +3886,7 @@ export interface components {
         };
         TripPrivate: {
             decisions: components["schemas"]["Decision"][];
+            effectiveFacts?: components["schemas"]["EffectiveTripFacts"] | null;
             evidence: components["schemas"]["Evidence"][];
             manualRevision: components["schemas"]["ManualRevisionRead"] | null;
             pendingProposalId: string | null;
@@ -3892,7 +3944,14 @@ export interface components {
             /** @enum {string} */
             outcome: "open" | "delivered" | "cancelled" | "none";
             owner: components["schemas"]["MemberSummary"];
+            /** @enum {string} */
+            recording?: "complete" | "partial" | "unknown";
             reportingAt: string | null;
+            /**
+             * @description Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds.
+             * @enum {string}
+             */
+            reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
             sourceKinds: ("ets2telemetry" | "manual")[];
             version: number;
             /** @constant */
@@ -7732,6 +7791,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeListAssignmentHistory"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listTripReconciliations: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                tripId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListReconciliation"];
                 };
             };
             default: components["responses"]["Error"];

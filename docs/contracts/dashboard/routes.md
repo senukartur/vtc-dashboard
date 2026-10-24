@@ -1,6 +1,6 @@
 # Browser route and command inventory
 
-Generated index of the [OpenAPI](openapi.json); semantics and sensitive response handling are in [README.md](README.md). Capability checks also require current membership, resource ownership, revision and action guards. These operations are proposed, not implemented.
+Generated index of the [OpenAPI](openapi.json); semantics and sensitive response handling are in [README.md](README.md). Capability checks also require current membership, resource ownership, revision and action guards. Each owning card records actual implementation and activation; an inventory entry alone does not establish either.
 
 | Method / path | Operation | Capability | Owner |
 | --- | --- | --- | --- |
@@ -68,6 +68,7 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/evidence/{evidenceId}/content` | `downloadEvidence` | `session` | VTC-025 |
 | `GET /api/v1/trips` | `listTrips` | `company.read` | VTC-022 |
 | `GET /api/v1/trips/{tripId}` | `getTrip` | `company.read` | VTC-022 |
+| `GET /api/v1/trips/{tripId}/reconciliations` | `listTripReconciliations` | `trips.review` | VTC-030 |
 | `GET /api/v1/me/trip-status-summary` | `getMyTripStatusSummary` | `company.read` | VTC-022 |
 | `POST /api/v1/manual-trips` | `submitManualTrip` | `trips.submit_own` | VTC-025 |
 | `POST /api/v1/trips/{tripId}/manual-revisions` | `reviseManualTrip` | `trips.submit_own` | VTC-025 |

@@ -1317,3 +1317,32 @@ test("representative mixed history uses bounded ordered company and owner indexe
   expect(Number(company[0]?.rows)).toBeLessThan(600);
   expect(Number(mine[0]?.rows)).toBeLessThan(600);
 });
+
+test("private normalized telemetry facts retain supported actual timing, zero, planned distance and unknown completeness", async () => {
+  const p = fixture();
+  p.eventId = newId();
+  p.source.tripId = newId();
+  p.source.pluginSessionId = newId();
+  if (p.snapshot.observedDistance.available) p.snapshot.observedDistance.value = 0;
+  const r = await receive(p),
+    view = await service.detail(owner, r.tripId);
+  if (view.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+  expect(view.effectiveFacts).toMatchObject({
+    provider: "ets2telemetry",
+    actualDistanceM: "0",
+    plannedDistanceM: "120000",
+    actualStartAt: new Date(p.snapshot.start.utcMs as number).toISOString(),
+    actualCompletedAt: new Date(p.snapshot.end?.utcMs as number).toISOString(),
+  });
+  expect(view.summary.reportingBasis).toBe("actual_completion");
+  const partial = fixture("closed-partial");
+  partial.eventId = newId();
+  partial.source.tripId = newId();
+  partial.source.pluginSessionId = newId();
+  const result = await receive(partial),
+    read = await service.detail(owner, result.tripId);
+  if (read.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+  expect(read.effectiveFacts?.actualDistanceM).toBeNull();
+  expect(read.effectiveFacts?.wholeTripDistanceSupported).toBe(false);
+  expect(read.summary.recording).toBe("partial");
+});

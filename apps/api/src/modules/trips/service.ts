@@ -39,7 +39,7 @@ import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository } from "./facts.js";
+import { createFactRepository, effectiveFacts } from "./facts.js";
 import { createTripGroups } from "./groups.js";
 import { createTripReconciliation } from "./reconciliation.js";
 
@@ -640,6 +640,14 @@ export function createTrips(
         cargo: label(f?.cargo),
         actualDistanceM: row.actualDistanceM === null ? null : decimal(row.actualDistanceM),
         reportingAt: row.reportingAt,
+        recording: row.recording,
+        reportingBasis: !row.reportingAt
+          ? "unknown"
+          : f?.provider === "manual"
+            ? "manual_confirmation"
+            : f?.end.verifiedActual && f.end.utc === row.reportingAt
+              ? "actual_completion"
+              : "unknown",
         sourceKinds: [
           ...new Set(
             sources.filter((s) => factMembers.get(s.tripId) === row.id).map((s) => s.provider),
@@ -724,6 +732,15 @@ export function createTrips(
       const [result] = await summaries(tx, [row], locale);
       if (!result) throw new Error("TRIP_SUMMARY_MISSING");
       return result;
+    },
+    async effectiveFactsInTransaction(tx: TxContext, id: string) {
+      const row = await groups.resolve(tx, id, "share");
+      const saved = row.currentFactId
+        ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
+        : undefined;
+      if (saved && !(await groups.contains(tx, row.id, saved.tripId, true)))
+        throw new Error("TRIP_FACT_POINTER_INVALID");
+      return saved ? effectiveFacts(saved.evidence) : null;
     },
     contributions: createContributionRegister(unit),
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
@@ -923,10 +940,15 @@ export function createTrips(
         const projection = privateRead
           ? (await ports.manualProjection?.(tx, [row.id]))?.get(row.id)
           : undefined;
+        const savedFact =
+          privateRead && row.currentFactId
+            ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
+            : undefined;
         return privateRead
           ? {
               view: "private",
               summary,
+              effectiveFacts: savedFact ? effectiveFacts(savedFact.evidence) : null,
               manualRevision: projection?.manualRevision ?? null,
               evidence: projection?.evidence ?? [],
               decisions: [],

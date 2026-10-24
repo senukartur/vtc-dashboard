@@ -62,6 +62,23 @@ export async function registerReconciliationRoutes(
     },
     async (r) => envelope(await service.list(await actor(r), r.query), r),
   );
+  app.get<{ Params: { tripId: string }; Querystring: { limit?: number; cursor?: string } }>(
+    "/api/v1/trips/:tripId/reconciliations",
+    {
+      schema: {
+        params: { ...empty, properties: { tripId: id }, required: ["tripId"] },
+        querystring: {
+          ...empty,
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+            cursor: { type: "string", minLength: 1, maxLength: 2048 },
+          },
+        },
+        response: { 200: ref("EnvelopeListReconciliation") },
+      },
+    },
+    async (r) => envelope(await service.history(await actor(r), r.params.tripId, r.query), r),
+  );
   app.get<{ Params: { reconciliationId: string } }>(
     "/api/v1/reconciliations/:reconciliationId",
     { schema: { params, querystring: empty, response: { 200: ref("EnvelopeReconciliation") } } },

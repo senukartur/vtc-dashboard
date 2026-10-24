@@ -5,6 +5,7 @@ import {
   and,
   desc,
   eq,
+  inArray,
   lt,
   or,
   reconciliationCandidates,
@@ -619,24 +620,81 @@ export function createReconciliation(
         const result = paging.finish(rows, (r) => ({ id: r.id, time: r.createdAt }));
         const items: S["MergeCandidate"][] = [];
         for (const row of result.items) {
-          const states = await ports.trips.statesInTransaction(tx, [
-            row.primaryTripId,
-            row.secondaryTripId,
-          ]);
+          const states = await ports.trips.statesInTransaction(
+            tx,
+            [row.primaryTripId, row.secondaryTripId],
+            "share",
+          );
+          const primary = states.find((t) => t.id === row.primaryTripId),
+            secondary = states.find((t) => t.id === row.secondaryTripId);
           if (
-            states.length !== 2 ||
-            states.some((t) => t.aliasOf) ||
-            !states.some((t) => t.id === row.primaryTripId && t.version === row.primaryVersion) ||
-            !states.some((t) => t.id === row.secondaryTripId && t.version === row.secondaryVersion)
+            !primary ||
+            !secondary ||
+            primary.aliasOf ||
+            secondary.aliasOf ||
+            primary.ownerId !== row.ownerId ||
+            secondary.ownerId !== row.ownerId ||
+            primary.game !== row.game ||
+            secondary.game !== row.game
           )
             continue;
+          let reasons = row.reasons;
+          if (
+            primary.version !== row.primaryVersion ||
+            secondary.version !== row.secondaryVersion
+          ) {
+            // Assessment can change a projection version without changing its immutable
+            // source evidence. Only that provable case can refresh this advisory read.
+            const members = await ports.trips.groups.members(
+              tx,
+              [primary.id, secondary.id],
+              "share",
+            );
+            const left = await ports.trips.reconciliation.matchingEvidence(
+              tx,
+              members.filter((m) => (m.aliasOf ?? m.id) === primary.id).map((m) => m.id),
+            );
+            const right = await ports.trips.reconciliation.matchingEvidence(
+              tx,
+              members.filter((m) => (m.aliasOf ?? m.id) === secondary.id).map((m) => m.id),
+            );
+            const saved = (row.evidence as { factIds?: unknown }).factIds;
+            const factIds = [...left.facts, ...right.facts].map((f) => f.factRevisionId).sort();
+            if (
+              !left.complete ||
+              !right.complete ||
+              !left.facts.length ||
+              !right.facts.length ||
+              !Array.isArray(saved) ||
+              saved.some((id) => typeof id !== "string") ||
+              canonicalJson([...saved].sort()) !== canonicalJson(factIds) ||
+              !left.facts.some((f) => f.factRevisionId === primary.currentFactId) ||
+              !right.facts.some((f) => f.factRevisionId === secondary.currentFactId)
+            )
+              continue;
+            const outcomes = left.facts
+              .flatMap((a) => right.facts.map((b) => matchEvidence(a, b, config.rule)))
+              .filter((r) => r.outcome !== "different");
+            if (!outcomes.length) continue;
+            reasons = [
+              ...new Set([
+                ...outcomes.flatMap((r) => r.reasons),
+                ...(states.some((t) => t.reviewReasons.includes("candidate_search_overflow"))
+                  ? ["candidate_search_overflow"]
+                  : []),
+                ...(states.some((t) => t.decision === "accepted")
+                  ? ["confirmed_facts_require_review"]
+                  : []),
+              ]),
+            ].sort();
+          }
           items.push({
             id: row.id,
             primaryTripId: row.primaryTripId,
             secondaryTripId: row.secondaryTripId,
             reasonCodes: [
               ...new Set([
-                ...row.reasons,
+                ...reasons,
                 ...((
                   await c(tx)
                     .select({ id: reconciliationCandidates.id })
@@ -663,6 +721,39 @@ export function createReconciliation(
           });
         }
         return { ...result, items };
+      });
+    },
+    history(actor: Actor, tripId: string, options: Page = {}) {
+      return ports.identity.transaction(async (tx) => {
+        await authorize(tx, actor);
+        const root = await ports.trips.groups.resolve(tx, applicationId(tripId), "share");
+        const members = await ports.trips.groups.members(tx, [root.id], "share");
+        const ids = members.map((t) => t.id);
+        const paging = page(actor, ["history", tripId, root.id, root.version], options);
+        const rows = await c(tx)
+          .select()
+          .from(reconciliations)
+          .where(
+            and(
+              or(
+                inArray(reconciliations.primaryTripId, ids),
+                inArray(reconciliations.secondaryTripId, ids),
+              ),
+              paging.after?.time
+                ? or(
+                    lt(reconciliations.createdAt, paging.after.time),
+                    and(
+                      eq(reconciliations.createdAt, paging.after.time),
+                      lt(reconciliations.id, paging.after.id),
+                    ),
+                  )
+                : undefined,
+            ),
+          )
+          .orderBy(desc(reconciliations.createdAt), desc(reconciliations.id))
+          .limit(paging.limit + 1);
+        const result = paging.finish(rows, (r) => ({ id: r.id, time: r.createdAt }));
+        return { ...result, items: result.items.map(dto) };
       });
     },
     get(actor: Actor, id: string) {

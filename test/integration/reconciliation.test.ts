@@ -1854,3 +1854,60 @@ test("a later manual correction request fences reversal instead of restoring obs
   expect((await state(r.tripId))?.correctionPending).toBe(true);
   expect((await state(t.tripId))?.aliasOf).toBe(r.tripId);
 });
+
+test("reconciliation history is signed bounded deterministic across equal times, aliases, reversal and revoked authority", async () => {
+  const a = await report(),
+    b = await report();
+  const first = await merge(a.tripId, b.tripId);
+  await reverse(first.data.id);
+  const second = await merge(a.tripId, b.tripId);
+  await reverse(second.data.id);
+  const third = await merge(a.tripId, b.tripId);
+  const expected = [first.data.id, second.data.id, third.data.id].sort().reverse();
+  let cursor: string | null = null;
+  const seen: string[] = [];
+  do {
+    const result = await service.history(director, b.tripId, {
+      limit: 1,
+      ...(cursor ? { cursor } : {}),
+    });
+    seen.push(...result.items.map((r) => r.id));
+    cursor = result.nextCursor;
+  } while (cursor);
+  expect(seen).toEqual(expected);
+  expect((await service.history(director, a.tripId)).items.map((r) => r.state).sort()).toEqual([
+    "applied",
+    "reversed",
+    "reversed",
+  ]);
+  const page = await service.history(director, a.tripId, { limit: 1 });
+  await expect(
+    service.history(director, b.tripId, { limit: 1, cursor: page.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(
+    service.history(deputy, a.tripId, { limit: 1, cursor: page.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(service.history(owner, a.tripId)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(
+    service.history({ ...director, accessEpoch: director.accessEpoch + 1 }, a.tripId),
+  ).rejects.toMatchObject({ statusCode: 401 });
+  await expect(service.history(director, a.tripId, { limit: 101 })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  const [explain] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN SELECT id,version,primary_trip_id,secondary_trip_id,state FROM reconciliations WHERE primary_trip_id IN (?,?) OR secondary_trip_id IN (?,?) ORDER BY created_at DESC,id DESC LIMIT 26",
+    [a.tripId, b.tripId, a.tripId, b.tripId],
+  );
+  console.log(
+    JSON.stringify({
+      event: "reconciliation_history_plan",
+      accessType: String(explain[0]?.type ?? "unknown"),
+      key: explain[0]?.key ?? null,
+      estimatedRows: Number(explain[0]?.rows ?? 0),
+      extra: String(explain[0]?.Extra ?? ""),
+    }),
+  );
+  expect(explain.length).toBeGreaterThan(0);
+  expect(Number(explain[0]?.rows)).toBeLessThan(1000);
+  expect((await service.history(director, a.tripId)).items[0]).not.toHaveProperty("reason");
+});
