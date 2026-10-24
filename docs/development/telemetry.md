@@ -2,6 +2,8 @@
 
 [VTC-023](https://trello.com/c/h9cPLb6I) implements the server side of the frozen [v1.0 transport](../contracts/telemetry-v1.md). It reuses the [canonical source/trip foundation](trips.md), including immutable source messages, RFC 8785 hashing, permanent ownership, normalized facts and transactional outbox. A receipt confirms delivery; company decisions, contribution totals and notifications remain their owning modules' work.
 
+The [VTC-024 desktop integration plan and verification protocol](../integrations/telemetry-verification.md) records the inspected client baseline, future upload procedures and pending client/game/hosting evidence. It is documentation preparation only; the desktop integration remains incomplete.
+
 ## Activation and recovery
 
 `TELEMETRY_ENABLED=false` is the default. Activation requires enabled identity, external identities and trips, explicit migration `0009_slimy_exiles`, reviewed runtime grants and a separate random 32-byte hexadecimal `TELEMETRY_CURSOR_KEY`. Startup does not migrate, seed or activate anything. `TELEMETRY_IP_PER_MINUTE` and `TELEMETRY_GLOBAL_PER_MINUTE` are required deployment choices (example 600 and 6000); both must be integers, IP at least 60, global at least IP and each at most 60000. These are technical admission settings, not measured capacity or company allowances. The maximum keeps scaled credit counters within unsigned INT capacity.
