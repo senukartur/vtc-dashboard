@@ -205,6 +205,22 @@ test("controlled committed promotion with lost response remains recoverable afte
   expect(state.memberVersion).toBe(8);
 });
 
+test("controlled duplicate names with identical UUID prefixes remain distinguishable before selection", async ({
+  page,
+}) => {
+  await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  const select = page.getByRole("combobox", { name: "Member", exact: true }),
+    first = "d3100000-0000-4000-8000-000000000001",
+    second = "d3100000-0000-4000-8000-000000000002";
+  await expect(select.locator(`option[value="${first}"]`)).toContainText(first);
+  await expect(select.locator(`option[value="${second}"]`)).toContainText(second);
+  await select.selectOption(second);
+  await expect(
+    page.locator("p").filter({ hasText: "Selected member:" }).getByText(second, { exact: true }),
+  ).toBeVisible();
+});
+
 test("controlled member permissions unset thresholds retained-review and unavailable states", async ({
   page,
 }, info) => {

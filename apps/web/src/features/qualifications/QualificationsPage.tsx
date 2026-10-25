@@ -95,8 +95,15 @@ function TargetPicker({
       "EnvelopeListMemberSummary",
     ),
     items = query.data?.data.data.items ?? [];
+  const candidates =
+    selected && !items.some((m) => m.id === selected.id) ? [selected, ...items] : items;
+  const duplicateNames = new Set(
+    candidates
+      .filter((m, i) => candidates.some((other, j) => i !== j && other.nickname === m.nickname))
+      .map((m) => m.nickname),
+  );
   const label = (m: DTO["MemberSummary"]) =>
-    `${m.nickname}${m.formerMember ? ` · ${t("former")}` : ""} · ${m.id.slice(0, 8)}`;
+    `${m.nickname}${m.formerMember ? ` · ${t("former")}` : ""}${duplicateNames.has(m.nickname) ? ` · ${m.id}` : ""}`;
   return (
     <div className="stack">
       <Label htmlFor="qualification-member">{t("member")}</Label>

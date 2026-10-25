@@ -60,6 +60,12 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
             formerMember: true,
             roles: ["driver", "dispatcher"],
           },
+          {
+            id: "d3100000-0000-4000-8000-000000000002",
+            nickname: "Fictional Duplicate Name — длинное имя участника",
+            formerMember: true,
+            roles: ["driver"],
+          },
         ]),
       });
     if (path.endsWith("/qualification-progress")) {
