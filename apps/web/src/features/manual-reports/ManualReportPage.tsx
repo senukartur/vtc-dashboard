@@ -334,7 +334,7 @@ function ManualEditor({
             </div>
             <div className="trip-grid">
               {(["cargoMassKg", "actualDistanceM"] as const).map((name) => (
-                <div key={name}>
+                <div key={name} className="field">
                   <Label htmlFor={name}>{t(name)}</Label>
                   <Input
                     id={name}

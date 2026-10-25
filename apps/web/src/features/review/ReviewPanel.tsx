@@ -201,7 +201,7 @@ function ResolutionForm({
             />
             <div className="trip-grid">
               {(["actualDistanceM", "cargoMassKg"] as const).map((k) => (
-                <div key={k}>
+                <div key={k} className="field">
                   <Label htmlFor={`resolution-${k}`}>{t(k)}</Label>
                   <Input
                     id={`resolution-${k}`}
