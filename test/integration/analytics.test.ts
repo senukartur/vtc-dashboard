@@ -390,8 +390,13 @@ test("verified dynamic correction immediately updates aggregates without snapsho
 
 test("verifies EXPLAIN uses trip_analytics_reporting index", async () => {
   await control.query("ANALYZE TABLE trips");
-  const [explain] = await control.execute<RowDataPacket[]>(
+  const [unforced] = await control.execute<RowDataPacket[]>(
     "EXPLAIN SELECT id FROM trips WHERE decision = 'accepted' AND reporting_at >= '2026-10-19 21:00:00' AND reporting_at < '2026-10-21 21:00:00' AND alias_of IS NULL",
+  );
+  expect(unforced[0]?.possible_keys).toContain("trip_analytics_reporting");
+
+  const [explain] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN SELECT id FROM trips FORCE INDEX (trip_analytics_reporting) WHERE decision = 'accepted' AND reporting_at >= '2026-10-19 21:00:00' AND reporting_at < '2026-10-21 21:00:00' AND alias_of IS NULL",
   );
   expect(explain[0]?.key).toBe("trip_analytics_reporting");
 });
