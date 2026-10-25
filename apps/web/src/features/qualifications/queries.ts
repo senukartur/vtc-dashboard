@@ -58,7 +58,11 @@ export function useQualificationQuery<K extends keyof DTO>(path: string, name: K
   });
   return { ...query, data: query.isError ? undefined : query.data };
 }
-export function useQualificationCommand(owner?: CommandOwner, onRefresh?: () => void) {
+export function useQualificationCommand(
+  owner?: CommandOwner,
+  onRefresh?: () => void,
+  onLevel?: (level: DTO["QualificationLevel"]) => void,
+) {
   const session = useSession(),
     client = useQueryClient(),
     active = useRef(true),
@@ -233,6 +237,7 @@ export function useQualificationCommand(owner?: CommandOwner, onRefresh?: () => 
       attempt.current = null;
       request.current = null;
       if (active.current) {
+        if (level) onLevel?.(level);
         onRefresh?.();
         // A replayed receipt is historical: reload current pointers instead of caching its old level.
         if (change) await refresh(change, replay ? undefined : level);
@@ -280,6 +285,8 @@ export function useQualificationCommand(owner?: CommandOwner, onRefresh?: () => 
   }
   return {
     run,
+    matchesPending: (path: string, body: unknown, method: "POST" | "PATCH" = "POST") =>
+      !!request.current && attempt.current?.fingerprint === JSON.stringify([method, path, body]),
     pending,
     failure,
     seconds: Math.max(0, Math.ceil((waitUntil - now) / 1000)),

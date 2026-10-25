@@ -42,6 +42,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     selfPromoted: false,
     rulePaged: false,
     ruleRequests: [] as string[],
+    rulePointer: ruleId,
+    ruleGate: null as Promise<void> | null,
   };
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
@@ -173,6 +175,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           levels(game).map((l) => ({
             ...l,
             version: state.version,
+            ruleVersionId: state.rulePointer,
             ...(state.unconfigured
               ? {
                   ruleVersionId: null,
@@ -188,6 +191,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       path.startsWith("/api/v1/qualification-levels/") ||
       (path.startsWith("/api/v1/admin/qualification-levels/") && request.method() === "GET")
     ) {
+      if (!path.endsWith("/rule-versions") && path.endsWith(state.rulePointer) && state.ruleGate)
+        await state.ruleGate;
       if (path.includes("/admin/") && path.endsWith("/rule-versions")) {
         state.ruleRequests.push(`${state.version}:${url.searchParams.get("cursor") ?? ""}`);
         if (state.rulePaged && state.version > 1 && url.searchParams.has("cursor"))
@@ -201,7 +206,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       }
       const levelId = path.split("/")[path.includes("/admin/") ? 5 : 4],
         rule = {
-          id: ruleId,
+          id: path.endsWith("/rule-versions") ? ruleId : path.split("/").at(-1),
           levelId,
           game: "ets2",
           publishedAt: "2026-10-20T12:00:00.000Z",
@@ -272,7 +277,14 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       if (state.uncertain) {
         state.uncertain = false;
         state.version++;
-        receipts.set(key, envelope({ ...levels("ets2")[0], version: state.version }));
+        receipts.set(
+          key,
+          envelope({
+            ...levels("ets2")[0],
+            version: state.version,
+            ruleVersionId: state.rulePointer,
+          }),
+        );
         return route.abort("failed");
       }
       if (state.publishStatus !== 201)
@@ -284,7 +296,11 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       state.version++;
       return route.fulfill({
         status: 201,
-        json: envelope({ ...levels("ets2")[0], version: state.version }),
+        json: envelope({
+          ...levels("ets2")[0],
+          version: state.version,
+          ruleVersionId: state.rulePointer,
+        }),
       });
     }
     return route.fulfill({ status: 503, json: {} });

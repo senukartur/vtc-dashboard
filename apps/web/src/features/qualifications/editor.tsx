@@ -23,8 +23,16 @@ export function LevelEditor({
   level: DTO["QualificationLevel"];
   current: DTO["QualificationRuleVersion"] | undefined;
 }) {
-  const { t } = useTranslation("qualifications"),
-    command = useQualificationCommand({ kind: "level", id: level.id, game: level.game }),
+  const { t } = useTranslation("qualifications");
+  const [baseline, setBaseline] = useState({
+    version: level.version,
+    ruleVersionId: level.ruleVersionId,
+  });
+  const command = useQualificationCommand(
+      { kind: "level", id: level.id, game: level.game },
+      undefined,
+      (result) => setBaseline({ version: result.version, ruleVersionId: result.ruleVersionId }),
+    ),
     previewCommand = useQualificationCommand();
   const [name, setName] = useState(level.name),
     [rules, setRules] = useState<DTO["Rule"][]>(current?.rules ?? []),
@@ -69,6 +77,9 @@ export function LevelEditor({
       sample: actualSample,
     },
     fingerprint = JSON.stringify([
+      baseline,
+      level.version,
+      level.ruleVersionId,
       previewInput,
       sampleMass,
       mass,
@@ -90,6 +101,17 @@ export function LevelEditor({
   };
   const guard = JSON.stringify([level.id, level.version, input, fingerprint, fresh]);
   const busy = command.pending || previewCommand.pending;
+  const stale =
+      baseline.version !== level.version || baseline.ruleVersionId !== level.ruleVersionId,
+    latestAvailable =
+      level.ruleVersionId === null ||
+      (current?.id === level.ruleVersionId &&
+        current.levelId === level.id &&
+        current.game === level.game),
+    renamePath = `/admin/qualification-levels/${level.id}`,
+    publishPath = `${renamePath}/rule-versions`,
+    renameReplay = command.matchesPending(renamePath, { name }, "PATCH"),
+    publishReplay = command.matchesPending(publishPath, input);
   function toggle(type: DTO["Rule"]["type"], enabled: boolean) {
     setRules((old) =>
       enabled
@@ -102,6 +124,42 @@ export function LevelEditor({
     <section className="stack">
       <h4>{t("rules")}</h4>
       <p>{t("limits")}</p>
+      {stale && (
+        <div className="stack" role="alert">
+          <p>{t("baselineChanged")}</p>
+          <LevelContext level={level} />
+          <p>
+            {t("version")}: {level.version}
+          </p>
+          {latestAvailable ? (
+            level.ruleVersionId && current ? (
+              <>
+                <RulesView rules={current.rules} game={level.game} />
+                <p>
+                  {t("thresholds")}: {current.requiredTrips ?? t("unset")} /{" "}
+                  {current.requiredDistanceM ?? t("unset")} m
+                </p>
+              </>
+            ) : (
+              <p>{t("noRules")}</p>
+            )
+          ) : (
+            <p>{t("baselineUnavailable")}</p>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!latestAvailable || busy || command.canRecover}
+            onClick={() => {
+              setBaseline({ version: level.version, ruleVersionId: level.ruleVersionId });
+              setPreview(null);
+              setSuccess(false);
+            }}
+          >
+            {t("reviewBaseline")}
+          </Button>
+        </div>
+      )}
       <fieldset className="stack" disabled={busy}>
         <Label htmlFor={`level-name-${level.id}`}>{t("name")}</Label>
         <Input
@@ -112,16 +170,21 @@ export function LevelEditor({
         />
         <Confirm
           label={t("saveName")}
-          guard={JSON.stringify([level.id, level.version, name])}
-          disabled={!name.trim() || name === level.name || command.seconds > 0}
+          guard={JSON.stringify([level.id, level.version, level.ruleVersionId, baseline, name])}
+          disabled={
+            !name.trim() ||
+            (name === level.name && !renameReplay) ||
+            (stale && !renameReplay) ||
+            command.seconds > 0
+          }
           pending={command.pending || command.seconds > 0}
           failure={command.failure}
           onConfirm={async () => {
             const result = await command.run(
-              `/admin/qualification-levels/${level.id}`,
+              renamePath,
               { name },
               "EnvelopeQualificationLevel",
-              `"v${level.version}"`,
+              `"v${baseline.version}"`,
               "PATCH",
             );
             if (result) setSuccess(true);
@@ -340,15 +403,21 @@ export function LevelEditor({
       <Confirm
         label={t("publish")}
         guard={guard}
-        disabled={!valid || !reason.trim() || !fresh || busy || command.seconds > 0}
+        disabled={
+          !valid ||
+          !reason.trim() ||
+          ((!fresh || stale) && !publishReplay) ||
+          busy ||
+          command.seconds > 0
+        }
         pending={command.pending || command.seconds > 0}
         failure={command.failure}
         onConfirm={async () => {
           const result = await command.run(
-            `/admin/qualification-levels/${level.id}/rule-versions`,
+            publishPath,
             input,
             "EnvelopeQualificationLevel",
-            `"v${level.version}"`,
+            `"v${baseline.version}"`,
           );
           if (result) {
             setSuccess(true);

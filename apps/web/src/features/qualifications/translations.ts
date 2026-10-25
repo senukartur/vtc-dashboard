@@ -104,6 +104,10 @@ export const qualificationTranslations = {
     noTrailers: "No trailer facts added.",
     preview: "Evaluate sample",
     previewRequired: "Evaluate the current draft and sample before publication.",
+    baselineChanged:
+      "This level changed while your draft was open. Review the latest stored context before applying your retained inputs. Resolve an uncertain previous action first.",
+    baselineUnavailable: "The latest rule version is not available for review yet.",
+    reviewBaseline: "Use reviewed version as draft baseline",
     outcome: "Sample outcome",
     pass: "Pass",
     fail: "Fail",
@@ -239,6 +243,10 @@ export const qualificationTranslations = {
     noTrailers: "Данные прицепов не добавлены.",
     preview: "Проверить пример",
     previewRequired: "Перед публикацией проверьте текущий проект и пример.",
+    baselineChanged:
+      "Уровень изменился, пока проект был открыт. Проверьте актуальные сохранённые данные перед применением введённых значений. Сначала уточните результат предыдущей операции, если он неизвестен.",
+    baselineUnavailable: "Актуальная версия правил пока недоступна для проверки.",
+    reviewBaseline: "Использовать проверенную версию как основу проекта",
     outcome: "Результат примера",
     pass: "Соответствует",
     fail: "Не соответствует",

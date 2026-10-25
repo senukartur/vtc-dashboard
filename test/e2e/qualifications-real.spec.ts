@@ -101,7 +101,14 @@ test("real four configured levels publish and assign within the unchanged shared
     phase = "TARGET";
     await page.goto("/account/qualifications");
     await catalogLanguage(page);
+    await expect(page.getByRole("heading", { name: "Trainee · ETS2", exact: true })).toBeVisible();
+    const targetProgress = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname ===
+          `/api/v1/admin/members/${userId}/qualification-progress` && response.status() === 409,
+    );
     await page.getByRole("combobox", { name: "Member", exact: true }).selectOption({ label: name });
+    await targetProgress;
     await expect(
       page.getByText("No current assignment is recorded for this game.", { exact: true }),
     ).toBeVisible();

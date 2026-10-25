@@ -3,6 +3,106 @@ import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
 
+for (const locale of ["en", "ru"] as const)
+  test(`controlled ${locale} external publication requires validated baseline review for rename and publication while retaining the draft`, async ({
+    page,
+  }, info) => {
+    const state = await mockQualifications(page, locale);
+    await page.goto("/account/qualifications");
+    await catalogLanguage(page, locale);
+    const card = page
+      .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+      .locator("..");
+    await card
+      .getByRole("button", {
+        name: locale === "en" ? "Edit rules" : "Редактировать правила",
+        exact: true,
+      })
+      .click();
+    const editor = card.locator("section").last(),
+      publish = editor.getByRole("button", {
+        name: locale === "en" ? "Publish rule version" : "Опубликовать версию правил",
+        exact: true,
+      }),
+      rename = editor.getByRole("button", {
+        name: locale === "en" ? "Save name" : "Сохранить название",
+        exact: true,
+      }),
+      preview = editor.getByRole("button", {
+        name: locale === "en" ? "Evaluate sample" : "Проверить пример",
+        exact: true,
+      }),
+      review = editor.getByRole("button", {
+        name:
+          locale === "en"
+            ? "Use reviewed version as draft baseline"
+            : "Использовать проверенную версию как основу проекта",
+        exact: true,
+      });
+    await editor.locator('[id^="level-name-"]').fill("Fictional retained name");
+    await editor.locator('[id^="mass-"]').fill("12");
+    await editor.locator('[id^="count-"]').fill("3");
+    await editor.locator('[id^="distance-"]').fill("101");
+    await editor.locator('[id^="sample-mass-"]').fill("12");
+    await editor.locator('[id^="reason-"]').fill("Fictional retained baseline rationale");
+    await preview.click();
+    await expect(publish).toBeEnabled();
+    let release = () => {};
+    state.ruleGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    state.rulePointer = "d3300000-0000-4000-8000-000000000004";
+    state.version = 2;
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(
+      card.getByText(locale === "en" ? "Version: 2" : "Версия: 2", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(review).toBeDisabled();
+    await expect(rename).toBeDisabled();
+    await expect(publish).toBeDisabled();
+    expect(state.keys).toEqual([]);
+    release();
+    await expect(review).toBeEnabled();
+    await expect(editor.getByRole("alert")).toContainText("10 kg");
+    await editor.screenshot({
+      path: info.outputPath(`qualification-baseline-review-${locale}.png`),
+    });
+    await review.click();
+    await expect(review).toHaveCount(0);
+    await expect(publish).toBeDisabled();
+    for (const [field, value] of [
+      ["mass", "12"],
+      ["count", "3"],
+      ["distance", "101"],
+      ["sample-mass", "12"],
+      ["reason", "Fictional retained baseline rationale"],
+      ["level-name", "Fictional retained name"],
+    ])
+      await expect(editor.locator(`[id^="${field}-"]`)).toHaveValue(value as string);
+    await rename.click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: locale === "en" ? "Confirm" : "Подтвердить", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      card.getByText(locale === "en" ? "Version: 3" : "Версия: 3", { exact: true }),
+    ).toBeVisible();
+    await preview.click();
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: locale === "en" ? "Confirm" : "Подтвердить", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(state.etags).toEqual(['"v2"', '"v3"']);
+    expect(state.previewInputs.at(-1)).toMatchObject({
+      rules: [{ type: "max_mass", maxKg: "12" }],
+      sample: { cargoMassKg: "12" },
+    });
+  });
+
 test("controlled publication refresh rebases paged rule history without refetching its obsolete cursor", async ({
   page,
 }) => {
@@ -98,6 +198,13 @@ test("controlled historical publication receipt cannot replace a newer refreshed
   await expect(editor.locator('[id^="reason-"]')).toHaveValue(
     "Fictional original publication intent",
   );
+  await expect(
+    editor.getByRole("button", { name: "Use reviewed version as draft baseline", exact: true }),
+  ).toBeEnabled();
+  await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+  await expect(
+    editor.getByRole("button", { name: "Publish rule version", exact: true }),
+  ).toBeDisabled();
 });
 
 for (const locale of ["en", "ru"] as const)
