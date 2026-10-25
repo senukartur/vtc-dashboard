@@ -67,6 +67,7 @@ let control: Connection,
   identity: Identity,
   tripService: Trips,
   service: Qualifications;
+let maximumPublicationWork: Promise<void> | undefined;
 let director: Actor,
   owner: Actor,
   deputy: Actor,
@@ -365,6 +366,8 @@ beforeEach(async () => {
   observer = d.actor;
 });
 afterAll(async () => {
+  // The final large-catalog case must settle before pools close, even after a framework timeout.
+  await maximumPublicationWork?.catch(() => undefined);
   await unit?.close();
   await control?.end();
 });
@@ -1494,7 +1497,11 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
   }
 });
 
-test("maximum supported publication fits its route bound with real published catalog identities and rejects an oversized body", async () => {
+test("maximum supported publication fits its route bound with real published catalog identities and rejects an oversized body", () => {
+  maximumPublicationWork = maximumPublication();
+  return maximumPublicationWork;
+});
+async function maximumPublication() {
   const catalogs = createCatalogs(
     unit,
     {
@@ -1599,4 +1606,4 @@ test("maximum supported publication fits its route bound with real published cat
   } finally {
     await app.close();
   }
-});
+}
