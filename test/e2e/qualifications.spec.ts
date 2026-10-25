@@ -120,6 +120,10 @@ test("controlled uncertain publication retains the original key and draft; recov
   state.publishStatus = 429;
   await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Too many requests.");
+  await expect(page.getByRole("dialog").getByRole("button").first()).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(editor.getByText(/Retry in \d seconds\./)).toBeVisible();
   await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional preserved rationale");
 });
