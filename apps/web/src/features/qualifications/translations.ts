@@ -1,5 +1,11 @@
 export const qualificationTranslations = {
   en: {
+    targetMember: "Target member",
+    stage: "Progression stage",
+    trainee: "Trainee",
+    driver_iii: "Driver III",
+    driver_ii: "Driver II",
+    driver_i: "Driver I",
     title: "Qualifications",
     intro: "Qualifications and accepted progress are independent in ETS2 and ATS.",
     roles:
@@ -117,6 +123,12 @@ export const qualificationTranslations = {
     rule_adr_category_unknown: "The hazardous category is unknown.",
   },
   ru: {
+    targetMember: "Участник операции",
+    stage: "Ступень квалификации",
+    trainee: "Стажёр",
+    driver_iii: "Водитель III",
+    driver_ii: "Водитель II",
+    driver_i: "Водитель I",
     title: "Квалификации",
     intro: "Квалификации и зачтённый прогресс независимы в ETS2 и ATS.",
     roles:

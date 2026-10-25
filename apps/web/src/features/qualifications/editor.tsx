@@ -4,7 +4,7 @@ import type { Selection } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, Recovery, RulesView, State } from "./components.js";
+import { Confirm, Failure, LevelContext, Recovery, RulesView, State } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
 import { countInput, type DTO, exactInput, type Game, utcInput } from "./transport.js";
 
@@ -120,6 +120,7 @@ export function LevelEditor({
             return result;
           }}
         >
+          <LevelContext level={level} />
           <p>
             {level.name} → {name}
           </p>
@@ -348,8 +349,9 @@ export function LevelEditor({
           return result;
         }}
       >
+        <LevelContext level={level} />
         <p>
-          {level.name} · {level.game.toUpperCase()} · {schedule ? effectiveAt : t("immediate")}
+          {t("effective")}: {schedule ? effectiveAt : t("immediate")}
         </p>
         <RulesView rules={draft} game={level.game} />
         <p>

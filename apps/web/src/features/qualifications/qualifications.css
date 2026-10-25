@@ -65,3 +65,9 @@
   width: 100%;
   font-size: 16px;
 }
+.qualification-command-context {
+  overflow-wrap: anywhere;
+}
+.qualification-command-context :is(span, code) {
+  display: block;
+}

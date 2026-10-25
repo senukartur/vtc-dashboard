@@ -1,3 +1,4 @@
+import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
@@ -21,6 +22,38 @@ for (const locale of ["en", "ru"] as const)
       path: info.outputPath(`qualifications-${locale}.png`),
       fullPage: true,
     });
+    await page.locator("#assignment-reason").fill("Fictional reviewed promotion context");
+    await page
+      .getByRole("button", {
+        name:
+          locale === "en"
+            ? "Confirm next-level promotion"
+            : "Подтвердить повышение на следующий уровень",
+        exact: true,
+      })
+      .click();
+    const promotionDialog = page.getByRole("dialog");
+    await expect(
+      promotionDialog.getByText(locale === "en" ? "Target member" : "Участник операции", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(
+      promotionDialog.getByText("Fictional Yukon Member", { exact: true }),
+    ).toBeVisible();
+    await expect(promotionDialog.getByText(fixtureId, { exact: true })).toBeVisible();
+    await expect(
+      promotionDialog.getByText("d3400000-0000-4000-8000-000000000002", { exact: true }),
+    ).toBeVisible();
+    await expect(promotionDialog).toContainText(
+      locale === "en" ? "Progression stage: Driver III" : "Ступень квалификации: Водитель III",
+    );
+    await promotionDialog.screenshot({
+      path: info.outputPath(`qualification-promotion-context-${locale}.png`),
+    });
+    await page.keyboard.press("Escape");
+    await expect(promotionDialog).toHaveCount(0);
+    await page.locator("#assignment-reason").fill("");
     const card = page
       .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
       .locator("..");
@@ -31,6 +64,26 @@ for (const locale of ["en", "ru"] as const)
       })
       .click();
     const editor = card.locator("section").last();
+    await editor.locator('[id^="level-name-"]').fill("Fictional renamed stage");
+    await editor
+      .getByRole("button", {
+        name: locale === "en" ? "Save name" : "Сохранить название",
+        exact: true,
+      })
+      .click();
+    const renameDialog = page.getByRole("dialog");
+    await expect(
+      renameDialog.getByText("d3400000-0000-4000-8000-000000000001", { exact: true }),
+    ).toBeVisible();
+    await expect(renameDialog).toContainText(
+      locale === "en" ? "ETS2 · Progression stage: Trainee" : "ETS2 · Ступень квалификации: Стажёр",
+    );
+    await renameDialog.screenshot({
+      path: info.outputPath(`qualification-rename-context-${locale}.png`),
+    });
+    await page.keyboard.press("Escape");
+    await expect(renameDialog).toHaveCount(0);
+    await editor.locator('[id^="level-name-"]').fill("Fictional trainee");
     const preview = editor.getByRole("button", {
         name: locale === "en" ? "Evaluate sample" : "Проверить пример",
         exact: true,
@@ -60,6 +113,15 @@ for (const locale of ["en", "ru"] as const)
     await publish.click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    await expect(
+      dialog.getByText("d3400000-0000-4000-8000-000000000001", { exact: true }),
+    ).toBeVisible();
+    await expect(dialog).toContainText(
+      locale === "en" ? "ETS2 · Progression stage: Trainee" : "ETS2 · Ступень квалификации: Стажёр",
+    );
+    await dialog.screenshot({
+      path: info.outputPath(`qualification-publication-context-${locale}.png`),
+    });
     const focus = await page.evaluate(
       () => document.activeElement?.closest('[role="dialog"]') !== null,
     );
@@ -130,7 +192,7 @@ test("controlled uncertain publication retains the original key and draft; recov
 
 test("controlled assignment uncertain receipt retains command ETag after background progress refresh", async ({
   page,
-}) => {
+}, info) => {
   const state = await mockQualifications(page);
   await page.goto("/account/qualifications");
   await page.locator("#assignment-purpose").selectOption("administrative_correction");
@@ -138,6 +200,16 @@ test("controlled assignment uncertain receipt retains command ETag after backgro
   await page.locator("#assignment-reason").fill("Fictional retained assignment intent");
   state.uncertain = true;
   await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
+  await expect(
+    page.getByRole("dialog").getByText("Fictional Yukon Member", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(fixtureId, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("d3400000-0000-4000-8000-000000000001", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .screenshot({ path: info.outputPath("qualification-assignment-context.png") });
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
   const refreshed = page.waitForResponse(
@@ -189,6 +261,13 @@ test("controlled committed promotion with lost response remains recoverable afte
   await page.locator("#assignment-reason").fill("Fictional original promotion confirmation");
   state.uncertain = true;
   await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
+  await expect(
+    page.getByRole("dialog").getByText("Fictional Yukon Member", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog").getByText(fixtureId, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByText("d3400000-0000-4000-8000-000000000002", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
   const refreshed = page.waitForResponse(
@@ -216,7 +295,7 @@ test("controlled committed promotion with lost response remains recoverable afte
 
 test("controlled duplicate names with identical UUID prefixes remain distinguishable before selection", async ({
   page,
-}) => {
+}, info) => {
   await mockQualifications(page);
   await page.goto("/account/qualifications");
   const select = page.getByRole("combobox", { name: "Member", exact: true }),
@@ -228,6 +307,20 @@ test("controlled duplicate names with identical UUID prefixes remain distinguish
   await expect(
     page.locator("p").filter({ hasText: "Selected member:" }).getByText(second, { exact: true }),
   ).toBeVisible();
+  await page.locator("#assignment-purpose").selectOption("historical_resolution");
+  await page.locator("#assignment-level").selectOption("d3400000-0000-4000-8000-000000000001");
+  await page.locator("#assignment-start").fill("2025-01-01T00:00");
+  await page.locator("#assignment-end").fill("2025-02-01T00:00");
+  await page.locator("#assignment-reason").fill("Fictional supported historical interval");
+  await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(second, { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText("Fictional Duplicate Name — длинное имя участника", { exact: true }),
+  ).toBeVisible();
+  await dialog.screenshot({ path: info.outputPath("qualification-named-target-context.png") });
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.keyboard.press("Escape");
 });
 
 test("controlled member permissions unset thresholds retained-review and unavailable states", async ({

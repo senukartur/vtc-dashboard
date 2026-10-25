@@ -262,6 +262,7 @@ function MemberQualification({
         <AssignmentEditor
           game={game}
           memberId={id}
+          memberName={target?.nickname ?? session.self?.member.nickname ?? t("own")}
           levels={levels}
           progress={p}
           etag={progress.data?.etag ?? history.data?.etag ?? null}

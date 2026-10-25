@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, Recovery } from "./components.js";
+import { Confirm, Failure, LevelContext, MemberContext, Recovery } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
 import { type DTO, type Game, levelOrder, utcInput } from "./transport.js";
 
 export function AssignmentEditor({
   game,
   memberId,
+  memberName,
   levels,
   progress,
   etag,
@@ -16,6 +17,7 @@ export function AssignmentEditor({
 }: {
   game: Game;
   memberId: string;
+  memberName: string;
   levels: DTO["QualificationLevel"][];
   progress: DTO["Progress"] | undefined;
   etag: string | null;
@@ -110,7 +112,7 @@ export function AssignmentEditor({
             .sort((a, b) => levelOrder.indexOf(a.code) - levelOrder.indexOf(b.code))
             .map((l) => (
               <option key={l.id} value={l.id}>
-                {l.name}
+                {l.name === t(l.code) ? l.name : `${t(l.code)} · ${l.name}`}
               </option>
             ))}
         </select>
@@ -157,9 +159,9 @@ export function AssignmentEditor({
           failure={command.failure}
           onConfirm={() => confirm(false)}
         >
-          <p>
-            {game.toUpperCase()} · {levels.find((l) => l.id === levelId)?.name} · {t(purpose)}
-          </p>
+          <MemberContext name={memberName} id={memberId} />
+          <LevelContext level={levels.find((l) => l.id === levelId)} />
+          <p>{t(purpose)}</p>
           <p>{reason}</p>
           {historical && (
             <p>
@@ -182,8 +184,11 @@ export function AssignmentEditor({
           failure={command.failure}
           onConfirm={() => confirm(true)}
         >
+          <MemberContext name={memberName} id={memberId} />
+          <LevelContext level={next} />
           <p>
-            {game.toUpperCase()} · {current?.name} → {next?.name}
+            {current ? t(current.code) : t("unknown")} ({current?.name}) →{" "}
+            {next ? t(next.code) : t("unknown")} ({next?.name})
           </p>
           <p>{t("promoteHelp")}</p>
           <p>{reason}</p>

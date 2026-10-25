@@ -10,6 +10,28 @@ import { type useQualificationCommand, useQualificationQuery } from "./queries.j
 import type { DTO, Game } from "./transport.js";
 
 export { Confirm, Failure, PageNav, State };
+export function MemberContext({ name, id }: { name: string; id: string }) {
+  const { t } = useTranslation("qualifications");
+  return (
+    <p className="qualification-command-context">
+      <strong>{t("targetMember")}</strong>
+      <span>{name}</span>
+      <code>{id}</code>
+    </p>
+  );
+}
+export function LevelContext({ level }: { level: DTO["QualificationLevel"] | undefined }) {
+  const { t } = useTranslation("qualifications");
+  return level ? (
+    <p className="qualification-command-context">
+      <strong>
+        {level.game.toUpperCase()} · {t("stage")}: {t(level.code)}
+      </strong>
+      <span>{level.name}</span>
+      <code>{level.id}</code>
+    </p>
+  ) : null;
+}
 export function Recovery({
   command,
   onRecovered,
