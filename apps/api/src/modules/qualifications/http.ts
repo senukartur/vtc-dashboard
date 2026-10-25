@@ -243,6 +243,7 @@ export async function registerQualificationRoutes(
   app.post<{ Params: { levelId: string }; Body: S["RulesInput"] }>(
     "/api/v1/admin/qualification-levels/:levelId/rule-versions",
     {
+      bodyLimit: 131072,
       schema: {
         params: object({ levelId: id }, ["levelId"]),
         querystring: object({}),

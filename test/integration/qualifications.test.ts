@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { eq, membership, roles } from "@vtc/db/identity-schema";
 import {
@@ -17,6 +18,7 @@ import {
   beforeAll as vitestBeforeAll,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   type Actor,
   createIdentity,
@@ -39,7 +41,14 @@ import {
 import type { ContributionChange } from "../../apps/api/src/modules/trips/contributions.ts";
 import { createFactRepository } from "../../apps/api/src/modules/trips/facts.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
-import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
+import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
+import {
+  catalogEvents,
+  createOutbox,
+  identityAccessEvents,
+} from "../../apps/api/src/platform/outbox/events.ts";
+import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -47,6 +56,7 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
+import { completeCatalogImport } from "../support/catalog-import-fixture.ts";
 import { deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
@@ -1479,6 +1489,113 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
         })
       ).statusCode,
     ).toBe(401);
+  } finally {
+    await app.close();
+  }
+});
+
+test("maximum supported publication fits its route bound with real published catalog identities and rejects an oversized body", async () => {
+  const catalogs = createCatalogs(
+    unit,
+    {
+      production: false,
+      synthetic: true,
+      cursorKey: randomBytes(32).toString("hex"),
+      maxFileBytes: 8388608,
+      artifactTtlMs: 86400000,
+      policyRevision: 1,
+      evidence: [],
+    },
+    { identity, published: catalogEvents(unit).append },
+    now,
+  );
+  const source = artifact("ets2", [
+    ...Array.from({ length: 1000 }, (_, i) =>
+      entity(`qualification_trailer_${i}`, { kind: "trailer_type", aliases: [], mappings: [] }),
+    ),
+    ...Array.from({ length: 1000 }, (_, i) =>
+      entity(`qualification_adr_${i}`, { kind: "adr_category", aliases: [], mappings: [] }),
+    ),
+  ]);
+  const uploaded = await catalogs.upload(director, newId(), Buffer.from(JSON.stringify(source))),
+    operation = await catalogs.import(director, newId(), {
+      artifactId: uploaded.id,
+      sha256: uploaded.sha256,
+      game: "ets2",
+    }),
+    queue = createQueue(unit, [catalogs.handler]);
+  const completed = await completeCatalogImport(
+    operation.id,
+    { read: (id) => catalogs.operation(director, id), pass: (signal) => runPass(queue, signal) },
+    { deadlineAt: performance.now() + 10000 },
+  );
+  const revision = await catalogs.detail(director, completed.resultId);
+  await catalogs.publish(director, revision.id, newId(), revision.version, {
+    expectedPublicationVersion: revision.publicationVersion,
+    reason: "Fictional reviewed maximum qualification catalog",
+  });
+  async function ids(kind: "trailer_type" | "adr_category") {
+    const values: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await catalogs.entities(director, {
+        revisionId: revision.id,
+        kind,
+        locale: "en",
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      values.push(...page.items.map((row) => row.id));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(values).toHaveLength(1000);
+    return values;
+  }
+  const trailerIds = await ids("trailer_type"),
+    adrIds = await ids("adr_category"),
+    q = createQualifications(unit, config, { identity, trips: tripService, catalogs }, now),
+    app = await createApp({ identity, qualifications: q, checkReadiness: async () => true });
+  try {
+    const csrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: directorCookie } })
+    ).json().data.token;
+    const headers = {
+        cookie: directorCookie,
+        origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": newId(),
+        "if-match": '"v1"',
+      },
+      url = `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
+      maximum = "99999999999999999999.999999999999999999";
+    const payload = {
+      rules: [
+        { type: "max_mass", maxKg: maximum },
+        { type: "allowed_trailer_types", entityIds: trailerIds },
+        { type: "allowed_adr_categories", entityIds: adrIds },
+      ],
+      requiredTrips: 2147483647,
+      requiredDistanceM: maximum,
+      reason: "Fictional maximum wire-size fixture".padEnd(2048, "x"),
+    };
+    expect(Buffer.byteLength(JSON.stringify(payload))).toBeGreaterThan(65536);
+    expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThanOrEqual(131072);
+    const result = await app.inject({ method: "POST", url, headers, payload });
+    expect(result.statusCode).toBe(201);
+    expect((await q.rules(director, structuralLevels.ets2[0])).items[0]?.rules).toEqual(
+      payload.rules,
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "content-type": "application/json" },
+          payload: " ".repeat(131073),
+        })
+      ).statusCode,
+    ).toBe(413);
+    expect((await q.rules(director, structuralLevels.ets2[0])).items).toHaveLength(1);
   } finally {
     await app.close();
   }
