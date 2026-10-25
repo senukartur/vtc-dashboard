@@ -34,8 +34,8 @@ export function LevelEditor({
       (result, operation) =>
         setBaseline((previous) => ({
           version: result.version,
-          // Renaming owns the name, so a newly active rule pointer still needs review.
-          ruleVersionId: operation === "rename" ? previous.ruleVersionId : result.ruleVersionId,
+          // Name changes and future publication do not own the currently active rules.
+          ruleVersionId: operation === "publish" ? result.ruleVersionId : previous.ruleVersionId,
         })),
     ),
     previewCommand = useQualificationCommand();

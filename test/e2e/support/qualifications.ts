@@ -45,6 +45,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     rulePointer: ruleId,
     ruleGate: null as Promise<void> | null,
     renamePointer: null as string | null,
+    scheduledPointer: null as string | null,
+    publications: [] as S["RulesInput"][],
   };
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
@@ -271,12 +273,20 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       });
     }
     if (path.startsWith("/api/v1/admin/qualification-levels/")) {
+      if (request.method() === "POST")
+        state.publications.push(request.postDataJSON() as S["RulesInput"]);
       const key = request.headers()["idempotency-key"] ?? "";
       state.keys.push(key);
       state.etags.push(request.headers()["if-match"] ?? "");
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
       if (request.method() === "PATCH" && state.renamePointer)
         state.rulePointer = state.renamePointer;
+      if (
+        request.method() === "POST" &&
+        state.scheduledPointer &&
+        request.postDataJSON().effectiveAt
+      )
+        state.rulePointer = state.scheduledPointer;
       if (state.uncertain) {
         state.uncertain = false;
         state.version++;

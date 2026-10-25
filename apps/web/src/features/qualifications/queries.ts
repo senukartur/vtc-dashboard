@@ -61,7 +61,10 @@ export function useQualificationQuery<K extends keyof DTO>(path: string, name: K
 export function useQualificationCommand(
   owner?: CommandOwner,
   onRefresh?: () => void,
-  onLevel?: (level: DTO["QualificationLevel"], operation: "rename" | "publish") => void,
+  onLevel?: (
+    level: DTO["QualificationLevel"],
+    operation: "rename" | "publish" | "schedule",
+  ) => void,
 ) {
   const session = useSession(),
     client = useQueryClient(),
@@ -237,7 +240,15 @@ export function useQualificationCommand(
       attempt.current = null;
       request.current = null;
       if (active.current) {
-        if (level) onLevel?.(level, method === "PATCH" ? "rename" : "publish");
+        if (level)
+          onLevel?.(
+            level,
+            method === "PATCH"
+              ? "rename"
+              : body && typeof body === "object" && "effectiveAt" in body
+                ? "schedule"
+                : "publish",
+          );
         onRefresh?.();
         // A replayed receipt is historical: reload current pointers instead of caching its old level.
         if (change) await refresh(change, replay ? undefined : level);

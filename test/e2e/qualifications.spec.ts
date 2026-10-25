@@ -169,6 +169,70 @@ test("controlled recovered rename retains the old rule baseline when a newly act
   await expect(review).toHaveCount(0);
 });
 
+test("controlled scheduled publication recovery uses the frozen future body and cannot adopt another newly active rule", async ({
+  page,
+}) => {
+  const state = await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  const card = page
+    .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+    .locator("..");
+  await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+  const editor = card.locator("section").last(),
+    publish = editor.getByRole("button", { name: "Publish rule version", exact: true }),
+    preview = editor.getByRole("button", { name: "Evaluate sample", exact: true }),
+    review = editor.getByRole("button", {
+      name: "Use reviewed version as draft baseline",
+      exact: true,
+    });
+  await editor.locator('[id^="mass-"]').fill("12");
+  await editor.locator('[id^="sample-mass-"]').fill("12");
+  await editor.locator('[id^="reason-"]').fill("Fictional retained future publication");
+  await editor.locator('[id^="mode-"]').selectOption("schedule");
+  await editor.locator('[id^="effective-"]').fill("2099-01-01T12:00");
+  await preview.click();
+  await expect(publish).toBeEnabled();
+  state.scheduledPointer = "d3300000-0000-4000-8000-000000000004";
+  state.uncertain = true;
+  await publish.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "The result is uncertain.",
+  );
+  await page.keyboard.press("Escape");
+  await editor.locator('[id^="mode-"]').selectOption("immediate");
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
+  await expect(publish).toBeDisabled();
+  await page.getByRole("button", { name: "Check the previous action", exact: true }).click();
+  await expect(editor.getByText("The server confirmed the change.", { exact: true })).toBeVisible();
+  expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
+  expect(state.etags).toEqual(['"v1"', '"v1"']);
+  expect(state.publications.map((body) => body.effectiveAt)).toEqual([
+    "2099-01-01T12:00:00.000Z",
+    "2099-01-01T12:00:00.000Z",
+  ]);
+  await expect(editor.locator('[id^="mode-"]')).toHaveValue("immediate");
+  await expect(review).toBeEnabled();
+  await expect(editor.getByRole("alert")).toContainText("Latest stored version: 2");
+  await preview.click();
+  await expect(publish).toBeDisabled();
+  await expect(editor.locator('[id^="mass-"]')).toHaveValue("12");
+  await expect(editor.locator('[id^="reason-"]')).toHaveValue(
+    "Fictional retained future publication",
+  );
+  await review.click();
+  await expect(publish).toBeDisabled();
+  await preview.click();
+  await expect(publish).toBeEnabled();
+  await publish.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(state.etags).toEqual(['"v1"', '"v1"', '"v2"']);
+  expect(state.publications.at(-1)).not.toHaveProperty("effectiveAt");
+  await expect(review).toHaveCount(0);
+});
+
 test("controlled publication refresh rebases paged rule history without refetching its obsolete cursor", async ({
   page,
 }) => {
