@@ -1397,6 +1397,39 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
       outcome: "fail",
       ruleResults: [{ ruleType: "max_mass", outcome: "fail", reasonCode: "rule_mass_exceeded" }],
     });
+    const ids = Array.from(
+      { length: 1000 },
+      (_, i) => `d5100000-0000-4000-8000-${i.toString(16).padStart(12, "0")}`,
+    );
+    const large = {
+      ...payload,
+      rules: [
+        { type: "max_mass", maxKg: "99999999999999999999.999999999999999999" },
+        { type: "allowed_trailer_types", entityIds: ids },
+        { type: "allowed_adr_categories", entityIds: ids },
+      ],
+      sample: {
+        cargoMassKg: "99999999999999999999.999999999999999999",
+        trailerTypeIds: ids.slice(0, 32),
+        trailersComplete: false,
+        adr: { status: "known", entityId: ids[0] },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(large))).toBeGreaterThan(65536);
+    expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThanOrEqual(131072);
+    expect((await app.inject({ method: "POST", url, headers, payload: large })).statusCode).toBe(
+      200,
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, "content-type": "application/json" },
+          payload: " ".repeat(131073),
+        })
+      ).statusCode,
+    ).toBe(413);
     expect(await snapshot()).toEqual(before);
     expect(
       (

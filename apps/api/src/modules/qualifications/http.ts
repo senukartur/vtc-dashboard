@@ -101,7 +101,7 @@ export async function registerQualificationRoutes(
   app.post<{ Body: S["QualificationPreviewInput"] }>(
     "/api/v1/admin/qualification-rule-previews",
     {
-      bodyLimit: 65536,
+      bodyLimit: 131072,
       schema: {
         querystring: object({}),
         body: ref("QualificationPreviewInput"),
