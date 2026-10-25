@@ -41,10 +41,19 @@ test("controlled uncertain own Trainee promotion refreshes its session on origin
   state.uncertain = true;
   await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "The result is uncertain.",
+  );
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Check the previous action", exact: true }),
   ).toBeVisible();
+  const backgroundSelf = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === "/api/v1/me" && response.status() === 200,
+  );
   await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await backgroundSelf;
   await expect(
     page.getByRole("button", { name: "Confirm next-level promotion", exact: true }),
   ).toBeDisabled();

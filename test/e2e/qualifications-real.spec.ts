@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import {
   createQualificationInitialization,
   structuralLevels,
@@ -12,8 +12,8 @@ import { expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
-async function confirm(page: Page, label: string) {
-  await page.getByRole("button", { name: label, exact: true }).click();
+async function confirm(page: Page, label: string, scope: Page | Locator = page) {
+  await scope.getByRole("button", { name: label, exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
@@ -123,7 +123,7 @@ test("real four configured levels publish and assign within the unchanged shared
     await expect(
       editor.getByRole("heading", { name: "Sample outcome: Pass", exact: true }),
     ).toBeVisible();
-    await confirm(page, "Publish rule version");
+    await confirm(page, "Publish rule version", editor);
     await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional normal publication");
     await expect(otherDraft.locator('[id^="reason-"]')).toHaveValue(
       "Fictional unrelated preserved draft",
@@ -210,9 +210,9 @@ test("real four configured levels publish and assign within the unchanged shared
     "all shared-bucket GETs fit even if the flow crosses a minute boundary",
   ).toBeLessThanOrEqual(20);
   expect(reads.filter((row) => row.status === 429)).toEqual([]);
+  if (failure) throw new Error(`SYNTHETIC_QUALIFICATION_NORMAL_${phase}`, { cause: failure });
   expect(authenticated).toBe(true);
   expect(persistedAssignment).toBe(true);
-  if (failure) throw new Error(`SYNTHETIC_QUALIFICATION_NORMAL_${phase}`, { cause: failure });
 });
 test("real named target rule preview publication assignment accepted contributions and explicit promotion preserve ATS and additive roles", async ({
   page,
