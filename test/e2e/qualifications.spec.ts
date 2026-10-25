@@ -63,6 +63,9 @@ for (const locale of ["en", "ru"] as const)
     expect(state.keys).toEqual([]);
     release();
     await expect(review).toBeEnabled();
+    await expect(editor.getByRole("alert")).toContainText(
+      locale === "en" ? "Latest stored version: 2" : "Актуальная сохранённая версия: 2",
+    );
     await expect(editor.getByRole("alert")).toContainText("10 kg");
     await editor.screenshot({
       path: info.outputPath(`qualification-baseline-review-${locale}.png`),
@@ -102,6 +105,69 @@ for (const locale of ["en", "ru"] as const)
       sample: { cargoMassKg: "12" },
     });
   });
+
+test("controlled recovered rename retains the old rule baseline when a newly active pointer arrives with its receipt", async ({
+  page,
+}) => {
+  const state = await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  const card = page
+    .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+    .locator("..");
+  await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+  const editor = card.locator("section").last(),
+    rename = editor.getByRole("button", { name: "Save name", exact: true }),
+    publish = editor.getByRole("button", { name: "Publish rule version", exact: true }),
+    preview = editor.getByRole("button", { name: "Evaluate sample", exact: true }),
+    review = editor.getByRole("button", {
+      name: "Use reviewed version as draft baseline",
+      exact: true,
+    });
+  await editor.locator('[id^="level-name-"]').fill("Fictional original rename");
+  await editor.locator('[id^="mass-"]').fill("12");
+  await editor.locator('[id^="sample-mass-"]').fill("12");
+  await editor.locator('[id^="reason-"]').fill("Fictional retained rules during rename");
+  await preview.click();
+  await expect(publish).toBeEnabled();
+  state.renamePointer = "d3300000-0000-4000-8000-000000000004";
+  state.uncertain = true;
+  await rename.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "The result is uncertain.",
+  );
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
+  await expect(review).toBeDisabled();
+  await editor.locator('[id^="level-name-"]').fill("Fictional distinct retained rename");
+  await expect(rename).toBeDisabled();
+  await page.getByRole("button", { name: "Check the previous action", exact: true }).click();
+  await expect(editor.getByText("The server confirmed the change.", { exact: true })).toBeVisible();
+  expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
+  expect(state.etags).toEqual(['"v1"', '"v1"']);
+  await expect(review).toBeEnabled();
+  await expect(editor.getByRole("alert")).toContainText("Latest stored version: 2");
+  await expect(rename).toBeDisabled();
+  await preview.click();
+  await expect(publish).toBeDisabled();
+  await expect(editor.locator('[id^="level-name-"]')).toHaveValue(
+    "Fictional distinct retained rename",
+  );
+  await expect(editor.locator('[id^="mass-"]')).toHaveValue("12");
+  await expect(editor.locator('[id^="reason-"]')).toHaveValue(
+    "Fictional retained rules during rename",
+  );
+  await review.click();
+  await expect(publish).toBeDisabled();
+  await preview.click();
+  await expect(publish).toBeEnabled();
+  await publish.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(state.etags).toEqual(['"v1"', '"v1"', '"v2"']);
+  await expect(review).toHaveCount(0);
+});
 
 test("controlled publication refresh rebases paged rule history without refetching its obsolete cursor", async ({
   page,

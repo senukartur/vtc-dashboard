@@ -31,7 +31,12 @@ export function LevelEditor({
   const command = useQualificationCommand(
       { kind: "level", id: level.id, game: level.game },
       undefined,
-      (result) => setBaseline({ version: result.version, ruleVersionId: result.ruleVersionId }),
+      (result, operation) =>
+        setBaseline((previous) => ({
+          version: result.version,
+          // Renaming owns the name, so a newly active rule pointer still needs review.
+          ruleVersionId: operation === "rename" ? previous.ruleVersionId : result.ruleVersionId,
+        })),
     ),
     previewCommand = useQualificationCommand();
   const [name, setName] = useState(level.name),
@@ -129,7 +134,7 @@ export function LevelEditor({
           <p>{t("baselineChanged")}</p>
           <LevelContext level={level} />
           <p>
-            {t("version")}: {level.version}
+            {t("latestVersion")}: {level.version}
           </p>
           {latestAvailable ? (
             level.ruleVersionId && current ? (

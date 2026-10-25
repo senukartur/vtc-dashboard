@@ -44,6 +44,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     ruleRequests: [] as string[],
     rulePointer: ruleId,
     ruleGate: null as Promise<void> | null,
+    renamePointer: null as string | null,
   };
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
@@ -274,6 +275,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       state.keys.push(key);
       state.etags.push(request.headers()["if-match"] ?? "");
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
+      if (request.method() === "PATCH" && state.renamePointer)
+        state.rulePointer = state.renamePointer;
       if (state.uncertain) {
         state.uncertain = false;
         state.version++;
