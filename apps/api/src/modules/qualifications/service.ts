@@ -15,6 +15,7 @@ import {
   desc,
   eq,
   gt,
+  inArray,
   isNull,
   levelCodes,
   lt,
@@ -61,6 +62,7 @@ interface Ports {
     | "qualificationContextInTransaction"
     | "completeTraineeInTransaction"
     | "qualificationMembersInTransaction"
+    | "memberSummariesInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
   catalogs?: Pick<Catalogs, "qualificationReferencesInTransaction">;
@@ -186,6 +188,19 @@ export function createQualifications(
       levelId: row.levelId,
       assignedAt: row.assignedAt,
     };
+  }
+  async function actors(tx: TxContext, ids: (string | null)[]) {
+    const unique = [...new Set(ids.filter((id): id is string => id !== null))].sort();
+    const names = new Map<string, string>();
+    for (let offset = 0; offset < unique.length; offset += 100) {
+      const members = await ports.identity.memberSummariesInTransaction(
+        tx,
+        unique.slice(offset, offset + 100),
+      );
+      for (const [id, member] of members) names.set(id, member.nickname);
+    }
+    return (id: string | null): S["QualificationActionActor"] | null =>
+      id === null ? null : { id, nickname: names.get(id) ?? null };
   }
   async function levelDto(tx: TxContext, row: Level): Promise<S["QualificationLevel"]> {
     const rule = await ruleAt(tx, row.id, at());
@@ -526,11 +541,28 @@ export function createQualifications(
         }));
       });
     },
-    async rules(actor: Actor, levelId: string, options: Page = {}, ruleVersionId?: string) {
+    async rules(
+      actor: Actor,
+      levelId: string,
+      options: Page = {},
+      ruleVersionId?: string,
+      staff = false,
+    ) {
       return ports.identity.transaction(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, [], actor, "company.read");
+        await ports.identity.qualificationContextInTransaction(
+          tx,
+          [],
+          actor,
+          staff ? "qualifications.manage" : "company.read",
+        );
         const selected = await level(tx, levelId);
-        const paging = page(actor, ["rules", levelId], options);
+        const paging = page(
+          actor,
+          staff
+            ? ["staff-rule-history", levelId, selected.game, selected.version]
+            : ["rules", levelId],
+          options,
+        );
         const rows = await c(tx)
           .select()
           .from(qualificationRules)
@@ -551,7 +583,14 @@ export function createQualifications(
           )
           .orderBy(desc(qualificationRules.effectiveAt), desc(qualificationRules.id))
           .limit(paging.limit + 1);
-        const items = rows.map((row) => ({
+        const result = paging.finish(rows, (row) => ({ id: row.id, time: row.effectiveAt }));
+        const actorDto = staff
+          ? await actors(
+              tx,
+              result.items.map((row) => row.actorId),
+            )
+          : undefined;
+        const items = result.items.map((row) => ({
           id: row.id,
           levelId,
           game: selected.game,
@@ -560,9 +599,10 @@ export function createQualifications(
           rules: row.rules as S["Rule"][],
           requiredTrips: row.requiredTrips,
           requiredDistanceM: row.requiredDistanceM == null ? null : decimal(row.requiredDistanceM),
+          ...(actorDto ? { publisher: actorDto(row.actorId) } : {}),
         }));
         if (ruleVersionId && !items.length) throw identityError(404);
-        return paging.finish(items, (row) => ({ id: row.id, time: row.effectiveAt }));
+        return { ...result, items };
       });
     },
     async rename(
@@ -876,6 +916,81 @@ export function createQualifications(
             rows.map((row) => ({ ...assignmentDto(row), endedAt: row.endedAt })),
             (row) => ({ id: row.id, time: row.assignedAt }),
           ),
+          version: current.version,
+        };
+      });
+    },
+    async actionHistory(actor: Actor, userId: string, selectedGame: Game, options: Page = {}) {
+      game(selectedGame);
+      applicationId(userId);
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [userId], actor);
+        const current = await state(tx, userId, selectedGame);
+        const paging = page(
+          actor,
+          ["staff-action-history", userId, selectedGame, current.version],
+          options,
+        );
+        const rows = await c(tx)
+          .select()
+          .from(qualificationAssignments)
+          .where(
+            and(
+              eq(qualificationAssignments.userId, userId),
+              eq(qualificationAssignments.game, selectedGame),
+              paging.after?.time
+                ? or(
+                    lt(qualificationAssignments.assignedAt, paging.after.time),
+                    and(
+                      eq(qualificationAssignments.assignedAt, paging.after.time),
+                      lt(qualificationAssignments.id, paging.after.id),
+                    ),
+                  )
+                : undefined,
+            ),
+          )
+          .orderBy(desc(qualificationAssignments.assignedAt), desc(qualificationAssignments.id))
+          .limit(paging.limit + 1);
+        const result = paging.finish(rows, (row) => ({ id: row.id, time: row.assignedAt }));
+        const actorDto = await actors(
+          tx,
+          result.items.map((row) => row.actorId),
+        );
+        const proofs = result.items.length
+          ? await c(tx)
+              .select({
+                id: qualificationPromotions.id,
+                targetAssignmentId: qualificationPromotions.targetAssignmentId,
+                confirmedAt: qualificationPromotions.confirmedAt,
+              })
+              .from(qualificationPromotions)
+              .where(
+                inArray(
+                  qualificationPromotions.targetAssignmentId,
+                  result.items.map((row) => row.id),
+                ),
+              )
+              .limit(result.items.length + 1)
+          : [];
+        if (proofs.length > result.items.length)
+          throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
+        const byTarget = new Map<string, S["QualificationActionHistory"]["promotion"]>();
+        for (const proof of proofs) {
+          if (byTarget.has(proof.targetAssignmentId))
+            throw new Error("AMBIGUOUS_QUALIFICATION_PROMOTION");
+          byTarget.set(proof.targetAssignmentId, { id: proof.id, confirmedAt: proof.confirmedAt });
+        }
+        return {
+          data: {
+            ...result,
+            items: result.items.map((row): S["QualificationActionHistory"] => ({
+              ...assignmentDto(row),
+              endedAt: row.endedAt,
+              purpose: row.purpose,
+              actor: actorDto(row.actorId),
+              promotion: byTarget.get(row.id) ?? null,
+            })),
+          },
           version: current.version,
         };
       });

@@ -4,7 +4,15 @@ import type { Selection } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, LevelContext, Recovery, RulesView, State } from "./components.js";
+import {
+  Confirm,
+  DraftEntities,
+  Failure,
+  LevelContext,
+  Recovery,
+  RulesView,
+  State,
+} from "./components.js";
 import { useQualificationCommand } from "./queries.js";
 import { countInput, type DTO, exactInput, type Game, utcInput } from "./transport.js";
 
@@ -388,7 +396,8 @@ function Allowlist({
   onChange: (ids: string[]) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    [selected, setSelected] = useState<Selection | null>(null);
+    [selected, setSelected] = useState<Selection | null>(null),
+    [rowPage, setRowPage] = useState(0);
   return (
     <div className="stack">
       <CatalogSelector
@@ -410,6 +419,7 @@ function Allowlist({
         }
         onClick={() => {
           if (selected) {
+            setRowPage(Math.floor(ids.length / 25));
             onChange([...ids, selected.entityId]);
             setSelected(null);
           }
@@ -418,20 +428,15 @@ function Allowlist({
         {t("add")}
       </Button>
       {!ids.length && <p>{t("emptyAllowlist")}</p>}
-      <ul>
-        {ids.map((id) => (
-          <li key={id}>
-            <code>{id}</code>{" "}
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onChange(ids.filter((v) => v !== id))}
-            >
-              {t("remove")}
-            </Button>
-          </li>
-        ))}
-      </ul>
+      <DraftEntities
+        ids={ids}
+        revision={revision}
+        game={game}
+        kind={type === "allowed_trailer_types" ? "trailer_type" : "adr_category"}
+        page={rowPage}
+        onPage={setRowPage}
+        onRemove={(index) => onChange(ids.filter((_, i) => i !== index))}
+      />
     </div>
   );
 }
@@ -447,7 +452,8 @@ function SampleTrailers({
   onChange: (value: DTO["QualificationPreviewInput"]["sample"]) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    [selected, setSelected] = useState<Selection | null>(null);
+    [selected, setSelected] = useState<Selection | null>(null),
+    [rowPage, setRowPage] = useState(0);
   return (
     <>
       <CatalogSelector
@@ -467,6 +473,7 @@ function SampleTrailers({
           }
           onClick={() => {
             if (selected) {
+              setRowPage(Math.floor(sample.trailerTypeIds.length / 25));
               onChange({
                 ...sample,
                 trailerTypeIds: [...sample.trailerTypeIds, selected.entityId],
@@ -481,30 +488,29 @@ function SampleTrailers({
           type="button"
           variant="outline"
           disabled={sample.trailerTypeIds.length >= 32}
-          onClick={() => onChange({ ...sample, trailerTypeIds: [...sample.trailerTypeIds, null] })}
+          onClick={() => {
+            setRowPage(Math.floor(sample.trailerTypeIds.length / 25));
+            onChange({ ...sample, trailerTypeIds: [...sample.trailerTypeIds, null] });
+          }}
         >
           {t("addUnknown")}
         </Button>
       </div>
       {!sample.trailerTypeIds.length && <p>{t("noTrailers")}</p>}
-      {sample.trailerTypeIds.map((id, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: ordinal identifies a stateless fact's chain position; duplicate types are valid.
-        <p key={`${i}:${id}`}>
-          {id ?? t("unknown")}{" "}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() =>
-              onChange({
-                ...sample,
-                trailerTypeIds: sample.trailerTypeIds.filter((_, index) => index !== i),
-              })
-            }
-          >
-            {t("remove")} {i + 1}
-          </Button>
-        </p>
-      ))}
+      <DraftEntities
+        ids={sample.trailerTypeIds}
+        revision={revision}
+        game={game}
+        kind="trailer_type"
+        page={rowPage}
+        onPage={setRowPage}
+        onRemove={(index) =>
+          onChange({
+            ...sample,
+            trailerTypeIds: sample.trailerTypeIds.filter((_, i) => i !== index),
+          })
+        }
+      />
       <label className="qualification-check">
         <input
           type="checkbox"

@@ -47,3 +47,56 @@ test("preview wire facts and safe results are closed, bounded and carry no decis
     }),
   ).toBe(false);
 });
+
+test("staff action projections are additive and closed without extending existing safe histories", () => {
+  const id = "00000000-0000-4000-8000-000000000001",
+    instant = "2026-10-20T12:00:00.000Z";
+  const history = {
+    id,
+    periodId: id,
+    game: "ets2",
+    levelId: id,
+    assignedAt: instant,
+    endedAt: null,
+  };
+  const actor = { id, nickname: "Fictional current nickname" };
+  const action = {
+    ...history,
+    purpose: "promotion",
+    actor,
+    promotion: { id, confirmedAt: instant },
+  };
+  expect(valid("AssignmentHistory")(history)).toBe(true);
+  expect(valid("AssignmentHistory")(action)).toBe(false);
+  expect(valid("QualificationActionHistory")(action)).toBe(true);
+  expect(valid("QualificationActionHistory")({ ...action, actor: null, promotion: null })).toBe(
+    true,
+  );
+  expect(valid("QualificationActionHistory")({ ...action, actor: { id, nickname: null } })).toBe(
+    true,
+  );
+  for (const extra of [
+    { reason: "private" },
+    { recordedAt: instant },
+    { email: "fiction@example.invalid" },
+  ])
+    expect(valid("QualificationActionHistory")({ ...action, ...extra })).toBe(false);
+  expect(
+    valid("QualificationActionHistory")({ ...action, actor: { ...actor, roles: ["director"] } }),
+  ).toBe(false);
+  const rule = {
+    id,
+    levelId: id,
+    game: "ets2",
+    publishedAt: instant,
+    effectiveAt: instant,
+    rules: [],
+    requiredTrips: null,
+    requiredDistanceM: null,
+  };
+  expect(valid("QualificationRuleVersion")({ ...rule, publisher: actor })).toBe(false);
+  expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor })).toBe(true);
+  expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor, reason: "private" })).toBe(
+    false,
+  );
+});

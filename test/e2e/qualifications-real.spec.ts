@@ -156,6 +156,62 @@ test("real named target rule preview publication assignment accepted contributio
     expect(ets.data.items[1]?.endedAt).toBe(ets.data.items[0]?.assignedAt);
     expect(ats.data).toEqual(beforeATS.data);
     expect((await q.progress(fixture.staff, userId, "ets2", "admin")).data.acceptedTrips).toBe(0);
+    phase = "ATTRIBUTION_RELOAD";
+    await page.reload();
+    await catalogLanguage(page);
+    const reloadedTarget = page.getByRole("combobox", { name: "Member", exact: true });
+    for (
+      let i = 0;
+      i < 20 && (await reloadedTarget.getByRole("option").filter({ hasText: name }).count()) === 0;
+      i++
+    ) {
+      const next = reloadedTarget
+        .locator("..")
+        .getByRole("button", { name: "Next page", exact: true });
+      if (await next.isDisabled()) break;
+      await next.click();
+      await expect(reloadedTarget.locator("..").getByRole("status")).toHaveCount(0);
+    }
+    await reloadedTarget.selectOption({
+      label:
+        (await reloadedTarget.getByRole("option").filter({ hasText: name }).textContent()) ?? "",
+    });
+    const history = page
+        .getByRole("heading", { name: "Assignment history", exact: true })
+        .locator(".."),
+      staffName = (await identity.current(fixture.staff)).data.member.nickname;
+    await expect(history).toContainText("Confirmed promotion");
+    await expect(history).toContainText("Promotion confirmed");
+    await expect(history).toContainText("Initial assignment");
+    await expect(history).toContainText(staffName);
+    await expect(history).toContainText(fixture.staff.userId);
+    const actionResponse = await page.request.get(
+      `/api/v1/admin/members/${userId}/qualification-action-history?game=ets2`,
+    );
+    expect(actionResponse.status()).toBe(200);
+    const actions = (await actionResponse.json()).data.items;
+    expect(actions[0]).toMatchObject({
+      id: ets.data.items[0]?.id,
+      purpose: "promotion",
+      actor: { id: fixture.staff.userId, nickname: staffName },
+      promotion: { id: expect.any(String), confirmedAt: expect.any(String) },
+    });
+    await expect(history).toContainText(actions[0].promotion.id);
+    const ruleCard = page
+      .getByRole("heading", { name: /Trainee · ETS2|Стажёр · ETS2/ })
+      .locator("..");
+    await ruleCard.getByText("Rule version history", { exact: true }).click();
+    await expect(ruleCard).toContainText("Recorded publisher");
+    await expect(ruleCard).toContainText(staffName);
+    await expect(ruleCard).toContainText(fixture.staff.userId);
+    const ruleResponse = await page.request.get(
+      `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
+    );
+    expect(ruleResponse.status()).toBe(200);
+    expect((await ruleResponse.json()).data.items[0].publisher).toEqual({
+      id: fixture.staff.userId,
+      nickname: staffName,
+    });
     await context.clearCookies();
     await write(page.request, "/auth/login", { email, password: fixture.password });
     await page.goto("/account/qualifications");
@@ -166,6 +222,20 @@ test("real named target rule preview publication assignment accepted contributio
     const self = (await (await page.request.get("/api/v1/me")).json()).data;
     expect(self.member.roles.sort()).toEqual(["dispatcher", "driver"]);
     expect((await page.request.get("/api/v1/admin/qualification-members")).status()).toBe(403);
+    expect(
+      (
+        await page.request.get(
+          `/api/v1/admin/members/${userId}/qualification-action-history?game=ets2`,
+        )
+      ).status(),
+    ).toBe(403);
+    expect(
+      (
+        await page.request.get(
+          `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
+        )
+      ).status(),
+    ).toBe(403);
     expect(
       (
         await write(page.request, "/admin/qualification-rule-previews", {

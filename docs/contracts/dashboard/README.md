@@ -124,6 +124,8 @@ Obsolete proposals can be rejected using current authority, complete-group self-
 
 ## Trip workspace read extensions
 
+VTC-031 adds staff-only `QualificationActionHistory` and `QualificationRuleHistory` projections at the admin qualification action-history and rule-versions GET routes. Existing `AssignmentHistory` and `QualificationRuleVersion` DTOs remain closed and unchanged. Recorded actors/publishers contain only an ID and nullable current public nickname; optional promotion attribution uses the exact target-assignment proof relation. No private rationale, historical role, inferred system actor or fabricated assignment recording time is exposed. See [qualification workspace](../../development/qualifications.md#member-and-staff-workspace).
+
 VTC-030 adds optional `TripSummary.recording` and server-derived `reportingBasis`, plus optional nullable private `effectiveFacts`. The private normalized projection contains exact quantities, supported actual times and pinned catalog/trailer references, without raw source payloads. Company summaries omit private facts, evidence, reasons and proposals. Derived manual facts retain manual-confirmation reporting; source-kind collections never establish timing.
 
 Staff-only `GET /trips/{tripId}/reconciliations` returns bounded safe operation references for the current canonical group, including reversed operations. Its signed timestamp/ID cursor binds actor/session/access, requested trip and effective root/version. Reasons and raw snapshots are omitted. Reversal must reload the operation for its current ETag and original primary/secondary versions. See [trip workspace](../../development/trip-workspace.md).

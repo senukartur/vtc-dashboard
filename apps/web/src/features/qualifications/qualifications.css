@@ -71,3 +71,11 @@
 .qualification-command-context :is(span, code) {
   display: block;
 }
+.qualification-draft-entities {
+  padding-inline-start: 1.25rem;
+}
+.qualification-draft-entities li,
+.qualification-draft-entities span,
+.qualification-history code {
+  overflow-wrap: anywhere;
+}

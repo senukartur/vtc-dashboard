@@ -1,5 +1,16 @@
 export const qualificationTranslations = {
   en: {
+    catalogLabelLoading: "Loading catalog label…",
+    catalogLabelUnavailable: "Catalog label unavailable",
+    staffHistoryHelp:
+      "Recorded qualification actions and effective intervals. Actor names are current public nicknames. Private reasons are omitted; interval starts are not action recording times.",
+    actor: "Recorded actor",
+    publisher: "Recorded publisher",
+    actorNotRecorded: "Actor not recorded",
+    actorLabelUnavailable: "Current nickname unavailable",
+    promotion: "Confirmed promotion",
+    promotionConfirmed: "Promotion confirmed",
+    effectiveInterval: "Effective interval",
     targetMember: "Target member",
     stage: "Progression stage",
     trainee: "Trainee",
@@ -123,6 +134,17 @@ export const qualificationTranslations = {
     rule_adr_category_unknown: "The hazardous category is unknown.",
   },
   ru: {
+    catalogLabelLoading: "Загрузка названия из каталога…",
+    catalogLabelUnavailable: "Название из каталога недоступно",
+    staffHistoryHelp:
+      "Записанные действия с квалификацией и интервалы их действия. Имена авторов — текущие публичные псевдонимы. Закрытые причины не показаны; начало интервала не означает время записи действия.",
+    actor: "Записанный автор",
+    publisher: "Записанный издатель",
+    actorNotRecorded: "Автор не записан",
+    actorLabelUnavailable: "Текущий псевдоним недоступен",
+    promotion: "Подтверждённое повышение",
+    promotionConfirmed: "Повышение подтверждено",
+    effectiveInterval: "Интервал действия",
     targetMember: "Участник операции",
     stage: "Ступень квалификации",
     trainee: "Стажёр",

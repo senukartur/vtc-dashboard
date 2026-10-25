@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { entitySchema } from "../../shared/catalog-selectors/contracts.js";
@@ -125,7 +125,7 @@ function EntityList({
     </>
   );
 }
-function EntityName({
+export function EntityName({
   id,
   revision,
   game,
@@ -145,23 +145,121 @@ function EntityName({
       !!revision,
     ),
     entity = query.data?.data.data,
-    valid = entity?.game === game && entity.kind === kind;
+    valid =
+      entity?.id === id &&
+      entity.revisionId === revision &&
+      entity.game === game &&
+      entity.kind === kind;
   return (
     <>
-      {valid ? entity.display.label : t("unknown")}
+      {valid
+        ? entity.display.label
+        : t(query.isPending && revision ? "catalogLabelLoading" : "catalogLabelUnavailable")}
       {valid && entity.display.englishFallback ? ` · ${t("catalogs:fallback")}` : ""}
       {valid && entity.display.retired ? ` · ${t("catalogs:retired")}` : ""}
+      {" · "}
       <code>{id}</code>
     </>
   );
 }
-export function RuleHistory({ level }: { level: DTO["QualificationLevel"] }) {
+export function DraftEntities({
+  ids,
+  revision,
+  game,
+  kind,
+  page,
+  onPage,
+  onRemove,
+}: {
+  ids: (string | null)[];
+  revision: string;
+  game: Game;
+  kind: "trailer_type" | "adr_category";
+  page: number;
+  onPage: (page: number) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { t } = useTranslation("qualifications"),
+    prefix = useId();
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(ids.length / 25) - 1)),
+    start = currentPage * 25;
+  return (
+    <div className="stack">
+      <ul className="qualification-draft-entities">
+        {ids.slice(start, start + 25).map((id, offset) => {
+          const ordinal = start + offset,
+            labelId = `${prefix}-${ordinal}`,
+            removeId = `${labelId}-remove`;
+          // Chain position is the identity of a stateless row; duplicate trailer facts are supported.
+          return (
+            <li key={labelId}>
+              <span id={labelId}>
+                {ordinal + 1}.{" "}
+                {id ? (
+                  <EntityName id={id} revision={revision} game={game} kind={kind} />
+                ) : (
+                  t("unknown")
+                )}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                id={removeId}
+                aria-labelledby={`${removeId} ${labelId}`}
+                onClick={() => onRemove(ordinal)}
+              >
+                {t("remove")}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+      {ids.length > 25 && (
+        <div className="qualification-actions">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={currentPage === 0}
+            onClick={() => onPage(currentPage - 1)}
+          >
+            {t("trips:previous")}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={start + 25 >= ids.length}
+            onClick={() => onPage(currentPage + 1)}
+          >
+            {t("trips:next")}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+export function ActionActor({ actor }: { actor: DTO["QualificationActionActor"] | null }) {
+  const { t } = useTranslation("qualifications");
+  return actor ? (
+    <span>
+      {actor.nickname ?? t("actorLabelUnavailable")} · <code>{actor.id}</code>
+    </span>
+  ) : (
+    <span>{t("actorNotRecorded")}</span>
+  );
+}
+export function RuleHistory({
+  level,
+  manage = false,
+}: {
+  level: DTO["QualificationLevel"];
+  manage?: boolean;
+}) {
   const { t } = useTranslation("qualifications"),
     [open, setOpen] = useState(false),
     [cursors, setCursors] = useState<string[]>([]);
   const query = useQualificationQuery(
-    `/qualification-levels/${level.id}/rule-versions?limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
-    "EnvelopeListQualificationRuleVersion",
+    `${manage ? "/admin" : ""}/qualification-levels/${level.id}/rule-versions?limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
+    manage ? "EnvelopeListQualificationRuleHistory" : "EnvelopeListQualificationRuleVersion",
     open,
   );
   return (
@@ -187,6 +285,11 @@ export function RuleHistory({ level }: { level: DTO["QualificationLevel"] }) {
               <p>
                 {t("published")}: <Time value={r.publishedAt} />
               </p>
+              {manage && "publisher" in r && (
+                <p>
+                  {t("publisher")}: <ActionActor actor={r.publisher} />
+                </p>
+              )}
               <p>
                 {t("effective")}: <Time value={r.effectiveAt} />
               </p>

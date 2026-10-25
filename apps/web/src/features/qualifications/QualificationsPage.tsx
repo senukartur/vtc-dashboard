@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Button, Card, Label } from "../../shared/ui/primitives.js";
 import { AssignmentEditor } from "./assignments.js";
-import { Fact, PageNav, RuleHistory, RulesView, State, Time } from "./components.js";
+import { ActionActor, Fact, PageNav, RuleHistory, RulesView, State, Time } from "./components.js";
 import { LevelEditor } from "./editor.js";
 import { useQualificationQuery } from "./queries.js";
 import { type DTO, type Game, levelOrder, QualificationFailure } from "./transport.js";
@@ -163,8 +163,8 @@ function MemberQualification({
       "EnvelopeProgress",
     ),
     history = useQualificationQuery(
-      `${base}/qualification-assignments?game=${game}&limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
-      "EnvelopeListAssignmentHistory",
+      `${base}/${manage ? "qualification-action-history" : "qualification-assignments"}?game=${game}&limit=25${cursors.length ? `&cursor=${encodeURIComponent(cursors.at(-1) ?? "")}` : ""}`,
+      manage ? "EnvelopeListQualificationActionHistory" : "EnvelopeListAssignmentHistory",
     ),
     p = progress.data?.data.data,
     level = levels.find((l) => l.id === p?.assignment.levelId),
@@ -230,7 +230,7 @@ function MemberQualification({
       </Card>
       <Card className="stack">
         <h2>{t("history")}</h2>
-        <p>{t("immutable")}</p>
+        <p>{t(manage ? "staffHistoryHelp" : "immutable")}</p>
         <State
           query={history}
           refresh={() => {
@@ -242,7 +242,24 @@ function MemberQualification({
         {history.data?.data.data.items.map((a) => (
           <article className="qualification-history" key={a.id}>
             <strong>{levels.find((l) => l.id === a.levelId)?.name ?? a.levelId}</strong>
+            {manage && "purpose" in a && (
+              <>
+                <p>
+                  {t("purpose")}: {t(a.purpose)}
+                </p>
+                <p>
+                  {t("actor")}: <ActionActor actor={a.actor} />
+                </p>
+                {a.promotion && (
+                  <p>
+                    {t("promotionConfirmed")}: <Time value={a.promotion.confirmedAt} /> ·{" "}
+                    <code>{a.promotion.id}</code>
+                  </p>
+                )}
+              </>
+            )}
             <p>
+              {manage && `${t("effectiveInterval")}: `}
               <Time value={a.assignedAt} /> →{" "}
               {a.endedAt ? <Time value={a.endedAt} /> : t("currentInterval")}
             </p>
@@ -296,7 +313,7 @@ function Level({ level, manage }: { level: DTO["QualificationLevel"]; manage: bo
       ) : (
         <p>{t("noRules")}</p>
       )}
-      <RuleHistory key={`${level.id}:${level.version}`} level={level} />
+      <RuleHistory key={`${level.id}:${level.version}`} level={level} manage={manage} />
       {manage && (
         <>
           <Button type="button" variant="outline" onClick={() => setEdit(!edit)}>

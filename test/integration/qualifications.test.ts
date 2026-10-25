@@ -371,6 +371,392 @@ afterAll(async () => {
   await unit?.close();
   await control?.end();
 });
+test("staff action and publisher projections retain exact persisted attribution without changing safe history contracts", async () => {
+  const target = await member(["trainee"], false);
+  await service.assign(director, target.actor.userId, newId(), 1, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "initial",
+    reason: "Fictional private initial rationale",
+  });
+  const initial = await service.progress(director, target.actor.userId, "ets2", "admin");
+  tick();
+  await service.assign(deputy, target.actor.userId, newId(), initial.version, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "administrative_correction",
+    reason: "Fictional private correction rationale",
+  });
+  const correction = await service.progress(director, target.actor.userId, "ets2", "admin");
+  tick();
+  await service.assign(director, target.actor.userId, newId(), correction.version, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "historical_resolution",
+    assignedAt: "2020-01-01T00:00:00.000Z",
+    endedAt: "2020-01-02T00:00:00.000Z",
+    reason: "Fictional private historical rationale",
+  });
+  await publish();
+  await publish("ets2", 1);
+  tick();
+  const contribution = await fixture({ ownerId: target.actor.userId });
+  await replace([contribution.change]);
+  await promote("ets2", target.actor, deputy);
+  const promoted = await service.progress(director, target.actor.userId, "ets2", "admin");
+  const [proof] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(qualificationPromotions)
+      .where(eq(qualificationPromotions.targetAssignmentId, promoted.data.assignment.id)),
+  );
+  const deputyLogin = await identity.login(`${deputy.userId}@example.invalid`, password),
+    deputyCookie = deputyLogin.cookies.map((v) => v.split(";", 1)[0]).join("; ");
+  const app = await createApp({
+    identity,
+    qualifications: service,
+    checkReadiness: async () => true,
+  });
+  const actionUrl = `/api/v1/admin/members/${target.actor.userId}/qualification-action-history?game=ets2`,
+    ruleUrl = `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`;
+  try {
+    for (const cookie of [directorCookie, deputyCookie]) {
+      const response = await app.inject({ url: actionUrl, headers: { cookie } });
+      expect(response.statusCode).toBe(200);
+      const rows = response.json().data.items;
+      expect(rows).toHaveLength(4);
+      expect(rows.find((r: { id: string }) => r.id === promoted.data.assignment.id)).toMatchObject({
+        purpose: "promotion",
+        actor: { id: deputy.userId, nickname: "Fictional Qualification Member" },
+        promotion: { id: proof?.id, confirmedAt: proof?.confirmedAt },
+      });
+      expect(rows.find((r: { id: string }) => r.id === initial.data.assignment.id)).toMatchObject({
+        purpose: "initial",
+        actor: { id: director.userId },
+        promotion: null,
+      });
+      expect(
+        rows.find((r: { id: string }) => r.id === correction.data.assignment.id),
+      ).toMatchObject({
+        purpose: "administrative_correction",
+        actor: { id: deputy.userId },
+        promotion: null,
+      });
+      expect(
+        rows.find((r: { purpose: string }) => r.purpose === "historical_resolution"),
+      ).toMatchObject({
+        assignedAt: "2020-01-01T00:00:00.000Z",
+        endedAt: "2020-01-02T00:00:00.000Z",
+        actor: { id: director.userId },
+        promotion: null,
+      });
+      for (const row of rows)
+        expect(Object.keys(row).sort()).toEqual([
+          "actor",
+          "assignedAt",
+          "endedAt",
+          "game",
+          "id",
+          "levelId",
+          "periodId",
+          "promotion",
+          "purpose",
+        ]);
+      expect(response.body).not.toMatch(/private|reason|recordedAt|email|provider|roles/);
+      const versions = await app.inject({ url: ruleUrl, headers: { cookie } });
+      expect(versions.statusCode).toBe(200);
+      expect(versions.json().data.items[0].publisher).toEqual({
+        id: director.userId,
+        nickname: "Fictional Qualification Director",
+      });
+      expect(versions.body).not.toMatch(/reason|email|provider|roles/);
+    }
+    const legacy = await service.actionHistory(director, owner.userId, "ets2");
+    expect(legacy.data.items[0]).toMatchObject({
+      purpose: "initial",
+      actor: null,
+      promotion: null,
+    });
+    for (const [url, cookie] of [
+      [`/api/v1/me/qualification-assignments?game=ets2`, target.cookie],
+      [
+        `/api/v1/admin/members/${target.actor.userId}/qualification-assignments?game=ets2`,
+        directorCookie,
+      ],
+    ] as const) {
+      const response = await app.inject({ url, headers: { cookie } });
+      expect(response.statusCode).toBe(200);
+      for (const row of response.json().data.items)
+        expect(Object.keys(row).sort()).toEqual([
+          "assignedAt",
+          "endedAt",
+          "game",
+          "id",
+          "levelId",
+          "periodId",
+        ]);
+    }
+    const safeRules = await app.inject({
+      url: `/api/v1/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(Object.keys(safeRules.json().data.items[0]).sort()).toEqual([
+      "effectiveAt",
+      "game",
+      "id",
+      "levelId",
+      "publishedAt",
+      "requiredDistanceM",
+      "requiredTrips",
+      "rules",
+    ]);
+    const publicProgress = await app.inject({
+      url: `/api/v1/members/${target.actor.userId}/qualification-progress?game=ets2`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(publicProgress.statusCode).toBe(200);
+    expect(publicProgress.body).not.toMatch(/publisher|purpose|actor|promotion/);
+    for (const url of [actionUrl, ruleUrl]) {
+      expect((await app.inject({ url, headers: { cookie: ownerCookie } })).statusCode).toBe(403);
+      expect(
+        (await app.inject({ url: `${url}${url.includes("?") ? "&" : "?"}limit=invalid` }))
+          .statusCode,
+      ).toBe(401);
+    }
+    await identity.administer(director, deputy.userId, newId(), 1, {
+      kind: "roles",
+      roles: ["driver"],
+    });
+    for (const url of [actionUrl, ruleUrl])
+      expect((await app.inject({ url, headers: { cookie: deputyCookie } })).statusCode).toBe(401);
+    if (!proof) throw new Error("SYNTHETIC_PROMOTION_PROOF_MISSING");
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .insert(qualificationPromotions)
+        .values({ ...proof, id: newId(), sourceAssignmentId: initial.data.assignment.id }),
+    );
+    await expect(service.actionHistory(director, target.actor.userId, "ets2")).rejects.toThrow(
+      "AMBIGUOUS_QUALIFICATION_PROMOTION",
+    );
+    await expect(
+      service.actionHistory(director, target.actor.userId, "ets2", { limit: 1 }),
+    ).rejects.toThrow("AMBIGUOUS_QUALIFICATION_PROMOTION");
+  } finally {
+    await app.close();
+  }
+});
+
+test("staff histories trim lookahead, batch current actor labels and isolate signed cursors by route session game and state", async () => {
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(qualificationAssignments)
+      .values(
+        Array.from({ length: 101 }, (_, i) => ({
+          id: newId(),
+          userId: owner.userId,
+          game: "ets2" as const,
+          levelId: structuralLevels.ets2[0],
+          assignedAt: new Date(Date.UTC(2020, 0, 1) + i * 2).toISOString(),
+          endedAt: new Date(Date.UTC(2020, 0, 1) + i * 2 + 1).toISOString(),
+          purpose: "historical_resolution" as const,
+          actorId: i < 2 ? owner.userId : i % 2 ? director.userId : deputy.userId,
+          reason: "Fictional private pagination rationale",
+        })),
+      ),
+  );
+  const calls: string[][] = [],
+    measured = createQualifications(
+      unit,
+      config,
+      {
+        identity: {
+          ...identity,
+          async memberSummariesInTransaction(tx, ids) {
+            calls.push(ids);
+            return identity.memberSummariesInTransaction(tx, ids);
+          },
+        },
+        trips: tripService,
+      },
+      now,
+    );
+  const first = await measured.actionHistory(director, owner.userId, "ets2", { limit: 100 });
+  expect(first.data.items).toHaveLength(100);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]?.sort()).toEqual([director.userId, deputy.userId].sort());
+  const next = await measured.actionHistory(director, owner.userId, "ets2", {
+    limit: 100,
+    cursor: first.data.nextCursor as string,
+  });
+  expect(next.data.items).toHaveLength(2);
+  expect(next.data.nextCursor).toBeNull();
+  expect(calls[1]).toEqual([owner.userId]);
+  const missingLabel = createQualifications(
+    unit,
+    config,
+    {
+      identity: {
+        ...identity,
+        async memberSummariesInTransaction() {
+          return new Map();
+        },
+      },
+      trips: tripService,
+    },
+    now,
+  );
+  expect(
+    (await missingLabel.actionHistory(director, owner.userId, "ets2", { limit: 2 })).data.items[1]
+      ?.actor,
+  ).toMatchObject({ id: expect.any(String), nickname: null });
+  for (const run of [
+    () =>
+      service.actionHistory(deputy, owner.userId, "ets2", {
+        cursor: first.data.nextCursor as string,
+      }),
+    () =>
+      service.actionHistory(director, owner.userId, "ats", {
+        cursor: first.data.nextCursor as string,
+      }),
+    () =>
+      service.actionHistory(director, deputy.userId, "ets2", {
+        cursor: first.data.nextCursor as string,
+      }),
+    () =>
+      service.history(
+        director,
+        owner.userId,
+        "ets2",
+        { cursor: first.data.nextCursor as string },
+        true,
+      ),
+    () =>
+      service.actionHistory(director, owner.userId, "ets2", {
+        cursor: `${first.data.nextCursor}x`,
+      }),
+  ])
+    await expect(run()).rejects.toMatchObject({ statusCode: 409 });
+  await expect(
+    service.actionHistory(director, owner.userId, "ets2", { limit: 101 }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  tick();
+  await publish();
+  tick();
+  await publish();
+  const staffRules = await service.rules(
+    director,
+    structuralLevels.ets2[0],
+    { limit: 1 },
+    undefined,
+    true,
+  );
+  expect(staffRules.nextCursor).not.toBeNull();
+  await expect(
+    service.rules(director, structuralLevels.ets2[0], { cursor: staffRules.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  const login = await identity.login("qualification-director@example.invalid", password),
+    another = await identity.authenticate(
+      new Headers({ cookie: login.cookies.map((v) => v.split(";", 1)[0]).join("; ") }),
+    );
+  await expect(
+    service.actionHistory(another, owner.userId, "ets2", {
+      cursor: first.data.nextCursor as string,
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  tick();
+  await service.assign(director, owner.userId, newId(), first.version, {
+    game: "ets2",
+    levelId: structuralLevels.ets2[0],
+    purpose: "administrative_correction",
+    reason: "Fictional new state",
+  });
+  await expect(
+    service.actionHistory(director, owner.userId, "ets2", {
+      cursor: first.data.nextCursor as string,
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  tick();
+  await publish();
+  await expect(
+    service.rules(
+      director,
+      structuralLevels.ets2[0],
+      { cursor: staffRules.nextCursor as string },
+      undefined,
+      true,
+    ),
+  ).rejects.toMatchObject({ statusCode: 409 });
+});
+
+test("one hundred distinct recorded actors use one facade batch and leave the lookahead actor unenriched", async () => {
+  const target = await member(["trainee"], false),
+    ids = Array.from({ length: 101 }, () => newId()),
+    credential = await identity.prepareCredential(password);
+  await unit.run(async (tx) => {
+    for (const [i, id] of ids.entries())
+      await identity.insertWithCredential(tx, {
+        userId: id,
+        email: `${id}@example.invalid`,
+        name: `Fictional recorded operator ${i}`,
+        roles: ["driver"],
+        ...credential,
+      });
+    await unit
+      .client(tx)
+      .insert(qualificationAssignments)
+      .values(
+        ids.map((actorId, i) => ({
+          id: newId(),
+          userId: target.actor.userId,
+          game: "ets2" as const,
+          levelId: structuralLevels.ets2[0],
+          assignedAt: new Date(Date.UTC(2020, 0, 1) + i * 2).toISOString(),
+          endedAt: new Date(Date.UTC(2020, 0, 1) + i * 2 + 1).toISOString(),
+          purpose: "historical_resolution" as const,
+          actorId,
+          reason: "Fictional bounded actor fixture",
+        })),
+      );
+  });
+  const calls: string[][] = [],
+    measured = createQualifications(
+      unit,
+      config,
+      {
+        identity: {
+          ...identity,
+          async memberSummariesInTransaction(tx, actorIds) {
+            calls.push(actorIds);
+            return identity.memberSummariesInTransaction(tx, actorIds);
+          },
+        },
+        trips: tripService,
+      },
+      now,
+    );
+  const result = await measured.actionHistory(director, target.actor.userId, "ets2", {
+    limit: 100,
+  });
+  expect(result.data.items).toHaveLength(100);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toHaveLength(100);
+  expect(calls[0]).not.toContain(ids[0]);
+  expect(
+    result.data.items.every((row) =>
+      row.actor?.nickname?.startsWith("Fictional recorded operator "),
+    ),
+  ).toBe(true);
+  const last = await measured.actionHistory(director, target.actor.userId, "ets2", {
+    limit: 100,
+    cursor: result.data.nextCursor as string,
+  });
+  expect(last.data.items).toHaveLength(1);
+  expect(calls[1]).toEqual([ids[0]]);
+});
+
 test("structural levels have no launch defaults; unset either threshold stays ineligible", async () => {
   const levels = await service.levels(owner, "ets2");
   expect(levels.items.map((v) => v.code)).toEqual([

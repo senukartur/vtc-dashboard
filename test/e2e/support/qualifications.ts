@@ -136,7 +136,10 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       }
       return route.fulfill({ status: 201, json: result });
     }
-    if (path.endsWith("/qualification-assignments"))
+    if (
+      path.endsWith("/qualification-assignments") ||
+      path.endsWith("/qualification-action-history")
+    )
       return route.fulfill({
         headers: { ETag: `"v${state.memberVersion}"` },
         json: list(
@@ -150,6 +153,9 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
                   game,
                   assignedAt: "2026-10-20T12:00:00.000Z",
                   endedAt: null,
+                  ...(path.endsWith("/qualification-action-history")
+                    ? { purpose: "initial", actor: null, promotion: null }
+                    : {}),
                 },
               ],
         ),
@@ -171,8 +177,11 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           })),
         ),
       });
-    if (path.startsWith("/api/v1/qualification-levels/")) {
-      const levelId = path.split("/")[4],
+    if (
+      path.startsWith("/api/v1/qualification-levels/") ||
+      (path.startsWith("/api/v1/admin/qualification-levels/") && request.method() === "GET")
+    ) {
+      const levelId = path.split("/")[path.includes("/admin/") ? 5 : 4],
         rule = {
           id: ruleId,
           levelId,
@@ -182,6 +191,9 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           rules: [{ type: "max_mass", maxKg: "10" }],
           requiredTrips: 2,
           requiredDistanceM: "100",
+          ...(path.includes("/admin/")
+            ? { publisher: { id: memberId, nickname: "Fictional current publisher" } }
+            : {}),
         };
       return route.fulfill({
         json: path.endsWith("/rule-versions")

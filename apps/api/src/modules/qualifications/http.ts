@@ -37,7 +37,7 @@ export async function registerQualificationRoutes(
     path.startsWith("/api/v1/admin/qualification-levels") ||
     path === "/api/v1/admin/qualification-members" ||
     path === "/api/v1/admin/qualification-rule-previews" ||
-    /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|promotions)$/.test(
+    /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|qualification-action-history|promotions)$/.test(
       path,
     ) ||
     ["/api/v1/me/qualification-progress", "/api/v1/me/qualification-assignments"].includes(path);
@@ -110,6 +110,47 @@ export async function registerQualificationRoutes(
     },
     async (request) =>
       envelope(request, await qualifications.preview(await actor(request), request.body)),
+  );
+  app.get<{ Params: { memberId: string }; Querystring: Page & { game: Game } }>(
+    "/api/v1/admin/members/:memberId/qualification-action-history",
+    {
+      schema: {
+        params: object({ memberId: id }, ["memberId"]),
+        querystring: object({ ...page, game }, ["game"]),
+        response: { 200: ref("EnvelopeListQualificationActionHistory") },
+      },
+    },
+    async (request, reply) => {
+      const result = await qualifications.actionHistory(
+        await actor(request),
+        request.params.memberId,
+        request.query.game,
+        request.query,
+      );
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(request, result.data);
+    },
+  );
+  app.get<{ Params: { levelId: string }; Querystring: Page }>(
+    "/api/v1/admin/qualification-levels/:levelId/rule-versions",
+    {
+      schema: {
+        params: object({ levelId: id }, ["levelId"]),
+        querystring: object(page),
+        response: { 200: ref("EnvelopeListQualificationRuleHistory") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.rules(
+          await actor(request),
+          request.params.levelId,
+          request.query,
+          undefined,
+          true,
+        ),
+      ),
   );
   app.get<{ Querystring: Page & { game: Game } }>(
     "/api/v1/qualification-levels",
