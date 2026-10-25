@@ -30,6 +30,7 @@ try {
             config.events,
             config.reconciliation,
             config.tripDecisions,
+            config.analytics,
           ),
         }
       : {}),

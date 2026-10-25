@@ -746,6 +746,7 @@ export function createIdentity(
           id: companyId,
           directorUserId: userId,
           version: 1,
+          reportingTimezone: null,
         });
         return { userId, companyId };
       });

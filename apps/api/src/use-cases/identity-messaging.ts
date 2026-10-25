@@ -1,6 +1,7 @@
 import type { UnitOfWork } from "@vtc/db";
 import type { AdmissionsConfig } from "../modules/admissions/security.js";
 import { type Admissions, createAdmissions } from "../modules/admissions/service.js";
+import { createAnalytics, type AnalyticsConfig } from "../modules/analytics/index.js";
 import type { CatalogConfig } from "../modules/catalogs/artifact.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
 import { createEvents, type EventsConfig } from "../modules/events/service.js";
@@ -61,6 +62,7 @@ export function composeIdentity(
   eventsConfig?: EventsConfig,
   reconciliationConfig?: ReconciliationConfig,
   tripDecisionsConfig?: TripDecisionsConfig,
+  analyticsConfig?: AnalyticsConfig,
 ) {
   let identity: Identity;
   let qualifications: Qualifications | undefined, reconciliation: Reconciliation | undefined;
@@ -254,8 +256,11 @@ export function composeIdentity(
     ],
   );
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
+  const analytics =
+    analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
   return {
     identity,
+    ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events } : {}),
     ...(tripDecisions ? { tripDecisions } : {}),
