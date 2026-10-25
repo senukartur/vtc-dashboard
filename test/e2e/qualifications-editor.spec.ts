@@ -151,12 +151,18 @@ for (const locale of ["en", "ru"] as const) {
     await sample.getByRole("button", { name: /1\. Fictional trailer 27/ }).click();
     await expect(sample.locator("li")).toHaveCount(1);
     await editor.locator('[id^="reason-"]').fill("Fictional labelled draft");
+    const firstPreview = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/admin/qualification-rule-previews") &&
+        response.request().method() === "POST",
+    );
     await editor
       .getByRole("button", {
         name: locale === "en" ? "Evaluate sample" : "Проверить пример",
         exact: true,
       })
       .click();
+    await firstPreview;
     expect(state.previewInputs.at(-1)?.rules).toEqual([
       {
         type: "allowed_trailer_types",
@@ -168,12 +174,18 @@ for (const locale of ["en", "ru"] as const) {
     const unchangedWireInput = JSON.stringify(state.previewInputs.at(-1));
     await catalogLanguage(page, locale === "en" ? "ru" : "en");
     await expect(editor.getByText(adrId, { exact: true })).toBeVisible();
+    const localePreview = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/admin/qualification-rule-previews") &&
+        response.request().method() === "POST",
+    );
     await editor
       .getByRole("button", {
         name: locale === "en" ? "Проверить пример" : "Evaluate sample",
         exact: true,
       })
       .click();
+    await localePreview;
     expect(JSON.stringify(state.previewInputs.at(-1))).toBe(unchangedWireInput);
     await catalogLanguage(page, locale);
     await editor.screenshot({
@@ -181,6 +193,12 @@ for (const locale of ["en", "ru"] as const) {
     });
     await trailer.getByRole("button", { name: /Fictional trailer 27/ }).click();
     await expect(trailer.locator("li").filter({ hasText: "Fictional trailer 27" })).toHaveCount(0);
+    await expect(
+      editor.getByRole("button", {
+        name: locale === "en" ? "Publish rule version" : "Опубликовать версию правил",
+        exact: true,
+      }),
+    ).toBeDisabled();
     await trailer
       .getByRole("combobox", { name: trailerLabel, exact: true })
       .selectOption(trailerId(27));

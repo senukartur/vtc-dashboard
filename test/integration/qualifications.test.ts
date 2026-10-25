@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { eq, membership, roles } from "@vtc/db/identity-schema";
@@ -420,9 +420,18 @@ test("staff action and publisher projections retain exact persisted attribution 
   });
   const actionUrl = `/api/v1/admin/members/${target.actor.userId}/qualification-action-history?game=ets2`,
     ruleUrl = `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`;
+  const slot = (source: string) =>
+    createHmac("sha256", identityConfig.secret).update(source).digest()[0];
+  // Keep this scenario's real admission charges separate from existing loopback scenarios.
+  const source = Array.from({ length: 254 }, (_, i) => `192.0.2.${i + 1}`).find(
+    (value) => slot(value) !== slot("127.0.0.1"),
+  );
+  if (!source) throw new Error("SYNTHETIC_DISTINCT_RATE_SOURCE_MISSING");
+  const read = (url: string, cookie?: string) =>
+    app.inject({ url, remoteAddress: source, ...(cookie ? { headers: { cookie } } : {}) });
   try {
     for (const cookie of [directorCookie, deputyCookie]) {
-      const response = await app.inject({ url: actionUrl, headers: { cookie } });
+      const response = await read(actionUrl, cookie);
       expect(response.statusCode).toBe(200);
       const rows = response.json().data.items;
       expect(rows).toHaveLength(4);
@@ -464,7 +473,7 @@ test("staff action and publisher projections retain exact persisted attribution 
           "purpose",
         ]);
       expect(response.body).not.toMatch(/private|reason|recordedAt|email|provider|roles/);
-      const versions = await app.inject({ url: ruleUrl, headers: { cookie } });
+      const versions = await read(ruleUrl, cookie);
       expect(versions.statusCode).toBe(200);
       expect(versions.json().data.items[0].publisher).toEqual({
         id: director.userId,
@@ -485,7 +494,7 @@ test("staff action and publisher projections retain exact persisted attribution 
         directorCookie,
       ],
     ] as const) {
-      const response = await app.inject({ url, headers: { cookie } });
+      const response = await read(url, cookie);
       expect(response.statusCode).toBe(200);
       for (const row of response.json().data.items)
         expect(Object.keys(row).sort()).toEqual([
@@ -497,10 +506,10 @@ test("staff action and publisher projections retain exact persisted attribution 
           "periodId",
         ]);
     }
-    const safeRules = await app.inject({
-      url: `/api/v1/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
-      headers: { cookie: ownerCookie },
-    });
+    const safeRules = await read(
+      `/api/v1/qualification-levels/${structuralLevels.ets2[0]}/rule-versions`,
+      ownerCookie,
+    );
     expect(Object.keys(safeRules.json().data.items[0]).sort()).toEqual([
       "effectiveAt",
       "game",
@@ -511,25 +520,24 @@ test("staff action and publisher projections retain exact persisted attribution 
       "requiredTrips",
       "rules",
     ]);
-    const publicProgress = await app.inject({
-      url: `/api/v1/members/${target.actor.userId}/qualification-progress?game=ets2`,
-      headers: { cookie: ownerCookie },
-    });
+    const publicProgress = await read(
+      `/api/v1/members/${target.actor.userId}/qualification-progress?game=ets2`,
+      ownerCookie,
+    );
     expect(publicProgress.statusCode).toBe(200);
     expect(publicProgress.body).not.toMatch(/publisher|purpose|actor|promotion/);
     for (const url of [actionUrl, ruleUrl]) {
-      expect((await app.inject({ url, headers: { cookie: ownerCookie } })).statusCode).toBe(403);
-      expect(
-        (await app.inject({ url: `${url}${url.includes("?") ? "&" : "?"}limit=invalid` }))
-          .statusCode,
-      ).toBe(401);
+      expect((await read(url, ownerCookie)).statusCode).toBe(403);
+      expect((await read(`${url}${url.includes("?") ? "&" : "?"}limit=invalid`)).statusCode).toBe(
+        401,
+      );
     }
     await identity.administer(director, deputy.userId, newId(), 1, {
       kind: "roles",
       roles: ["driver"],
     });
     for (const url of [actionUrl, ruleUrl])
-      expect((await app.inject({ url, headers: { cookie: deputyCookie } })).statusCode).toBe(401);
+      expect((await read(url, deputyCookie)).statusCode).toBe(401);
     if (!proof) throw new Error("SYNTHETIC_PROMOTION_PROOF_MISSING");
     await unit.run((tx) =>
       unit
