@@ -271,6 +271,22 @@ for (const locale of ["en", "ru"] as const) {
     await expect(history).toContainText(
       locale === "en" ? "Effective interval" : "Интервал действия",
     );
+    const current = history.locator("article").filter({ hasText: trailerId(90) }),
+      closed = history.locator("article").filter({ hasText: trailerId(93) });
+    for (const row of [current, closed])
+      await expect(row.locator("small")).toContainText(
+        locale === "en" ? "Assignment ID" : "Идентификатор назначения",
+      );
+    await expect(current.locator("small")).toContainText(trailerId(90));
+    await expect(current).not.toContainText(
+      locale === "en" ? "Exclusive end" : "Конец не включается",
+    );
+    await expect(closed.locator("p").last()).toContainText(
+      locale === "en" ? "Exclusive end" : "Конец не включается",
+    );
+    await expect(closed.locator("small")).not.toContainText(
+      locale === "en" ? "Exclusive end" : "Конец не включается",
+    );
     await history.screenshot({
       path: info.outputPath(`qualification-action-history-${locale}.png`),
     });

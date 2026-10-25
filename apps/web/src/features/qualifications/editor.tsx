@@ -24,7 +24,7 @@ export function LevelEditor({
   current: DTO["QualificationRuleVersion"] | undefined;
 }) {
   const { t } = useTranslation("qualifications"),
-    command = useQualificationCommand(),
+    command = useQualificationCommand({ kind: "level", id: level.id, game: level.game }),
     previewCommand = useQualificationCommand();
   const [name, setName] = useState(level.name),
     [rules, setRules] = useState<DTO["Rule"][]>(current?.rules ?? []),

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import {
   createQualificationInitialization,
@@ -22,7 +23,12 @@ test("real four configured levels publish and assign within the unchanged shared
 }, info) => {
   const fixture = await tripBrowserFixture(),
     staff = await staffContext();
-  const reads: { operation: string; status: number | null; minute: number | null }[] = [],
+  const reads: {
+      operation: string;
+      phase: string;
+      status: number | null;
+      minute: number | null;
+    }[] = [],
     pending = new Map<object, number>();
   let phase = "FIXTURE",
     failure: unknown,
@@ -47,7 +53,7 @@ test("real four configured levels publish and assign within the unchanged shared
     const kind = request.method() === "GET" ? operation(request.url()) : null;
     if (capture && kind) {
       pending.set(request, reads.length);
-      reads.push({ operation: kind, status: null, minute: null });
+      reads.push({ operation: kind, phase, status: null, minute: null });
     }
   });
   page.on("response", (response) => {
@@ -100,11 +106,16 @@ test("real four configured levels publish and assign within the unchanged shared
       page.getByText("No current assignment is recorded for this game.", { exact: true }),
     ).toBeVisible();
     phase = "PUBLISH";
-    await page.getByRole("button", { name: "Edit rules", exact: true }).first().click();
-    const editor = page
-      .locator("section")
-      .filter({ has: page.locator('[id^="sample-mass-"]') })
-      .last();
+    const otherCard = page
+      .getByRole("heading", { name: "Driver III · ETS2", exact: true })
+      .locator("..");
+    await otherCard.getByRole("button", { name: "Edit rules", exact: true }).click();
+    const otherDraft = otherCard.locator("section").last();
+    await otherDraft.locator('[id^="reason-"]').fill("Fictional unrelated preserved draft");
+    const card = page.getByRole("heading", { name: "Trainee · ETS2", exact: true }).locator("..");
+    await card.getByText("Rule version history", { exact: true }).click();
+    await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+    const editor = card.locator("section").last();
     await editor.locator('[id^="mass-"]').fill("25000");
     await editor.locator('[id^="sample-mass-"]').fill("25000");
     await editor.locator('[id^="reason-"]').fill("Fictional normal publication");
@@ -113,6 +124,17 @@ test("real four configured levels publish and assign within the unchanged shared
       editor.getByRole("heading", { name: "Sample outcome: Pass", exact: true }),
     ).toBeVisible();
     await confirm(page, "Publish rule version");
+    await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional normal publication");
+    await expect(otherDraft.locator('[id^="reason-"]')).toHaveValue(
+      "Fictional unrelated preserved draft",
+    );
+    await card.getByText("Rule version history", { exact: true }).click();
+    const published = (await q.levels(fixture.staff, "ets2")).items.find(
+      (level) => level.id === structuralLevels.ets2[0],
+    );
+    if (!published?.ruleVersionId) throw Error("QUALIFICATION_NORMAL_PUBLICATION_MISSING");
+    await expect(card.locator("details")).toContainText(published.ruleVersionId);
+    await expect(card.locator("details").locator("article").first()).toContainText("25000 kg");
     phase = "ASSIGN";
     await page.locator("#assignment-level").selectOption(structuralLevels.ets2[0]);
     await page.locator("#assignment-reason").fill("Fictional normal assignment");
@@ -128,6 +150,9 @@ test("real four configured levels publish and assign within the unchanged shared
     await expect(
       page.getByRole("heading", { name: "Qualification administration", exact: true }),
     ).toBeVisible();
+    await expect(otherDraft.locator('[id^="reason-"]')).toHaveValue(
+      "Fictional unrelated preserved draft",
+    );
   } catch (error) {
     failure = error;
   } finally {
@@ -136,6 +161,7 @@ test("real four configured levels publish and assign within the unchanged shared
         date = Date.parse(me.headers().date ?? "");
       reads.push({
         operation: "final_self",
+        phase: "FINAL_SELF",
         status: me.status(),
         minute: Number.isFinite(date) ? Math.floor(date / 60000) : null,
       });
@@ -154,6 +180,11 @@ test("real four configured levels publish and assign within the unchanged shared
         totalSharedBucketReads: reads.length,
         reads,
       };
+      await mkdir(info.outputDir, { recursive: true });
+      await writeFile(
+        info.outputPath("qualification-normal-read-budget.json"),
+        JSON.stringify(ledger),
+      );
       await info.attach("qualification-normal-read-budget", {
         body: JSON.stringify(ledger),
         contentType: "application/json",

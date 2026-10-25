@@ -38,6 +38,10 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     unset: false,
     emptyHistory: false,
     unconfigured: false,
+    selfReads: 0,
+    selfPromoted: false,
+    rulePaged: false,
+    ruleRequests: [] as string[],
   };
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
@@ -47,7 +51,9 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
     if (path.startsWith("/api/v1/catalogs/")) return route.fallback();
     if (path === "/api/v1/me") {
+      state.selfReads++;
       const self = accountFixture(locale);
+      if (state.selfPromoted) self.data.member.roles = ["driver"];
       if (staff) self.data.capabilities.push("qualifications.manage");
       return route.fulfill({ json: self });
     }
@@ -119,6 +125,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
       state.memberVersion++;
       if (path.endsWith("/promotions")) {
+        if (path.includes(accountFixture(locale).data.member.id)) state.selfPromoted = true;
         state.currentRank = 1;
         state.eligible = false;
       }
@@ -181,6 +188,17 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       path.startsWith("/api/v1/qualification-levels/") ||
       (path.startsWith("/api/v1/admin/qualification-levels/") && request.method() === "GET")
     ) {
+      if (path.includes("/admin/") && path.endsWith("/rule-versions")) {
+        state.ruleRequests.push(`${state.version}:${url.searchParams.get("cursor") ?? ""}`);
+        if (state.rulePaged && state.version > 1 && url.searchParams.has("cursor"))
+          return route.fulfill({
+            status: 409,
+            json: {
+              error: { code: "VERSION_CONFLICT", messageKey: "version_conflict", retryable: false },
+              meta: { requestId: "synthetic-rule-cursor" },
+            },
+          });
+      }
       const levelId = path.split("/")[path.includes("/admin/") ? 5 : 4],
         rule = {
           id: ruleId,
@@ -197,19 +215,32 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
         };
       return route.fulfill({
         json: path.endsWith("/rule-versions")
-          ? list([
-              {
-                ...rule,
-                id: "d3300000-0000-4000-8000-000000000002",
-                effectiveAt: "2099-01-01T00:00:00.000Z",
-              },
-              rule,
-              {
-                ...rule,
-                id: "d3300000-0000-4000-8000-000000000003",
-                effectiveAt: "2026-01-01T00:00:00.000Z",
-              },
-            ])
+          ? list(
+              state.rulePaged
+                ? url.searchParams.has("cursor")
+                  ? [rule]
+                  : [
+                      {
+                        ...rule,
+                        id: "d3300000-0000-4000-8000-000000000002",
+                        effectiveAt: "2099-01-01T00:00:00.000Z",
+                      },
+                    ]
+                : [
+                    {
+                      ...rule,
+                      id: "d3300000-0000-4000-8000-000000000002",
+                      effectiveAt: "2099-01-01T00:00:00.000Z",
+                    },
+                    rule,
+                    {
+                      ...rule,
+                      id: "d3300000-0000-4000-8000-000000000003",
+                      effectiveAt: "2026-01-01T00:00:00.000Z",
+                    },
+                  ],
+              state.rulePaged && !url.searchParams.has("cursor") ? "synthetic-rule-next" : null,
+            )
           : envelope(rule),
       });
     }

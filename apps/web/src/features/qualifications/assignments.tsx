@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSession } from "../../app/Session.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, LevelContext, MemberContext, Recovery } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
@@ -14,6 +13,7 @@ export function AssignmentEditor({
   progress,
   etag,
   former,
+  onRefresh,
 }: {
   game: Game;
   memberId: string;
@@ -22,10 +22,18 @@ export function AssignmentEditor({
   progress: DTO["Progress"] | undefined;
   etag: string | null;
   former: boolean;
+  onRefresh: () => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    session = useSession(),
-    command = useQualificationCommand();
+    command = useQualificationCommand(
+      {
+        kind: "member",
+        id: memberId,
+        game,
+        rolePromotionLevelId: levels.find((level) => level.code === "driver_iii")?.id ?? null,
+      },
+      onRefresh,
+    );
   const [levelId, setLevel] = useState(""),
     [purpose, setPurpose] = useState<DTO["AssignmentInput"]["purpose"]>("initial"),
     [reason, setReason] = useState(""),
@@ -65,7 +73,6 @@ export function AssignmentEditor({
     );
     if (result) {
       setSuccess(true);
-      await session.refresh();
     }
     return result;
   }
@@ -197,9 +204,8 @@ export function AssignmentEditor({
       <Failure error={command.failure} seconds={command.seconds} />
       <Recovery
         command={command}
-        onRecovered={async () => {
+        onRecovered={() => {
           setSuccess(true);
-          await session.refresh();
         }}
       />
       {success && <p role="status">{t("success")}</p>}

@@ -3,6 +3,94 @@ import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
 
+test("controlled publication refresh rebases paged rule history without refetching its obsolete cursor", async ({
+  page,
+}) => {
+  const state = await mockQualifications(page);
+  state.rulePaged = true;
+  await page.goto("/account/qualifications");
+  const card = page
+    .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+    .locator("..");
+  await card.getByText("Rule version history", { exact: true }).click();
+  await card.locator("details").getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(card.getByText("Effective now", { exact: true })).toBeVisible();
+  expect(state.ruleRequests).toContain("1:synthetic-rule-next");
+  await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+  const editor = card.locator("section").last();
+  await editor.locator('[id^="reason-"]').fill("Fictional cursor refresh");
+  await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+  await expect(
+    editor.getByRole("button", { name: "Publish rule version", exact: true }),
+  ).toBeEnabled();
+  await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(editor.getByText("The server confirmed the change.", { exact: true })).toBeVisible();
+  await expect(card.locator("details")).toHaveJSProperty("open", false);
+  await card.getByText("Rule version history", { exact: true }).click();
+  await expect.poll(() => state.ruleRequests.at(-1)).toBe("2:");
+  expect(state.ruleRequests.filter((request) => request.startsWith("2:"))).toEqual(["2:"]);
+});
+
+test("controlled uncertain own Trainee promotion refreshes its session on original receipt recovery after eligibility changes", async ({
+  page,
+}) => {
+  const state = await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  await page.locator("#assignment-reason").fill("Fictional own promotion");
+  state.uncertain = true;
+  await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Check the previous action", exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await expect(
+    page.getByRole("button", { name: "Confirm next-level promotion", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("heading", { name: "Fictional driver_iii", exact: true }),
+  ).toBeVisible();
+  const before = state.selfReads,
+    key = state.keys[0],
+    etag = state.etags[0];
+  await page.getByRole("button", { name: "Check the previous action", exact: true }).click();
+  await expect(page.getByText("The server confirmed the change.", { exact: true })).toBeVisible();
+  await expect.poll(() => state.selfReads).toBe(before + 1);
+  expect(state.keys).toEqual([key, key]);
+  expect(state.etags).toEqual([etag, etag]);
+});
+
+test("controlled historical publication receipt cannot replace a newer refreshed level", async ({
+  page,
+}) => {
+  const state = await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  const card = page
+    .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+    .locator("..");
+  await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+  const editor = card.locator("section").last();
+  await editor.locator('[id^="reason-"]').fill("Fictional original publication intent");
+  await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+  state.uncertain = true;
+  await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+  state.version = 3;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await expect(card.getByText("Version: 3", { exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Check the previous action", exact: true }).click();
+  await expect(editor.getByText("The server confirmed the change.", { exact: true })).toBeVisible();
+  await expect(card.getByText("Version: 3", { exact: true })).toBeVisible();
+  expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
+  expect(state.etags).toEqual(['"v1"', '"v1"']);
+  await expect(editor.locator('[id^="reason-"]')).toHaveValue(
+    "Fictional original publication intent",
+  );
+});
+
 for (const locale of ["en", "ru"] as const)
   test(`controlled qualification ${locale} current rules exact progress editor preview and confirmations`, async ({
     page,

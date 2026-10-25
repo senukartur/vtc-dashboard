@@ -261,10 +261,16 @@ function MemberQualification({
             <p>
               {manage && `${t("effectiveInterval")}: `}
               <Time value={a.assignedAt} /> →{" "}
-              {a.endedAt ? <Time value={a.endedAt} /> : t("currentInterval")}
+              {a.endedAt ? (
+                <>
+                  <Time value={a.endedAt} /> ({t("exclusive")})
+                </>
+              ) : (
+                t("currentInterval")
+              )}
             </p>
             <small>
-              {t("exclusive")} · <code>{a.id}</code>
+              {t("assignmentId")}: <code>{a.id}</code>
             </small>
           </article>
         ))}
@@ -284,6 +290,7 @@ function MemberQualification({
           progress={p}
           etag={progress.data?.etag ?? history.data?.etag ?? null}
           former={target?.formerMember ?? false}
+          onRefresh={() => setCursors([])}
         />
       )}
     </>
@@ -316,12 +323,15 @@ function Level({ level, manage }: { level: DTO["QualificationLevel"]; manage: bo
       <RuleHistory key={`${level.id}:${level.version}`} level={level} manage={manage} />
       {manage && (
         <>
-          <Button type="button" variant="outline" onClick={() => setEdit(!edit)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setEdit(!edit)}
+            disabled={!edit && !!level.ruleVersionId && !rules.data}
+          >
             {t(edit ? "close" : "edit")}
           </Button>
-          {edit && (!level.ruleVersionId || rules.data) && (
-            <LevelEditor level={level} current={rules.data?.data.data} />
-          )}
+          {edit && <LevelEditor level={level} current={rules.data?.data.data} />}
         </>
       )}
     </Card>

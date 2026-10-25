@@ -1,5 +1,6 @@
 export const qualificationTranslations = {
   en: {
+    assignmentId: "Assignment ID",
     catalogLabelLoading: "Loading catalog label…",
     catalogLabelUnavailable: "Catalog label unavailable",
     staffHistoryHelp:
@@ -134,6 +135,7 @@ export const qualificationTranslations = {
     rule_adr_category_unknown: "The hazardous category is unknown.",
   },
   ru: {
+    assignmentId: "Идентификатор назначения",
     catalogLabelLoading: "Загрузка названия из каталога…",
     catalogLabelUnavailable: "Название из каталога недоступно",
     staffHistoryHelp:
