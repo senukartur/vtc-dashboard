@@ -12,6 +12,7 @@ export function eventLine(stage: string, exitCode: number, durationMs: number): 
 export function collectEvents(): {
   events: SafeEvent[];
   browserFailures: BrowserFailure[];
+  fixtureDiagnostics: Record<string, unknown>[];
   push(chunk: unknown): void;
 };
 export function qualityReport(
@@ -20,4 +21,5 @@ export function qualityReport(
   events: SafeEvent[],
   probe?: string,
   browserFailures?: unknown[],
+  fixtureDiagnostics?: unknown[],
 ): object;

@@ -9,6 +9,7 @@ import {
 } from "@vtc/db";
 import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
+import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { tripEventAssociations } from "@vtc/db/trip-decisions-schema";
 import { eq, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
@@ -283,7 +284,7 @@ async function credit(id: string) {
       )[0],
   );
 }
-async function report(who = owner) {
+async function report(who = owner, target = manual) {
   const id = newId();
   await unit.run((tx) =>
     unit
@@ -309,7 +310,7 @@ async function report(who = owner) {
     entityId: ids.get(name) as string,
     catalogRevisionId: revisionId,
   });
-  return manual.submitReport(who, newId(), {
+  return target.submitReport(who, newId(), {
     fields: {
       game: "ets2",
       origin: pin("fixture_north"),
@@ -2537,4 +2538,210 @@ test("direct author-request disposition, resolved rejected facts and null associ
   expect(
     (await service.getProposal(dispatcher, trip.tripId, original.data.id)).data.correctionRequestId,
   ).toBeNull();
+});
+
+test("safe effective facts retain derived manual confirmation, exact zero and planned separation without company disclosure", async () => {
+  const r = await report();
+  await decide(r.tripId);
+  const ordinary = await member();
+  const company = await tripsService.detail(ordinary, r.tripId);
+  expect(company.view).toBe("summary");
+  expect(company).not.toHaveProperty("effectiveFacts");
+  expect(company).not.toHaveProperty("evidence");
+  expect(company).not.toHaveProperty("decisions");
+  const proposed = await service.propose(
+    dispatcher,
+    r.tripId,
+    newId(),
+    (await state(r.tripId))!.version,
+    {
+      reason: "Synthetic exact distance correction",
+      evidenceIds: r.currentRevision.fields.evidenceIds,
+      actualDistanceM: "0",
+    },
+  );
+  const p = await service.getProposal(deputy, r.tripId, proposed.data.id);
+  await service.proposalDecision(deputy, r.tripId, p.data.id, newId(), p.version, {
+    decision: "approve",
+    reviewedRevisionId: p.data.revisionId,
+    reason: "Synthetic verified zero",
+  });
+  const privateView = await tripsService.detail(owner, r.tripId);
+  if (privateView.view !== "private") throw Error("EXPECTED_PRIVATE_TRIP");
+  expect(privateView.summary.reportingBasis).toBe("manual_confirmation");
+  expect(privateView.summary.reportingAt).toBe(iso());
+  expect(privateView.effectiveFacts).toMatchObject({
+    provider: "manual",
+    actualDistanceM: "0",
+    plannedDistanceM: null,
+    actualStartAt: null,
+    actualCompletedAt: null,
+  });
+  expect(privateView.effectiveFacts?.factRevisionId).not.toBe(privateView.manualRevision?.id);
+  expect(privateView.effectiveFacts?.cargo?.entityId).toBe(ids.get("fixture_crates"));
+  await expect(tripsService.detail(ordinary, r.tripId)).rejects.toMatchObject({ statusCode: 404 });
+});
+
+test("production candidate reads revalidate assessment-only versions without mutating sources searches or credits and fail closed on changed evidence", async () => {
+  const who = await member(),
+    composed = composedModules();
+  if (
+    !composed.trips ||
+    !composed.manualReports ||
+    !composed.reconciliation ||
+    !composed.qualifications ||
+    !composed.tripDecisions ||
+    !composed.catalogs
+  )
+    throw Error("SYNTHETIC_COMPOSITION_MISSING");
+  const target = composed.trips,
+    recon = composed.reconciliation,
+    p = payload(),
+    decisions = composed.tripDecisions;
+  const put = (p: Telemetry, target: Trips) =>
+    retryTransaction(unit, (tx) =>
+      target.storeInTransaction(tx, "ets2telemetry", p, {
+        ownerUserId: who.userId,
+        connection: { state: "unknown", referenceId: null },
+      }),
+    );
+  const source = await put(p, target);
+  const submitted = await report(who, composed.manualReports);
+  for (let n = 0; n < 5; n++) {
+    await runPass(composed.jobsQueue, new AbortController().signal);
+    const search = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select()
+        .from(reconciliationSearches)
+        .where(eq(reconciliationSearches.tripId, source.tripId)),
+    );
+    if (search[0]?.finished) break;
+  }
+  const stored = await unit.run(async (tx) =>
+    (
+      await unit
+        .client(tx)
+        .select()
+        .from(reconciliationCandidates)
+        .where(eq(reconciliationCandidates.active, true))
+    ).find(
+      (c) =>
+        [c.primaryTripId, c.secondaryTripId].includes(source.tripId) &&
+        [c.primaryTripId, c.secondaryTripId].includes(submitted.tripId),
+    ),
+  );
+  if (!stored) throw Error("SYNTHETIC_CANDIDATE_MISSING");
+  const review = await decisions.review(dispatcher, submitted.tripId);
+  await decisions.decide(dispatcher, submitted.tripId, newId(), review.version, {
+    decision: "accept",
+    reviewedRevisionId: review.data.trip.manualRevision?.id ?? review.data.factRevisionId,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional assessment of unchanged manual source facts",
+  });
+  const assessedManual = await state(submitted.tripId);
+  expect(assessedManual?.version).toBeGreaterThan(
+    submitted.tripId === stored.primaryTripId ? stored.primaryVersion : stored.secondaryVersion,
+  );
+  const current = await state(source.tripId),
+    beforeCredit = await credit(source.tripId);
+  expect(current?.decision).toBe("accepted");
+  const beforeSearch = await unit.run((tx) =>
+    unit.client(tx).select().from(reconciliationSearches),
+  );
+  const candidate = (await recon.list(director, { limit: 100 })).items.find(
+    (c) => c.id === stored.id,
+  );
+  expect(candidate).toMatchObject({ confidence: "review_required" });
+  expect(candidate?.reasonCodes).toContain("manual_actual_time_unknown");
+  expect(candidate?.reasonCodes).toContain("confirmed_facts_require_review");
+  expect(await state(source.tripId)).toEqual(current);
+  expect(await credit(source.tripId)).toEqual(beforeCredit);
+  expect(await unit.run((tx) => unit.client(tx).select().from(reconciliationSearches))).toEqual(
+    beforeSearch,
+  );
+  const replay = await put(p, target);
+  expect(replay.tripId).toBe(source.tripId);
+  expect(await state(source.tripId)).toEqual(current);
+  expect(await credit(source.tripId)).toEqual(beforeCredit);
+  const visible = async () =>
+    (await recon.list(director, { limit: 100 })).items.some((c) => c.id === stored.id);
+  const foreign = await member();
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ ownerId: foreign.userId })
+      .where(eq(trips.id, source.tripId)),
+  );
+  expect(await visible()).toBe(false);
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ ownerId: who.userId, game: "ats" })
+      .where(eq(trips.id, source.tripId)),
+  );
+  expect(await visible()).toBe(false);
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ game: "ets2" }).where(eq(trips.id, source.tripId)),
+  );
+  const mismatch = createReconciliation(
+    unit,
+    {
+      key: key(),
+      rule: { version: 1, startToleranceMs: 1, endToleranceMs: 1, distanceToleranceM: "0" },
+    },
+    { identity, trips: target, qualifications: composed.qualifications },
+  );
+  expect(
+    (await mismatch.list(director, { limit: 100 })).items.some((c) => c.id === stored.id),
+  ).toBe(false);
+  const incomplete = createReconciliation(unit, recon.config, {
+    identity,
+    trips: {
+      ...target,
+      reconciliation: {
+        ...target.reconciliation,
+        matchingEvidence: async () => ({ facts: [], complete: false }),
+      },
+    },
+    qualifications: composed.qualifications,
+  });
+  expect(
+    (await incomplete.list(director, { limit: 100 })).items.some((c) => c.id === stored.id),
+  ).toBe(false);
+  const priorPointer = current?.currentFactId;
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ currentFactId: null }).where(eq(trips.id, source.tripId)),
+  );
+  expect(await visible()).toBe(false);
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ currentFactId: priorPointer })
+      .where(eq(trips.id, source.tripId)),
+  );
+  const third = await put(payload(), target);
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ aliasOf: third.tripId }).where(eq(trips.id, source.tripId)),
+  );
+  expect(await visible()).toBe(false);
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ aliasOf: null }).where(eq(trips.id, source.tripId)),
+  );
+  const correction = structuredClone(p);
+  correction.eventId = newId();
+  correction.revision++;
+  correction.type = "trip.corrected";
+  const sourceOnly = createTrips(
+    unit,
+    { cursorKey: key() },
+    { identity: composed.identity, catalogs: composed.catalogs },
+  );
+  await put(correction, sourceOnly);
+  expect(await visible()).toBe(false);
+  expect(await credit(source.tripId)).toEqual(beforeCredit);
 });

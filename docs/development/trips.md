@@ -63,3 +63,5 @@ Trips now owns one monotonic current contribution per canonical trip and immutab
 [Reconciliation](reconciliation.md) adds Trips-owned flat aliases while preserving immutable original source/fact ownership. Effective membership governs reads, source arrival, private projection, retention and contribution validation. Aliases do not add counts. Current fact membership checks validate the selected fact against the complete same-owner/game group; they are not removed. Production source callbacks and Qualifications preparation share the caller transaction.
 
 VTC-029 adds the [decision coordinator](trip-decisions.md), relational derived-fact provenance and a reversal-fencing adjudication marker. Source rows/messages remain immutable; effective derived facts still back the real contribution FK. Read the post-activation old-reader rollback boundary before deploying an older artifact.
+
+VTC-030 integrates the protected [trip reporting and review workspace](trip-workspace.md). Runtime/hosted activation and the exact-candidate verification/review gates remain separate from frontend implementation.

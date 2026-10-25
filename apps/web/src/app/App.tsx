@@ -23,6 +23,30 @@ import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
 import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
 
+const TripsPage = lazy(() =>
+  import("../features/trips/TripsPage.js").then((module) => ({ default: module.TripsPage })),
+);
+const TripDetailPage = lazy(() =>
+  import("../features/trips/TripDetailPage.js").then((module) => ({
+    default: module.TripDetailPage,
+  })),
+);
+const ReportsPage = lazy(() =>
+  import("../features/manual-reports/ManualReportPage.js").then((module) => ({
+    default: module.ReportsPage,
+  })),
+);
+const ManualReportPage = lazy(() =>
+  import("../features/manual-reports/ManualReportPage.js").then((module) => ({
+    default: module.ManualReportPage,
+  })),
+);
+const ReconciliationPage = lazy(() =>
+  import("../features/review/ReconciliationPage.js").then((module) => ({
+    default: module.ReconciliationPage,
+  })),
+);
+
 const queryClient = createAppQueryClient();
 const memberPath = "/foundation/member";
 const FoundationPage = lazy(() =>
@@ -162,6 +186,78 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <CatalogsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/trips"
+              element={
+                <ProtectedAccount>
+                  <TripsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/trips/:tripId"
+              element={
+                <ProtectedAccount>
+                  <TripDetailPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/reports"
+              element={
+                <ProtectedAccount>
+                  <ReportsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/reports/new"
+              element={
+                <ProtectedAccount>
+                  <ManualReportPage kind="new" />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/reports/drafts/:draftId"
+              element={
+                <ProtectedAccount>
+                  <ManualReportPage kind="draft" />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/reports/:reportId/edit"
+              element={
+                <ProtectedAccount>
+                  <ManualReportPage kind="report" />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/review"
+              element={
+                <ProtectedAccount>
+                  <TripsPage review />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/review/reconciliation"
+              element={
+                <ProtectedAccount>
+                  <ReconciliationPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/review/:tripId"
+              element={
+                <ProtectedAccount>
+                  <TripDetailPage review />
                 </ProtectedAccount>
               }
             />

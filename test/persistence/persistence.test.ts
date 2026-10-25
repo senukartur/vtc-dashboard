@@ -257,11 +257,16 @@ async function serializedFreshMigrations(
       return { state: "rejected" as const };
     }
   };
-  const first = observe(0);
+  const callerStates = ["pending", "not_started"];
+  const first = observe(0).then((result) => {
+    callerStates[0] = result.state;
+    return result;
+  });
   let second: ReturnType<typeof observe> | undefined;
   let secondSettled = false;
   let completed = false;
   const started = performance.now();
+  let lastPhase = "waiting_final_journal_ack";
   const milestone = (
     phase:
       | "final_journal_held"
@@ -270,7 +275,8 @@ async function serializedFreshMigrations(
       | "waiter_blocked"
       | "ack_released"
       | "settled",
-  ) =>
+  ) => {
+    lastPhase = phase;
     console.log(
       JSON.stringify({
         event: "persistence_migration_serialization",
@@ -283,6 +289,7 @@ async function serializedFreshMigrations(
         waiterForwardMs: 1000,
       }),
     );
+  };
   try {
     await Promise.race([
       bounded(gate.withheld, "fresh_final_journal_ack", EXTENDED_TEST_TIMEOUT_MS),
@@ -305,9 +312,15 @@ async function serializedFreshMigrations(
       "first migrator owns the real named lock after its committed final journal write",
     );
     milestone("history_verified");
-    second = observe(1).finally(() => {
-      secondSettled = true;
-    });
+    callerStates[1] = "pending";
+    second = observe(1)
+      .then((result) => {
+        callerStates[1] = result.state;
+        return result;
+      })
+      .finally(() => {
+        secondSettled = true;
+      });
     await bounded(gate.waiterForwarded, "fresh_waiter_forwarded", 1000);
     milestone("waiter_forwarded");
     await delay(100);
@@ -346,6 +359,20 @@ async function serializedFreshMigrations(
     assert.deepEqual(await tables(), expectedTables);
     milestone("settled");
     completed = true;
+  } catch (error) {
+    // Snapshot before release/close: teardown cannot establish the original rendezvous cause.
+    console.log(
+      JSON.stringify({
+        event: "persistence_migration_serialization_failure",
+        phase: lastPhase,
+        elapsedMs: Math.round(performance.now() - started),
+        rendezvousMs: EXTENDED_TEST_TIMEOUT_MS,
+        callers: [...callerStates],
+        activeSockets: gate.activeSockets(),
+        facts: { ...gate.facts },
+      }),
+    );
+    throw error;
   } finally {
     try {
       gate.release();

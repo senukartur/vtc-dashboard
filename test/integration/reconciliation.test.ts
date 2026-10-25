@@ -64,8 +64,10 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+import { identityDiagnostics } from "../support/identity-diagnostics.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vBefore, vAfter);
+const submitDiagnostic = identityDiagnostics("reconciliation");
 type S = components["schemas"];
 let control: Connection,
   unit: UnitOfWork,
@@ -133,7 +135,7 @@ async function member(assigned: ("driver" | "dispatcher" | "deputy_director")[] 
 }
 beforeAll(async () => {
   control = await testConnection();
-  unit = createUnitOfWork(guardedSettings());
+  unit = submitDiagnostic.unit(createUnitOfWork(guardedSettings()));
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
@@ -360,9 +362,12 @@ async function corrections() {
   );
   return Number(rows[0]?.n);
 }
-function productionComposition(reconciliationConfig: ReconciliationConfig = config) {
+function productionComposition(
+  reconciliationConfig: ReconciliationConfig = config,
+  compositionUnit = unit,
+) {
   const composed = composeIdentity(
-    unit,
+    compositionUnit,
     identityConfig,
     undefined,
     undefined,
@@ -689,10 +694,14 @@ test(
     const composed = productionComposition(),
       target = "f0000000-0000-4000-8000-000000000001";
     await seedTelemetry([target]);
-    await composed.manualReports.submitReport(owner, newId(), {
-      fields: fields(await image()),
-      targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
-    });
+    const submissionKey = newId(),
+      submission = {
+        fields: fields(await image()),
+        targetTrip: { tripId: target, expectedVersion: (await state(target))?.version as number },
+      };
+    await submitDiagnostic.scope({ caseId: "reconciliation_root_submit", step: "submit" }, () =>
+      composed.manualReports.submitReport(owner, submissionKey, submission),
+    );
     const aPayload = payload(),
       a = await receive(aPayload, owner, composed.trips);
     const oldPair = (await composed.reconciliation.list(director)).items[0];
@@ -738,6 +747,65 @@ test(
   },
   EXTENDED_TEST_TIMEOUT_MS,
 );
+
+test("submit diagnostics retain an uncertain receipt before public 503 after real MySQL settlement without automatic replay", async () => {
+  const evidenceId = await image(),
+    key = newId(),
+    input = { fields: fields(evidenceId) };
+  const native = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL"), {
+    code: "ETIMEDOUT",
+    sql: "SYNTHETIC_PRIVATE_INPUT",
+  });
+  const failure = new TransactionCommitOutcomeUnknownError(native),
+    diagnostic = identityDiagnostics("reconciliation");
+  let executions = 0;
+  const lost: UnitOfWork = {
+    client: (tx) => unit.client(tx),
+    close: async () => {},
+    async run(command) {
+      executions++;
+      await unit.run(command);
+      throw failure;
+    },
+  };
+  const observed = diagnostic.unit(lost),
+    composed = productionComposition(config, observed),
+    lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  try {
+    await expect(
+      diagnostic.scope({ caseId: "reconciliation_root_submit", step: "submit" }, () =>
+        composed.manualReports.submitReport(owner, key, input),
+      ),
+    ).rejects.toMatchObject({ statusCode: 503, publicCode: "DEPENDENCY_UNAVAILABLE" });
+    expect(executions).toBe(1);
+    const facts = lines.map((line) => JSON.parse(line));
+    expect(facts).toHaveLength(1);
+    expect(facts[0]).toMatchObject({
+      event: "identity_fixture",
+      fixture: "reconciliation",
+      phase: "transaction",
+      state: "failed",
+      caseId: "reconciliation_root_submit",
+      step: "submit",
+      codes: ["TRANSACTION_COMMIT_OUTCOME_UNKNOWN", "ETIMEDOUT"],
+    });
+    expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+    expect(lines.join("\n")).not.toContain(evidenceId);
+    expect(lines.join("\n")).not.toContain(key);
+    const replay = await productionComposition().manualReports.submitReport(owner, key, input);
+    expect(replay.currentRevision.number).toBe(1);
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT (SELECT COUNT(*) FROM manual_commands) commands,(SELECT COUNT(*) FROM manual_revisions) revisions,(SELECT COUNT(*) FROM source_messages) messages",
+    );
+    expect(Number(rows[0]?.commands)).toBe(1);
+    expect(Number(rows[0]?.revisions)).toBe(1);
+    expect(Number(rows[0]?.messages)).toBe(1);
+  } finally {
+    output.mockRestore();
+    await observed.close();
+  }
+});
 
 test(
   "EXPLAIN measures the actual production discovery predicate with current aliases, mixed sources and evidence branches",
@@ -1853,4 +1921,61 @@ test("a later manual correction request fences reversal instead of restoring obs
   await expect(reverse(one.data.id)).rejects.toMatchObject({ statusCode: 409 });
   expect((await state(r.tripId))?.correctionPending).toBe(true);
   expect((await state(t.tripId))?.aliasOf).toBe(r.tripId);
+});
+
+test("reconciliation history is signed bounded deterministic across equal times, aliases, reversal and revoked authority", async () => {
+  const a = await report(),
+    b = await report();
+  const first = await merge(a.tripId, b.tripId);
+  await reverse(first.data.id);
+  const second = await merge(a.tripId, b.tripId);
+  await reverse(second.data.id);
+  const third = await merge(a.tripId, b.tripId);
+  const expected = [first.data.id, second.data.id, third.data.id].sort().reverse();
+  let cursor: string | null = null;
+  const seen: string[] = [];
+  do {
+    const result = await service.history(director, b.tripId, {
+      limit: 1,
+      ...(cursor ? { cursor } : {}),
+    });
+    seen.push(...result.items.map((r) => r.id));
+    cursor = result.nextCursor;
+  } while (cursor);
+  expect(seen).toEqual(expected);
+  expect((await service.history(director, a.tripId)).items.map((r) => r.state).sort()).toEqual([
+    "applied",
+    "reversed",
+    "reversed",
+  ]);
+  const page = await service.history(director, a.tripId, { limit: 1 });
+  await expect(
+    service.history(director, b.tripId, { limit: 1, cursor: page.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(
+    service.history(deputy, a.tripId, { limit: 1, cursor: page.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(service.history(owner, a.tripId)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(
+    service.history({ ...director, accessEpoch: director.accessEpoch + 1 }, a.tripId),
+  ).rejects.toMatchObject({ statusCode: 401 });
+  await expect(service.history(director, a.tripId, { limit: 101 })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  const [explain] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN SELECT id,version,primary_trip_id,secondary_trip_id,state FROM reconciliations WHERE primary_trip_id IN (?,?) OR secondary_trip_id IN (?,?) ORDER BY created_at DESC,id DESC LIMIT 26",
+    [a.tripId, b.tripId, a.tripId, b.tripId],
+  );
+  console.log(
+    JSON.stringify({
+      event: "reconciliation_history_plan",
+      accessType: String(explain[0]?.type ?? "unknown"),
+      key: explain[0]?.key ?? null,
+      estimatedRows: Number(explain[0]?.rows ?? 0),
+      extra: String(explain[0]?.Extra ?? ""),
+    }),
+  );
+  expect(explain.length).toBeGreaterThan(0);
+  expect(Number(explain[0]?.rows)).toBeLessThan(1000);
+  expect((await service.history(director, a.tripId)).items[0]).not.toHaveProperty("reason");
 });

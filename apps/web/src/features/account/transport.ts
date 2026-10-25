@@ -1,3 +1,4 @@
+import { withReadSlot } from "../../shared/read-scheduler.js";
 import type { components } from "@vtc/contracts";
 import { z } from "zod";
 import { csrfEnvelope, receiptEnvelope } from "../admissions/schema.js";
@@ -143,12 +144,14 @@ export async function read<T extends z.ZodType>(path: string, schema: T, signal:
   else signal.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(abort, 15000);
   try {
-    const response = await fetch(`/api/v1${path}`, {
-      credentials: "same-origin",
-      cache: "no-store",
-      signal: bounded.signal,
-      headers: { Accept: "application/json" },
-    });
+    const response = await withReadSlot(bounded.signal, () =>
+      fetch(`/api/v1${path}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: bounded.signal,
+        headers: { Accept: "application/json" },
+      }),
+    );
     if (response.status !== 200) failed(response);
     const parsed = schema.safeParse(await response.json());
     if (!parsed.success) throw new AccountFailure("unavailable");

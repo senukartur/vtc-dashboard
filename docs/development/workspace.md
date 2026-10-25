@@ -82,4 +82,6 @@ The [testing guide](testing.md) documents Vitest 5.0.5, Playwright 1.64.1/Chromi
 VTC-022 adds [opt-in trip reads](trips.md). `TRIPS_ENABLED` defaults to false; activation requires identity and a distinct random 32-byte hexadecimal `TRIPS_CURSOR_KEY`, plus explicit migrations. Its internal source adapters do not expose telemetry/manual submission endpoints or install a raw cleanup scheduler.
 
 
-VTC-025 adds disabled-by-default [manual-report APIs/private evidence](manual-reports.md). The local Compose source prepares a separate private persistent volume; activation still requires reviewed explicit values/migrations/grants. Catalog/trips/manual flags must be enabled together. No form, decision or qualification pipeline is installed.
+VTC-025 adds disabled-by-default [manual-report APIs/private evidence](manual-reports.md). The local Compose source prepares a separate private persistent volume; activation still requires reviewed explicit values/migrations/grants. Catalog/trips/manual flags must be enabled together. VTC-028 and VTC-029 provide the opt-in qualification/decision pipeline; VTC-030 connects the [live trip workspace](trip-workspace.md). Hosted activation remains separate.
+
+The protected [trip reporting and review workspace](trip-workspace.md) integrates own/company trip reads, durable manual drafts/evidence, staff decisions/proposals and merge/reversal history. It adds no production configuration or hosted activation.

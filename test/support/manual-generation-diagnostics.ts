@@ -9,7 +9,13 @@ export function generationTransactionTracing(args: readonly string[]): boolean {
 const cases = ["generation_progress", "generation_late", "generation_retry"] as const;
 export type GenerationCase = (typeof cases)[number];
 export function generationTransactionArguments(caseId: GenerationCase, ordinal: number): string[] {
-  return caseId === "generation_late" && ordinal === 1 ? [generationTransactionFlag] : [];
+  return (caseId === "generation_progress" &&
+    Number.isInteger(ordinal) &&
+    ordinal >= 0 &&
+    ordinal <= 4) ||
+    (caseId === "generation_late" && ordinal === 1)
+    ? [generationTransactionFlag]
+    : [];
 }
 const codes = [
   "PROTOCOL_SEQUENCE_TIMEOUT",
@@ -76,6 +82,9 @@ export function safeScopedTransactionRecord(value: unknown): Record<string, unkn
       (value.fixture === "admissions" &&
         value.caseId === "admissions_reissue_expiry" &&
         value.step === "purge") ||
+      (value.fixture === "reconciliation" &&
+        value.caseId === "reconciliation_root_submit" &&
+        value.step === "submit") ||
       (value.fixture === "generation_worker" &&
         value.caseId === "generation_worker" &&
         allowed(value.step, phases))
@@ -257,8 +266,10 @@ export function safeGenerationProcessRecord(value: unknown): Record<string, unkn
         ["event", "caseId", "ordinal", "phase", "transactionOrdinal", "boundary", "durationMs"],
         ["category", "codes", "statusCode", "databaseOperation"],
       ) ||
-      candidate.caseId !== "generation_late" ||
-      candidate.ordinal !== 1
+      !(
+        candidate.caseId === "generation_progress" ||
+        (candidate.caseId === "generation_late" && candidate.ordinal === 1)
+      )
     )
       return;
     const { caseId: _case, ordinal: _ordinal, phase, ...transaction } = candidate;
@@ -295,20 +306,24 @@ export function safeGenerationProcessRecord(value: unknown): Record<string, unkn
       processed: candidate.processed,
     };
   if (
-    !fields(candidate, [
-      "event",
-      "caseId",
-      "ordinal",
-      "state",
-      "durationMs",
-      "exitCode",
-      "signal",
-      "timerFired",
-      "caseAborted",
-      "spawnFailed",
-      "firstStop",
-      "receiptState",
-    ]) ||
+    !fields(
+      candidate,
+      [
+        "event",
+        "caseId",
+        "ordinal",
+        "state",
+        "durationMs",
+        "exitCode",
+        "signal",
+        "timerFired",
+        "caseAborted",
+        "spawnFailed",
+        "firstStop",
+        "receiptState",
+      ],
+      ["lastTransaction"],
+    ) ||
     candidate.event !== "manual_generation_process" ||
     !allowed(candidate.state, ["exit", "close", "spawn_error"]) ||
     !integer(candidate.durationMs, 86400000) ||
@@ -327,6 +342,19 @@ export function safeGenerationProcessRecord(value: unknown): Record<string, unkn
     !allowed(candidate.receiptState, ["pending", "valid", "missing", "malformed"])
   )
     return;
+  let lastTransaction: Record<string, unknown> | undefined;
+  if (Object.hasOwn(candidate, "lastTransaction")) {
+    const last = candidate.lastTransaction as Record<string, unknown> | null;
+    if (
+      !last ||
+      last.event !== "manual_generation_transaction" ||
+      last.caseId !== candidate.caseId ||
+      last.ordinal !== candidate.ordinal
+    )
+      return;
+    lastTransaction = safeGenerationProcessRecord(last);
+    if (!lastTransaction) return;
+  }
   return {
     event: candidate.event,
     ...context,
@@ -339,6 +367,7 @@ export function safeGenerationProcessRecord(value: unknown): Record<string, unkn
     spawnFailed: candidate.spawnFailed,
     firstStop: candidate.firstStop,
     receiptState: candidate.receiptState,
+    ...(lastTransaction ? { lastTransaction } : {}),
   };
 }
 export function generationProcessLine(value: unknown): string {

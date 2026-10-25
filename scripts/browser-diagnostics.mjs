@@ -1,4 +1,7 @@
 export const browserFiles = {
+  "test/e2e/trips-corrections.spec.ts": "trips-corrections",
+  "test/e2e/trips.spec.ts": "trips",
+  "test/e2e/trips-real.spec.ts": "trips-real",
   "test/e2e/account.spec.ts": "account",
   "test/e2e/account-real.spec.ts": "account-real",
   "test/e2e/catalogs.spec.ts": "catalogs",

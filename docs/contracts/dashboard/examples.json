@@ -5320,6 +5320,44 @@
           "requestId": "synthetic-request-001"
         }
       }
+    },
+    {
+      "id": "listTripReconciliations:success",
+      "operationId": "listTripReconciliations",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "primaryTripId": "41000000-0000-4000-8000-000000000001",
+              "secondaryTripId": "41000000-0000-4000-8000-000000000002",
+              "primaryVersion": 1,
+              "secondaryVersion": 1,
+              "state": "applied"
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-030"
+        }
+      }
+    },
+    {
+      "id": "listTripReconciliations:empty",
+      "operationId": "listTripReconciliations",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-030"
+        }
+      }
     }
   ]
 }

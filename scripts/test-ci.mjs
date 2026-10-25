@@ -44,6 +44,7 @@ const report = qualityReport(
   collector.events,
   probe,
   collector.browserFailures,
+  collector.fixtureDiagnostics,
 );
 await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
 console.log(`Quality suite: ${report.status}; ${report.category}`);

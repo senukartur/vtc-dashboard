@@ -618,6 +618,7 @@ export function createTripDecisions(
         row.id,
         (await ports.identity.authorizeInTransaction(tx, actor, "company.read")).locale,
       ),
+      effectiveFacts: await ports.trips.effectiveFactsInTransaction(tx, row.id),
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
       decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d))),
