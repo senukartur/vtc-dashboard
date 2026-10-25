@@ -27,7 +27,6 @@ let unit: UnitOfWork;
 let identity: Identity;
 let app: Awaited<ReturnType<typeof createApp>>;
 
-let directorActor: Actor;
 let directorCookie: string;
 let driver1Actor: Actor;
 let driver1Cookie: string;
@@ -83,7 +82,6 @@ beforeAll(async () => {
   });
   const dirLogin = await identity.login("analytics-director@example.invalid", password);
   directorCookie = dirLogin.cookies.map((v) => v.split(";", 1)[0]).join("; ");
-  directorActor = await identity.authenticate(new Headers({ cookie: directorCookie }));
 
   // Add driver 1 and driver 2
   const d1 = await registerMember("Driver One");
@@ -266,7 +264,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   });
 
   expect(compRes.statusCode).toBe(200);
-  const compData = compRes.json();
+  const compData = compRes.json().data;
 
   // Total accepted trips: Trip 1 (150km) + Trip 2 (200km) + Trip 3 (80km) = 3 trips, 430,000m
   expect(compData.summary.acceptedTrips).toBe(3);
@@ -290,7 +288,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver1Cookie },
   });
   expect(ets2Res.statusCode).toBe(200);
-  const ets2Data = ets2Res.json();
+  const ets2Data = ets2Res.json().data;
   // Excludes ATS (Trip 3)
   expect(ets2Data.summary.acceptedTrips).toBe(2);
   expect(ets2Data.summary.actualDistanceM).toBe("350000");
@@ -302,7 +300,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver1Cookie },
   });
   expect(atsRes.statusCode).toBe(200);
-  const atsData = atsRes.json();
+  const atsData = atsRes.json().data;
   // Only Trip 3 (no pending ETS2 trip in ATS scope)
   expect(atsData.summary.acceptedTrips).toBe(1);
   expect(atsData.summary.actualDistanceM).toBe("80000");
@@ -315,7 +313,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver1Cookie },
   });
   expect(m1Res.statusCode).toBe(200);
-  const m1Data = m1Res.json();
+  const m1Data = m1Res.json().data;
   expect(m1Data.member.id).toBe(driver1Actor.userId);
   expect(m1Data.summary.acceptedTrips).toBe(2);
   expect(m1Data.summary.actualDistanceM).toBe("350000");
@@ -328,7 +326,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver2Cookie },
   });
   expect(m2Res.statusCode).toBe(200);
-  const m2Data = m2Res.json();
+  const m2Data = m2Res.json().data;
   expect(m2Data.member.id).toBe(driver2Actor.userId);
   expect(m2Data.summary.acceptedTrips).toBe(1);
   expect(m2Data.summary.actualDistanceM).toBe("80000");
@@ -341,7 +339,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver1Cookie },
   });
   expect(lbRes.statusCode).toBe(200);
-  const lbData = lbRes.json();
+  const lbData = lbRes.json().data;
   expect(lbData.items.length).toBe(1);
   expect(lbData.items[0].rank).toBe(1);
   expect(lbData.items[0].member.id).toBe(driver1Actor.userId);
@@ -357,7 +355,7 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
     headers: { cookie: driver1Cookie },
   });
   expect(lbPage2.statusCode).toBe(200);
-  const lb2Data = lbPage2.json();
+  const lb2Data = lbPage2.json().data;
   expect(lb2Data.items.length).toBe(1);
   expect(lb2Data.items[0].rank).toBe(2);
   expect(lb2Data.items[0].member.id).toBe(driver2Actor.userId);
@@ -382,7 +380,7 @@ test("verified dynamic correction immediately updates aggregates without snapsho
   });
 
   expect(compRes.statusCode).toBe(200);
-  const compData = compRes.json();
+  const compData = compRes.json().data;
 
   // Driver 1's trips were updated to 180,000m each (Trip 1 and Trip 2 = 360,000m) + Trip 3 (80,000m) = 440,000m
   expect(compData.summary.actualDistanceM).toBe("440000");
