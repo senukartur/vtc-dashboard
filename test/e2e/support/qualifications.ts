@@ -36,6 +36,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     progressDelay: 0,
     review: false,
     unset: false,
+    emptyHistory: false,
+    unconfigured: false,
   };
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
@@ -137,20 +139,37 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     if (path.endsWith("/qualification-assignments"))
       return route.fulfill({
         headers: { ETag: `"v${state.memberVersion}"` },
-        json: list([
-          {
-            id: assignmentId,
-            periodId: assignmentId,
-            levelId: levels(game)[0]?.id,
-            game,
-            assignedAt: "2026-10-20T12:00:00.000Z",
-            endedAt: null,
-          },
-        ]),
+        json: list(
+          state.emptyHistory
+            ? []
+            : [
+                {
+                  id: assignmentId,
+                  periodId: assignmentId,
+                  levelId: levels(game)[0]?.id,
+                  game,
+                  assignedAt: "2026-10-20T12:00:00.000Z",
+                  endedAt: null,
+                },
+              ],
+        ),
       });
     if (path === "/api/v1/qualification-levels")
       return route.fulfill({
-        json: list(levels(game).map((l) => ({ ...l, version: state.version }))),
+        json: list(
+          levels(game).map((l) => ({
+            ...l,
+            version: state.version,
+            ...(state.unconfigured
+              ? {
+                  ruleVersionId: null,
+                  configured: false,
+                  requiredTrips: null,
+                  requiredDistanceM: null,
+                }
+              : {}),
+          })),
+        ),
       });
     if (path.startsWith("/api/v1/qualification-levels/")) {
       const levelId = path.split("/")[4],

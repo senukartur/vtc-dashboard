@@ -78,7 +78,7 @@ for (const locale of ["en", "ru"] as const)
 
 test("controlled uncertain publication retains the original key and draft; recoverable conflict preserves inputs", async ({
   page,
-}) => {
+}, info) => {
   const state = await mockQualifications(page);
   await page.goto("/account/qualifications");
   const card = page
@@ -91,6 +91,7 @@ test("controlled uncertain publication retains the original key and draft; recov
       exact: true,
     }),
   ).toBeVisible();
+  await card.screenshot({ path: info.outputPath("qualification-version-history.png") });
   await card.getByRole("button", { name: "Edit rules", exact: true }).click();
   const editor = card.locator("section").last();
   await editor.locator('[id^="reason-"]').fill("Fictional preserved rationale");
@@ -99,7 +100,7 @@ test("controlled uncertain publication retains the original key and draft; recov
   await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
   await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
@@ -138,7 +139,7 @@ test("controlled assignment uncertain receipt retains command ETag after backgro
   const refreshed = page.waitForResponse(
     (r) => r.url().includes("qualification-progress") && r.headers().etag === '"v8"',
   );
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
   await refreshed;
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
@@ -178,7 +179,7 @@ test("controlled loading and game change discard the obsolete pending progress r
 
 test("controlled committed promotion with lost response remains recoverable after eligibility changes", async ({
   page,
-}) => {
+}, info) => {
   const state = await mockQualifications(page);
   await page.goto("/account/qualifications");
   await page.locator("#assignment-reason").fill("Fictional original promotion confirmation");
@@ -189,7 +190,7 @@ test("controlled committed promotion with lost response remains recoverable afte
   const refreshed = page.waitForResponse(
     (r) => r.url().includes("qualification-progress") && r.headers().etag === '"v8"',
   );
-  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
   await refreshed;
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
@@ -203,6 +204,10 @@ test("controlled committed promotion with lost response remains recoverable afte
   expect(state.keys[0]).toBe(state.keys[1]);
   expect(state.etags).toEqual(['"v7"', '"v7"']);
   expect(state.memberVersion).toBe(8);
+  await page.screenshot({
+    path: info.outputPath("qualification-confirmed-success.png"),
+    fullPage: true,
+  });
 });
 
 test("controlled duplicate names with identical UUID prefixes remain distinguishable before selection", async ({
@@ -245,10 +250,31 @@ test("controlled member permissions unset thresholds retained-review and unavail
   await expect(page.getByRole("alert")).toBeVisible();
   await page.screenshot({ path: info.outputPath("qualification-unavailable.png"), fullPage: true });
   state.progressStatus = 409;
+  state.emptyHistory = true;
   await page.reload();
   await expect(
     page.getByText("No current assignment is recorded for this game.", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText("No supported assignment intervals are recorded for this game.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({ path: info.outputPath("qualification-empty-setup.png"), fullPage: true });
+  state.unconfigured = true;
+  state.progressStatus = 200;
+  await page.reload();
+  await expect(
+    page
+      .getByText("No effective rules have been published. Launch configuration is incomplete.", {
+        exact: true,
+      })
+      .first(),
+  ).toBeVisible();
+  await page.screenshot({
+    path: info.outputPath("qualification-unconfigured.png"),
+    fullPage: true,
+  });
   await page.getByLabel("Game", { exact: true }).selectOption("ats");
   await expect(page).toHaveURL(/game=ats/);
   await expect(
