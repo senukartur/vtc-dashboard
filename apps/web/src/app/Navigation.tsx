@@ -46,6 +46,11 @@ export function Navigation({
               {t("catalogs:title")}
             </NavLink>
           )}
+          {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/qualifications" onClick={close}>
+              {t("qualifications:title")}
+            </NavLink>
+          )}
           {[
             ["company.read", "/account/trips", "title"],
             ["trips.submit_own", "/account/reports", "drafts"],

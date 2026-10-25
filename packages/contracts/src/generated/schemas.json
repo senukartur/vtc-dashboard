@@ -3641,7 +3641,9 @@
                 "type": "string",
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              }
+              },
+              "maxItems": 1000,
+              "uniqueItems": true
             }
           },
           "required": [
@@ -3662,7 +3664,9 @@
                 "type": "string",
                 "format": "uuid",
                 "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              }
+              },
+              "maxItems": 1000,
+              "uniqueItems": true
             }
           },
           "required": [
@@ -8556,6 +8560,183 @@
       "properties": {
         "data": {
           "$ref": "#/$defs/ListReconciliation"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationPreviewInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "maxItems": 32
+        },
+        "sample": {
+          "type": "object",
+          "properties": {
+            "cargoMassKg": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "trailerTypeIds": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "trailersComplete": {
+              "type": "boolean"
+            },
+            "adr": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "known",
+                    "non_hazardous",
+                    "unknown"
+                  ]
+                },
+                "entityId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "status",
+                "entityId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "cargoMassKg",
+            "trailerTypeIds",
+            "trailersComplete",
+            "adr"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "game",
+        "rules",
+        "sample"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationPreview": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ]
+        },
+        "ruleResults": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "properties": {
+              "ruleType": {
+                "type": "string",
+                "enum": [
+                  "max_mass",
+                  "allowed_trailer_types",
+                  "allowed_adr_categories"
+                ]
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "reasonCode": {
+                "type": "string",
+                "enum": [
+                  "rule_passed",
+                  "rule_mass_exceeded",
+                  "rule_mass_unknown",
+                  "rule_mass_invalid",
+                  "rule_trailer_type_disallowed",
+                  "rule_trailer_type_unknown",
+                  "rule_trailers_incomplete",
+                  "rule_adr_category_disallowed",
+                  "rule_adr_category_unknown"
+                ]
+              }
+            },
+            "required": [
+              "ruleType",
+              "outcome",
+              "reasonCode"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "outcome",
+        "ruleResults"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeQualificationPreview": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/QualificationPreview"
         },
         "meta": {
           "$ref": "#/$defs/Meta"

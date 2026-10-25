@@ -42,6 +42,7 @@ import type { ContributionChange } from "../trips/contributions.js";
 import type { Trips } from "../trips/service.js";
 import type { Game } from "./initialization.js";
 import { type Page, pagination } from "./pagination.js";
+import { previewRules, validateDraftRules } from "./preview.js";
 
 type S = components["schemas"];
 type Assignment = typeof qualificationAssignments.$inferSelect;
@@ -59,6 +60,7 @@ interface Ports {
     | "externalCommand"
     | "qualificationContextInTransaction"
     | "completeTraineeInTransaction"
+    | "qualificationMembersInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
   catalogs?: Pick<Catalogs, "qualificationReferencesInTransaction">;
@@ -481,6 +483,27 @@ export function createQualifications(
         ),
       );
     },
+    async members(actor: Actor, options: Page = {}) {
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [], actor);
+        const paging = page(actor, ["qualification-members"], options);
+        return paging.finish(
+          await ports.identity.qualificationMembersInTransaction(
+            tx,
+            paging.after?.id ?? null,
+            paging.limit,
+          ),
+          (row) => ({ id: row.id, time: null }),
+        );
+      });
+    },
+    async preview(actor: Actor, input: S["QualificationPreviewInput"]) {
+      game(input.game);
+      return ports.identity.transaction(async (tx) => {
+        await ports.identity.qualificationContextInTransaction(tx, [], actor);
+        return previewRules(input);
+      });
+    },
     async levels(actor: Actor, selectedGame: Game, options: Page = {}) {
       game(selectedGame);
       return ports.identity.transaction(async (tx) => {
@@ -582,7 +605,7 @@ export function createQualifications(
       reason(input.reason);
       let rules: Rule[];
       try {
-        rules = defaultRegistry.validateRuleSet(input.rules);
+        rules = validateDraftRules(input.rules);
       } catch {
         throw identityError(422);
       }

@@ -35,6 +35,8 @@ export async function registerQualificationRoutes(
   const owned = (path: string) =>
     path.startsWith("/api/v1/qualification-levels") ||
     path.startsWith("/api/v1/admin/qualification-levels") ||
+    path === "/api/v1/admin/qualification-members" ||
+    path === "/api/v1/admin/qualification-rule-previews" ||
     /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|promotions)$/.test(
       path,
     ) ||
@@ -88,6 +90,27 @@ export async function registerQualificationRoutes(
     data,
     meta: { requestId: request.id },
   });
+  app.get<{ Querystring: Page }>(
+    "/api/v1/admin/qualification-members",
+    {
+      schema: { querystring: object(page), response: { 200: ref("EnvelopeListMemberSummary") } },
+    },
+    async (request) =>
+      envelope(request, await qualifications.members(await actor(request), request.query)),
+  );
+  app.post<{ Body: S["QualificationPreviewInput"] }>(
+    "/api/v1/admin/qualification-rule-previews",
+    {
+      bodyLimit: 65536,
+      schema: {
+        querystring: object({}),
+        body: ref("QualificationPreviewInput"),
+        response: { 200: ref("EnvelopeQualificationPreview") },
+      },
+    },
+    async (request) =>
+      envelope(request, await qualifications.preview(await actor(request), request.body)),
+  );
   app.get<{ Querystring: Page & { game: Game } }>(
     "/api/v1/qualification-levels",
     {

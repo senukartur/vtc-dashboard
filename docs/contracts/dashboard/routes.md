@@ -101,6 +101,8 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/reconciliations/{reconciliationId}` | `getReconciliation` | `trips.review` | VTC-026 |
 | `POST /api/v1/reconciliations/{reconciliationId}/reversals` | `reverseReconciliation` | `trips.review` | VTC-026 |
 | `GET /api/v1/qualification-levels` | `listQualificationLevels` | `company.read` | VTC-028 |
+| `GET /api/v1/admin/qualification-members` | `listQualificationMembers` | `qualifications.manage` | VTC-031 |
+| `POST /api/v1/admin/qualification-rule-previews` | `previewQualificationRules` | `qualifications.manage` | VTC-031 |
 | `GET /api/v1/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleVersions` | `company.read` | VTC-028 |
 | `GET /api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}` | `getQualificationRuleVersion` | `company.read` | VTC-028 |
 | `GET /api/v1/members/{memberId}/qualification-progress` | `getQualificationProgress` | `company.read` | VTC-028 |

@@ -666,6 +666,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/qualification-members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List named qualification targets, including former members */
+        get: operations["listQualificationMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-rule-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate hypothetical facts against a draft without publishing */
+        post: operations["previewQualificationRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/source-connections": {
         parameters: {
             query?: never;
@@ -2892,6 +2926,10 @@ export interface components {
             data: components["schemas"]["QualificationLevel"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeQualificationPreview: {
+            data: components["schemas"]["QualificationPreview"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeQualificationRuleVersion: {
             data: components["schemas"]["QualificationRuleVersion"];
             meta: components["schemas"]["Meta"];
@@ -3651,6 +3689,33 @@ export interface components {
             requiredTrips: number | null;
             ruleVersionId: string | null;
             version: number;
+        };
+        QualificationPreview: {
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            ruleResults: {
+                /** @enum {string} */
+                outcome: "pass" | "fail" | "unknown";
+                /** @enum {string} */
+                reasonCode: "rule_passed" | "rule_mass_exceeded" | "rule_mass_unknown" | "rule_mass_invalid" | "rule_trailer_type_disallowed" | "rule_trailer_type_unknown" | "rule_trailers_incomplete" | "rule_adr_category_disallowed" | "rule_adr_category_unknown";
+                /** @enum {string} */
+                ruleType: "max_mass" | "allowed_trailer_types" | "allowed_adr_categories";
+            }[];
+        };
+        QualificationPreviewInput: {
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            rules: components["schemas"]["Rule"][];
+            sample: {
+                adr: {
+                    entityId: string | null;
+                    /** @enum {string} */
+                    status: "known" | "non_hazardous" | "unknown";
+                };
+                cargoMassKg: string | null;
+                trailersComplete: boolean;
+                trailerTypeIds: (string | null)[];
+            };
         };
         QualificationRuleVersion: {
             /** Format: date-time */
@@ -5154,6 +5219,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeQualificationLevel"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listQualificationMembers: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded member summaries ordered by exact ascending ID. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListMemberSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewQualificationRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Hypothetical qualification outcome only; no company acceptance or event authority. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationPreview"];
                 };
             };
             default: components["responses"]["Error"];

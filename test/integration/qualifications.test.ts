@@ -1228,3 +1228,225 @@ test("promotion uses one confirmation instant and immutable rule when a stricter
     await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions)),
   ).toHaveLength(1);
 });
+
+test("qualification target lookup is bounded, named, private and bound to current staff sessions", async () => {
+  const credential = await identity.prepareCredential(password);
+  for (let batch = 0; batch < 4; batch++)
+    await unit.run(async (tx) => {
+      for (let i = 0; i < 26; i++) {
+        const n = batch * 26 + i,
+          id = `d3100000-0000-4000-8000-${n.toString().padStart(12, "0")}`;
+        await identity.insertWithCredential(tx, {
+          userId: id,
+          email: `lookup-${n}@example.invalid`,
+          name: "Fictional Duplicate Name",
+          ...credential,
+          roles: ["driver", "dispatcher"],
+        });
+      }
+    });
+  const former = "d3100000-0000-4000-8000-000000000000";
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(membership)
+      .set({ status: "inactive" })
+      .where(eq(membership.userId, former)),
+  );
+  const full = await service.members(director, { limit: 100 });
+  expect(full.items).toHaveLength(100);
+  expect(full.nextCursor).not.toBeNull();
+  const all: typeof full.items = [];
+  let cursor: string | undefined;
+  do {
+    const page = await service.members(director, { limit: 100, ...(cursor ? { cursor } : {}) });
+    all.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  expect(new Set(all.map((m) => m.id)).size).toBe(all.length);
+  expect(all.map((m) => m.id)).toEqual([...all.map((m) => m.id)].sort());
+  expect(all.find((m) => m.id === former)).toMatchObject({
+    nickname: "Fictional Duplicate Name",
+    formerMember: true,
+    roles: ["driver", "dispatcher"],
+  });
+  expect(all.find((m) => m.id === director.userId)?.roles).toContain("director");
+  let selects = 0;
+  const measured = createIdentity(
+    {
+      ...unit,
+      client(tx) {
+        const database = unit.client(tx);
+        return new Proxy(database, {
+          get(target, key, receiver) {
+            if (key === "select")
+              return (...args: unknown[]) => {
+                selects++;
+                return Reflect.apply(target.select, target, args);
+              };
+            return Reflect.get(target, key, receiver);
+          },
+        });
+      },
+    },
+    identityConfig,
+    {},
+    now,
+  );
+  const bounded = await unit.run((tx) => measured.qualificationMembersInTransaction(tx, null, 100));
+  expect(bounded).toHaveLength(101);
+  expect(selects).toBe(3);
+  const [plan] = await control.execute<RowDataPacket[]>(
+    "EXPLAIN SELECT u.id,u.name,m.status FROM identity_users u INNER JOIN identity_memberships m ON m.user_id=u.id WHERE u.id>? ORDER BY u.id LIMIT 101",
+    [former],
+  );
+  expect(plan.length).toBeGreaterThan(0);
+  expect(plan.some((row) => row.key === "PRIMARY")).toBe(true);
+  expect(plan.every((row) => !String(row.Extra).includes("Using filesort"))).toBe(true);
+  for (const m of all)
+    expect(Object.keys(m).sort()).toEqual(["formerMember", "id", "nickname", "roles"]);
+  await expect(service.members(owner)).rejects.toMatchObject({ statusCode: 403 });
+  await expect(service.members(director, { limit: 101 })).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  await expect(
+    service.members(deputy, { cursor: full.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  await expect(service.members(director, { cursor: `${full.nextCursor}x` })).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  const login = await identity.login("qualification-director@example.invalid", password),
+    cookie = login.cookies.map((v) => v.split(";", 1)[0]).join("; "),
+    another = await identity.authenticate(new Headers({ cookie }));
+  await expect(
+    service.members(another, { cursor: full.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+});
+
+test("preview HTTP admits current staff before parsing, enforces closed CSRF facts and writes no domain state", async () => {
+  const app = await createApp({
+      identity,
+      qualifications: service,
+      checkReadiness: async () => true,
+    }),
+    url = "/api/v1/admin/qualification-rule-previews",
+    payload = {
+      game: "ets2",
+      rules: [{ type: "max_mass", maxKg: "10" }],
+      sample: {
+        cargoMassKg: "10.000000000000000001",
+        trailerTypeIds: [],
+        trailersComplete: false,
+        adr: { status: "unknown", entityId: null },
+      },
+    };
+  async function snapshot() {
+    const counts: Record<string, number> = {};
+    for (const table of [
+      "qualification_assignments",
+      "qualification_rule_versions",
+      "qualification_promotions",
+      "trip_contributions",
+      "audit_entries",
+      "outbox_events",
+    ]) {
+      const [rows] = await control.query<RowDataPacket[]>(`SELECT COUNT(*) n FROM ${table}`);
+      counts[table] = Number(rows[0]?.n);
+    }
+    return counts;
+  }
+  try {
+    const before = await snapshot();
+    expect((await app.inject({ method: "POST", url, payload })).statusCode).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { cookie: ownerCookie, "content-type": "application/json" },
+          payload: "{",
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: "POST", url, headers: { cookie: directorCookie }, payload }))
+        .statusCode,
+    ).toBe(403);
+    const csrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: directorCookie } })
+    ).json().data.token;
+    const headers = { cookie: directorCookie, origin, "x-csrf-token": csrf };
+    for (const extra of ["ownerId", "accepted", "confirmedEvent", "sourcePayload"])
+      expect(
+        (await app.inject({ method: "POST", url, headers, payload: { ...payload, [extra]: true } }))
+          .statusCode,
+      ).toBe(422);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { ...headers, origin: "https://example.invalid" },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(403);
+    const result = await app.inject({ method: "POST", url, headers, payload });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().data).toEqual({
+      outcome: "fail",
+      ruleResults: [{ ruleType: "max_mass", outcome: "fail", reasonCode: "rule_mass_exceeded" }],
+    });
+    expect(await snapshot()).toEqual(before);
+    expect(
+      (
+        await app.inject({
+          url: "/api/v1/admin/qualification-members",
+          headers: { cookie: ownerCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const members = await app.inject({
+      url: "/api/v1/admin/qualification-members?limit=1",
+      headers: { cookie: directorCookie },
+    });
+    expect(members.statusCode).toBe(200);
+    expect(members.json().data.items).toHaveLength(1);
+    expect(
+      (await app.inject({ url: "/api/v1/admin/members", headers: { cookie: directorCookie } }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ url: "/api/v1/members", headers: { cookie: directorCookie } }))
+        .statusCode,
+    ).toBe(404);
+    const revoked = await member(["deputy_director"]);
+    const revokedCsrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: revoked.cookie } })
+    ).json().data.token;
+    await identity.administer(director, revoked.actor.userId, newId(), 1, {
+      kind: "roles",
+      roles: ["driver"],
+    });
+    expect(
+      (
+        await app.inject({
+          url: "/api/v1/admin/qualification-members",
+          headers: { cookie: revoked.cookie },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers: { cookie: revoked.cookie, origin, "x-csrf-token": revokedCsrf },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(401);
+  } finally {
+    await app.close();
+  }
+});

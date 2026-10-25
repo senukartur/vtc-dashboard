@@ -26,6 +26,11 @@ import { createAppQueryClient } from "./session-cache.js";
 const TripsPage = lazy(() =>
   import("../features/trips/TripsPage.js").then((module) => ({ default: module.TripsPage })),
 );
+const QualificationsPage = lazy(() =>
+  import("../features/qualifications/QualificationsPage.js").then((module) => ({
+    default: module.QualificationsPage,
+  })),
+);
 const TripDetailPage = lazy(() =>
   import("../features/trips/TripDetailPage.js").then((module) => ({
     default: module.TripDetailPage,
@@ -186,6 +191,14 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <CatalogsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/qualifications"
+              element={
+                <ProtectedAccount>
+                  <QualificationsPage />
                 </ProtectedAccount>
               }
             />

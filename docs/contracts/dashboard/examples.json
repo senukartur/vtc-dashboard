@@ -5358,6 +5358,82 @@
           "requestId": "synthetic-request-030"
         }
       }
+    },
+    {
+      "id": "listQualificationMembers:success",
+      "operationId": "listQualificationMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "d3100000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Qualification Member",
+              "formerMember": false,
+              "roles": [
+                "driver",
+                "dispatcher"
+              ]
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
+    },
+    {
+      "id": "previewQualificationRules:success",
+      "operationId": "previewQualificationRules",
+      "status": 200,
+      "request": {
+        "game": "ets2",
+        "rules": [
+          {
+            "type": "max_mass",
+            "maxKg": "10"
+          }
+        ],
+        "sample": {
+          "cargoMassKg": "10.000000000000000001",
+          "trailerTypeIds": [],
+          "trailersComplete": false,
+          "adr": {
+            "status": "unknown",
+            "entityId": null
+          }
+        }
+      },
+      "response": {
+        "data": {
+          "outcome": "fail",
+          "ruleResults": [
+            {
+              "ruleType": "max_mass",
+              "outcome": "fail",
+              "reasonCode": "rule_mass_exceeded"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
+    },
+    {
+      "id": "listQualificationMembers:empty",
+      "operationId": "listQualificationMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
     }
   ]
 }
