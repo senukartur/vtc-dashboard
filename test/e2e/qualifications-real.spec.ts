@@ -16,6 +16,173 @@ async function confirm(page: Page, label: string) {
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
+test("real four configured levels publish and assign within the unchanged shared read budget without intermediate resets", async ({
+  page,
+  context,
+}, info) => {
+  const fixture = await tripBrowserFixture(),
+    staff = await staffContext();
+  const reads: { operation: string; status: number | null; minute: number | null }[] = [],
+    pending = new Map<object, number>();
+  let phase = "FIXTURE",
+    failure: unknown,
+    authenticated = false,
+    persistedAssignment = false;
+  const operation = (url: string) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/v1/me" || path.startsWith("/api/v1/me/")) return "self";
+    if (path === "/api/v1/admin/qualification-members") return "targets";
+    if (
+      path.startsWith("/api/v1/qualification-levels") ||
+      path.startsWith("/api/v1/admin/qualification-levels")
+    )
+      return "levels_or_rules";
+    if (/^\/api\/v1\/admin\/members\/[^/]+\/qualification-/.test(path))
+      return "target_progress_or_history";
+    return null;
+  };
+  let capture = false,
+    userId = "";
+  page.on("request", (request) => {
+    const kind = request.method() === "GET" ? operation(request.url()) : null;
+    if (capture && kind) {
+      pending.set(request, reads.length);
+      reads.push({ operation: kind, status: null, minute: null });
+    }
+  });
+  page.on("response", (response) => {
+    const index = pending.get(response.request()),
+      row = index === undefined ? undefined : reads[index];
+    if (row) {
+      row.status = response.status();
+      const date = Date.parse(response.headers().date ?? "");
+      row.minute = Number.isFinite(date) ? Math.floor(date / 60000) : null;
+    }
+  });
+  try {
+    const identity = fixture.composed.identity,
+      q = fixture.composed.qualifications;
+    if (!q) throw Error("QUALIFICATION_NORMAL_COMPOSITION_MISSING");
+    for (const level of (await q.levels(fixture.staff, "ets2")).items)
+      await q.publish(fixture.staff, level.id, randomUUID(), level.version, {
+        rules: [{ type: "max_mass", maxKg: "20000" }],
+        requiredTrips: 2,
+        requiredDistanceM: "100",
+        reason: "Fictional four-level configuration",
+      });
+    expect(
+      (await q.levels(fixture.staff, "ets2")).items.filter((level) => level.configured),
+    ).toHaveLength(4);
+    userId = `00000000-0000-4000-8000-${randomUUID().replaceAll("-", "").slice(-12)}`;
+    const name = `Fictional bounded qualification ${info.project.name}`,
+      credential = await identity.prepareCredential(fixture.password);
+    await fixture.unit.run((tx) =>
+      identity.insertWithCredential(tx, {
+        userId,
+        email: `${userId}@example.invalid`,
+        name,
+        roles: ["trainee", "dispatcher"],
+        ...credential,
+      }),
+    );
+    expect(
+      (await q.members(fixture.staff, { limit: 25 })).items.some((member) => member.id === userId),
+    ).toBe(true);
+    await context.addCookies((await staff.storageState()).cookies);
+    // One fixture boundary precedes every UI read; the ordinary flow has no reset or pacing.
+    await resetAccountLimits();
+    capture = true;
+    phase = "TARGET";
+    await page.goto("/account/qualifications");
+    await catalogLanguage(page);
+    await page.getByRole("combobox", { name: "Member", exact: true }).selectOption({ label: name });
+    await expect(
+      page.getByText("No current assignment is recorded for this game.", { exact: true }),
+    ).toBeVisible();
+    phase = "PUBLISH";
+    await page.getByRole("button", { name: "Edit rules", exact: true }).first().click();
+    const editor = page
+      .locator("section")
+      .filter({ has: page.locator('[id^="sample-mass-"]') })
+      .last();
+    await editor.locator('[id^="mass-"]').fill("25000");
+    await editor.locator('[id^="sample-mass-"]').fill("25000");
+    await editor.locator('[id^="reason-"]').fill("Fictional normal publication");
+    await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+    await expect(
+      editor.getByRole("heading", { name: "Sample outcome: Pass", exact: true }),
+    ).toBeVisible();
+    await confirm(page, "Publish rule version");
+    phase = "ASSIGN";
+    await page.locator("#assignment-level").selectOption(structuralLevels.ets2[0]);
+    await page.locator("#assignment-reason").fill("Fictional normal assignment");
+    await confirm(page, "Assign qualification");
+    phase = "READBACK";
+    const history = page
+      .getByRole("heading", { name: "Assignment history", exact: true })
+      .locator("..");
+    await expect(history).toContainText("Initial assignment");
+    await expect(
+      page.getByText("The server confirmed the change.", { exact: true }).last(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Qualification administration", exact: true }),
+    ).toBeVisible();
+  } catch (error) {
+    failure = error;
+  } finally {
+    try {
+      const me = await page.request.get("/api/v1/me"),
+        date = Date.parse(me.headers().date ?? "");
+      reads.push({
+        operation: "final_self",
+        status: me.status(),
+        minute: Number.isFinite(date) ? Math.floor(date / 60000) : null,
+      });
+      authenticated =
+        me.status() === 200 && (await me.json()).data.member.id === fixture.staff.userId;
+      const q = fixture.composed.qualifications;
+      if (q && userId)
+        persistedAssignment = (
+          await q.history(fixture.staff, userId, "ets2", {}, true)
+        ).data.items.some((row) => row.levelId === structuralLevels.ets2[0]);
+      const ledger = {
+        phase,
+        completed: !failure,
+        authenticated,
+        persistedAssignment,
+        totalSharedBucketReads: reads.length,
+        reads,
+      };
+      await info.attach("qualification-normal-read-budget", {
+        body: JSON.stringify(ledger),
+        contentType: "application/json",
+      });
+      console.log(
+        JSON.stringify({
+          event: "qualification_normal_read_budget",
+          phase,
+          completed: !failure,
+          authenticated,
+          persistedAssignment,
+          total: reads.length,
+          limited: reads.filter((row) => row.status === 429).length,
+        }),
+      );
+    } finally {
+      await staff.dispose();
+      await fixture.close();
+    }
+  }
+  expect(
+    reads.length,
+    "all shared-bucket GETs fit even if the flow crosses a minute boundary",
+  ).toBeLessThanOrEqual(20);
+  expect(reads.filter((row) => row.status === 429)).toEqual([]);
+  expect(authenticated).toBe(true);
+  expect(persistedAssignment).toBe(true);
+  if (failure) throw new Error(`SYNTHETIC_QUALIFICATION_NORMAL_${phase}`, { cause: failure });
+});
 test("real named target rule preview publication assignment accepted contributions and explicit promotion preserve ATS and additive roles", async ({
   page,
   context,
