@@ -157,6 +157,7 @@ test("real named target rule preview publication assignment accepted contributio
     expect(ats.data).toEqual(beforeATS.data);
     expect((await q.progress(fixture.staff, userId, "ets2", "admin")).data.acceptedTrips).toBe(0);
     phase = "ATTRIBUTION_RELOAD";
+    await resetAccountLimits();
     await page.reload();
     await catalogLanguage(page);
     const reloadedTarget = page.getByRole("combobox", { name: "Member", exact: true });
@@ -212,6 +213,7 @@ test("real named target rule preview publication assignment accepted contributio
       id: fixture.staff.userId,
       nickname: staffName,
     });
+    await resetAccountLimits();
     await context.clearCookies();
     await write(page.request, "/auth/login", { email, password: fixture.password });
     await page.goto("/account/qualifications");

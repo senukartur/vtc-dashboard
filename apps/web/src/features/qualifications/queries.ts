@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
@@ -14,8 +13,7 @@ import {
 } from "./transport.js";
 export function useQualificationQuery<K extends keyof DTO>(path: string, name: K, enabled = true) {
   const session = useSession(),
-    client = useQueryClient(),
-    { i18n } = useTranslation();
+    client = useQueryClient();
   const query = useQuery({
     queryKey: [
       "qualification-workspace",
@@ -23,7 +21,6 @@ export function useQualificationQuery<K extends keyof DTO>(path: string, name: K
       session.generation,
       session.self?.identityEpoch,
       session.self?.capabilities.join(","),
-      i18n.resolvedLanguage,
       path,
       name,
     ],

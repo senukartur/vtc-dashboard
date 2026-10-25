@@ -174,6 +174,7 @@ for (const locale of ["en", "ru"] as const) {
     const unchangedWireInput = JSON.stringify(state.previewInputs.at(-1));
     await catalogLanguage(page, locale === "en" ? "ru" : "en");
     await expect(editor.getByText(adrId, { exact: true })).toBeVisible();
+    await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional labelled draft");
     const localePreview = page.waitForResponse(
       (response) =>
         response.url().endsWith("/admin/qualification-rule-previews") &&
@@ -188,6 +189,9 @@ for (const locale of ["en", "ru"] as const) {
     await localePreview;
     expect(JSON.stringify(state.previewInputs.at(-1))).toBe(unchangedWireInput);
     await catalogLanguage(page, locale);
+    await expect(trailer.locator("li").filter({ hasText: "Fictional trailer 27" })).toBeVisible();
+    await expect(adr.locator("li")).toContainText("Fictional ADR");
+    await expect(sample.locator("li")).toContainText("Fictional trailer 27");
     await editor.screenshot({
       path: info.outputPath(`qualification-labelled-draft-${locale}.png`),
     });
