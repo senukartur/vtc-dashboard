@@ -155,7 +155,8 @@ test("controlled historical receipt must fence an old GET before reading the lat
       editor.getByText("The server confirmed the change.", { exact: true }),
     ).toBeVisible();
     await expect(card.getByText("Version: 4", { exact: true })).toBeVisible();
-    await expect(card.getByText("40 kg", { exact: true })).toBeVisible();
+    await expect(card.locator(":scope > dl").getByText("40 kg", { exact: true })).toBeVisible();
+    await expect(editor.getByRole("alert").getByText("40 kg", { exact: true })).toBeVisible();
     expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
     expect(state.etags).toEqual(['"v1"', '"v1"']);
     await expect(
