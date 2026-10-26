@@ -51,6 +51,21 @@ const ReconciliationPage = lazy(() =>
     default: module.ReconciliationPage,
   })),
 );
+const DashboardPage = lazy(() =>
+  import("../features/dashboard/DashboardPage.js").then((module) => ({
+    default: module.DashboardPage,
+  })),
+);
+const DriversPage = lazy(() =>
+  import("../features/drivers/DriversPage.js").then((module) => ({
+    default: module.DriversPage,
+  })),
+);
+const DriverProfilePage = lazy(() =>
+  import("../features/drivers/DriverProfilePage.js").then((module) => ({
+    default: module.DriverProfilePage,
+  })),
+);
 
 const queryClient = createAppQueryClient();
 const memberPath = "/foundation/member";
@@ -183,6 +198,30 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <AccountPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/dashboard"
+              element={
+                <ProtectedAccount>
+                  <DashboardPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/drivers"
+              element={
+                <ProtectedAccount>
+                  <DriversPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/drivers/:memberId"
+              element={
+                <ProtectedAccount>
+                  <DriverProfilePage />
                 </ProtectedAccount>
               }
             />

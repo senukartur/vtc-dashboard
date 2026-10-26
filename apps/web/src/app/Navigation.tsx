@@ -42,6 +42,16 @@ export function Navigation({
             {t("account:account")}
           </NavLink>
           {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/dashboard" onClick={close}>
+              {t("dashboard:title")}
+            </NavLink>
+          )}
+          {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/drivers" onClick={close}>
+              {t("drivers:directory.title")}
+            </NavLink>
+          )}
+          {session.self?.capabilities.includes("company.read") && (
             <NavLink to="/account/catalogs" onClick={close}>
               {t("catalogs:title")}
             </NavLink>
@@ -66,7 +76,6 @@ export function Navigation({
             {t("home")}
           </Link>
           {[
-            ["company.read", "dashboard"],
             ["applications.manage", "administration"],
             ["leadership.transfer", "leadership"],
           ]

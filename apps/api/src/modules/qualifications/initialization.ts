@@ -1,7 +1,9 @@
+import type { components } from "@vtc/contracts";
 import { newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   and,
   eq,
+  inArray,
   initialQualifications,
   qualificationAssignments,
   qualificationStates,
@@ -86,6 +88,32 @@ export function createQualificationInitialization(unit: UnitOfWork) {
           .set({ assignmentId: null, version: state.version + 1 })
           .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
       }
+    },
+    async currentAssignments(
+      tx: TxContext,
+      userId: string,
+    ): Promise<components["schemas"]["Assignment"][]> {
+      const states = await unit
+        .client(tx)
+        .select({ assignmentId: qualificationStates.assignmentId })
+        .from(qualificationStates)
+        .where(eq(qualificationStates.userId, userId))
+        .for("share");
+      const ids = states.map((s) => s.assignmentId).filter((id): id is string => id !== null);
+      if (!ids.length) return [];
+      const rows = await unit
+        .client(tx)
+        .select()
+        .from(qualificationAssignments)
+        .where(inArray(qualificationAssignments.id, ids))
+        .for("share");
+      return rows.map((row) => ({
+        id: row.id,
+        periodId: row.id,
+        game: row.game,
+        levelId: row.levelId,
+        assignedAt: row.assignedAt,
+      }));
     },
   };
 }

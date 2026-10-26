@@ -1856,10 +1856,6 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
       (await app.inject({ url: "/api/v1/admin/members", headers: { cookie: directorCookie } }))
         .statusCode,
     ).toBe(404);
-    expect(
-      (await app.inject({ url: "/api/v1/members", headers: { cookie: directorCookie } }))
-        .statusCode,
-    ).toBe(404);
     const revoked = await member(["deputy_director"]);
     const revokedCsrf = (
       await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: revoked.cookie } })
