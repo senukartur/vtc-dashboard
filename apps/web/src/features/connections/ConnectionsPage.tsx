@@ -16,10 +16,12 @@ import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "../admin/trans
 function Tokens() {
   const { t } = useTranslation("administration"),
     session = useSession(),
+    allowed = session.self?.capabilities.includes("trips.submit_own") ?? false,
     [cursor, setCursor] = useState<string | null>(null),
     query = useWorkspaceQuery(
       `/me/telemetry-tokens?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       "EnvelopeListTokenInfo",
+      allowed,
     ),
     issue = useWorkspaceCommand(),
     revoke = useWorkspaceCommand(),
@@ -27,8 +29,7 @@ function Tokens() {
     [secret, setSecret] = useState<string | null>(null);
   const issueTrigger = useRef<HTMLButtonElement | null>(null),
     returnFocus = useRef<HTMLElement | null>(null);
-  const allowed = session.self?.capabilities.includes("trips.submit_own") ?? false,
-    recoveryId = issue.failure?.ownResourceId;
+  const recoveryId = issue.failure?.ownResourceId;
   async function revokeToken(id: string) {
     const result = await revoke.run(
       `/me/telemetry-tokens/${id}`,
@@ -85,73 +86,77 @@ function Tokens() {
           </Button>
         </form>
       )}
-      <CommandFeedback command={issue} />
-      {recoveryId && (
-        <div className="stack">
-          <p>{t("tokenRecovery")}</p>
-          <p className="admin-id">{recoveryId}</p>
-          <Button disabled={revoke.pending} onClick={() => void revokeToken(recoveryId)}>
-            {t("recoverRevoke")}
-          </Button>
-        </div>
-      )}
-      <QueryState
-        pending={query.isPending}
-        error={query.isError}
-        retry={query.refetch}
-        empty={query.data?.data.data.items.length === 0}
-      />
-      {query.data?.data.data.items.map((token) => (
-        <section className="stack" key={token.id}>
-          <h3>{token.label}</h3>
-          <p>
-            {t("created")}: {token.createdAt}
-          </p>
-          <p>
-            {t("lastUsed")}: {token.lastUsedAt ?? t("neverUsed")}
-          </p>
-          {token.revokedAt ? (
-            <Badge>{t("revoked")}</Badge>
-          ) : (
-            <Confirmation
-              label={`${t("revokeToken")} · ${token.label}`}
-              description={t("revokeHelp")}
-              busy={revoke.pending}
-              disabled={revoke.held || revoke.seconds > 0}
-              confirm={() => revokeToken(token.id)}
-            >
-              <p>{token.label}</p>
-              <p className="admin-id">{token.id}</p>
-            </Confirmation>
+      {allowed && (
+        <>
+          <CommandFeedback command={issue} />
+          {recoveryId && (
+            <div className="stack">
+              <p>{t("tokenRecovery")}</p>
+              <p className="admin-id">{recoveryId}</p>
+              <Button disabled={revoke.pending} onClick={() => void revokeToken(recoveryId)}>
+                {t("recoverRevoke")}
+              </Button>
+            </div>
           )}
-        </section>
-      ))}
-      <Pager cursor={cursor} next={query.data?.data.data.nextCursor} setCursor={setCursor} />
-      {revoke.held && (
-        <Button
-          disabled={revoke.pending || revoke.seconds > 0}
-          onClick={() =>
-            void revoke.run(
-              "/me/telemetry-tokens",
-              "EnvelopeCommandResult",
-              undefined,
-              null,
-              "DELETE",
-            )
-          }
-        >
-          {t("refresh")}
-        </Button>
-      )}
-      <CommandFeedback command={revoke} />
-      {secret && (
-        <SensitiveValue
-          title={t("tokenSecret")}
-          description={t("tokenHelp")}
-          value={secret}
-          returnFocus={returnFocus.current}
-          close={() => setSecret(null)}
-        />
+          <QueryState
+            pending={query.isPending}
+            error={query.isError}
+            retry={query.refetch}
+            empty={query.data?.data.data.items.length === 0}
+          />
+          {query.data?.data.data.items.map((token) => (
+            <section className="stack" key={token.id}>
+              <h3>{token.label}</h3>
+              <p>
+                {t("created")}: {token.createdAt}
+              </p>
+              <p>
+                {t("lastUsed")}: {token.lastUsedAt ?? t("neverUsed")}
+              </p>
+              {token.revokedAt ? (
+                <Badge>{t("revoked")}</Badge>
+              ) : (
+                <Confirmation
+                  label={`${t("revokeToken")} · ${token.label}`}
+                  description={t("revokeHelp")}
+                  busy={revoke.pending}
+                  disabled={revoke.held || revoke.seconds > 0}
+                  confirm={() => revokeToken(token.id)}
+                >
+                  <p>{token.label}</p>
+                  <p className="admin-id">{token.id}</p>
+                </Confirmation>
+              )}
+            </section>
+          ))}
+          <Pager cursor={cursor} next={query.data?.data.data.nextCursor} setCursor={setCursor} />
+          {revoke.held && (
+            <Button
+              disabled={revoke.pending || revoke.seconds > 0}
+              onClick={() =>
+                void revoke.run(
+                  "/me/telemetry-tokens",
+                  "EnvelopeCommandResult",
+                  undefined,
+                  null,
+                  "DELETE",
+                )
+              }
+            >
+              {t("refresh")}
+            </Button>
+          )}
+          <CommandFeedback command={revoke} />
+          {secret && (
+            <SensitiveValue
+              title={t("tokenSecret")}
+              description={t("tokenHelp")}
+              value={secret}
+              returnFocus={returnFocus.current}
+              close={() => setSecret(null)}
+            />
+          )}
+        </>
       )}
     </Card>
   );
@@ -242,11 +247,18 @@ function ExternalIdentity() {
 }
 export function ConnectionsPage() {
   const { t } = useTranslation("administration"),
+    session = useSession(),
     capabilities = useWorkspaceQuery(
       "/me/connection-capabilities",
       "EnvelopePersonalConnectionCapabilities",
     ),
-    data = capabilities.data?.data.data;
+    data = capabilities.data?.data.data,
+    scope = [
+      session.self?.member.id,
+      session.generation,
+      session.self?.identityEpoch,
+      session.self?.capabilities.join(","),
+    ].join(":");
   return (
     <div className="administration-page stack">
       <WorkspaceHeading title={t("connections")} />
@@ -259,7 +271,7 @@ export function ConnectionsPage() {
         <>
           {(!data.telemetry || !data.externalIdentities) && <p role="status">{t("partial")}</p>}
           {data.externalIdentities ? (
-            <ExternalIdentity />
+            <ExternalIdentity key={scope} />
           ) : (
             <Card>
               <h2>{t("identity")}</h2>
@@ -267,7 +279,7 @@ export function ConnectionsPage() {
             </Card>
           )}
           {data.telemetry ? (
-            <Tokens />
+            <Tokens key={scope} />
           ) : (
             <Card>
               <h2>{t("tokens")}</h2>

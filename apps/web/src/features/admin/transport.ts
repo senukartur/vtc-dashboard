@@ -18,8 +18,7 @@ export class AdministrationFailure extends AccountFailure {
 }
 import { frozenAttempt, type RequestAttempt } from "./attempt.js";
 export function useWorkspaceQuery<K extends keyof DTO>(path: string, name: K, enabled = true) {
-  const session = useSession(),
-    client = useQueryClient();
+  const session = useSession();
   const query = useQuery({
     queryKey: [
       "administration",
@@ -44,8 +43,9 @@ export function useWorkspaceQuery<K extends keyof DTO>(path: string, name: K, en
         if (!signal.aborted && error instanceof AccountFailure) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
           if (error.kind === "forbidden") {
-            await client.cancelQueries({ queryKey: ["administration"] });
-            client.removeQueries({ queryKey: ["administration"], type: "inactive" });
+            // Reconcile current authority before changing other reads. A resource-level
+            // denial at unchanged authority must not strand permitted pending queries.
+            // Authority-bound keys and Session's private-cache clearing cancel obsolete reads.
             await session.refresh();
           }
         }
@@ -169,13 +169,16 @@ export function useWorkspaceCommand() {
       const parsed = schema(name).safeParse(await response.json());
       if (!parsed.success) throw new AdministrationFailure("uncertain");
       if (!active.current || current.signal.aborted) return;
+      // The confirmed response ends the command deadline. Subsequent read failures
+      // cannot turn a committed command (including a one-show secret) into uncertainty.
+      clearTimeout(timer);
       attempt.current = null;
       setHeld(false);
       setCommitted(true);
-      if (refreshReads) await refresh(request.path);
+      if (refreshReads) void refresh(request.path).catch(() => undefined);
       if (request.path.startsWith(`/admin/members/${session.self?.member.id}/`))
-        await session.refresh();
-      return active.current && !current.signal.aborted ? parsed.data : undefined;
+        void session.refresh().catch(() => undefined);
+      return parsed.data;
     } catch (error) {
       if (!active.current) return;
       const safe =

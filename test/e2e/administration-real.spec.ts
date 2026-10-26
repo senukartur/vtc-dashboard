@@ -985,3 +985,294 @@ test("real revoked administration session clears private content before a delaye
     await staff.dispose();
   }
 });
+
+for (const refreshOutcome of ["success", "failure"] as const) {
+  test(`real confirmed token survives ${refreshOutcome} list refresh beyond the command deadline`, async ({
+    page,
+    context,
+  }) => {
+    const member = await administrationMember(),
+      label = `Fictional confirmed ${refreshOutcome}`;
+    expect(
+      (
+        await write(context.request, "/auth/login", {
+          email: member.email,
+          password: member.password,
+        })
+      ).status(),
+    ).toBe(200);
+    const proof = await write(context.request, "/me/steam-verifications");
+    expect(proof.status()).toBe(200);
+    await steamAssertion(context.request, (await proof.json()).data.verificationUrl);
+    const initialList = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/v1/me/telemetry-tokens" &&
+        response.request().method() === "GET",
+    );
+    await page.goto("/account/connections");
+    expect((await initialList).status()).toBe(200);
+    await catalogLanguage(page);
+    await expect(page.getByLabel("Credential label", { exact: true })).toBeVisible();
+    const tokens = page
+      .getByRole("heading", { name: "Personal telemetry credentials", exact: true })
+      .locator("..");
+    await expect(
+      tokens.getByText("There are no records in this view.", { exact: true }),
+    ).toBeVisible();
+    let release: () => void = () => {},
+      entered: () => void = () => {},
+      held = true,
+      posts = 0,
+      issuedId = "",
+      issuedSecret = "";
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+    await page.route("**/api/v1/me/telemetry-tokens**", async (route) => {
+      if (new URL(route.request().url()).pathname !== "/api/v1/me/telemetry-tokens")
+        return route.continue();
+      if (route.request().method() === "POST") {
+        posts++;
+        const response = await route.fetch();
+        expect(response.status()).toBe(201);
+        const data = (await response.json()).data;
+        issuedId = data.info.id;
+        issuedSecret = data.token;
+        await route.fulfill({ response });
+      } else if (route.request().method() === "GET" && held) {
+        held = false;
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        entered();
+        await gate;
+        if (refreshOutcome === "success") await route.fulfill({ response });
+        else
+          await route.fulfill({
+            status: 503,
+            json: {
+              error: {
+                code: "SERVICE_UNAVAILABLE",
+                messageKey: "errors.service_unavailable",
+                retryable: true,
+              },
+              meta: { requestId: "synthetic-confirmed-token-list-failure" },
+            },
+          });
+      } else await route.continue();
+    });
+    await page.clock.install();
+    try {
+      await page.getByLabel("Credential label", { exact: true }).fill(label);
+      await page.getByRole("button", { name: "Create credential", exact: true }).click();
+      await ready;
+      // The real POST is committed and its subsequent list read is held. Advance
+      // the browser command timer past 15 seconds without sleeping or releasing the read.
+      await page.clock.fastForward(15001);
+      const secret = page.getByRole("dialog", { name: "One-time telemetry secret", exact: true });
+      await expect(secret).toBeVisible();
+      expect(
+        (await secret.locator("pre").textContent()) === issuedSecret && issuedSecret.length > 0,
+      ).toBe(true);
+      expect(posts).toBe(1);
+      const refreshed = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/me/telemetry-tokens" &&
+          response.request().method() === "GET",
+      );
+      release();
+      expect((await refreshed).status()).toBe(refreshOutcome === "success" ? 200 : 503);
+      await expect(secret).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(
+        page.getByRole("button", { name: "Create credential", exact: true }),
+      ).toBeFocused();
+      await expect(page.locator(".admin-secret")).toHaveCount(0);
+      await expect(
+        tokens.getByText(
+          "The result could not be confirmed. Retry the original request before making another change.",
+          { exact: true },
+        ),
+      ).toHaveCount(0);
+      await expect(
+        page.getByRole("button", {
+          name: "Revoke credential from the previous issuance",
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      if (refreshOutcome === "failure") {
+        await expect(tokens.getByRole("alert")).toContainText("This information is unavailable.");
+        const recovered = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/v1/me/telemetry-tokens" &&
+            response.request().method() === "GET",
+        );
+        await tokens.getByRole("button", { name: "Refresh", exact: true }).click();
+        expect((await recovered).status()).toBe(200);
+      }
+      await expect(tokens.getByRole("heading", { name: label, exact: true })).toBeVisible();
+      await confirm(page, `Revoke credential · ${label}`);
+      await expect(tokens.getByText("Revoked", { exact: true })).toBeVisible();
+      const listed = await context.request.get("/api/v1/me/telemetry-tokens?limit=25");
+      expect(listed.status()).toBe(200);
+      const matching = (await listed.json()).data.items.filter(
+        (row: { label: string }) => row.label === label,
+      );
+      expect(matching.length).toBe(1);
+      expect(matching[0].id === issuedId && matching[0].revokedAt !== null).toBe(true);
+      expect(posts).toBe(1);
+    } finally {
+      release();
+      await page.clock.resume();
+    }
+  });
+}
+
+for (const role of ["deputy_director", "dispatcher"] as const) {
+  test(`real non-driving ${role} connections keep delayed permitted identity without requesting tokens`, async ({
+    page,
+    context,
+  }) => {
+    const member = await administrationMember([role]);
+    expect(
+      (
+        await write(context.request, "/auth/login", {
+          email: member.email,
+          password: member.password,
+        })
+      ).status(),
+    ).toBe(200);
+    let release: () => void = () => {},
+      entered: () => void = () => {},
+      tokenReads = 0;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+      ready = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v1/me/telemetry-tokens") tokenReads++;
+    });
+    await page.route("**/api/v1/me/identity", async (route) => {
+      const response = await route.fetch();
+      expect(response.status()).toBe(200);
+      entered();
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await page.goto("/account/connections");
+      await ready;
+      await catalogLanguage(page);
+      const tokens = page
+        .getByRole("heading", { name: "Personal telemetry credentials", exact: true })
+        .locator("..");
+      await expect(
+        tokens.getByText("Your current roles do not allow personal telemetry credentials.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(tokens.getByRole("status")).toHaveCount(0);
+      await expect(tokens.getByRole("alert")).toHaveCount(0);
+      await expect(tokens.getByRole("button")).toHaveCount(0);
+      expect((await context.request.get("/api/v1/me/telemetry-tokens?limit=25")).status()).toBe(
+        403,
+      );
+      const identity = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me/identity",
+      );
+      release();
+      expect((await identity).status()).toBe(200);
+      await expect(
+        page.getByRole("button", { name: "Verify Steam ownership", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page
+          .getByRole("heading", { name: "Steam and TruckersMP", exact: true })
+          .locator("..")
+          .getByText("Not linked", { exact: true })
+          .first(),
+      ).toBeVisible();
+      expect(tokenReads).toBe(0);
+    } finally {
+      release();
+    }
+  });
+}
+
+test("controlled resource denial at unchanged real authority does not cancel a permitted identity read", async ({
+  page,
+  context,
+}) => {
+  const member = await administrationMember();
+  expect(
+    (
+      await write(context.request, "/auth/login", {
+        email: member.email,
+        password: member.password,
+      })
+    ).status(),
+  ).toBe(200);
+  let release: () => void = () => {},
+    entered: () => void = () => {},
+    denied = false;
+  const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+    ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+  await page.route("**/api/v1/me/identity", async (route) => {
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    entered();
+    await gate;
+    try {
+      await route.fulfill({ response });
+    } catch {
+      /* A regression may cancel the request. */
+    }
+  });
+  await page.route("**/api/v1/me/telemetry-tokens**", async (route) => {
+    await ready;
+    denied = true;
+    await route.fulfill({
+      status: 403,
+      json: {
+        error: { code: "FORBIDDEN", messageKey: "errors.forbidden", retryable: false },
+        meta: { requestId: "synthetic-isolated-resource-denial" },
+      },
+    });
+  });
+  const reconciled = page.waitForResponse(
+    (response) =>
+      denied &&
+      new URL(response.url()).pathname === "/api/v1/me" &&
+      response.request().method() === "GET",
+  );
+  try {
+    await page.goto("/account/connections");
+    await ready;
+    const current = await reconciled;
+    expect(current.status()).toBe(200);
+    expect((await current.json()).data.capabilities.includes("trips.submit_own")).toBe(true);
+    await catalogLanguage(page);
+    release();
+    await expect(
+      page.getByRole("button", { name: "Verify Steam ownership", exact: true }),
+    ).toBeVisible();
+    const listed = await context.request.get("/api/v1/me/telemetry-tokens?limit=25");
+    expect(listed.status()).toBe(200);
+    await expect(
+      page
+        .getByRole("heading", { name: "Personal telemetry credentials", exact: true })
+        .locator("..")
+        .getByRole("alert"),
+    ).toContainText("This information is unavailable.");
+  } finally {
+    release();
+  }
+});
