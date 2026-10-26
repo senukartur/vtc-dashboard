@@ -31,22 +31,22 @@ All analytics endpoints require the `company.read` permission (satisfied by acti
 
 - `GET /api/v1/analytics/company`:
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
-  - Returns `summary` (`acceptedTrips`, `actualDistanceM`, `projectionPending`), `reportingTimezone`, and contiguous `timeSeries` buckets.
+  - Returns envelope with `data` containing `acceptedTrips`, `actualDistanceM`, `projectionPending`, `reportingTimezone`, and contiguous `buckets`.
 
 - `GET /api/v1/members/:memberId/analytics`:
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
-  - Returns target `member` (`id`, `name`), `summary`, `reportingTimezone`, and `timeSeries` buckets.
+  - Returns member analytics envelope matching `Analytics` schema for the specified member.
 
 - `GET /api/v1/analytics/leaderboard`:
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game`, optional pagination `limit` (1-100, default 50) and signed `cursor`.
-  - Returns ranked member items ordered by distance descending and trips descending, with deterministic tie-breaking by member ID.
+  - Returns ranked member items (`member: { id }`, `acceptedTrips`, `actualDistanceM`) ordered by distance descending, with deterministic tie-breaking by member ID ascending.
   - Keyset pagination uses HMAC-SHA256 cursors bound to the requester's identity session, access epoch, and filter scope to prevent cross-user replay and tampering.
 
 ## Database schema and index optimization
 
 - Migration `0015_military_clint_barton.sql` adds:
   - `identity_company.reporting_timezone`: `varchar(128)` nullable launch configuration.
-  - Index `trip_analytics_reporting` on `trips(decision, reporting_at, game, owner_id)` enabling efficient range scans and index-only lookups for accepted trip reporting periods.
+  - Index `trip_analytics_reporting` on `trips(decision, reporting_at, game, owner_id)` enabling efficient range filtering for accepted trips within reporting periods.
 
 ## Configuration
 
