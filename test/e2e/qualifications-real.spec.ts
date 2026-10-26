@@ -9,6 +9,7 @@ import { pngBytes } from "../fixtures/manual-images.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
+import { owningMemberPages, QualificationMemberPicker } from "./support/qualification-members.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
@@ -229,18 +230,48 @@ test("real named target rule preview publication assignment accepted contributio
   await resetAccountLimits();
   const fixture = await tripBrowserFixture(),
     staff = await staffContext();
-  let phase = "MEMBER";
+  let phase = "MEMBER",
+    failure: unknown,
+    userId = "",
+    name = "",
+    picker: QualificationMemberPicker | undefined,
+    preflight: Awaited<ReturnType<typeof owningMemberPages>> | null = null;
   try {
     const identity = fixture.composed.identity,
       q = fixture.composed.qualifications,
       manual = fixture.composed.manualReports,
       decisions = fixture.composed.tripDecisions;
     if (!q || !manual || !decisions) throw Error("QUALIFICATION_BROWSER_COMPOSITION_MISSING");
-    const userId = randomUUID(),
-      email = `${userId}@example.invalid`,
-      name = `Fictional Qualification ${info.project.name}`,
+    userId = `00010001-0000-4000-8000-${randomUUID().replaceAll("-", "").slice(-12)}`;
+    name = `Fictional Qualification ${info.project.name}`;
+    const email = `${userId}@example.invalid`,
       credential = await identity.prepareCredential(fixture.password);
     await fixture.unit.run(async (tx) => {
+      const padding = Array.from({ length: 25 }, (_, index) => ({
+        id: `00010000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+        nickname: `Fictional qualification paging ${index + 1}`,
+      }));
+      const existing = await identity.memberSummariesInTransaction(
+        tx,
+        padding.map((member) => member.id),
+      );
+      for (const member of padding) {
+        const found = existing.get(member.id);
+        if (found)
+          expect(found).toMatchObject({
+            nickname: member.nickname,
+            formerMember: false,
+            roles: ["driver"],
+          });
+        else
+          await identity.insertWithCredential(tx, {
+            userId: member.id,
+            email: `${member.id}@example.invalid`,
+            name: member.nickname,
+            roles: ["driver"],
+            ...credential,
+          });
+      }
       await identity.insertWithCredential(tx, {
         userId,
         email,
@@ -254,29 +285,32 @@ test("real named target rule preview publication assignment accepted contributio
         assignedAt: new Date(Date.now() - 86400000).toISOString(),
       });
     });
+    preflight = await owningMemberPages(
+      (cursor) => q.members(fixture.staff, { limit: 25, ...(cursor ? { cursor } : {}) }),
+      userId,
+      name,
+    );
+    expect(
+      preflight.targetPage,
+      "the synthetic journey must cross real pages",
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      preflight.targetPage,
+      "the reserved fixture remains near the first page",
+    ).toBeLessThanOrEqual(3);
     const login = await identity.login(email, fixture.password),
       cookie = login.cookies.map((v) => v.split(";", 1)[0]).join("; "),
       author = await identity.authenticate(new Headers({ cookie }));
     const beforeATS = await q.history(fixture.staff, userId, "ats", {}, true);
     await context.addCookies((await staff.storageState()).cookies);
-    await page.goto("/account/qualifications");
-    await catalogLanguage(page);
     phase = "NAMED_TARGET";
-    const select = page.getByRole("combobox", { name: "Member", exact: true }),
-      picker = select.locator("..");
-    for (
-      let i = 0;
-      i < 20 && (await select.getByRole("option").filter({ hasText: name }).count()) === 0;
-      i++
-    ) {
-      const next = picker.getByRole("button", { name: "Next page", exact: true });
-      if (await next.isDisabled()) break;
-      await next.click();
-      await expect(picker.getByRole("status")).toHaveCount(0);
-    }
-    const option = select.getByRole("option").filter({ hasText: name });
-    await expect(option).toHaveCount(1);
-    await select.selectOption({ label: (await option.textContent()) ?? "" });
+    picker = new QualificationMemberPicker(page, info, userId, name, () => phase);
+    expect(
+      await picker.select(async () => {
+        await page.goto("/account/qualifications");
+        await catalogLanguage(page);
+      }),
+    ).toBeGreaterThanOrEqual(2);
     await expect(
       page.getByText("No current assignment is recorded for this game.", { exact: true }),
     ).toBeVisible();
@@ -332,22 +366,10 @@ test("real named target rule preview publication assignment accepted contributio
       eligibleForConfirmation: true,
     });
     phase = "PROMOTION";
-    await page.reload();
-    await catalogLanguage(page);
     // Reload deliberately returns to the owned member; select the named target again.
-    const target = page.getByRole("combobox", { name: "Member", exact: true });
-    for (
-      let i = 0;
-      i < 20 && (await target.getByRole("option").filter({ hasText: name }).count()) === 0;
-      i++
-    ) {
-      const next = target.locator("..").getByRole("button", { name: "Next page", exact: true });
-      if (await next.isDisabled()) break;
-      await next.click();
-      await expect(target.locator("..").getByRole("status")).toHaveCount(0);
-    }
-    await target.selectOption({
-      label: (await target.getByRole("option").filter({ hasText: name }).textContent()) ?? "",
+    await picker.select(async () => {
+      await page.reload();
+      await catalogLanguage(page);
     });
     await expect(
       page.getByText("Both thresholds are met. Staff confirmation is required.", { exact: true }),
@@ -363,24 +385,9 @@ test("real named target rule preview publication assignment accepted contributio
     expect((await q.progress(fixture.staff, userId, "ets2", "admin")).data.acceptedTrips).toBe(0);
     phase = "ATTRIBUTION_RELOAD";
     await resetAccountLimits();
-    await page.reload();
-    await catalogLanguage(page);
-    const reloadedTarget = page.getByRole("combobox", { name: "Member", exact: true });
-    for (
-      let i = 0;
-      i < 20 && (await reloadedTarget.getByRole("option").filter({ hasText: name }).count()) === 0;
-      i++
-    ) {
-      const next = reloadedTarget
-        .locator("..")
-        .getByRole("button", { name: "Next page", exact: true });
-      if (await next.isDisabled()) break;
-      await next.click();
-      await expect(reloadedTarget.locator("..").getByRole("status")).toHaveCount(0);
-    }
-    await reloadedTarget.selectOption({
-      label:
-        (await reloadedTarget.getByRole("option").filter({ hasText: name }).textContent()) ?? "",
+    await picker.select(async () => {
+      await page.reload();
+      await catalogLanguage(page);
     });
     const history = page
         .getByRole("heading", { name: "Assignment history", exact: true })
@@ -418,6 +425,7 @@ test("real named target rule preview publication assignment accepted contributio
       id: fixture.staff.userId,
       nickname: staffName,
     });
+    phase = "ORDINARY_ACCESS";
     await resetAccountLimits();
     await context.clearCookies();
     await write(page.request, "/auth/login", { email, password: fixture.password });
@@ -462,9 +470,57 @@ test("real named target rule preview publication assignment accepted contributio
       page.getByRole("heading", { name: "Current qualification · ATS", exact: true }),
     ).toBeVisible();
   } catch (error) {
-    throw new Error(`SYNTHETIC_QUALIFICATION_BROWSER_${phase}`, { cause: error });
+    failure = error;
   } finally {
-    await staff.dispose();
-    await fixture.close();
+    const truth = {
+      preflight,
+      pages: null as Awaited<ReturnType<typeof owningMemberPages>> | null,
+      targetExists: false,
+      nicknameMatches: false,
+      activeMember: false,
+      errorCategory: null as "owner_read_failed" | null,
+    };
+    try {
+      if (userId) {
+        const member = await fixture.unit.run(async (tx) =>
+          (await fixture.composed.identity.memberSummariesInTransaction(tx, [userId])).get(userId),
+        );
+        truth.targetExists = !!member;
+        truth.nicknameMatches = member?.nickname === name;
+        truth.activeMember = member?.formerMember === false;
+        const qualifications = fixture.composed.qualifications;
+        if (qualifications)
+          truth.pages = await owningMemberPages(
+            (cursor) =>
+              qualifications.members(fixture.staff, {
+                limit: 25,
+                ...(cursor ? { cursor } : {}),
+              }),
+            userId,
+            name,
+          );
+      }
+    } catch {
+      truth.errorCategory = "owner_read_failed";
+      failure ??= Error("QUALIFICATION_MEMBER_OWNER_DIAGNOSTIC_FAILED");
+    }
+    try {
+      if (!failure) {
+        expect(truth.targetExists && truth.nicknameMatches && truth.activeMember).toBe(true);
+        expect(truth.pages?.targetPage).toBeGreaterThanOrEqual(2);
+        expect(truth.pages?.targetPage).toBeLessThanOrEqual(3);
+      }
+    } catch (error) {
+      failure ??= error;
+    }
+    try {
+      await picker?.finish(truth, failure);
+    } catch (error) {
+      failure ??= error;
+    } finally {
+      await staff.dispose();
+      await fixture.close();
+    }
   }
+  if (failure) throw new Error(`SYNTHETIC_QUALIFICATION_BROWSER_${phase}`, { cause: failure });
 });
