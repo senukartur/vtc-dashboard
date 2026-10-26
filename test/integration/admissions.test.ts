@@ -286,6 +286,39 @@ afterAll(async () => {
   await unit?.close();
   await control?.end();
 });
+
+test("first email request preserves invitation generation, link and expiry with idempotent enqueue and disabled/failure rollback", async () => {
+  const disabled = harness({ mail: false }).admissions,
+    fixture = await approved(disabled),
+    id = fixture.invitationId;
+  const before = await disabled.inspect(director, id);
+  expect(before.emailDelivery).toBe("not_requested");
+  expect(await status(disabled.requestEmail(director, id, newId(), 1))).toBe(503);
+  const failing = harness({
+    overrides: {
+      mail: {
+        enqueue: async () => {
+          throw new Error("SYNTHETIC_ENQUEUE_FAILURE");
+        },
+        status: messaging.admissionsStatus,
+      },
+    },
+  }).admissions;
+  expect(await status(failing.requestEmail(director, id, newId(), 1))).toBe(500);
+  expect((await disabled.inspect(director, id)).version).toBe(1);
+  const key = newId(),
+    sent = await admissions.requestEmail(director, id, key, 1);
+  expect(sent.id).toBe(id);
+  expect(sent.expiresAt).toBe(before.expiresAt);
+  expect(sent.version).toBe(2);
+  expect(sent.deliveryId).toBeTruthy();
+  expect(await admissions.requestEmail(director, id, key, 1)).toEqual(sent);
+  expect((await admissions.copy(director, id, 2)).link).toBe(fixture.link.link);
+  expect(await status(admissions.requestEmail(director, id, newId(), 2))).toBe(409);
+  const fresh = await admissions.reissue(director, id, newId(), 2);
+  expect(fresh.id).not.toBe(id);
+  expect(await status(admissions.copy(director, id, 2))).toBe(409);
+});
 afterEach(async ({ task }) => {
   if (
     task.result?.state === "fail" &&

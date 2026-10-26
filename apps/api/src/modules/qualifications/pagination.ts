@@ -10,16 +10,22 @@ interface Position {
   id: string;
   time: string | null;
 }
-export function pagination(key: string) {
+export function pagination(key: string, domain = "qualifications") {
   const sign = (body: string) =>
-    createHmac("sha256", Buffer.from(key, "hex"))
-      .update("qualifications/cursor/v1\0")
+    createHmac("sha256", Buffer.from(key, domain === "administration" ? "utf8" : "hex"))
+      .update(`${domain}/cursor/v1\0`)
       .update(body)
       .digest();
   return function page(actor: Actor, scope: unknown[], options: Page) {
     const limit = options.limit ?? 25;
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
-    const binding = canonicalJson([actor.userId, actor.sessionId, actor.accessEpoch, ...scope]);
+    const binding = canonicalJson([
+      actor.userId,
+      actor.sessionId,
+      actor.accessEpoch,
+      ...(domain === "administration" ? [limit] : []),
+      ...scope,
+    ]);
     let after: Position | null = null;
     if (options.cursor) {
       try {

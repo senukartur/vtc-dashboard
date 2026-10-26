@@ -482,14 +482,19 @@ export function createAdmissions(
     },
     async list(
       actor: Actor,
-      options: { limit?: number; cursor?: string; historyId?: string } = {},
+      options: {
+        limit?: number;
+        cursor?: string;
+        historyId?: string;
+        status?: "submitted" | "approved" | "rejected";
+      } = {},
     ) {
       return run(async (tx) => {
         await authority(tx, actor);
         const limit = options.limit ?? 25;
         if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
         const parent = options.historyId ? await application(tx, options.historyId) : null;
-        const binding = `${actor.userId}:${actor.sessionId}:${actor.accessEpoch}:applications:${parent?.id ?? "all"}:${parent?.emailKey ?? "all"}:manage:v1`;
+        const binding = `${actor.userId}:${actor.sessionId}:${actor.accessEpoch}:applications:${parent?.id ?? "all"}:${parent?.emailKey ?? "all"}:${options.status ?? "all"}:${limit}:manage:v2`;
         const cursor = options.cursor ? crypto.readCursor(binding, options.cursor) : null;
         const rows = await client(tx)
           .select()
@@ -497,6 +502,7 @@ export function createAdmissions(
           .where(
             and(
               parent ? eq(applications.emailKey, parent.emailKey) : undefined,
+              options.status ? eq(applications.status, options.status) : undefined,
               cursor
                 ? or(
                     lt(applications.submittedAt, cursor.at),
@@ -639,6 +645,43 @@ export function createAdmissions(
           throw identityError(503);
         await record(tx, company.id, actor, app, "invitation.copied", row.id);
         return { invitationId: row.id, link: crypto.link(token), expiresAt: row.expiresAt };
+      });
+    },
+    async requestEmail(actor: Actor, id: string, key: string, expected: number) {
+      return run(async (tx) => {
+        await authority(tx, actor);
+        const result = await once(
+          tx,
+          `${actor.userId}:invitation-email:${id}`,
+          key,
+          { expected },
+          async () => {
+            const { row, app } = await invitation(tx, id);
+            match(row.version, expected);
+            if (!active(row, app) || row.deliveryId) throw identityError(409);
+            if (!ports.mail || !row.ciphertext) throw identityError(503);
+            const token = crypto.open(row.id, app.id, row.ciphertext);
+            if (!crypto.digest("invitation", token).equals(row.secretHash as Buffer))
+              throw identityError(503);
+            const deliveryId = await ports.mail.enqueue(tx, {
+              owner: "admissions",
+              generationId: row.id,
+              userId: null,
+              kind: "invitation",
+              locale: app.locale,
+              recipient: app.email,
+              expiresAt: row.expiresAt,
+              link: crypto.link(token),
+            });
+            const next = { ...row, deliveryId, version: row.version + 1 };
+            await client(tx)
+              .update(invitations)
+              .set({ deliveryId, version: next.version })
+              .where(eq(invitations.id, id));
+            return { id, version: next.version, response: await inviteDto(tx, next) };
+          },
+        );
+        return result.response as Awaited<ReturnType<typeof inviteDto>>;
       });
     },
     async reissue(actor: Actor, id: string, key: string, expected: number) {

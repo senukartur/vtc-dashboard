@@ -1,3 +1,7 @@
+import {
+  createQualificationInitialization,
+  structuralLevels,
+} from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations } from "@vtc/db";
 import { eq, steamLinks, steamNonces, steamProofs } from "@vtc/db/external-identities-schema";
@@ -48,6 +52,7 @@ let instant = Date.now(),
 const now = () => new Date(instant),
   sid = () => (76561190000000000n + serial++).toString();
 const ports = () => ({
+  qualificationsLifecycle: createQualificationInitialization(unit),
   accessEvents: identityAccessEvents(unit),
   steamProjection: steamProjection(unit),
 });
@@ -431,7 +436,18 @@ test("replacement only verifies a member request; current deputy/director applie
           unit.client(tx).select().from(membership).where(eq(membership.userId, m.userId)),
         )
       )[0]?.version ?? 0,
-      { kind: "reinstate", roles: ["driver"] },
+      {
+        kind: "reinstate",
+        roles: ["driver"],
+        qualifications: [
+          {
+            game: "ets2",
+            levelId: structuralLevels.ets2[0],
+            purpose: "reinstatement",
+            reason: "Fictional explicit return",
+          },
+        ],
+      },
     ),
   );
   expect(await eligible(current)).toBe(false);

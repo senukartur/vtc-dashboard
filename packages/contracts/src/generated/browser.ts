@@ -393,6 +393,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/invitations/{invitationId}/email-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request first email for the current invitation generation */
+        post: operations["requestInvitationEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/invitations/{invitationId}/reissue": {
         parameters: {
             query?: never;
@@ -489,6 +506,23 @@ export interface paths {
         put?: never;
         /** deactivateMember */
         post: operations["deactivateMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/members/{memberId}/identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getAdminMemberIdentity */
+        get: operations["getAdminMemberIdentity"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -712,6 +746,40 @@ export interface paths {
         put?: never;
         /** Evaluate hypothetical facts against a draft without publishing */
         post: operations["previewQualificationRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/reinstatement-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read explicit per-game return choices */
+        get: operations["getReinstatementOptions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/source-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getSourceCapabilities */
+        get: operations["getSourceCapabilities"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1199,6 +1267,23 @@ export interface paths {
         };
         /** getMe */
         get: operations["getMe"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/connection-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getPersonalConnectionCapabilities */
+        get: operations["getPersonalConnectionCapabilities"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2936,6 +3021,10 @@ export interface components {
             data: components["schemas"]["OwnTripStatusSummary"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopePersonalConnectionCapabilities: {
+            data: components["schemas"]["PersonalConnectionCapabilities"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopePreferences: {
             data: components["schemas"]["Preferences"];
             meta: components["schemas"]["Meta"];
@@ -2964,6 +3053,10 @@ export interface components {
             data: components["schemas"]["Reconciliation"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeReinstatementOptions: {
+            data: components["schemas"]["ReinstatementOptions"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeReview: {
             data: components["schemas"]["Review"];
             meta: components["schemas"]["Meta"];
@@ -2974,6 +3067,10 @@ export interface components {
         };
         EnvelopeSelf: {
             data: components["schemas"]["Self"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeSourceCapabilities: {
+            data: components["schemas"]["SourceCapabilities"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeSourceConnection: {
@@ -3524,6 +3621,7 @@ export interface components {
             profile: components["schemas"]["MemberProfile"];
             /** @enum {string} */
             status: "active" | "inactive";
+            version: number;
         };
         MemberProfile: {
             member: components["schemas"]["MemberSummary"];
@@ -3640,6 +3738,10 @@ export interface components {
             proposedEmail: string;
             /** @enum {string} */
             stage: "current_email" | "proposed_email";
+        };
+        PersonalConnectionCapabilities: {
+            externalIdentities: boolean;
+            telemetry: boolean;
         };
         Preferences: {
             displayTimezone: string;
@@ -3837,6 +3939,18 @@ export interface components {
             reason: string;
             roles: ("trainee" | "driver" | "dispatcher" | "deputy_director")[];
         };
+        ReinstatementLevelOption: {
+            /** @enum {string} */
+            code: "trainee" | "driver_iii" | "driver_ii" | "driver_i";
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        ReinstatementOptions: {
+            levels: components["schemas"]["ReinstatementLevelOption"][];
+        };
         ResolutionChanges: {
             /** Format: date-time */
             actualCompletedAt?: string;
@@ -3968,6 +4082,23 @@ export interface components {
             missingSetup: string[];
             preferences: components["schemas"]["Preferences"];
             steamVerified: boolean;
+        };
+        SourceCapabilities: {
+            admissions: boolean;
+            externalIdentities: boolean;
+            mail: boolean;
+            manual: boolean;
+            qualifications: boolean;
+            sources: components["schemas"]["SourceCapability"][];
+            telemetry: boolean;
+        };
+        SourceCapability: {
+            implemented: boolean;
+            /** @enum {string} */
+            ownership: "personal" | "company";
+            /** @enum {string} */
+            provider: "ets2telemetry" | "manual" | "trucky" | "vtcbase";
+            runtimeEnabled: boolean;
         };
         SourceConnection: {
             /** @enum {string} */
@@ -4141,6 +4272,7 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
+                status?: "submitted" | "approved" | "rejected";
             };
             header?: never;
             path?: never;
@@ -4812,6 +4944,34 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    requestInvitationEmail: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                invitationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeInvitation"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     reissueInvitation: {
         parameters: {
             query?: never;
@@ -4899,6 +5059,7 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
+                status?: "active" | "inactive";
             };
             header?: never;
             path?: never;
@@ -4970,6 +5131,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeCommandResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getAdminMemberIdentity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized safe projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeIdentity"];
                 };
             };
             default: components["responses"]["Error"];
@@ -5398,6 +5582,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeQualificationPreview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getReinstatementOptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized safe projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeReinstatementOptions"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getSourceCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized safe projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeSourceCapabilities"];
                 };
             };
             default: components["responses"]["Error"];
@@ -6260,6 +6486,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeSelf"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPersonalConnectionCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current authorized safe projection. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopePersonalConnectionCapabilities"];
                 };
             };
             default: components["responses"]["Error"];

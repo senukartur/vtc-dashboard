@@ -1,3 +1,7 @@
+import {
+  createQualificationInitialization,
+  structuralLevels,
+} from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { randomBytes } from "node:crypto";
 import { request } from "node:http";
 import { resolve } from "node:path";
@@ -93,6 +97,7 @@ beforeAll(async () => {
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
     invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id),
   });
   await safe(
@@ -525,6 +530,7 @@ test("Steam replacement atomically revokes tokens; invalidation callback failure
   );
   const broken = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
     invalidateTelemetryCredentials: async (tx, id) => {
       await invalidateTelemetryCredentials(unit, tx, id);
       throw new Error("SYNTHETIC_INVALIDATION_FAILURE");
@@ -546,6 +552,7 @@ test("Steam replacement atomically revokes tokens; invalidation callback failure
     entered = deferred<void>();
   const racingIdentity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
     invalidateTelemetryCredentials: async (tx, id) => {
       await invalidateTelemetryCredentials(unit, tx, id);
       entered.resolve();
@@ -617,6 +624,14 @@ test("deactivation and reinstatement eagerly revoke old credentials permanently 
   await identity.administer(staff, owner.userId, newId(), (version as number) + 1, {
     kind: "reinstate",
     roles: ["driver"],
+    qualifications: [
+      {
+        game: "ets2",
+        levelId: structuralLevels.ets2[0],
+        purpose: "reinstatement",
+        reason: "Fictional explicit return",
+      },
+    ],
   });
   await expect(service.receive(bearer(issued.token), "127.0.0.1", p)).rejects.toMatchObject({
     statusCode: 401,
@@ -952,6 +967,7 @@ test("deactivation holding identity locks refuses both waiting new and duplicate
     before = await counts();
   const guarded = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
     invalidateTelemetryCredentials: async (tx, id) => {
       await invalidateTelemetryCredentials(unit, tx, id);
       entered.resolve();
@@ -982,6 +998,7 @@ test("security change while telemetry invalidation is absent cannot revive stale
   const { issued } = await connect();
   const disabled = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit),
+    qualificationsLifecycle: createQualificationInitialization(unit),
   });
   await disabled.administer(staff, owner.userId, newId(), 1, { kind: "roles", roles: ["trainee"] });
   const [before] = await control.execute<RowDataPacket[]>(

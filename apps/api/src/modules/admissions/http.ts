@@ -48,7 +48,12 @@ export async function registerAdmissionsRoutes(
       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json"
     )
       throw identityError(415);
-    if ((route.endsWith("/copy-link") || route.endsWith("/reissue")) && request.body !== undefined)
+    if (
+      (route.endsWith("/copy-link") ||
+        route.endsWith("/reissue") ||
+        route.endsWith("/email-deliveries")) &&
+      request.body !== undefined
+    )
       throw identityError(422);
   });
   const actor = async (request: FastifyRequest) => {
@@ -154,9 +159,26 @@ export async function registerAdmissionsRoutes(
           ),
         ),
   );
-  app.get<{ Querystring: { limit?: number; cursor?: string } }>(
+  app.get<{
+    Querystring: {
+      limit?: number;
+      cursor?: string;
+      status?: "submitted" | "approved" | "rejected";
+    };
+  }>(
     "/api/v1/admin/applications",
-    { schema: { querystring: page, response: { 200: ref("EnvelopeListApplication") } } },
+    {
+      schema: {
+        querystring: {
+          ...page,
+          properties: {
+            ...page.properties,
+            status: { type: "string", enum: ["submitted", "approved", "rejected"] },
+          },
+        },
+        response: { 200: ref("EnvelopeListApplication") },
+      },
+    },
     async (request) =>
       envelope(await admissions.list(await actor(request), request.query), request),
   );
@@ -240,6 +262,22 @@ export async function registerAdmissionsRoutes(
       const current = await actor(request);
       csrf.check(request, current);
       const data = await admissions.reissue(
+        current,
+        request.params.invitationId,
+        key(request),
+        expected(request),
+      );
+      reply.header("ETag", `"v${data.version}"`);
+      return envelope(data, request);
+    },
+  );
+  app.post<{ Params: { invitationId: string } }>(
+    "/api/v1/admin/invitations/:invitationId/email-deliveries",
+    { schema: { params: params("invitationId"), response: { 200: ref("EnvelopeInvitation") } } },
+    async (request, reply) => {
+      const current = await actor(request);
+      csrf.check(request, current);
+      const data = await admissions.requestEmail(
         current,
         request.params.invitationId,
         key(request),

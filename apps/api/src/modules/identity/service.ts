@@ -25,7 +25,7 @@ import {
   sql,
   user,
 } from "@vtc/db/identity-schema";
-import { int, mysqlTable } from "drizzle-orm/mysql-core";
+import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import {
   engine,
   type IdentityConfig,
@@ -48,6 +48,7 @@ const company = mysqlTable("identity_company", {
   id: idColumn("id").notNull(),
   directorUserId: idColumn("director_user_id").notNull(),
   version: int("version", { unsigned: true }).notNull().default(1),
+  reportingTimezone: varchar("reporting_timezone", { length: 128 }),
 });
 type Company = typeof company.$inferSelect;
 type Purpose = typeof challenges.$inferSelect.purpose;
@@ -73,6 +74,13 @@ export interface PrivateChallenge {
 export interface IdentityPorts {
   qualificationsLifecycle?: {
     close(tx: TxContext, userId: string, endedAt: string): Promise<void>;
+    reinstate?(
+      tx: TxContext,
+      actor: Actor,
+      userId: string,
+      assignments: readonly components["schemas"]["AssignmentInput"][],
+      assignedAt: string,
+    ): Promise<void>;
   };
   invalidateTelemetryCredentials?: (tx: TxContext, userId: string) => Promise<void>;
   steamProjection?: (tx: TxContext, userId: string) => Promise<boolean>;
@@ -322,7 +330,10 @@ export function createIdentity(
         preferences: { locale: row.locale, displayTimezone: row.displayTimezone },
         steamVerified,
         identityEpoch: row.identityEpoch,
-        missingSetup: [...(steamVerified ? [] : ["steam"]), "company_reporting_timezone"],
+        missingSetup: [
+          ...(steamVerified ? [] : ["steam"]),
+          ...(current.reportingTimezone ? [] : ["company_reporting_timezone"]),
+        ],
       },
     };
   }
@@ -756,6 +767,7 @@ export function createIdentity(
           id: companyId,
           directorUserId: userId,
           version: 1,
+          reportingTimezone: null,
         });
         return { userId, companyId };
       });
@@ -1247,11 +1259,12 @@ export function createIdentity(
       input: {
         kind: "roles" | "deactivate" | "reinstate";
         roles?: readonly AssignableRole[];
-        qualifications?: readonly unknown[];
+        qualifications?: readonly components["schemas"]["AssignmentInput"][];
       },
     ) {
       if (!ports.accessEvents) throw identityError(503);
-      if (input.qualifications?.length) throw identityError(503);
+      if (input.kind !== "reinstate" && input.qualifications !== undefined)
+        throw identityError(422);
       if (input.kind !== "deactivate" && input.roles === undefined) throw identityError(422);
       if (input.roles) validRoles(input.roles);
       return unwrap(
@@ -1272,8 +1285,22 @@ export function createIdentity(
               if (target.version !== expectedVersion) throw identityError(409, "VERSION_CONFLICT");
               if ((input.kind === "reinstate") !== (target.status === "inactive"))
                 throw identityError(409);
-              if (input.kind === "deactivate")
-                await ports.qualificationsLifecycle?.close(tx, targetId, now().toISOString());
+              const instant = now().toISOString();
+              if (input.kind === "deactivate") {
+                if (!ports.qualificationsLifecycle) throw identityError(503);
+                await ports.qualificationsLifecycle.close(tx, targetId, instant);
+              }
+              if (input.kind === "reinstate") {
+                if (!input.qualifications) throw identityError(422);
+                if (!ports.qualificationsLifecycle?.reinstate) throw identityError(503);
+                await ports.qualificationsLifecycle.reinstate(
+                  tx,
+                  actor,
+                  targetId,
+                  input.qualifications ?? [],
+                  instant,
+                );
+              }
               await invalidate(tx, target, input.kind !== "roles");
               await replaceRoles(
                 tx,
@@ -1359,6 +1386,135 @@ export function createIdentity(
           );
         }),
       );
+    },
+    // The wire command cannot choose a different successor than the emailed challenge.
+    async confirmBoundSuccession(actor: Actor, challengeId: string, code: string, key: string) {
+      const successorId = await run(async (tx) => {
+        const current = await lockCompany(tx);
+        await checkActor(tx, actor, current);
+        requireCapability(actor, "leadership.transfer");
+        const [challenge] = await client(tx)
+          .select({
+            successorId: challenges.successorId,
+            userId: challenges.userId,
+            purpose: challenges.purpose,
+          })
+          .from(challenges)
+          .where(eq(challenges.id, applicationId(challengeId)));
+        if (
+          !challenge?.successorId ||
+          challenge.userId !== actor.userId ||
+          challenge.purpose !== "succession"
+        )
+          throw identityError(401);
+        return challenge.successorId;
+      });
+      return this.confirmSuccession(actor, successorId, challengeId, code, key);
+    },
+    async administrationMembersInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      after: string | null,
+      limit: number,
+      status?: "active" | "inactive",
+      targetId?: string,
+    ) {
+      const current = await lockCompany(tx);
+      await checkActor(tx, actor, current);
+      requireCapability(actor, "members.manage");
+      if (!Number.isInteger(limit) || limit < 1 || limit > 101) throw identityError(422);
+      const rows = await client(tx)
+        .select({
+          id: user.id,
+          nickname: user.name,
+          email: user.email,
+          status: membership.status,
+          version: membership.version,
+          accessEpoch: membership.accessEpoch,
+          identityEpoch: membership.identityEpoch,
+        })
+        .from(user)
+        .innerJoin(membership, eq(membership.userId, user.id))
+        .where(
+          and(
+            after ? gt(user.id, applicationId(after)) : undefined,
+            status ? eq(membership.status, status) : undefined,
+            targetId ? eq(user.id, applicationId(targetId)) : undefined,
+          ),
+        )
+        .orderBy(user.id)
+        .limit(limit)
+        .for("share");
+      const assigned = rows.length
+        ? await client(tx)
+            .select({ userId: roles.userId, role: roles.role })
+            .from(roles)
+            .where(
+              inArray(
+                roles.userId,
+                rows.map((row) => row.id),
+              ),
+            )
+            .for("share")
+        : [];
+      return rows.map((row) => ({
+        ...row,
+        roles: [
+          ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
+          ...(current.directorUserId === row.id ? ["director" as const] : []),
+        ].sort(),
+      }));
+    },
+    async companySettingsInTransaction(tx: TxContext, actor: Actor) {
+      const current = await lockCompany(tx);
+      await checkActor(tx, actor, current);
+      requireCapability(actor, "company.configure");
+      return {
+        id: current.id,
+        version: current.version,
+        reportingTimezone: current.reportingTimezone,
+      };
+    },
+    async updateCompanySettings(
+      actor: Actor,
+      key: string,
+      expected: number,
+      reportingTimezone: string,
+    ) {
+      try {
+        if (reportingTimezone.length > 128 || !/^[A-Za-z][A-Za-z0-9_+/-]*$/.test(reportingTimezone))
+          throw new Error();
+        new Intl.DateTimeFormat("en", { timeZone: reportingTimezone });
+      } catch {
+        throw identityError(422);
+      }
+      return run(async (tx) => {
+        const current = await this.companySettingsInTransaction(tx, actor);
+        return once(
+          tx,
+          `${actor.userId}:company-settings`,
+          key,
+          { expected, reportingTimezone },
+          async () => {
+            if (current.version !== expected) throw identityError(409, "VERSION_CONFLICT");
+            await client(tx)
+              .update(company)
+              .set({ reportingTimezone, version: current.version + 1 })
+              .where(eq(company.singleton, 1));
+            await audit.append(tx, {
+              actorKind: "user",
+              actorId: actor.userId,
+              operation: "configuration.changed",
+              subjectKind: "company",
+              subjectId: current.id,
+              companyId: current.id,
+              reason: "operator_request",
+              occurredAt: now().toISOString(),
+            });
+            return { id: current.id, version: current.version + 1 };
+          },
+        );
+      });
     },
     // Messaging owns no identity tables. Recheck the current bound generation
     // immediately before provider I/O; redemption remains authoritative in flight.

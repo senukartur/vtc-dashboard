@@ -449,9 +449,8 @@ export function AccountPage() {
           <p>{t("sessionConfirmed")}</p>
           <p>{t(self.steamVerified ? "steamVerified" : "steamMissing")}</p>
           <p>{t(self.missingSetup.length ? "setupIncomplete" : "setupComplete")}</p>
-          <p className="muted">{t("futureConnections")}</p>
-          <Button disabled variant="outline">
-            {t("connectionUnavailable")}
+          <Button asChild variant="outline">
+            <Link to="/account/connections">{t("connections")}</Link>
           </Button>
           <Link to="/status">{t("applicationConnection")}</Link>
         </Card>

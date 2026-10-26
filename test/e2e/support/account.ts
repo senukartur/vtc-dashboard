@@ -1,3 +1,4 @@
+import { createQualificationInitialization } from "../../../apps/api/src/modules/qualifications/initialization.ts";
 import { createHmac, randomUUID } from "node:crypto";
 import { request, type APIRequestContext } from "@playwright/test";
 import { mailCrypto } from "../../../apps/api/src/modules/messaging/content.ts";
@@ -124,7 +125,10 @@ export async function deactivateFixtureMember(
     const identity = createIdentity(
       unit,
       { secret: accountSecret("identity"), origin, production: false },
-      { accessEvents: identityAccessEvents(unit) },
+      {
+        accessEvents: identityAccessEvents(unit),
+        qualificationsLifecycle: createQualificationInitialization(unit),
+      },
     );
     const state = await staff.storageState();
     const actor = await identity.authenticate(

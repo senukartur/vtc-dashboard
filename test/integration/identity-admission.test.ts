@@ -1,3 +1,4 @@
+import { createQualificationInitialization } from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { createHmac, randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext, type UnitOfWork } from "@vtc/db";
 import { account, company, eq, membership, sql, user } from "@vtc/db/identity-schema";
@@ -75,7 +76,13 @@ const ports = {
     },
   },
 };
-const identity = () => createIdentity(tracked, config, ports, time);
+const identity = () =>
+  createIdentity(
+    tracked,
+    config,
+    { ...ports, qualificationsLifecycle: createQualificationInitialization(tracked) },
+    time,
+  );
 async function safe<T>(work: Promise<T>): Promise<T> {
   try {
     return await work;

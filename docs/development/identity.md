@@ -87,3 +87,6 @@ VTC-015 implements the [admissions coordinator](admissions.md) using identity-ow
 [VTC-017 account screens](account.md) now consume these existing routes, including current-email verification, protected password change and reloadable two-proof email replacement. This browser integration does not change identity policy or activate a hosted service.
 
 [VTC-023 telemetry](telemetry.md) adds an optional transaction-scoped credential invalidation callback for membership/security changes and `externalChanged`. Composition supplies it only when telemetry is explicitly enabled; failure rolls back the identity/audit/access event. Captured epochs still prevent revival if a credential was stale while the module was disabled. Identity imports no telemetry repository.
+
+
+VTC-038 [administration](administration.md) mounts current-authority staff member reads/commands and verified-email leadership HTTP. It adds the existing company reporting-timezone primitive and resolves the successor from the stored challenge for the challenge/code-only confirmation wire shape. Explicit reinstatement uses the injected caller-transaction qualification lifecycle; old credentials remain invalid.

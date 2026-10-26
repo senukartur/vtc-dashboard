@@ -222,20 +222,20 @@ export function createExternalIdentities(
     });
     return { id: target.userId, version: changed.version };
   }
-  async function snapshot(actor: Actor) {
+  async function snapshot(actor: Actor, targetId = actor.userId, staff = false) {
     return run(async (tx) => {
-      const target = await identity.externalContext(tx, actor),
-        active = await link(tx, actor.userId);
+      const target = await identity.externalContext(tx, actor, targetId, staff),
+        active = await link(tx, targetId);
       const [cache] = await client(tx)
         .select()
         .from(truckersCache)
-        .where(eq(truckersCache.userId, actor.userId));
+        .where(eq(truckersCache.userId, targetId));
       const pending = await client(tx)
         .select()
         .from(steamProofs)
         .where(
           and(
-            eq(steamProofs.userId, actor.userId),
+            eq(steamProofs.userId, targetId),
             eq(steamProofs.identityEpoch, target.identityEpoch),
             gt(steamProofs.expiresAt, now()),
             or(eq(steamProofs.state, "pending"), eq(steamProofs.state, "verified")),
@@ -636,6 +636,9 @@ export function createExternalIdentities(
               : null,
         };
       });
+    },
+    async staffCurrent(actor: Actor, targetId: string) {
+      return snapshot(actor, targetId, true);
     },
     async current(actor: Actor) {
       await refresh(actor);

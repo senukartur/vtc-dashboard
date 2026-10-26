@@ -44,6 +44,7 @@ import type { Trips } from "../trips/service.js";
 import type { Game } from "./initialization.js";
 import { type Page, pagination } from "./pagination.js";
 import { previewRules, validateDraftRules } from "./preview.js";
+import { createAssignmentWriter } from "./assignment-writer.js";
 
 type S = components["schemas"];
 type Assignment = typeof qualificationAssignments.$inferSelect;
@@ -420,46 +421,18 @@ export function createQualifications(
     endedAt: string | null,
     text: string,
   ) {
-    const current = await state(tx, userId, selectedGame),
-      id = newId();
-    if (current.assignmentId && purpose !== "historical_resolution") {
-      const [old] = await c(tx)
-        .select()
-        .from(qualificationAssignments)
-        .where(eq(qualificationAssignments.id, current.assignmentId))
-        .for("update");
-      if (!old || old.assignedAt > assignedAt) throw identityError(409);
-      await c(tx)
-        .update(qualificationAssignments)
-        .set({ endedAt: assignedAt })
-        .where(eq(qualificationAssignments.id, old.id));
-    }
-    const row = {
-      id,
+    const result = await createAssignmentWriter(unit, outbox, at)(tx, actor, {
       userId,
       game: selectedGame,
       levelId,
+      purpose,
       assignedAt,
       endedAt,
-      purpose,
-      actorId: actor.userId,
       reason: text,
-      revision: 1,
-    };
-    await c(tx).insert(qualificationAssignments).values(row);
-    await c(tx)
-      .update(qualificationStates)
-      .set({
-        ...(purpose === "historical_resolution" ? {} : { assignmentId: id }),
-        version: current.version + 1,
-      })
-      .where(
-        and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, selectedGame)),
-      );
-    await recordAudit(tx, actor, userId, "membership.changed");
-    await emit(tx, "qualification.assigned", id, current.version + 1, userId, id);
-    return { data: assignmentDto(row), version: current.version + 1 };
+    });
+    return { data: assignmentDto(result.row), version: result.version };
   }
+
   async function prepare(tx: TxContext, owners: { ownerId: string; game: Game }[], actor?: Actor) {
     await ports.identity.qualificationContextInTransaction(
       tx,

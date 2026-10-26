@@ -55,3 +55,6 @@ Private mail invalidation is keyless and always composed, independently of optio
 ## Public application UI
 
 [VTC-016](public-landing.md) consumes the public submission API from the RU/EN landing. Its generic receipt confirmation does not expose duplicate email/status or create an authenticated session. Live activation remains disabled by default and follows this guide's existing gates. Staff review and invitation/account UI remain separate work.
+
+
+VTC-038 adds SQL status filtering to staff application pages and bodyless first-email requests for a still-current invitation with no delivery. Its [administration guide](administration.md#invitation-and-personal-secrets) distinguishes independent manual copy, same-generation first email, supported Messaging resend and generation reissue. No link or credential is returned by the email request.

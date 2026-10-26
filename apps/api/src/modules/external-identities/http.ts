@@ -39,7 +39,8 @@ export async function registerExternalIdentityRoutes(
     additionalProperties: false,
   });
   const ownedAdmin = (route: string) =>
-    route.startsWith("/api/v1/admin/members/") && route.includes("/steam-replacement");
+    route.startsWith("/api/v1/admin/members/") &&
+    (route.includes("/steam-replacement") || route.endsWith("/identity"));
   app.addHook("onRequest", async (request, reply) => {
     const route = request.routeOptions.url;
     if (route === "/api/v1/identity/steam/callback" || route === "/api/v1/identity/steam/completed")
@@ -66,6 +67,15 @@ export async function registerExternalIdentityRoutes(
       throw identityError(415);
     if (route.endsWith("verifications") && request.body !== undefined) throw identityError(422);
   });
+  app.get<{ Params: { memberId: string } }>(
+    "/api/v1/admin/members/:memberId/identity",
+    { schema: { params: params("memberId"), response: { 200: ref("EnvelopeIdentity") } } },
+    async (request, reply) => {
+      const result = await external.staffCurrent(await actor(request), request.params.memberId);
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(result.data, request);
+    },
+  );
   app.get(
     "/api/v1/me/identity",
     { schema: { response: { 200: ref("EnvelopeIdentity") } } },

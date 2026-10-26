@@ -1,4 +1,5 @@
 import { auditEntries, auditOperations, auditReasons, auditSubjects } from "../schema/audit.js";
+import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
 import type { TxContext, UnitOfWork } from "./unit-of-work.js";
 import { applicationId, newId, utcDateTime, utcIso } from "./values.js";
 
@@ -69,6 +70,50 @@ function safeInput(raw: AuditInput): AuditInput {
 
 export function createAudit(unitOfWork: UnitOfWork) {
   return {
+    // The caller must authorize company administration on this same transaction first.
+    async list(
+      tx: TxContext,
+      input: {
+        companyId: string;
+        limit: number;
+        after: { id: string; time: string | null } | null;
+      },
+    ) {
+      applicationId(input.companyId);
+      if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 101)
+        throw new Error("AUDIT_QUERY_BOUND_EXCEEDED");
+      if (input.after) {
+        applicationId(input.after.id);
+        utcDateTime(input.after.time as string);
+      }
+      return unitOfWork
+        .client(tx)
+        .select({
+          id: auditEntries.id,
+          actorId: auditEntries.actorId,
+          action: auditEntries.operation,
+          subjectId: auditEntries.subjectId,
+          occurredAt: auditEntries.occurredAt,
+        })
+        .from(auditEntries)
+        .where(
+          and(
+            // This single-company product also retains old module entries without a company reference.
+            or(eq(auditEntries.companyId, input.companyId), isNull(auditEntries.companyId)),
+            input.after
+              ? or(
+                  lt(auditEntries.occurredAt, input.after.time as string),
+                  and(
+                    eq(auditEntries.occurredAt, input.after.time as string),
+                    lt(auditEntries.id, input.after.id),
+                  ),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(desc(auditEntries.occurredAt), desc(auditEntries.id))
+        .limit(input.limit);
+    },
     async append(tx: TxContext, input: AuditInput): Promise<string> {
       const client = unitOfWork.client(tx);
       const safe = safeInput(input);

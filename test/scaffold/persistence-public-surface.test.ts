@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as database from "@vtc/db";
 
-test("public database surface exposes audit append without its writable table", async () => {
+test("public database surface exposes bounded audit reads and append without its writable table", async () => {
   assert.equal(Object.hasOwn(database, "auditEntries"), false);
   // The real pool is lazy: inspecting its facade never opens a database connection.
   const unit = database.createUnitOfWork({
@@ -15,7 +15,8 @@ test("public database surface exposes audit append without its writable table", 
   try {
     const audit = database.createAudit(unit);
     assert.equal(typeof audit.append, "function");
-    assert.deepEqual(Object.keys(audit), ["append"]);
+    assert.equal(typeof audit.list, "function");
+    assert.deepEqual(Object.keys(audit).sort(), ["append", "list"]);
   } finally {
     await unit.close();
   }
