@@ -1184,6 +1184,18 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "inactive"
+              ]
+            }
           }
         ]
       }
@@ -1681,6 +1693,19 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "submitted",
+                "approved",
+                "rejected"
+              ]
+            }
           }
         ]
       }
@@ -7109,7 +7134,7 @@
           }
         ],
         "x-module": "platform",
-        "x-owner-card": "VTC-039",
+        "x-owner-card": "VTC-038",
         "x-capability": "members.manage",
         "x-guards": [
           "no_secret_values_or_private_bodies"
@@ -8846,6 +8871,215 @@
           }
         ]
       }
+    },
+    "/api/v1/admin/source-capabilities": {
+      "get": {
+        "operationId": "getSourceCapabilities",
+        "tags": [
+          "company"
+        ],
+        "summary": "getSourceCapabilities",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "company",
+        "x-owner-card": "VTC-038",
+        "x-capability": "connections.manage",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Current authorized safe projection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeSourceCapabilities"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/me/connection-capabilities": {
+      "get": {
+        "operationId": "getPersonalConnectionCapabilities",
+        "tags": [
+          "identity"
+        ],
+        "summary": "getPersonalConnectionCapabilities",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-038",
+        "x-capability": "company.read",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Current authorized safe projection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopePersonalConnectionCapabilities"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/members/{memberId}/identity": {
+      "get": {
+        "operationId": "getAdminMemberIdentity",
+        "tags": [
+          "identity"
+        ],
+        "summary": "getAdminMemberIdentity",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-038",
+        "x-capability": "members.manage",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Current authorized safe projection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeIdentity"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/invitations/{invitationId}/email-deliveries": {
+      "post": {
+        "operationId": "requestInvitationEmail",
+        "tags": [
+          "admissions"
+        ],
+        "summary": "Request first email for the current invitation generation",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "admissions",
+        "x-owner-card": "VTC-038",
+        "x-capability": "applications.manage",
+        "x-guards": [
+          "current_valid_unconsumed_generation",
+          "mail_enabled",
+          "no_existing_delivery",
+          "preserve_token_generation_and_expiry"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeInvitation"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong authoritative aggregate version, for the next command."
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "invitationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/reinstatement-options": {
+      "get": {
+        "operationId": "getReinstatementOptions",
+        "tags": [
+          "company"
+        ],
+        "summary": "Read explicit per-game return choices",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-038",
+        "x-capability": "members.manage",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Current authorized safe projection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeReinstatementOptions"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9717,6 +9951,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9724,7 +9963,8 @@
           "email",
           "status",
           "accessEpoch",
-          "identityEpoch"
+          "identityEpoch",
+          "version"
         ],
         "additionalProperties": false
       },
@@ -9790,7 +10030,9 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/AssignmentInput"
-            }
+            },
+            "minItems": 1,
+            "maxItems": 2
           },
           "reason": {
             "type": "string",
@@ -17887,6 +18129,200 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ListQualificationRuleHistory"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SourceCapability": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ets2telemetry",
+              "manual",
+              "trucky",
+              "vtcbase"
+            ]
+          },
+          "implemented": {
+            "type": "boolean"
+          },
+          "runtimeEnabled": {
+            "type": "boolean"
+          },
+          "ownership": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "company"
+            ]
+          }
+        },
+        "required": [
+          "provider",
+          "implemented",
+          "runtimeEnabled",
+          "ownership"
+        ],
+        "additionalProperties": false
+      },
+      "SourceCapabilities": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceCapability"
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "telemetry": {
+            "type": "boolean"
+          },
+          "manual": {
+            "type": "boolean"
+          },
+          "qualifications": {
+            "type": "boolean"
+          },
+          "externalIdentities": {
+            "type": "boolean"
+          },
+          "admissions": {
+            "type": "boolean"
+          },
+          "mail": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sources",
+          "telemetry",
+          "manual",
+          "qualifications",
+          "externalIdentities",
+          "admissions",
+          "mail"
+        ],
+        "additionalProperties": false
+      },
+      "PersonalConnectionCapabilities": {
+        "type": "object",
+        "properties": {
+          "telemetry": {
+            "type": "boolean"
+          },
+          "externalIdentities": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "telemetry",
+          "externalIdentities"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeSourceCapabilities": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SourceCapabilities"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopePersonalConnectionCapabilities": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PersonalConnectionCapabilities"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ReinstatementLevelOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "trainee",
+              "driver_iii",
+              "driver_ii",
+              "driver_i"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "code",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "ReinstatementOptions": {
+        "type": "object",
+        "properties": {
+          "levels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReinstatementLevelOption"
+            },
+            "minItems": 8,
+            "maxItems": 8
+          }
+        },
+        "required": [
+          "levels"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeReinstatementOptions": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReinstatementOptions"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

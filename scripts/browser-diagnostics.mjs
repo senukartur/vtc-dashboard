@@ -1,4 +1,5 @@
 export const browserFiles = {
+  "test/e2e/administration-real.spec.ts": "administration-real",
   "test/e2e/qualifications-editor.spec.ts": "qualifications-editor",
   "test/e2e/qualifications.spec.ts": "qualifications",
   "test/e2e/qualifications-real.spec.ts": "qualifications-real",

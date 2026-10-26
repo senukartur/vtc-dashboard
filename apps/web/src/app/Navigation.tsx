@@ -72,19 +72,21 @@ export function Navigation({
                 {t(`trips:${label}`)}
               </NavLink>
             ))}
+          {[
+            ["company.read", "/account/connections", "connections"],
+            ["applications.manage", "/account/admin/applications", "applications"],
+            ["members.manage", "/account/admin/members", "members"],
+            ["company.configure", "/account/admin/settings", "settings"],
+          ]
+            .filter(([cap]) => cap && session.self?.capabilities.includes(cap))
+            .map(([, path, label]) => (
+              <NavLink key={path} to={path ?? "/account"} onClick={close}>
+                {t(`administration:${label}`)}
+              </NavLink>
+            ))}
           <Link to={publicPath(locale)} onClick={close}>
             {t("home")}
           </Link>
-          {[
-            ["applications.manage", "administration"],
-            ["leadership.transfer", "leadership"],
-          ]
-            .filter(([capability]) => capability && session.self?.capabilities.includes(capability))
-            .map(([, label]) => (
-              <span className="unavailable-navigation" key={label}>
-                {t(`account:nav.${label}`)} · {t("account:unavailable")}
-              </span>
-            ))}
         </>
       );
     if (!preview)

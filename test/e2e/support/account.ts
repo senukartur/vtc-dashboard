@@ -1,3 +1,4 @@
+import { createQualificationInitialization } from "../../../apps/api/src/modules/qualifications/initialization.ts";
 import { createHmac, randomUUID } from "node:crypto";
 import { request, type APIRequestContext } from "@playwright/test";
 import { mailCrypto } from "../../../apps/api/src/modules/messaging/content.ts";
@@ -12,6 +13,11 @@ export function accountSecret(kind: "identity" | "mail" | "password") {
   return createHmac("sha256", guardedAllocation().token)
     .update(`browser-account-${kind}`)
     .digest("hex");
+}
+export function browserAdmissionsKey() {
+  return createHmac("sha256", guardedAllocation().token)
+    .update("browser-account-admissions")
+    .digest("base64url");
 }
 export const origin = "http://127.0.0.1:4173";
 export async function resetAccountLimits() {
@@ -124,7 +130,10 @@ export async function deactivateFixtureMember(
     const identity = createIdentity(
       unit,
       { secret: accountSecret("identity"), origin, production: false },
-      { accessEvents: identityAccessEvents(unit) },
+      {
+        accessEvents: identityAccessEvents(unit),
+        qualificationsLifecycle: createQualificationInitialization(unit),
+      },
     );
     const state = await staff.storageState();
     const actor = await identity.authenticate(

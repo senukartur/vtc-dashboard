@@ -8,6 +8,7 @@ import { driverTranslations } from "../features/drivers/translations.js";
 import { foundationTranslations } from "../features/foundation/translations.js";
 import { qualificationTranslations } from "../features/qualifications/translations.js";
 import { tripTranslations } from "../features/trips/translations.js";
+import { administrationTranslations } from "../features/admin/translations.js";
 import { core } from "../i18n/core/resources.js";
 
 await i18next.use(initReactI18next).init({
@@ -19,6 +20,7 @@ await i18next.use(initReactI18next).init({
   resources: {
     en: {
       core: core.en,
+      administration: administrationTranslations.en,
       foundation: foundationTranslations.en,
       admissions: admissionsTranslations.en,
       account: accountTranslations.en,
@@ -30,6 +32,7 @@ await i18next.use(initReactI18next).init({
     },
     ru: {
       core: core.ru,
+      administration: administrationTranslations.ru,
       foundation: foundationTranslations.ru,
       admissions: admissionsTranslations.ru,
       account: accountTranslations.ru,

@@ -1077,15 +1077,18 @@ test("departure closes periods, return has no automatic assignment, and historic
   await identity.administer(director, owner.userId, newId(), m?.version as number, {
     kind: "reinstate",
     roles: ["driver"],
+    qualifications: [
+      {
+        game: "ets2",
+        levelId: structuralLevels.ets2[1],
+        purpose: "reinstatement",
+        reason: "Fictional return",
+      },
+    ],
   });
-  await expect(progress()).rejects.toMatchObject({ publicCode: "SETUP_REQUIRED" });
+  const returned = await progress();
+  expect(returned.data.assignment.levelId).toBe(structuralLevels.ets2[1]);
   let history = await service.history(director, owner.userId, "ets2", {}, true);
-  await service.assign(director, owner.userId, newId(), history.version, {
-    game: "ets2",
-    levelId: structuralLevels.ets2[1],
-    purpose: "reinstatement",
-    reason: "Fictional return",
-  });
   tick();
   history = await service.history(director, owner.userId, "ets2", {}, true);
   await expect(

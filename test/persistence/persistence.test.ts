@@ -731,30 +731,18 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
             "INSERT INTO qualification_initial_assignments(id,user_id,game,level,assigned_at) VALUES(?,?,'ets2','trainee','2026-01-02 03:04:05.678')",
             [id, userId],
           );
-        // This is the pre-0010 identity composition: no qualification lifecycle port existed.
-        const identity = createIdentity(
-          unit,
-          {
-            secret: randomBytes(32).toString("hex"),
-            origin: "http://127.0.0.1:4173",
-            production: false,
-          },
-          { accessEvents: identityAccessEvents(unit) },
+        // Historical fixture from the published pre-0010 lifecycle, observed at
+        // bbb8fecb1aac0901591865472327e899c41e1a8b before VTC-038: departure and
+        // return each increment all three security epochs and the member version.
+        // Current Identity requires the current schema and explicit new periods;
+        // this test establishes legacy migration compatibility, not that runtime.
+        await connection.execute(
+          "UPDATE identity_memberships SET status='active',identity_epoch=3,access_epoch=3,credential_epoch=3,version=3 WHERE user_id=? AND identity_epoch=1 AND version=1",
+          [returnedId],
         );
-        const password = "Fictional-upgrade-passphrase-42";
-        await identity.bootstrap({
-          email: "upgrade-director@example.invalid",
-          name: "Fictional Upgrade Director",
-          password,
-        });
-        const login = await identity.login("upgrade-director@example.invalid", password);
-        const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
-        const director = await identity.authenticate(new Headers({ cookie }));
-        await identity.administer(director, returnedId, newId(), 1, { kind: "deactivate" });
-        await identity.administer(director, returnedId, newId(), 2, {
-          kind: "reinstate",
-          roles: ["trainee"],
-        });
+        await connection.execute("INSERT INTO identity_roles(user_id,role) VALUES(?,'trainee')", [
+          returnedId,
+        ]);
         const [returned] = await connection.query<RowDataPacket[]>(
           "SELECT status,identity_epoch FROM identity_memberships WHERE user_id=?",
           [returnedId],
@@ -819,15 +807,24 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           },
           { accessEvents: identityAccessEvents(unit) },
         );
-        const password = "Fictional-event-upgrade-passphrase-42";
-        await identity.bootstrap({
-          email: "event-upgrade@example.invalid",
-          name: "Fictional Event Upgrade Director",
-          password,
-        });
-        const login = await identity.login("event-upgrade@example.invalid", password);
-        const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
-        const director = await identity.authenticate(new Headers({ cookie }));
+        const password = "Fictional-event-upgrade-passphrase-42",
+          directorId = newId();
+        const credential = await identity.prepareCredential(password);
+        await unit.run((tx) =>
+          identity.insertWithCredential(tx, {
+            userId: directorId,
+            email: "event-upgrade@example.invalid",
+            name: "Fictional Event Upgrade Director",
+            roles: ["driver"],
+            ...credential,
+          }),
+        );
+        // The published company fixture omits reporting_timezone, introduced after this prefix.
+        // Authenticate with the current Identity only after the forward migrations.
+        await connection.execute(
+          "INSERT INTO identity_company(singleton,id,director_user_id,version) VALUES(1,?,?,1)",
+          [newId(), directorId],
+        );
         const eventKey = randomBytes(32).toString("hex");
         const eventInput = {
           title: "Fictional upgrade convoy",
@@ -847,14 +844,8 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           prescribedMassKg: null,
           prescribedTrailerTypeId: null,
         };
-        const fixture = await seedPublishedEventsHistory(
-          unit,
-          director.userId,
-          eventKey,
-          eventInput,
-        );
+        const fixture = await seedPublishedEventsHistory(unit, directorId, eventKey, eventInput);
         const { eventId, createKey, eventBefore, historyBefore, replayBefore } = fixture;
-        const events = createEvents(unit, { cursorKey: eventKey }, { identity });
         assert.equal(historyBefore.definitions.length, 1);
         assert.equal(historyBefore.responses.length, 1);
         assert.equal(historyBefore.attendance.length, 1);
@@ -867,6 +858,10 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 12",
         );
         assert.deepEqual(after, before);
+        const login = await identity.login("event-upgrade@example.invalid", password);
+        const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
+        const director = await identity.authenticate(new Headers({ cookie }));
+        const events = createEvents(unit, { cursorKey: eventKey }, { identity });
         assert.deepEqual(await events.get(director, eventId), eventBefore);
         assert.deepEqual(await events.history(director, eventId), historyBefore);
         assert.deepEqual(await events.create(director, createKey, eventInput), replayBefore);

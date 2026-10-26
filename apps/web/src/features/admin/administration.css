@@ -1,0 +1,148 @@
+.administration-page {
+  min-width: 0;
+}
+.admin-navigation,
+.admin-tabs,
+.admin-actions,
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.admin-navigation a,
+.admin-tabs a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.5rem;
+}
+.admin-navigation a[aria-current],
+.admin-tabs a[aria-current] {
+  background: var(--muted);
+  color: var(--foreground);
+  outline: 1px solid var(--border);
+}
+.admin-workbench {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.3fr);
+  gap: 1.2rem;
+  align-items: start;
+}
+.admin-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.admin-list button {
+  width: 100%;
+  min-height: 56px;
+  text-align: left;
+  justify-content: flex-start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.admin-list button[aria-pressed="true"] {
+  outline: 2px solid var(--focus);
+}
+.admin-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.admin-detail dl {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.4fr) minmax(0, 1fr);
+  gap: 0.6rem;
+}
+.admin-detail dd {
+  margin: 0;
+}
+.admin-role-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.7rem 0;
+}
+.admin-role-list label {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 0.5rem;
+}
+.admin-role-list input {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+.admin-detail textarea {
+  width: 100%;
+  min-height: 6rem;
+}
+.admin-detail select,
+.admin-detail .input {
+  width: 100%;
+}
+.admin-secret {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  user-select: all;
+}
+.admin-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.admin-safe-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.admin-safe-table th,
+.admin-safe-table td {
+  padding: 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.admin-table-scroll {
+  overflow-x: auto;
+}
+.admin-table-scroll:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.admin-audit-table {
+  min-width: 48rem;
+}
+.admin-audit-table td:first-child {
+  white-space: nowrap;
+}
+.admin-mobile-back {
+  display: none;
+}
+@media (max-width: 700px) {
+  .admin-workbench {
+    display: block;
+  }
+  .admin-workbench.has-selection > .admin-master {
+    display: none;
+  }
+  .admin-workbench:not(.has-selection) > .admin-detail {
+    display: none;
+  }
+  .admin-mobile-back {
+    display: inline-flex;
+    margin-bottom: 1rem;
+  }
+  .admin-detail dl {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .admin-detail dd {
+    margin-bottom: 0.6rem;
+  }
+}

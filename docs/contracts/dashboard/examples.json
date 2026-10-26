@@ -557,7 +557,8 @@
               "email": "fixture@example.invalid",
               "status": "active",
               "accessEpoch": 1,
-              "identityEpoch": 1
+              "identityEpoch": 1,
+              "version": 1
             }
           ],
           "nextCursor": null
@@ -599,7 +600,8 @@
           "email": "fixture@example.invalid",
           "status": "active",
           "accessEpoch": 1,
-          "identityEpoch": 1
+          "identityEpoch": 1,
+          "version": 1
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -656,7 +658,14 @@
       },
       "request": {
         "roles": [],
-        "assignments": [],
+        "assignments": [
+          {
+            "game": "ets2",
+            "levelId": "02800000-0000-4000-8000-000000000001",
+            "purpose": "reinstatement",
+            "reason": "Fictional explicit return"
+          }
+        ],
         "reason": "synthetic-example"
       }
     },
@@ -5521,6 +5530,171 @@
         },
         "meta": {
           "requestId": "synthetic-qualification-attribution"
+        }
+      }
+    },
+    {
+      "id": "getSourceCapabilities:success",
+      "operationId": "getSourceCapabilities",
+      "status": 200,
+      "response": {
+        "data": {
+          "sources": [
+            {
+              "provider": "ets2telemetry",
+              "implemented": true,
+              "runtimeEnabled": false,
+              "ownership": "personal"
+            },
+            {
+              "provider": "manual",
+              "implemented": true,
+              "runtimeEnabled": false,
+              "ownership": "personal"
+            },
+            {
+              "provider": "trucky",
+              "implemented": false,
+              "runtimeEnabled": false,
+              "ownership": "company"
+            },
+            {
+              "provider": "vtcbase",
+              "implemented": false,
+              "runtimeEnabled": false,
+              "ownership": "company"
+            }
+          ],
+          "telemetry": false,
+          "manual": false,
+          "qualifications": false,
+          "externalIdentities": false,
+          "admissions": false,
+          "mail": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-038"
+        }
+      }
+    },
+    {
+      "id": "getPersonalConnectionCapabilities:success",
+      "operationId": "getPersonalConnectionCapabilities",
+      "status": 200,
+      "response": {
+        "data": {
+          "telemetry": false,
+          "externalIdentities": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-038"
+        }
+      }
+    },
+    {
+      "id": "getAdminMemberIdentity:success",
+      "operationId": "getAdminMemberIdentity",
+      "status": 200,
+      "response": {
+        "data": {
+          "steamStatus": "unlinked",
+          "steamProfileUrl": null,
+          "pendingReplacementId": null,
+          "identityEpoch": 1,
+          "truckersMp": {
+            "status": "not_linked",
+            "displayName": null,
+            "checkedAt": null,
+            "found": null,
+            "playerId": null,
+            "vtc": null,
+            "lastAttemptAt": null,
+            "failure": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestInvitationEmail:success",
+      "operationId": "requestInvitationEmail",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "applicationId": "41000000-0000-4000-8000-000000000001",
+          "expiresAt": "2026-10-17T12:00:00.000Z",
+          "state": "active",
+          "emailDelivery": "queued",
+          "deliveryId": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getReinstatementOptions:success",
+      "operationId": "getReinstatementOptions",
+      "status": 200,
+      "response": {
+        "data": {
+          "levels": [
+            {
+              "id": "02800000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "code": "trainee",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000002",
+              "game": "ets2",
+              "code": "driver_iii",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000003",
+              "game": "ets2",
+              "code": "driver_ii",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000004",
+              "game": "ets2",
+              "code": "driver_i",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000005",
+              "game": "ats",
+              "code": "trainee",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000006",
+              "game": "ats",
+              "code": "driver_iii",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000007",
+              "game": "ats",
+              "code": "driver_ii",
+              "name": "Fictional return level"
+            },
+            {
+              "id": "02800000-0000-4000-8000-000000000008",
+              "game": "ats",
+              "code": "driver_i",
+              "name": "Fictional return level"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-request-038"
         }
       }
     }

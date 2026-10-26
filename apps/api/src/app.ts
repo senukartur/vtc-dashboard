@@ -15,6 +15,8 @@ import type { Events } from "./modules/events/service.js";
 import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
 import type { ExternalIdentities } from "./modules/external-identities/service.js";
 import { registerIdentityRoutes } from "./modules/identity/http.js";
+import { registerAdministrationRoutes } from "./modules/identity/admin-http.js";
+import type { Administration } from "./use-cases/administration.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerManualRoutes } from "./modules/manual-reports/http.js";
 import type { ManualReports } from "./modules/manual-reports/service.js";
@@ -54,6 +56,7 @@ const errorCodes: Readonly<Record<number, string>> = {
 
 export interface AppOptions {
   identity?: Identity;
+  administration?: Administration;
   messaging?: Messaging;
   admissions?: Admissions;
   externalIdentities?: ExternalIdentities;
@@ -162,6 +165,8 @@ export async function createApp(options: AppOptions) {
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
   if (options.identity) await registerIdentityRoutes(app, options.identity);
+  if (options.identity && options.administration)
+    await registerAdministrationRoutes(app, options.identity, options.administration);
   if (options.identity && options.messaging)
     await registerMessagingRoutes(app, options.identity, options.messaging);
   if (options.identity && options.admissions)

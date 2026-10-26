@@ -8,6 +8,7 @@ export function browserTripConfig() {
     createHmac("sha256", allocation.token).update(`browser-trips-${kind}`).digest("hex");
   return {
     trips: { cursorKey: key("trips") },
+    telemetry: { cursorKey: key("telemetry"), ipPerMinute: 6000, globalPerMinute: 12000 },
     manual: {
       key: key("manual"),
       maxFilesPerReport: 5,

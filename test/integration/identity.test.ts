@@ -1,3 +1,7 @@
+import {
+  createQualificationInitialization,
+  structuralLevels,
+} from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { createHmac, randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type TxContext } from "@vtc/db";
 import {
@@ -64,6 +68,7 @@ const safe = async <T>(operation: Promise<T>): Promise<T> => {
   }
 };
 const ports = () => ({
+  qualificationsLifecycle: createQualificationInitialization(unit),
   delivery: {
     enqueue: async (tx: TxContext, input: PrivateChallenge) => {
       await unit
@@ -432,6 +437,14 @@ test("deactivation/reinstatement retains identity/history, replaces roles and ma
     identity.administer(director.actor, member.id, newId(), 2, {
       kind: "reinstate",
       roles: ["trainee"],
+      qualifications: [
+        {
+          game: "ets2",
+          levelId: structuralLevels.ets2[0],
+          purpose: "reinstatement",
+          reason: "Fictional explicit return",
+        },
+      ],
     }),
   );
   const returned = await signIn(member.email);
@@ -464,10 +477,17 @@ test("deactivation/reinstatement retains identity/history, replaces roles and ma
       identity.administer(director.actor, member.id, newId(), 3, {
         kind: "roles",
         roles: ["driver"],
-        qualifications: [{}],
+        qualifications: [
+          {
+            game: "ets2",
+            levelId: structuralLevels.ets2[0],
+            purpose: "reinstatement",
+            reason: "Fictional invalid role payload",
+          },
+        ],
       }),
     ),
-  ).rejects.toMatchObject({ statusCode: 503 });
+  ).rejects.toMatchObject({ statusCode: 422 });
 });
 
 test("challenge replacement, five wrong attempts, exact ten-minute expiry, purpose and actor binding are durable", async () => {

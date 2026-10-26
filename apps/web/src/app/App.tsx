@@ -67,6 +67,23 @@ const DriverProfilePage = lazy(() =>
   })),
 );
 
+const ApplicationsPage = lazy(() =>
+  import("../features/admin/ApplicationsPage.js").then((module) => ({
+    default: module.ApplicationsPage,
+  })),
+);
+const MembersPage = lazy(() =>
+  import("../features/admin/MembersPage.js").then((module) => ({ default: module.MembersPage })),
+);
+const SettingsPage = lazy(() =>
+  import("../features/admin/SettingsPage.js").then((module) => ({ default: module.SettingsPage })),
+);
+const ConnectionsPage = lazy(() =>
+  import("../features/connections/ConnectionsPage.js").then((module) => ({
+    default: module.ConnectionsPage,
+  })),
+);
+
 const queryClient = createAppQueryClient();
 const memberPath = "/foundation/member";
 const FoundationPage = lazy(() =>
@@ -310,6 +327,38 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               element={
                 <ProtectedAccount>
                   <TripDetailPage review />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/admin/applications"
+              element={
+                <ProtectedAccount>
+                  <ApplicationsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/admin/members"
+              element={
+                <ProtectedAccount>
+                  <MembersPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/admin/settings"
+              element={
+                <ProtectedAccount>
+                  <SettingsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/connections"
+              element={
+                <ProtectedAccount>
+                  <ConnectionsPage />
                 </ProtectedAccount>
               }
             />

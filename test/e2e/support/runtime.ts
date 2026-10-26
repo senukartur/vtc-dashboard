@@ -38,7 +38,7 @@ const compose = (target: typeof unit, worker = false) =>
     true,
     config.catalogs,
     trips.trips,
-    undefined,
+    trips.telemetry,
     trips.manual,
     trips.qualifications,
     trips.events,

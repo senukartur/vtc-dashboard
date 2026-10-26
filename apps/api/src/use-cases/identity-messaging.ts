@@ -47,6 +47,7 @@ import {
   catalogEvents,
   identityAccessEvents,
 } from "../platform/outbox/events.js";
+import { createAdministration } from "./administration.js";
 
 export function composeIdentity(
   unit: UnitOfWork,
@@ -260,6 +261,14 @@ export function composeIdentity(
     analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
   return {
     identity,
+    administration: createAdministration(unit, identity, {
+      telemetry: !!telemetryConfig,
+      manual: !!manualConfig,
+      qualifications: !!qualificationsConfig,
+      externalIdentities: externalEnabled,
+      admissions: !!admissionsConfig,
+      mail: !!mail,
+    }),
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events } : {}),
