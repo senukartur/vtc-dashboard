@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { components } from "@vtc/contracts";
+import { pagination } from "./pagination.js";
 import {
   applicationId,
   createAudit,
@@ -81,6 +82,10 @@ export interface IdentityPorts {
       assignments: readonly components["schemas"]["AssignmentInput"][],
       assignedAt: string,
     ): Promise<void>;
+    currentAssignments?(
+      tx: TxContext,
+      userId: string,
+    ): Promise<components["schemas"]["Assignment"][]>;
   };
   invalidateTelemetryCredentials?: (tx: TxContext, userId: string) => Promise<void>;
   steamProjection?: (tx: TxContext, userId: string) => Promise<boolean>;
@@ -548,6 +553,41 @@ export function createIdentity(
     if (!valid) return null;
     await client(tx).update(challenges).set({ consumed: true }).where(eq(challenges.id, id));
     return challenge;
+  }
+
+  async function queryQualificationMembers(tx: TxContext, after: string | null, limit: number) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+    const current = await lockCompany(tx);
+    const rows = await client(tx)
+      .select({ id: user.id, nickname: user.name, status: membership.status })
+      .from(user)
+      .innerJoin(membership, eq(membership.userId, user.id))
+      .where(after ? gt(user.id, applicationId(after)) : undefined)
+      .orderBy(user.id)
+      .limit(limit + 1)
+      .for("share");
+    // The lookahead row participates in this bounded batch, never the 100-ID facade.
+    const assigned = rows.length
+      ? await client(tx)
+          .select({ userId: roles.userId, role: roles.role })
+          .from(roles)
+          .where(
+            inArray(
+              roles.userId,
+              rows.map((row) => row.id),
+            ),
+          )
+          .for("share")
+      : [];
+    return rows.map((row) => ({
+      id: row.id,
+      nickname: row.nickname,
+      formerMember: row.status !== "active",
+      roles: [
+        ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
+        ...(current.directorUserId === row.id ? ["director" as const] : []),
+      ],
+    }));
   }
 
   return {
@@ -1654,40 +1694,7 @@ export function createIdentity(
       requireCapability(actor, capability);
       return { ...actor, capabilities: [...actor.capabilities], locale: member.locale };
     },
-    async qualificationMembersInTransaction(tx: TxContext, after: string | null, limit: number) {
-      if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
-      const current = await lockCompany(tx);
-      const rows = await client(tx)
-        .select({ id: user.id, nickname: user.name, status: membership.status })
-        .from(user)
-        .innerJoin(membership, eq(membership.userId, user.id))
-        .where(after ? gt(user.id, applicationId(after)) : undefined)
-        .orderBy(user.id)
-        .limit(limit + 1)
-        .for("share");
-      // The lookahead row participates in this bounded batch, never the 100-ID facade.
-      const assigned = rows.length
-        ? await client(tx)
-            .select({ userId: roles.userId, role: roles.role })
-            .from(roles)
-            .where(
-              inArray(
-                roles.userId,
-                rows.map((row) => row.id),
-              ),
-            )
-            .for("share")
-        : [];
-      return rows.map((row) => ({
-        id: row.id,
-        nickname: row.nickname,
-        formerMember: row.status !== "active",
-        roles: [
-          ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
-          ...(current.directorUserId === row.id ? ["director" as const] : []),
-        ],
-      }));
-    },
+    qualificationMembersInTransaction: queryQualificationMembers,
     async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
       const current = await lockCompany(tx);
       if (ids.length > 100) throw new Error("MEMBER_SUMMARY_BOUND_EXCEEDED");
@@ -1733,6 +1740,56 @@ export function createIdentity(
         identityEpoch: row.identityEpoch,
         credentialEpoch: row.credentialEpoch,
       };
+    },
+    async listMembers(
+      actor: Actor,
+      options: { limit?: number; cursor?: string } = {},
+    ): Promise<components["schemas"]["ListMemberSummary"]> {
+      requireCapability(actor, "company.read");
+      return run(async (tx: TxContext) => {
+        const current = await lockCompany(tx);
+        await checkActor(tx, actor, current);
+        const page = pagination(config.secret);
+        const paging = page(actor, ["members"], options);
+        const rows = await queryQualificationMembers(tx, paging.after, paging.limit);
+        return paging.finish(rows, (row) => row.id);
+      });
+    },
+    async getMember(
+      actor: Actor,
+      memberId: string,
+    ): Promise<components["schemas"]["MemberProfile"]> {
+      requireCapability(actor, "company.read");
+      return run(async (tx: TxContext) => {
+        const current = await lockCompany(tx);
+        await checkActor(tx, actor, current);
+        const validMemberId = applicationId(memberId);
+        const [memberRow] = await client(tx)
+          .select({ id: user.id, nickname: user.name, status: membership.status })
+          .from(user)
+          .innerJoin(membership, eq(membership.userId, user.id))
+          .where(eq(user.id, validMemberId))
+          .for("share");
+        if (!memberRow) throw identityError(404);
+        const assigned = await client(tx)
+          .select({ role: roles.role })
+          .from(roles)
+          .where(eq(roles.userId, memberRow.id))
+          .for("share");
+        const member: components["schemas"]["MemberSummary"] = {
+          id: memberRow.id,
+          nickname: memberRow.nickname,
+          formerMember: memberRow.status !== "active",
+          roles: [
+            ...assigned.map((r) => r.role),
+            ...(current.directorUserId === memberRow.id ? ["director" as const] : []),
+          ],
+        };
+        const qualifications = ports.qualificationsLifecycle?.currentAssignments
+          ? await ports.qualificationsLifecycle.currentAssignments(tx, memberRow.id)
+          : [];
+        return { member, qualifications };
+      });
     },
   };
 }

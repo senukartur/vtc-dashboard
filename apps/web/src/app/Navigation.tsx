@@ -42,6 +42,16 @@ export function Navigation({
             {t("account:account")}
           </NavLink>
           {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/dashboard" onClick={close}>
+              {t("dashboard:title")}
+            </NavLink>
+          )}
+          {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/drivers" onClick={close}>
+              {t("drivers:directory.title")}
+            </NavLink>
+          )}
+          {session.self?.capabilities.includes("company.read") && (
             <NavLink to="/account/catalogs" onClick={close}>
               {t("catalogs:title")}
             </NavLink>
@@ -77,13 +87,6 @@ export function Navigation({
           <Link to={publicPath(locale)} onClick={close}>
             {t("home")}
           </Link>
-          {[["company.read", "dashboard"]]
-            .filter(([capability]) => capability && session.self?.capabilities.includes(capability))
-            .map(([, label]) => (
-              <span className="unavailable-navigation" key={label}>
-                {t(`account:nav.${label}`)} · {t("account:unavailable")}
-              </span>
-            ))}
         </>
       );
     if (!preview)

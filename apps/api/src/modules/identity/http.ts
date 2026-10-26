@@ -79,7 +79,11 @@ export function csrfProtection(config: IdentityConfig, now: () => number = Date.
 
 export async function registerIdentityRoutes(app: FastifyInstance, identity: Identity) {
   const ownedRoute = (route: string) =>
-    route.startsWith("/api/v1/auth/") || route === "/api/v1/me" || route.startsWith("/api/v1/me/");
+    route.startsWith("/api/v1/auth/") ||
+    route === "/api/v1/me" ||
+    route.startsWith("/api/v1/me/") ||
+    route === "/api/v1/members" ||
+    route === "/api/v1/members/:memberId";
   app.addHook("onRequest", async (request) => {
     const route = request.routeOptions.url;
     if (!route || !ownedRoute(route)) return;
@@ -316,6 +320,50 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
         await identity.confirmEmailChange(current, key(request), request.body),
         request,
       );
+    },
+  );
+  app.get<{ Querystring: { limit?: number; cursor?: string } }>(
+    "/api/v1/members",
+    {
+      schema: {
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+            cursor: { type: "string", minLength: 1, maxLength: 2048 },
+          },
+          additionalProperties: false,
+        },
+        response: { 200: ref("EnvelopeListMemberSummary") },
+      },
+    },
+    async (request) => {
+      const current = await actor(request);
+      return envelope(await identity.listMembers(current, request.query), request);
+    },
+  );
+  app.get<{ Params: { memberId: string } }>(
+    "/api/v1/members/:memberId",
+    {
+      schema: {
+        params: {
+          type: "object",
+          properties: {
+            memberId: {
+              type: "string",
+              format: "uuid",
+              pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            },
+          },
+          required: ["memberId"],
+          additionalProperties: false,
+        },
+        response: { 200: ref("EnvelopeMemberProfile") },
+      },
+    },
+    async (request) => {
+      const current = await actor(request);
+      return envelope(await identity.getMember(current, request.params.memberId), request);
     },
   );
 }
