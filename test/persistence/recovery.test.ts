@@ -467,10 +467,11 @@ await recoveryTest(
       folder = await decisionsPriorFolder();
       assert.equal(await runMigrations(settings, { folder }), 14);
       const journal = JSON.parse(
-          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
-        ),
-        entry = journal.entries.at(-1);
-      assert.equal(entry.idx, 14);
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      journal.entries = journal.entries.filter((candidate: { idx: number }) => candidate.idx <= 14);
+      const entry = journal.entries.at(-1);
+      assert.equal(entry?.idx, 14);
       const source = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
       await writeFile(
         join(folder, `${entry.tag}.sql`),
@@ -521,10 +522,11 @@ await recoveryTest(
       folder = await analyticsPriorFolder();
       assert.equal(await runMigrations(settings, { folder }), 15);
       const journal = JSON.parse(
-          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
-        ),
-        entry = journal.entries.at(-1);
-      assert.equal(entry.idx, 15);
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      journal.entries = journal.entries.filter((candidate: { idx: number }) => candidate.idx <= 15);
+      const entry = journal.entries.at(-1);
+      assert.equal(entry?.idx, 15);
       const source = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
       await writeFile(
         join(folder, `${entry.tag}.sql`),
