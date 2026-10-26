@@ -1,4 +1,7 @@
 export const browserFiles = {
+  "test/e2e/qualifications-editor.spec.ts": "qualifications-editor",
+  "test/e2e/qualifications.spec.ts": "qualifications",
+  "test/e2e/qualifications-real.spec.ts": "qualifications-real",
   "test/e2e/trips-corrections.spec.ts": "trips-corrections",
   "test/e2e/trips.spec.ts": "trips",
   "test/e2e/trips-real.spec.ts": "trips-real",

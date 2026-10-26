@@ -5480,6 +5480,60 @@
             }
           }
         }
+      },
+      "get": {
+        "operationId": "listQualificationRuleHistory",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Read staff-only immutable rule history with recorded publisher",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-031",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_authority",
+          "session_access_level_game_state_cursor",
+          "no_private_rationale",
+          "bounded_actor_enrichment"
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable versions and recorded publisher with current safe nickname.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListQualificationRuleHistory"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "levelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ]
       }
     },
     "/api/v1/admin/members/{memberId}/promotions": {
@@ -8614,6 +8668,181 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/qualification-members": {
+      "get": {
+        "tags": [
+          "qualifications"
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-031",
+        "x-capability": "qualifications.manage",
+        "operationId": "listQualificationMembers",
+        "summary": "List named qualification targets, including former members",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded member summaries ordered by exact ascending ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListMemberSummary"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-guards": [
+          "current_authority",
+          "session_bound_cursor",
+          "no_private_identity_fields"
+        ]
+      }
+    },
+    "/api/v1/admin/qualification-rule-previews": {
+      "post": {
+        "tags": [
+          "qualifications"
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-031",
+        "x-capability": "qualifications.manage",
+        "operationId": "previewQualificationRules",
+        "summary": "Evaluate hypothetical facts against a draft without publishing",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualificationPreviewInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hypothetical qualification outcome only; no company acceptance or event authority.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeQualificationPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-guards": [
+          "current_authority",
+          "same_origin_csrf",
+          "no_domain_mutation",
+          "bounded_hypothetical_facts"
+        ]
+      }
+    },
+    "/api/v1/admin/members/{memberId}/qualification-action-history": {
+      "get": {
+        "operationId": "listQualificationActionHistory",
+        "tags": [
+          "qualifications"
+        ],
+        "summary": "Read staff-only recorded qualification action attribution and effective intervals",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "qualifications",
+        "x-owner-card": "VTC-031",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "current_authority",
+          "session_access_member_game_state_cursor",
+          "no_private_rationale",
+          "bounded_actor_enrichment"
+        ],
+        "responses": {
+          "200": {
+            "description": "Recorded purpose and actor, exact promotion proof relation; no private rationale or invented recorded timestamp.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeListQualificationActionHistory"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
           }
         ]
       }
@@ -12260,7 +12489,9 @@
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                }
+                },
+                "maxItems": 1000,
+                "uniqueItems": true
               }
             },
             "required": [
@@ -12281,7 +12512,9 @@
                   "type": "string",
                   "format": "uuid",
                   "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                }
+                },
+                "maxItems": 1000,
+                "uniqueItems": true
               }
             },
             "required": [
@@ -17175,6 +17408,485 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ListReconciliation"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationPreviewInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "maxItems": 32
+          },
+          "sample": {
+            "type": "object",
+            "properties": {
+              "cargoMassKg": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                    "maxLength": 64
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trailerTypeIds": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "trailersComplete": {
+                "type": "boolean"
+              },
+              "adr": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "known",
+                      "non_hazardous",
+                      "unknown"
+                    ]
+                  },
+                  "entityId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "entityId"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "cargoMassKg",
+              "trailerTypeIds",
+              "trailersComplete",
+              "adr"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "game",
+          "rules",
+          "sample"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationPreview": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "unknown"
+            ]
+          },
+          "ruleResults": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "ruleType": {
+                  "type": "string",
+                  "enum": [
+                    "max_mass",
+                    "allowed_trailer_types",
+                    "allowed_adr_categories"
+                  ]
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown"
+                  ]
+                },
+                "reasonCode": {
+                  "type": "string",
+                  "enum": [
+                    "rule_passed",
+                    "rule_mass_exceeded",
+                    "rule_mass_unknown",
+                    "rule_mass_invalid",
+                    "rule_trailer_type_disallowed",
+                    "rule_trailer_type_unknown",
+                    "rule_trailers_incomplete",
+                    "rule_adr_category_disallowed",
+                    "rule_adr_category_unknown"
+                  ]
+                }
+              },
+              "required": [
+                "ruleType",
+                "outcome",
+                "reasonCode"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "outcome",
+          "ruleResults"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeQualificationPreview": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QualificationPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationActionActor": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "nickname"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationActionHistory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "levelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "periodId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "endedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "initial",
+              "reinstatement",
+              "historical_resolution",
+              "administrative_correction",
+              "promotion"
+            ]
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationActionActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "promotion": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "confirmedAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+                  }
+                },
+                "required": [
+                  "id",
+                  "confirmedAt"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "levelId",
+          "game",
+          "assignedAt",
+          "periodId",
+          "endedAt",
+          "purpose",
+          "actor",
+          "promotion"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationRuleHistory": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "levelId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          },
+          "requiredTrips": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QualificationActionActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "levelId",
+          "game",
+          "publishedAt",
+          "rules",
+          "requiredTrips",
+          "requiredDistanceM",
+          "effectiveAt",
+          "publisher"
+        ],
+        "additionalProperties": false
+      },
+      "ListQualificationActionHistory": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationActionHistory"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListQualificationActionHistory": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListQualificationActionHistory"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ListQualificationRuleHistory": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualificationRuleHistory"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListQualificationRuleHistory": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListQualificationRuleHistory"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

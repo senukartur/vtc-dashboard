@@ -1498,6 +1498,40 @@ export function createIdentity(
       requireCapability(actor, capability);
       return { ...actor, capabilities: [...actor.capabilities], locale: member.locale };
     },
+    async qualificationMembersInTransaction(tx: TxContext, after: string | null, limit: number) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+      const current = await lockCompany(tx);
+      const rows = await client(tx)
+        .select({ id: user.id, nickname: user.name, status: membership.status })
+        .from(user)
+        .innerJoin(membership, eq(membership.userId, user.id))
+        .where(after ? gt(user.id, applicationId(after)) : undefined)
+        .orderBy(user.id)
+        .limit(limit + 1)
+        .for("share");
+      // The lookahead row participates in this bounded batch, never the 100-ID facade.
+      const assigned = rows.length
+        ? await client(tx)
+            .select({ userId: roles.userId, role: roles.role })
+            .from(roles)
+            .where(
+              inArray(
+                roles.userId,
+                rows.map((row) => row.id),
+              ),
+            )
+            .for("share")
+        : [];
+      return rows.map((row) => ({
+        id: row.id,
+        nickname: row.nickname,
+        formerMember: row.status !== "active",
+        roles: [
+          ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
+          ...(current.directorUserId === row.id ? ["director" as const] : []),
+        ],
+      }));
+    },
     async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
       const current = await lockCompany(tx);
       if (ids.length > 100) throw new Error("MEMBER_SUMMARY_BOUND_EXCEEDED");

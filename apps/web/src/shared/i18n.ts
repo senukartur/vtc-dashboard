@@ -1,10 +1,11 @@
-import { tripTranslations } from "../features/trips/translations.js";
 import i18next from "i18next";
 import { initReactI18next } from "react-i18next";
 import { accountTranslations } from "../features/account/translations.js";
 import { admissionsTranslations } from "../features/admissions/translations.js";
 import { catalogTranslations } from "../features/catalogs/translations.js";
 import { foundationTranslations } from "../features/foundation/translations.js";
+import { qualificationTranslations } from "../features/qualifications/translations.js";
+import { tripTranslations } from "../features/trips/translations.js";
 import { core } from "../i18n/core/resources.js";
 
 await i18next.use(initReactI18next).init({
@@ -21,6 +22,7 @@ await i18next.use(initReactI18next).init({
       account: accountTranslations.en,
       catalogs: catalogTranslations.en,
       trips: tripTranslations.en,
+      qualifications: qualificationTranslations.en,
     },
     ru: {
       core: core.ru,
@@ -29,6 +31,7 @@ await i18next.use(initReactI18next).init({
       account: accountTranslations.ru,
       catalogs: catalogTranslations.ru,
       trips: tripTranslations.ru,
+      qualifications: qualificationTranslations.ru,
     },
   },
 });

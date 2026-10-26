@@ -101,6 +101,8 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/reconciliations/{reconciliationId}` | `getReconciliation` | `trips.review` | VTC-026 |
 | `POST /api/v1/reconciliations/{reconciliationId}/reversals` | `reverseReconciliation` | `trips.review` | VTC-026 |
 | `GET /api/v1/qualification-levels` | `listQualificationLevels` | `company.read` | VTC-028 |
+| `GET /api/v1/admin/qualification-members` | `listQualificationMembers` | `qualifications.manage` | VTC-031 |
+| `POST /api/v1/admin/qualification-rule-previews` | `previewQualificationRules` | `qualifications.manage` | VTC-031 |
 | `GET /api/v1/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleVersions` | `company.read` | VTC-028 |
 | `GET /api/v1/qualification-levels/{levelId}/rule-versions/{ruleVersionId}` | `getQualificationRuleVersion` | `company.read` | VTC-028 |
 | `GET /api/v1/members/{memberId}/qualification-progress` | `getQualificationProgress` | `company.read` | VTC-028 |
@@ -139,6 +141,8 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/source-connections/{connectionId}` | `getSourceConnection` | `connections.manage` | VTC-038 |
 | `PATCH /api/v1/admin/source-connections/{connectionId}` | `updateSourceConnection` | `connections.manage` | VTC-038 |
 | `GET /api/v1/admin/audit` | `listAudit` | `members.manage` | VTC-039 |
+| `GET /api/v1/admin/members/{memberId}/qualification-action-history` | `listQualificationActionHistory` | `qualifications.manage` | VTC-031 |
+| `GET /api/v1/admin/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleHistory` | `qualifications.manage` | VTC-031 |
 | `GET /api/v1/operations/{operationId}` | `getOperation` | `session` | VTC-021 |
 | `GET /api/v1/mail-deliveries/{deliveryId}` | `getMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `POST /api/v1/mail-deliveries/{deliveryId}/resends` | `resendMailDelivery` | `session` (owner or applications.manage) | VTC-014 |

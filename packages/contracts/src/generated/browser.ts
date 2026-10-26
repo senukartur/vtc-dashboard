@@ -512,6 +512,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/members/{memberId}/qualification-action-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read staff-only recorded qualification action attribution and effective intervals */
+        get: operations["listQualificationActionHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/members/{memberId}/qualification-assignments": {
         parameters: {
             query?: never;
@@ -656,10 +673,45 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Read staff-only immutable rule history with recorded publisher */
+        get: operations["listQualificationRuleHistory"];
         put?: never;
         /** publishQualificationRules */
         post: operations["publishQualificationRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List named qualification targets, including former members */
+        get: operations["listQualificationMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/qualification-rule-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate hypothetical facts against a draft without publishing */
+        post: operations["previewQualificationRules"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2796,8 +2848,16 @@ export interface components {
             data: components["schemas"]["ListParticipant"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeListQualificationActionHistory: {
+            data: components["schemas"]["ListQualificationActionHistory"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListQualificationLevel: {
             data: components["schemas"]["ListQualificationLevel"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeListQualificationRuleHistory: {
+            data: components["schemas"]["ListQualificationRuleHistory"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeListQualificationRuleVersion: {
@@ -2890,6 +2950,10 @@ export interface components {
         };
         EnvelopeQualificationLevel: {
             data: components["schemas"]["QualificationLevel"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeQualificationPreview: {
+            data: components["schemas"]["QualificationPreview"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeQualificationRuleVersion: {
@@ -3195,8 +3259,16 @@ export interface components {
             items: components["schemas"]["Participant"][];
             nextCursor: string | null;
         };
+        ListQualificationActionHistory: {
+            items: components["schemas"]["QualificationActionHistory"][];
+            nextCursor: string | null;
+        };
         ListQualificationLevel: {
             items: components["schemas"]["QualificationLevel"][];
+            nextCursor: string | null;
+        };
+        ListQualificationRuleHistory: {
+            items: components["schemas"]["QualificationRuleHistory"][];
             nextCursor: string | null;
         };
         ListQualificationRuleVersion: {
@@ -3638,6 +3710,33 @@ export interface components {
             expectedPublicationVersion: number;
             reason: string;
         };
+        QualificationActionActor: {
+            /** Format: uuid */
+            id: string;
+            nickname: string | null;
+        };
+        QualificationActionHistory: {
+            actor: components["schemas"]["QualificationActionActor"] | null;
+            /** Format: date-time */
+            assignedAt: string;
+            endedAt: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            levelId: string;
+            /** Format: uuid */
+            periodId: string;
+            promotion: {
+                /** Format: date-time */
+                confirmedAt: string;
+                /** Format: uuid */
+                id: string;
+            } | null;
+            /** @enum {string} */
+            purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
+        };
         QualificationLevel: {
             /** @enum {string} */
             code: "trainee" | "driver_iii" | "driver_ii" | "driver_i";
@@ -3651,6 +3750,49 @@ export interface components {
             requiredTrips: number | null;
             ruleVersionId: string | null;
             version: number;
+        };
+        QualificationPreview: {
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            ruleResults: {
+                /** @enum {string} */
+                outcome: "pass" | "fail" | "unknown";
+                /** @enum {string} */
+                reasonCode: "rule_passed" | "rule_mass_exceeded" | "rule_mass_unknown" | "rule_mass_invalid" | "rule_trailer_type_disallowed" | "rule_trailer_type_unknown" | "rule_trailers_incomplete" | "rule_adr_category_disallowed" | "rule_adr_category_unknown";
+                /** @enum {string} */
+                ruleType: "max_mass" | "allowed_trailer_types" | "allowed_adr_categories";
+            }[];
+        };
+        QualificationPreviewInput: {
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            rules: components["schemas"]["Rule"][];
+            sample: {
+                adr: {
+                    entityId: string | null;
+                    /** @enum {string} */
+                    status: "known" | "non_hazardous" | "unknown";
+                };
+                cargoMassKg: string | null;
+                trailersComplete: boolean;
+                trailerTypeIds: (string | null)[];
+            };
+        };
+        QualificationRuleHistory: {
+            /** Format: date-time */
+            effectiveAt: string;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            levelId: string;
+            /** Format: date-time */
+            publishedAt: string;
+            publisher: components["schemas"]["QualificationActionActor"] | null;
+            requiredDistanceM: string | null;
+            requiredTrips: number | null;
+            rules: components["schemas"]["Rule"][];
         };
         QualificationRuleVersion: {
             /** Format: date-time */
@@ -4865,6 +5007,33 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listQualificationActionHistory: {
+        parameters: {
+            query: {
+                cursor?: components["parameters"]["Cursor"];
+                game: "ets2" | "ats";
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recorded purpose and actor, exact promotion proof relation; no private rationale or invented recorded timestamp. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListQualificationActionHistory"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listMemberQualificationAssignments: {
         parameters: {
             query: {
@@ -5127,6 +5296,32 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listQualificationRuleHistory: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                levelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable versions and recorded publisher with current safe nickname. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListQualificationRuleHistory"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     publishQualificationRules: {
         parameters: {
             query?: never;
@@ -5154,6 +5349,55 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeQualificationLevel"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listQualificationMembers: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bounded member summaries ordered by exact ascending ID. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListMemberSummary"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewQualificationRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QualificationPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Hypothetical qualification outcome only; no company acceptance or event authority. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeQualificationPreview"];
                 };
             };
             default: components["responses"]["Error"];

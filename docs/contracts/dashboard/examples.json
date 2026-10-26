@@ -5358,6 +5358,171 @@
           "requestId": "synthetic-request-030"
         }
       }
+    },
+    {
+      "id": "listQualificationMembers:success",
+      "operationId": "listQualificationMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "d3100000-0000-4000-8000-000000000001",
+              "nickname": "Fictional Qualification Member",
+              "formerMember": false,
+              "roles": [
+                "driver",
+                "dispatcher"
+              ]
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
+    },
+    {
+      "id": "previewQualificationRules:success",
+      "operationId": "previewQualificationRules",
+      "status": 200,
+      "request": {
+        "game": "ets2",
+        "rules": [
+          {
+            "type": "max_mass",
+            "maxKg": "10"
+          }
+        ],
+        "sample": {
+          "cargoMassKg": "10.000000000000000001",
+          "trailerTypeIds": [],
+          "trailersComplete": false,
+          "adr": {
+            "status": "unknown",
+            "entityId": null
+          }
+        }
+      },
+      "response": {
+        "data": {
+          "outcome": "fail",
+          "ruleResults": [
+            {
+              "ruleType": "max_mass",
+              "outcome": "fail",
+              "reasonCode": "rule_mass_exceeded"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
+    },
+    {
+      "id": "listQualificationMembers:empty",
+      "operationId": "listQualificationMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-workspace"
+        }
+      }
+    },
+    {
+      "id": "listQualificationActionHistory:success",
+      "operationId": "listQualificationActionHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "periodId": "00000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "levelId": "00000000-0000-4000-8000-000000000001",
+              "assignedAt": "2026-10-20T12:00:00.000Z",
+              "endedAt": null,
+              "purpose": "promotion",
+              "actor": {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "nickname": "Fictional current operator"
+              },
+              "promotion": {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "confirmedAt": "2026-10-20T12:00:00.000Z"
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-attribution"
+        }
+      }
+    },
+    {
+      "id": "listQualificationActionHistory:empty",
+      "operationId": "listQualificationActionHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-attribution"
+        }
+      }
+    },
+    {
+      "id": "listQualificationRuleHistory:success",
+      "operationId": "listQualificationRuleHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "levelId": "00000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "publishedAt": "2026-10-20T12:00:00.000Z",
+              "effectiveAt": "2026-10-20T12:00:00.000Z",
+              "rules": [],
+              "requiredTrips": null,
+              "requiredDistanceM": null,
+              "publisher": {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "nickname": "Fictional current operator"
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-attribution"
+        }
+      }
+    },
+    {
+      "id": "listQualificationRuleHistory:empty",
+      "operationId": "listQualificationRuleHistory",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-qualification-attribution"
+        }
+      }
     }
   ]
 }

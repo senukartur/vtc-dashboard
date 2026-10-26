@@ -124,7 +124,7 @@ The [canonical trip foundation](docs/development/trips.md) provides opt-in autho
 
 
 VTC-025 provides opt-in [manual reports and private evidence](docs/development/manual-reports.md). Read its migration/rollback, decoder, persistent-root, retention and prepared-grant boundaries before enabling the feature. Hosted activation remains separate.
-The [qualification guide](docs/development/qualifications.md) documents opt-in VTC-028 APIs, unset numeric launch configuration, explicit effective/history semantics, synchronous contribution authority and promotion proof/correction seams. `QUALIFICATIONS_ENABLED` defaults to false; migration and prepared grants are separate activation work. Admission/lifecycle always use the new assignment substrate after migration, even while qualification HTTP remains disabled.
+The [qualification guide](docs/development/qualifications.md) documents opt-in VTC-028 APIs and the VTC-031 RU/EN `/account/qualifications` workspace, named staff selection, hypothetical preview, unset numeric launch configuration, explicit effective/history semantics, synchronous contribution authority and promotion proof/correction seams. `QUALIFICATIONS_ENABLED` defaults to false; migration and prepared grants are separate activation work. Admission/lifecycle always use the new assignment substrate after migration, even while qualification HTTP remains disabled.
 
 [Events backend APIs](docs/development/events.md) are opt-in through `EVENTS_ENABLED` and an independent cursor key. They provide public/member views, voluntary RSVP and separate staff actual attendance; VTC-035 owns event UI and VTC-036 owns notifications/reminders.
 

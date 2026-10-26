@@ -35,7 +35,9 @@ export async function registerQualificationRoutes(
   const owned = (path: string) =>
     path.startsWith("/api/v1/qualification-levels") ||
     path.startsWith("/api/v1/admin/qualification-levels") ||
-    /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|promotions)$/.test(
+    path === "/api/v1/admin/qualification-members" ||
+    path === "/api/v1/admin/qualification-rule-previews" ||
+    /^\/api\/v1\/(?:admin\/)?members\/:memberId\/(?:qualification-progress|qualification-assignments|qualification-action-history|promotions)$/.test(
       path,
     ) ||
     ["/api/v1/me/qualification-progress", "/api/v1/me/qualification-assignments"].includes(path);
@@ -88,6 +90,68 @@ export async function registerQualificationRoutes(
     data,
     meta: { requestId: request.id },
   });
+  app.get<{ Querystring: Page }>(
+    "/api/v1/admin/qualification-members",
+    {
+      schema: { querystring: object(page), response: { 200: ref("EnvelopeListMemberSummary") } },
+    },
+    async (request) =>
+      envelope(request, await qualifications.members(await actor(request), request.query)),
+  );
+  app.post<{ Body: S["QualificationPreviewInput"] }>(
+    "/api/v1/admin/qualification-rule-previews",
+    {
+      bodyLimit: 131072,
+      schema: {
+        querystring: object({}),
+        body: ref("QualificationPreviewInput"),
+        response: { 200: ref("EnvelopeQualificationPreview") },
+      },
+    },
+    async (request) =>
+      envelope(request, await qualifications.preview(await actor(request), request.body)),
+  );
+  app.get<{ Params: { memberId: string }; Querystring: Page & { game: Game } }>(
+    "/api/v1/admin/members/:memberId/qualification-action-history",
+    {
+      schema: {
+        params: object({ memberId: id }, ["memberId"]),
+        querystring: object({ ...page, game }, ["game"]),
+        response: { 200: ref("EnvelopeListQualificationActionHistory") },
+      },
+    },
+    async (request, reply) => {
+      const result = await qualifications.actionHistory(
+        await actor(request),
+        request.params.memberId,
+        request.query.game,
+        request.query,
+      );
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(request, result.data);
+    },
+  );
+  app.get<{ Params: { levelId: string }; Querystring: Page }>(
+    "/api/v1/admin/qualification-levels/:levelId/rule-versions",
+    {
+      schema: {
+        params: object({ levelId: id }, ["levelId"]),
+        querystring: object(page),
+        response: { 200: ref("EnvelopeListQualificationRuleHistory") },
+      },
+    },
+    async (request) =>
+      envelope(
+        request,
+        await qualifications.rules(
+          await actor(request),
+          request.params.levelId,
+          request.query,
+          undefined,
+          true,
+        ),
+      ),
+  );
   app.get<{ Querystring: Page & { game: Game } }>(
     "/api/v1/qualification-levels",
     {
@@ -220,6 +284,7 @@ export async function registerQualificationRoutes(
   app.post<{ Params: { levelId: string }; Body: S["RulesInput"] }>(
     "/api/v1/admin/qualification-levels/:levelId/rule-versions",
     {
+      bodyLimit: 131072,
       schema: {
         params: object({ levelId: id }, ["levelId"]),
         querystring: object({}),
