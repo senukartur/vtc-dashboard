@@ -449,7 +449,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
           "INSERT INTO identity_challenges (id, user_id, purpose, proposed_email, email_epoch, access_epoch, credential_epoch, secret_hash, expires_at) VALUES (?, ?, 'email_change', 'synthetic-new@example.invalid', 1, 1, 1, ?, UTC_TIMESTAMP(3) + INTERVAL 10 MINUTE)",
           [challengeId, id, Buffer.alloc(32)],
         );
-        assert.equal(await runMigrations(settings), 15);
+        assert.equal(await runMigrations(settings), 14);
         assert.equal(await runMigrations(settings), 0);
         const [rows] = await connection.query<RowDataPacket[]>(
           "SELECT u.email_verified, c.proposed_email, c.current_email_confirmed, c.identity_epoch, c.consumed FROM identity_users u JOIN identity_challenges c ON c.user_id=u.id WHERE c.id=?",
@@ -861,7 +861,7 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         const [before] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version",
         );
-        assert.equal(await runMigrations(settings), 5);
+        assert.equal(await runMigrations(settings), 4);
         assert.equal(await runMigrations(settings), 0);
         const [after] = await connection.query<RowDataPacket[]>(
           "SELECT version,hash FROM _vtc_migrations ORDER BY version LIMIT 12",
@@ -1150,7 +1150,7 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 15);
+        assert.equal(await runMigrations(settings, { folder: extended }), 16);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",
@@ -1506,8 +1506,8 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        // The extended fixture retains its synthetic prior entry plus fifteen current migrations.
-        assert.equal(String(history[0]?.count), "16");
+        // The extended fixture retains its synthetic prior entry plus sixteen current migrations.
+        assert.equal(String(history[0]?.count), "17");
       },
     );
   } finally {
