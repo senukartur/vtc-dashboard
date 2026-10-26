@@ -45,7 +45,10 @@ try {
   if (mode === "produce") {
     const empty = await ownedUnit.run(async (tx) => {
       const db = ownedUnit.client(tx);
-      return !(await db.select().from(company)).length && !(await db.select().from(user)).length;
+      return (
+        !(await db.select({ singleton: company.singleton }).from(company)).length &&
+        !(await db.select({ id: user.id }).from(user)).length
+      );
     });
     requireState(empty);
     const recipient = process.env.VTC_ACCEPTANCE_RECIPIENT ?? "";

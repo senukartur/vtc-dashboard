@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
+import { type AnalyticsConfig, validateAnalyticsConfig } from "../../modules/analytics/service.js";
 import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
 import { type EventsConfig, validateEventsConfig } from "../../modules/events/service.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
@@ -395,7 +396,47 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
         "Invalid environment fields: TRIP_DECISIONS_ENABLED, TRIP_DECISIONS_KEY, IDENTITY_ENABLED, TRIPS_ENABLED, QUALIFICATIONS_ENABLED, MANUAL_REPORTS_ENABLED, EVENTS_ENABLED, CATALOGS_ENABLED, RECONCILIATION_ENABLED",
       );
     }
+  let analytics: AnalyticsConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.ANALYTICS_ENABLED))
+    throw new Error("Invalid environment fields: ANALYTICS_ENABLED");
+  if (input.ANALYTICS_ENABLED === "true") {
+    try {
+      if (!identity || !trips) throw new Error();
+      const analyticsConf: AnalyticsConfig = {
+        cursorKey: input.ANALYTICS_CURSOR_KEY ?? "",
+        ...(input.ANALYTICS_REPORTING_TIMEZONE
+          ? { reportingTimezone: input.ANALYTICS_REPORTING_TIMEZONE }
+          : {}),
+      };
+      validateAnalyticsConfig(analyticsConf);
+      if (
+        [
+          identity.secret,
+          mail?.key,
+          catalogs?.cursorKey,
+          trips.cursorKey,
+          qualifications?.cursorKey,
+          telemetry?.cursorKey,
+          manualReports?.key,
+          events?.cursorKey,
+          reconciliation?.key,
+          tripDecisions?.key,
+        ].includes(analyticsConf.cursorKey) ||
+        (admissions &&
+          Buffer.from(analyticsConf.cursorKey, "hex").equals(
+            Buffer.from(admissions.key, "base64url"),
+          ))
+      )
+        throw new Error();
+      analytics = analyticsConf;
+    } catch {
+      throw new Error(
+        "Invalid environment fields: ANALYTICS_ENABLED, ANALYTICS_CURSOR_KEY, ANALYTICS_REPORTING_TIMEZONE, IDENTITY_ENABLED, TRIPS_ENABLED",
+      );
+    }
+  }
   return {
+    analytics,
     tripDecisions,
     reconciliation,
     manualReports,

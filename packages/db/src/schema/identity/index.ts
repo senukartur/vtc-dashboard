@@ -98,6 +98,7 @@ export const company = mysqlTable(
     id: idColumn("id").notNull().unique(),
     directorUserId: idColumn("director_user_id").notNull(),
     version: int("version", { unsigned: true }).notNull().default(1),
+    reportingTimezone: varchar("reporting_timezone", { length: 128 }),
   },
   (t) => [
     check("identity_one_company", sql`${t.singleton} = 1`),

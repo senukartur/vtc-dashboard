@@ -3,6 +3,7 @@ import type { components } from "@vtc/contracts";
 import {
   applicationId,
   createAudit,
+  idColumn,
   newId,
   TransactionCommitOutcomeUnknownError,
   type TxContext,
@@ -13,7 +14,6 @@ import {
   and,
   challenges,
   commandResults,
-  company,
   eq,
   gt,
   inArray,
@@ -25,6 +25,7 @@ import {
   sql,
   user,
 } from "@vtc/db/identity-schema";
+import { int, mysqlTable } from "drizzle-orm/mysql-core";
 import {
   engine,
   type IdentityConfig,
@@ -42,6 +43,12 @@ import {
 
 type Self = components["schemas"]["Self"];
 type Member = typeof membership.$inferSelect;
+const company = mysqlTable("identity_company", {
+  singleton: int("singleton").primaryKey(),
+  id: idColumn("id").notNull(),
+  directorUserId: idColumn("director_user_id").notNull(),
+  version: int("version", { unsigned: true }).notNull().default(1),
+});
 type Company = typeof company.$inferSelect;
 type Purpose = typeof challenges.$inferSelect.purpose;
 type SafeResult = Record<string, unknown>;
@@ -729,7 +736,10 @@ export function createIdentity(
       const userId = newId(),
         companyId = newId();
       return run(async (tx) => {
-        const existing = await client(tx).select().from(company).where(eq(company.singleton, 1));
+        const existing = await client(tx)
+          .select({ singleton: company.singleton })
+          .from(company)
+          .where(eq(company.singleton, 1));
         if (existing.length) throw identityError(409);
         await this.insertWithCredential(tx, {
           userId,
