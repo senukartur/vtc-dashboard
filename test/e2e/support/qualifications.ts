@@ -54,6 +54,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     distinctAssignment: false,
     immediatePointer: null as string | null,
     ruleMasses: {} as Record<string, string>,
+    memberCommandArrived: 0,
+    memberCommitGate: null as Promise<void> | null,
     raceEvents: [] as { event: string; kind: string; version: number; atMs: number }[],
     releaseHeld: async () => {
       const pending = held.splice(0);
@@ -190,6 +192,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       state.keys.push(key);
       state.etags.push(request.headers()["if-match"] ?? "");
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
+      state.memberCommandArrived++;
+      if (state.memberCommitGate) await state.memberCommitGate;
       state.memberVersion++;
       state.raceEvents.push({
         event: "command_committed",

@@ -76,14 +76,20 @@ test("controlled promotion refresh must replace pre-command progress history and
   const state = await mockQualifications(page);
   let assertedCurrent = false;
   state.distinctAssignment = true;
+  let releaseCommand = () => {};
   try {
     await page.goto("/account/qualifications");
     await page.locator("#assignment-reason").fill("Fictional delayed promotion reads");
+    state.memberCommitGate = new Promise<void>((resolve) => {
+      releaseCommand = resolve;
+    });
+    await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(() => state.memberCommandArrived).toBe(1);
     state.deferNext = ["progress", "history"];
     await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
     await expect.poll(() => state.heldStarted.length).toBe(2);
-    await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    releaseCommand();
     await expect.poll(() => state.memberVersion).toBe(8);
     await state.releaseHeld();
     await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -106,6 +112,7 @@ test("controlled promotion refresh must replace pre-command progress history and
     expect(state.etags).toEqual(['"v7"', '"v8"']);
     assertedCurrent = true;
   } finally {
+    releaseCommand();
     await state.releaseHeld();
     await persistRace(info, state, "member", assertedCurrent);
   }
