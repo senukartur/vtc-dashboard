@@ -141,7 +141,7 @@ export function DriverProfilePage() {
               onClick={() => setGame("all")}
               aria-pressed={game === "all"}
             >
-              All Games
+              {t("profile.allGames")}
             </Button>
             <Button
               type="button"
@@ -211,7 +211,7 @@ export function DriverProfilePage() {
                     </div>
                     {ets2ProgressQuery.data.eligibleForConfirmation && (
                       <Badge className="bg-emerald-950 text-emerald-300">
-                        {locale === "ru" ? "Готов к повышению" : "Eligible"}
+                        {t("profile.eligible")}
                       </Badge>
                     )}
                   </div>
@@ -245,7 +245,7 @@ export function DriverProfilePage() {
                     </div>
                     {atsProgressQuery.data.eligibleForConfirmation && (
                       <Badge className="bg-emerald-950 text-emerald-300">
-                        {locale === "ru" ? "Готов к повышению" : "Eligible"}
+                        {t("profile.eligible")}
                       </Badge>
                     )}
                   </div>

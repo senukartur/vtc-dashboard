@@ -43,6 +43,7 @@ export const dashboardTranslations = {
       tripsLink: "Все мои рейсы",
       noQualification: "Квалификация не назначена",
       level: "Уровень",
+      eligible: "Готов к повышению",
     },
     reviewQueue: {
       title: "Очередь проверки",
@@ -137,6 +138,7 @@ export const dashboardTranslations = {
       tripsLink: "All my trips",
       noQualification: "No qualification assigned",
       level: "Level",
+      eligible: "Eligible",
     },
     reviewQueue: {
       title: "Review Queue",

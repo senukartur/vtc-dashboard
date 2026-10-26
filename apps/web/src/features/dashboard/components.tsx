@@ -261,7 +261,7 @@ export function MyQualificationWidget({
           <Badge>{progress.assignment.levelId}</Badge>
           {progress.eligibleForConfirmation && (
             <Badge className="bg-emerald-950 text-emerald-300">
-              {locale === "ru" ? "Готов к повышению" : "Eligible"}
+              {t("myQualification.eligible")}
             </Badge>
           )}
         </div>

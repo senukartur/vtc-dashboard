@@ -146,7 +146,7 @@ export function DriversPage() {
                 variant="outline"
                 onClick={() => setCursor(membersQuery.data?.nextCursor ?? undefined)}
               >
-                {t("states.loading")}
+                {t("directory.loadMore")}
               </Button>
             </div>
           )}

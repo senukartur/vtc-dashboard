@@ -12,6 +12,7 @@ export const driverTranslations = {
       totalMembers: "Всего участников",
       activeMember: "В штате",
       formerMember: "Бывший сотрудник",
+      loadMore: "Загрузить еще",
     },
     profile: {
       title: "Профиль водителя",
@@ -19,6 +20,8 @@ export const driverTranslations = {
       status: "Статус",
       active: "В штате",
       former: "Бывший сотрудник",
+      allGames: "Все игры",
+      eligible: "Готов к повышению",
       privacyNotice:
         "Политика конфиденциальности: личные данные (email, токены авторизации, приватные реквизиты) строго защищены и не отображаются в общедоступном профиле.",
       statsTitle: "Личная статистика",
@@ -68,6 +71,7 @@ export const driverTranslations = {
       totalMembers: "Total members",
       activeMember: "Active",
       formerMember: "Former Member",
+      loadMore: "Load more",
     },
     profile: {
       title: "Driver Profile",
@@ -75,6 +79,8 @@ export const driverTranslations = {
       status: "Status",
       active: "Active",
       former: "Former Member",
+      allGames: "All Games",
+      eligible: "Eligible",
       privacyNotice:
         "Privacy policy: personal account data (email, authentication tokens, credentials) is strictly protected and never shown on public member profiles.",
       statsTitle: "Personal Statistics",

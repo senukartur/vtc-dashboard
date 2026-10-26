@@ -194,7 +194,9 @@ export function useMemberAcceptedTrips(
     queryFn: async ({ signal }) => {
       try {
         const result = (await driversRead(path, "EnvelopeListTripSummary", signal)).data.data;
-        // Filter strictly to the requested member's trips
+        // Note: The VTC-022 /api/v1/trips contract does not currently support server-side
+        // filtering by memberId. Trips are scoped to company accepted trips and filtered
+        // in-memory by ownerId until a server-side member query parameter is introduced.
         return {
           ...result,
           items: result.items.filter((trip) => trip.owner.id === memberId),
