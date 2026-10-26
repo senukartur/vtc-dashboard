@@ -1,7 +1,165 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import type { TestInfo } from "@playwright/test";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
+
+async function persistRace(
+  info: TestInfo,
+  state: Awaited<ReturnType<typeof mockQualifications>>,
+  scenario: string,
+  assertedCurrent: boolean,
+) {
+  const ledger = {
+    scenario,
+    assertedCurrent,
+    events: state.raceEvents,
+    heldStarted: state.heldStarted,
+    heldFinished: state.heldFinished,
+    serverLevelVersion: state.version,
+    serverMemberVersion: state.memberVersion,
+    commandVersions: state.etags.map((etag) => Number(/^"v(\d+)"$/.exec(etag)?.[1]) || null),
+    replayUsesOriginalKey: state.keys.length > 1 ? state.keys[0] === state.keys[1] : null,
+  };
+  await mkdir(info.outputDir, { recursive: true });
+  await writeFile(info.outputPath("qualification-read-race.json"), JSON.stringify(ledger));
+  await info.attach("qualification-read-race", {
+    body: JSON.stringify(ledger),
+    contentType: "application/json",
+  });
+}
+
+test("controlled old levels response cannot replace a committed version and current rule pointer", async ({
+  page,
+}, info) => {
+  const state = await mockQualifications(page);
+  let assertedCurrent = false;
+  try {
+    await page.goto("/account/qualifications");
+    const card = page
+      .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+      .locator("..");
+    await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+    const editor = card.locator("section").last();
+    await editor.locator('[id^="mass-"]').fill("20");
+    await editor.locator('[id^="reason-"]').fill("Fictional delayed level response");
+    await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+    await expect(
+      editor.getByRole("button", { name: "Publish rule version", exact: true }),
+    ).toBeEnabled();
+    state.deferNext = ["levels"];
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => state.heldStarted).toEqual(["levels"]);
+    state.immediatePointer = "d3300000-0000-4000-8000-000000000004";
+    await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
+    await expect(card.getByText("20 kg", { exact: true })).toBeVisible();
+    await state.releaseHeld();
+    await editor.locator('[id^="level-name-"]').fill("Fictional retained version two");
+    await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
+    await expect(card.getByText("20 kg", { exact: true })).toBeVisible();
+    await expect(editor.getByRole("button", { name: "Save name", exact: true })).toBeEnabled();
+    expect(state.etags).toEqual(['"v1"']);
+    assertedCurrent = true;
+  } finally {
+    await state.releaseHeld();
+    await persistRace(info, state, "level", assertedCurrent);
+  }
+});
+
+test("controlled promotion refresh must replace pre-command progress history and command ETag", async ({
+  page,
+}, info) => {
+  const state = await mockQualifications(page);
+  let assertedCurrent = false;
+  state.distinctAssignment = true;
+  try {
+    await page.goto("/account/qualifications");
+    await page.locator("#assignment-reason").fill("Fictional delayed promotion reads");
+    state.deferNext = ["progress", "history"];
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => state.heldStarted.length).toBe(2);
+    await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(() => state.memberVersion).toBe(8);
+    await state.releaseHeld();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { name: "Fictional driver_iii", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Confirm next-level promotion", exact: true }),
+    ).toBeDisabled();
+    const history = page
+      .getByRole("heading", { name: "Assignment history", exact: true })
+      .locator("..");
+    await expect(history).toContainText("d3200000-0000-4000-8000-000000000002");
+    await expect(history).toContainText("Fictional driver_iii");
+    await page.locator("#assignment-purpose").selectOption("administrative_correction");
+    await page.locator("#assignment-level").selectOption("d3400000-0000-4000-8000-000000000002");
+    await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(state.etags).toEqual(['"v7"', '"v8"']);
+    assertedCurrent = true;
+  } finally {
+    await state.releaseHeld();
+    await persistRace(info, state, "member", assertedCurrent);
+  }
+});
+
+test("controlled historical receipt must fence an old GET before reading the latest level", async ({
+  page,
+}, info) => {
+  const state = await mockQualifications(page);
+  let assertedCurrent = false;
+  try {
+    await page.goto("/account/qualifications");
+    const card = page
+      .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+      .locator("..");
+    await card.getByRole("button", { name: "Edit rules", exact: true }).click();
+    const editor = card.locator("section").last();
+    await editor.locator('[id^="reason-"]').fill("Fictional original delayed receipt");
+    await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+    state.immediatePointer = "d3300000-0000-4000-8000-000000000004";
+    state.uncertain = true;
+    await editor.getByRole("button", { name: "Publish rule version", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+    await page.keyboard.press("Escape");
+    state.version = 3;
+    state.rulePointer = "d3300000-0000-4000-8000-000000000005";
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(card.getByText("Version: 3", { exact: true })).toBeVisible();
+    state.deferNext = ["levels"];
+    await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect.poll(() => state.heldStarted).toEqual(["levels"]);
+    state.version = 4;
+    state.rulePointer = "d3300000-0000-4000-8000-000000000006";
+    state.ruleMasses[state.rulePointer] = "40";
+    await page.getByRole("button", { name: "Check the previous action", exact: true }).click();
+    await expect.poll(() => state.keys.length).toBe(2);
+    await state.releaseHeld();
+    await expect(
+      editor.getByText("The server confirmed the change.", { exact: true }),
+    ).toBeVisible();
+    await expect(card.getByText("Version: 4", { exact: true })).toBeVisible();
+    await expect(card.getByText("40 kg", { exact: true })).toBeVisible();
+    expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
+    expect(state.etags).toEqual(['"v1"', '"v1"']);
+    await expect(
+      editor.getByRole("button", { name: "Use reviewed version as draft baseline", exact: true }),
+    ).toBeEnabled();
+    assertedCurrent = true;
+  } finally {
+    await state.releaseHeld();
+    await persistRace(info, state, "receipt", assertedCurrent);
+  }
+});
 
 for (const locale of ["en", "ru"] as const)
   test(`controlled ${locale} external publication requires validated baseline review for rename and publication while retaining the draft`, async ({

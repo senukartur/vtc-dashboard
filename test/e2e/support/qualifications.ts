@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { envelope, list, mockCatalogs } from "./catalogs.ts";
@@ -21,6 +21,7 @@ export const levels = (game: "ets2" | "ats"): S["QualificationLevel"][] =>
   }));
 export async function mockQualifications(page: Page, locale: "en" | "ru" = "en", staff = true) {
   await mockCatalogs(page, staff);
+  const held: { release: () => void; done: Promise<void> }[] = [];
   const state = {
     progressStatus: 200,
     publishStatus: 201,
@@ -47,7 +48,68 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     renamePointer: null as string | null,
     scheduledPointer: null as string | null,
     publications: [] as S["RulesInput"][],
+    deferNext: [] as ("levels" | "progress" | "history")[],
+    heldStarted: [] as string[],
+    heldFinished: [] as string[],
+    distinctAssignment: false,
+    immediatePointer: null as string | null,
+    ruleMasses: {} as Record<string, string>,
+    raceEvents: [] as { event: string; kind: string; version: number; atMs: number }[],
+    releaseHeld: async () => {
+      const pending = held.splice(0);
+      for (const item of pending) item.release();
+      await Promise.all(pending.map((item) => item.done));
+    },
   };
+  async function respond(
+    kind: "levels" | "progress" | "history",
+    route: Route,
+    input: Parameters<Route["fulfill"]>[0],
+  ) {
+    const captured = structuredClone(input),
+      index = state.deferNext.indexOf(kind);
+    if (index >= 0) {
+      state.deferNext.splice(index, 1);
+      let release = () => {},
+        complete = () => {};
+      const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+        done = new Promise<void>((resolve) => {
+          complete = resolve;
+        });
+      held.push({ release, done });
+      state.heldStarted.push(kind);
+      const capturedVersion = kind === "levels" ? state.version : state.memberVersion;
+      state.raceEvents.push({
+        event: "read_captured",
+        kind,
+        version: capturedVersion,
+        atMs: Math.round(performance.now()),
+      });
+      await gate;
+      try {
+        await route.fulfill(captured);
+        const response = await route.request().response();
+        await response?.finished();
+      } finally {
+        state.heldFinished.push(kind);
+        state.raceEvents.push({
+          event: "read_released",
+          kind,
+          version: capturedVersion,
+          atMs: Math.round(performance.now()),
+        });
+        complete();
+      }
+      return;
+    }
+    return route.fulfill(captured);
+  }
+  const currentAssignment = () =>
+    state.distinctAssignment && state.memberVersion > 7
+      ? "d3200000-0000-4000-8000-000000000002"
+      : assignmentId;
   const receipts = new Map<string, unknown>();
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request(),
@@ -97,12 +159,12 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
                 }
               : {},
         });
-      return route.fulfill({
+      return respond("progress", route, {
         headers: { ETag: `"v${state.memberVersion}"` },
         json: envelope({
           assignment: {
-            id: assignmentId,
-            periodId: assignmentId,
+            id: currentAssignment(),
+            periodId: currentAssignment(),
             levelId: levels(game)[state.currentRank]?.id,
             game,
             assignedAt: "2026-10-20T12:00:00.000Z",
@@ -129,14 +191,20 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       state.etags.push(request.headers()["if-match"] ?? "");
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
       state.memberVersion++;
+      state.raceEvents.push({
+        event: "command_committed",
+        kind: "member",
+        version: state.memberVersion,
+        atMs: Math.round(performance.now()),
+      });
       if (path.endsWith("/promotions")) {
         if (path.includes(accountFixture(locale).data.member.id)) state.selfPromoted = true;
         state.currentRank = 1;
         state.eligible = false;
       }
       const result = envelope({
-        id: assignmentId,
-        periodId: assignmentId,
+        id: currentAssignment(),
+        periodId: currentAssignment(),
         levelId: levels(game)[state.currentRank]?.id,
         game,
         assignedAt: "2026-10-20T12:00:00.000Z",
@@ -152,16 +220,16 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       path.endsWith("/qualification-assignments") ||
       path.endsWith("/qualification-action-history")
     )
-      return route.fulfill({
+      return respond("history", route, {
         headers: { ETag: `"v${state.memberVersion}"` },
         json: list(
           state.emptyHistory
             ? []
             : [
                 {
-                  id: assignmentId,
-                  periodId: assignmentId,
-                  levelId: levels(game)[0]?.id,
+                  id: currentAssignment(),
+                  periodId: currentAssignment(),
+                  levelId: levels(game)[state.distinctAssignment ? state.currentRank : 0]?.id,
                   game,
                   assignedAt: "2026-10-20T12:00:00.000Z",
                   endedAt: null,
@@ -173,7 +241,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
         ),
       });
     if (path === "/api/v1/qualification-levels")
-      return route.fulfill({
+      return respond("levels", route, {
         json: list(
           levels(game).map((l) => ({
             ...l,
@@ -214,7 +282,9 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           game: "ets2",
           publishedAt: "2026-10-20T12:00:00.000Z",
           effectiveAt: "2026-10-20T12:00:00.000Z",
-          rules: [{ type: "max_mass", maxKg: "10" }],
+          rules: [
+            { type: "max_mass", maxKg: state.ruleMasses[path.split("/").at(-1) ?? ""] ?? "10" },
+          ],
           requiredTrips: 2,
           requiredDistanceM: "100",
           ...(path.includes("/admin/")
@@ -279,6 +349,16 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       state.keys.push(key);
       state.etags.push(request.headers()["if-match"] ?? "");
       if (receipts.has(key)) return route.fulfill({ status: 201, json: receipts.get(key) });
+      if (
+        request.method() === "POST" &&
+        state.immediatePointer &&
+        !request.postDataJSON().effectiveAt
+      ) {
+        state.rulePointer = state.immediatePointer;
+        state.ruleMasses[state.rulePointer] =
+          request.postDataJSON().rules.find((rule: S["Rule"]) => rule.type === "max_mass")?.maxKg ??
+          "10";
+      }
       if (request.method() === "PATCH" && state.renamePointer)
         state.rulePointer = state.renamePointer;
       if (
@@ -290,6 +370,12 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
       if (state.uncertain) {
         state.uncertain = false;
         state.version++;
+        state.raceEvents.push({
+          event: "command_committed",
+          kind: "level",
+          version: state.version,
+          atMs: Math.round(performance.now()),
+        });
         receipts.set(
           key,
           envelope({
@@ -307,6 +393,12 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           json: {},
         });
       state.version++;
+      state.raceEvents.push({
+        event: "command_committed",
+        kind: "level",
+        version: state.version,
+        atMs: Math.round(performance.now()),
+      });
       return route.fulfill({
         status: 201,
         json: envelope({
