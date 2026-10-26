@@ -155,7 +155,11 @@ export async function registerAdministrationRoutes(
       schema: { params, body: ref("RolesInput"), response: { 200: ref("EnvelopeCommandResult") } },
     },
     async (r, reply) => {
-      const data = await memberCommand(r, { kind: "roles", roles: r.body.roles });
+      const data = await memberCommand(r, {
+        kind: "roles",
+        roles: r.body.roles,
+        reason: r.body.reason,
+      });
       reply.header("ETag", `"v${data.version}"`);
       return envelope(data, r);
     },
@@ -166,7 +170,7 @@ export async function registerAdministrationRoutes(
       schema: { params, body: ref("ReasonInput"), response: { 200: ref("EnvelopeCommandResult") } },
     },
     async (r, reply) => {
-      const data = await memberCommand(r, { kind: "deactivate" });
+      const data = await memberCommand(r, { kind: "deactivate", reason: r.body.reason });
       reply.header("ETag", `"v${data.version}"`);
       return envelope(data, r);
     },
@@ -185,6 +189,7 @@ export async function registerAdministrationRoutes(
         kind: "reinstate",
         roles: r.body.roles,
         qualifications: r.body.assignments,
+        reason: r.body.reason,
       });
       reply.header("ETag", `"v${data.version}"`);
       return envelope(data, r);

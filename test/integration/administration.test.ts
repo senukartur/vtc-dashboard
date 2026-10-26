@@ -198,6 +198,14 @@ test("new HTTP families enforce current roles, Origin/CSRF, versions and bounded
       payload,
     });
     expect(changed.statusCode).toBe(200);
+    const changedReason = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "if-match": '"v1"' },
+      payload: { ...payload, reason: "Fictional different rationale" },
+    });
+    expect(changedReason.statusCode).toBe(409);
+    expect(changedReason.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(
       await composed.identity.authenticate(new Headers({ cookie: ordinary.cookie })).then(
         () => 200,

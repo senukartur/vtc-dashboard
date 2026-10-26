@@ -1300,9 +1300,12 @@ export function createIdentity(
         kind: "roles" | "deactivate" | "reinstate";
         roles?: readonly AssignableRole[];
         qualifications?: readonly components["schemas"]["AssignmentInput"][];
+        reason?: string;
       },
     ) {
       if (!ports.accessEvents) throw identityError(503);
+      if (input.reason !== undefined && (!input.reason.trim() || input.reason.length > 2048))
+        throw identityError(422);
       if (input.kind !== "reinstate" && input.qualifications !== undefined)
         throw identityError(422);
       if (input.kind !== "deactivate" && input.roles === undefined) throw identityError(422);

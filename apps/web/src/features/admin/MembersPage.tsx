@@ -199,7 +199,7 @@ function MemberEditor({
                     .filter((level) => level.game === game)
                     .map((level) => (
                       <option key={level.id} value={level.id}>
-                        {level.name}
+                        {level.name} · {t(`qualifications:${level.code}`)}
                       </option>
                     ))}
                 </select>
