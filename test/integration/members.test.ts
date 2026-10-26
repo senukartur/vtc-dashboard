@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { membership } from "@vtc/db/identity-schema";
 import { eq } from "drizzle-orm";
@@ -64,7 +63,7 @@ beforeAll(async () => {
   identity = createIdentity(
     unit,
     {
-      secret: randomBytes(32).toString("hex"),
+      secret: "non-hex-integration-secret-phrase-32-chars-long!",
       origin: "http://127.0.0.1:4173",
       production: false,
     },

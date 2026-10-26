@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { pagination } from "../../apps/api/src/modules/identity/pagination.ts";
+import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
 import { formatDecimal, formatQuantity, formatUtc } from "../../apps/web/src/shared/formatting.ts";
 
 describe("Dashboard & Driver Profiles Unit Tests", () => {
@@ -176,6 +178,44 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
       // In component logic: isMax = entry.value === maxValue && maxValue > 0
       const isMaxHighlighted = points.map((p) => p.value === maxValue && maxValue > 0);
       expect(isMaxHighlighted.every((v) => v === false)).toBe(true);
+    });
+  });
+
+  describe("Identity members cursor pagination with non-hex secret", () => {
+    it("signs and verifies cursors with non-hex secrets correctly and rejects forged cursors", () => {
+      const nonHexSecret = "non-hex-secret-phrase-with-letters-and-symbols-!@#$%^&*()";
+      const pageFn = pagination(nonHexSecret);
+      const actor: Actor = {
+        userId: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a01",
+        sessionId: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a02",
+        accessEpoch: 1,
+        credentialEpoch: 1,
+        capabilities: ["company.read"],
+      };
+
+      const rows = [
+        { id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a10" },
+        { id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a11" },
+        { id: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a12" },
+      ];
+
+      const p1 = pageFn(actor, [], { limit: 2 });
+      const res1 = p1.finish(rows, (r) => r.id);
+      expect(res1.items.length).toBe(2);
+      expect(res1.nextCursor).toBeTruthy();
+
+      // Second page with cursor
+      const p2 = pageFn(actor, [], { limit: 2, cursor: res1.nextCursor! });
+      expect(p2.after).toBe(rows[1]!.id);
+
+      // Rejects forged cursor (tampered signature)
+      const [body] = res1.nextCursor!.split(".");
+      const forged = `${body}.tamperedmac12345`;
+      expect(() => pageFn(actor, [], { limit: 2, cursor: forged })).toThrow();
+
+      // Rejects cursor signed for different actor
+      const otherActor: Actor = { ...actor, userId: "018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a99" };
+      expect(() => pageFn(otherActor, [], { limit: 2, cursor: res1.nextCursor! })).toThrow();
     });
   });
 });

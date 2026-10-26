@@ -9,10 +9,7 @@ export interface Page {
 
 export function pagination(key: string) {
   const sign = (body: string) =>
-    createHmac("sha256", Buffer.from(key, "hex"))
-      .update("identity/members/cursor/v1\0")
-      .update(body)
-      .digest();
+    createHmac("sha256", key).update("identity/members/cursor/v1\0").update(body).digest();
 
   return function page(actor: Actor, scope: unknown[], options: Page) {
     const limit = options.limit ?? 25;
