@@ -120,7 +120,7 @@ test("returns 409 SETUP_REQUIRED when company timezone is unconfigured", async (
 
   expect(res.statusCode).toBe(409);
   const json = res.json();
-  expect(json.code).toBe("SETUP_REQUIRED");
+  expect(json.error.code).toBe("SETUP_REQUIRED");
 });
 
 test("returns 401 when unauthenticated", async () => {
@@ -177,6 +177,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "accepted" as const,
+      assessmentPending: false,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "150000.0",
       reportingAt: "2026-10-20T20:30:00.000Z",
@@ -191,6 +193,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "accepted" as const,
+      assessmentPending: false,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "200000.0",
       reportingAt: "2026-10-20T21:30:00.000Z",
@@ -205,6 +209,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "accepted" as const,
+      assessmentPending: false,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "80000.0",
       reportingAt: "2026-10-20T12:00:00.000Z",
@@ -219,6 +225,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "pending_review" as const,
+      assessmentPending: true,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "50000.0",
       reportingAt: "2026-10-20T14:00:00.000Z",
@@ -233,6 +241,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "rejected" as const,
+      assessmentPending: false,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "60000.0",
       reportingAt: "2026-10-20T15:00:00.000Z",
@@ -247,6 +257,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
       outcome: "delivered" as const,
       recording: "complete" as const,
       decision: "accepted" as const,
+      assessmentPending: false,
+      correctionPending: false,
       reviewReasons: [],
       actualDistanceM: "70000.0",
       reportingAt: "2026-10-20T16:00:00.000Z",
