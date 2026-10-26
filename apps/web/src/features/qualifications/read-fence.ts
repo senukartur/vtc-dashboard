@@ -22,6 +22,7 @@ export async function fenceQualificationReads(
         ? [
             {
               query,
+              originalPromise: promise,
               wasSuccess: query.state.status === "success",
               outcome: promise.catch((error: unknown) => error),
             },
@@ -30,13 +31,14 @@ export async function fenceQualificationReads(
     });
   // Reverting would restore fetch-start data and can discard a newer validated cache write.
   await client.cancelQueries(filters, { revert: false });
-  for (const { query, wasSuccess, outcome } of pending) {
+  for (const { query, originalPromise, wasSuccess, outcome } of pending) {
     const ownCancellation = await outcome;
     if (
       wasSuccess &&
       isCancelledError(ownCancellation) &&
       query.state.error === ownCancellation &&
       query.state.fetchStatus === "idle" &&
+      (!query.promise || query.promise === originalPromise) &&
       client.getQueryCache().get(query.queryHash) === query
     ) {
       // Only our cancellation of a cached success is presentation-neutral. Preserve CURRENT

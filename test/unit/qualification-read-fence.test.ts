@@ -13,6 +13,48 @@ function deferred<T>() {
 }
 const level = { kind: "level", id: "level", game: "ets2" } as const;
 
+test("synchronous abort replacement cannot be mistaken for the cancelled retryer after its old catch sets idle", async () => {
+  const client = createAppQueryClient(),
+    queryKey = key("/qualification-levels?game=ets2"),
+    old = deferred<number>(),
+    newer = deferred<number>();
+  let replacement: Promise<unknown> | undefined;
+  client.setQueryData(queryKey, 1);
+  const pending = client
+    .fetchQuery({
+      queryKey,
+      queryFn: ({ signal }) => {
+        signal.addEventListener("abort", () => {
+          replacement = client
+            .fetchQuery({ queryKey, queryFn: () => newer.promise })
+            .catch(() => undefined);
+        });
+        return old.promise;
+      },
+    })
+    .catch(() => undefined);
+  try {
+    await fenceQualificationReads(client, scope, level, "synthetic", false);
+    expect(client.getQueryCache().find({ queryKey })?.promise).toBeDefined();
+    expect(client.getQueryState(queryKey)?.status).not.toBe("success");
+    newer.resolve(4);
+    await replacement;
+    expect(client.getQueryState(queryKey)).toMatchObject({
+      data: 4,
+      status: "success",
+      error: null,
+      fetchStatus: "idle",
+    });
+    old.resolve(1);
+    await pending;
+  } finally {
+    old.resolve(1);
+    newer.resolve(4);
+    await replacement;
+    client.clear();
+  }
+});
+
 test("fence preserves newer cached data and timestamps without cancellation errors or stuck fetching; immutable and unrelated reads continue", async () => {
   const client = createAppQueryClient(),
     old = deferred<{ version: number }>(),
