@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
+import type { APIRequestContext, Page, Response, TestInfo } from "@playwright/test";
 import { testConnection } from "../persistence/support.ts";
 import { privateMail, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import {
@@ -348,6 +348,19 @@ test("real director-only verified-email leadership transfer uses the bound succe
         ).status(),
       ).toBe(200);
     }
+    function successorPage(cursor: string | null) {
+      return page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/v1/admin/members" &&
+          url.searchParams.get("status") === "active" &&
+          url.searchParams.get("limit") === "25" &&
+          url.searchParams.get("cursor") === cursor &&
+          response.request().method() === "GET"
+        );
+      });
+    }
+    const initialSuccessors = successorPage(null);
     await staffPage(
       page,
       staff,
@@ -357,17 +370,41 @@ test("real director-only verified-email leadership transfer uses the bound succe
     const leadership = page
       .getByRole("heading", { name: "Transfer leadership", exact: true })
       .locator("..");
+    async function settledSuccessors(response: Response) {
+      expect(response.status()).toBe(200);
+      const data = (await response.json()).data as {
+        items: { profile: { member: { id: string; nickname: string } } }[];
+        nextCursor: string | null;
+      };
+      const members = data.items
+        .map((row) => row.profile.member)
+        .filter((member) => member.id !== self.member.id);
+      // A response can arrive before React commits its choices. Match this page's
+      // actual rendered values and labels before deciding whether to paginate.
+      await expect
+        .poll(() =>
+          leadership
+            .locator("option")
+            .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)),
+        )
+        .toEqual(["", ...members.map((member) => member.id)]);
+      await expect(leadership.locator('option:not([value=""])')).toHaveText(
+        members.map((member) => `${member.nickname} · ${member.id}`),
+      );
+      return data.nextCursor;
+    }
+    let nextCursor = await settledSuccessors(await initialSuccessors);
     for (
       let index = 0;
       index < 30 && !(await leadership.locator(`option[value="${successor.userId}"]`).count());
       index++
     ) {
-      const nextPage = page.waitForResponse(
-        (r) => r.url().includes("/api/v1/admin/members?status=active") && r.status() === 200,
-      );
+      if (!nextCursor) break;
+      const nextPage = successorPage(nextCursor);
       await leadership.getByRole("button", { name: "Next page", exact: true }).click();
-      await nextPage;
+      nextCursor = await settledSuccessors(await nextPage);
     }
+    await expect(leadership.locator(`option[value="${successor.userId}"]`)).toHaveCount(1);
     await page.getByLabel("Active successor", { exact: true }).selectOption(successor.userId);
     const challengeResponse = page.waitForResponse(
       (r) =>
