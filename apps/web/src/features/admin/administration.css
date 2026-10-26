@@ -46,7 +46,7 @@
   overflow-wrap: anywhere;
 }
 .admin-list button[aria-pressed="true"] {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
 }
 .admin-detail {
   min-width: 0;
@@ -112,7 +112,7 @@
   overflow-x: auto;
 }
 .admin-table-scroll:focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 .admin-audit-table {

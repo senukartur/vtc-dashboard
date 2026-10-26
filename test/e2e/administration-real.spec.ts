@@ -264,6 +264,9 @@ test("real Steam proof, one-show token, lost issuance recovery and revoke", asyn
   await expect(
     page.getByRole("button", { name: "Revoke credential from the previous issuance", exact: true }),
   ).toHaveCount(0);
+  // Token lifecycle is complete; this independent permission-negative phase keeps
+  // the same authenticated member while resetting only synthetic source accounting.
+  await resetAccountLimits();
   expect((await context.request.get("/api/v1/admin/members")).status()).toBe(403);
 });
 
@@ -518,19 +521,46 @@ test("real disabled-mail invitation supports independent copy, first email, supp
       games: ["ets2"],
     });
     expect(submitted.status()).toBe(201);
-    const invitationId = await approveWithMailDisabled(staff, nickname);
+    const invitationId = await approveWithMailDisabled(staff, nickname),
+      initialList = responseFor("/admin/applications");
     await staffPage(
       page,
       staff,
       "/account/admin/applications?status=approved",
       /^(Applications|Заявки)$/,
     );
+    expect((await initialList).status()).toBe(200);
+    const initialDetail = applicationDetail(),
+      initialInvitation = responseFor(`/admin/invitations/${invitationId}`);
     await page.getByRole("button", { name: new RegExp(nickname) }).click();
+    expect((await initialDetail).status()).toBe(200);
+    expect((await initialInvitation).status()).toBe(200);
     await expect(
       page.getByText("Email status: Email not requested", { exact: true }),
     ).toBeVisible();
+    function responseFor(path: string, method = "GET") {
+      return page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/v1${path}` &&
+          response.request().method() === method,
+      );
+    }
+    function applicationDetail() {
+      return page.waitForResponse(
+        (response) =>
+          /^\/api\/v1\/admin\/applications\/[^/]+$/.test(new URL(response.url()).pathname) &&
+          response.request().method() === "GET",
+      );
+    }
+    async function readInvitation() {
+      const response = await staff.get(`/api/v1/admin/invitations/${invitationId}`);
+      expect(response.status()).toBe(200);
+      return (await response.json()).data;
+    }
     async function copyLink() {
+      const response = responseFor(`/admin/invitations/${invitationId}/copy-link`, "POST");
       await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+      expect((await response).status()).toBe(200);
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
       const link = await dialog.locator("pre").textContent();
@@ -539,49 +569,72 @@ test("real disabled-mail invitation supports independent copy, first email, supp
       return link;
     }
     const original = await copyLink(),
-      before = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json()).data;
+      before = await readInvitation(),
+      firstEmail = responseFor(`/admin/invitations/${invitationId}/email-deliveries`, "POST"),
+      firstDelivery = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname.startsWith("/api/v1/mail-deliveries/") &&
+          response.request().method() === "GET",
+      );
     await page.getByRole("button", { name: "Request first invitation email", exact: true }).click();
+    expect((await firstEmail).status()).toBe(200);
+    expect((await firstDelivery).status()).toBe(200);
     await expect(page.getByText("Email status: Queued", { exact: true })).toBeVisible();
-    const requested = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json())
-      .data;
+    const requested = await readInvitation();
     expect(requested.id).toBe(invitationId);
     expect(requested.expiresAt).toBe(before.expiresAt);
     expect((await copyLink()) === original).toBe(true);
+    async function showWorkerOutcome(state: "failed" | "ambiguous", label: string) {
+      // Each controlled worker outcome starts a separate operator inspection phase.
+      // Reset rate accounting only; encrypted delivery, generation and queue history remain.
+      await resetAccountLimits();
+      const list = responseFor("/admin/applications"),
+        detail = applicationDetail(),
+        invitation = responseFor(`/admin/invitations/${invitationId}`),
+        delivery = responseFor(`/mail-deliveries/${requested.deliveryId}`);
+      await page.reload();
+      expect((await list).status()).toBe(200);
+      await expect(
+        page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
+      ).toBeVisible();
+      await catalogLanguage(page);
+      await page.getByRole("button", { name: new RegExp(nickname) }).click();
+      expect((await detail).status()).toBe(200);
+      expect((await invitation).status()).toBe(200);
+      const received = await delivery;
+      expect(received.status()).toBe(200);
+      expect((await received.json()).data.state).toBe(state);
+      await expect(page.getByText(label, { exact: true })).toBeVisible();
+    }
     await controlledInvitationMailFailure(staff, requested.deliveryId);
     const failedJob = await invitationMailJob(requested.deliveryId);
-    await page.reload();
-    await expect(
-      page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
-    ).toBeVisible();
-    await catalogLanguage(page);
-    await page.getByRole("button", { name: new RegExp(nickname) }).click();
-    await expect(
-      page.getByText("Email status: Known delivery failure", { exact: true }),
-    ).toBeVisible();
+    await showWorkerOutcome("failed", "Email status: Known delivery failure");
     expect((await copyLink()) === original).toBe(true);
+    const retry = responseFor(`/mail-deliveries/${requested.deliveryId}/resends`, "POST"),
+      queued = responseFor(`/mail-deliveries/${requested.deliveryId}`);
     await page.getByRole("button", { name: "Retry rejected email", exact: true }).click();
+    expect((await retry).status()).toBe(200);
+    const queuedResponse = await queued;
+    expect(queuedResponse.status()).toBe(200);
+    expect((await queuedResponse.json()).data.state).toBe("queued");
     await expect(page.getByText("Email status: Queued", { exact: true })).toBeVisible();
     const retriedJob = await invitationMailJob(requested.deliveryId);
     expect(retriedJob.id).toBe(failedJob.id);
     expect(retriedJob.attempts).toBe(failedJob.attempts);
     expect(retriedJob.state).toBe("ready");
     await controlledInvitationMailFailure(staff, requested.deliveryId, true);
-    await page.reload();
-    await expect(
-      page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
-    ).toBeVisible();
-    await catalogLanguage(page);
-    await page.getByRole("button", { name: new RegExp(nickname) }).click();
-    await expect(
-      page.getByText("Email status: Outcome unknown; retry is blocked", { exact: true }),
-    ).toBeVisible();
+    await showWorkerOutcome("ambiguous", "Email status: Outcome unknown; retry is blocked");
     await expect(
       page.getByRole("button", { name: "Retry rejected email", exact: true }),
     ).toHaveCount(0);
     expect((await copyLink()) === original).toBe(true);
-    const state = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json())
-      .data;
+    const state = await readInvitation();
+    expect(state.id).toBe(invitationId);
+    expect(state.deliveryId).toBe(requested.deliveryId);
+    expect(state.expiresAt).toBe(before.expiresAt);
     const delivery = await staff.get(`/api/v1/mail-deliveries/${state.deliveryId}`);
+    expect(delivery.status()).toBe(200);
+    expect((await delivery.json()).data.state).toBe("ambiguous");
     expect(
       (
         await write(
