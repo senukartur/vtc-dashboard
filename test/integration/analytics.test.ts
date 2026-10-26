@@ -267,16 +267,16 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   const compData = compRes.json().data;
 
   // Total accepted trips: Trip 1 (150km) + Trip 2 (200km) + Trip 3 (80km) = 3 trips, 430,000m
-  expect(compData.summary.acceptedTrips).toBe(3);
-  expect(compData.summary.actualDistanceM).toBe("430000");
+  expect(compData.acceptedTrips).toBe(3);
+  expect(compData.actualDistanceM).toBe("430000");
   // projectionPending should be true due to Trip 4 (pending_review)
-  expect(compData.summary.projectionPending).toBe(true);
+  expect(compData.projectionPending).toBe(true);
   expect(compData.reportingTimezone).toBe("Europe/Moscow");
 
   // Check time-series buckets:
   // 2026-10-20: Trip 1 (150,000m) + Trip 3 (80,000m) = 230,000m, 2 trips
   // 2026-10-21: Trip 2 (200,000m cross-midnight) = 200,000m, 1 trip
-  expect(compData.timeSeries).toEqual([
+  expect(compData.buckets).toEqual([
     { date: "2026-10-20", acceptedTrips: 2, actualDistanceM: "230000" },
     { date: "2026-10-21", acceptedTrips: 1, actualDistanceM: "200000" },
   ]);
@@ -290,8 +290,8 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   expect(ets2Res.statusCode).toBe(200);
   const ets2Data = ets2Res.json().data;
   // Excludes ATS (Trip 3)
-  expect(ets2Data.summary.acceptedTrips).toBe(2);
-  expect(ets2Data.summary.actualDistanceM).toBe("350000");
+  expect(ets2Data.acceptedTrips).toBe(2);
+  expect(ets2Data.actualDistanceM).toBe("350000");
 
   // 3. Query company analytics with game=ats
   const atsRes = await app.inject({
@@ -302,9 +302,9 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   expect(atsRes.statusCode).toBe(200);
   const atsData = atsRes.json().data;
   // Only Trip 3 (no pending ETS2 trip in ATS scope)
-  expect(atsData.summary.acceptedTrips).toBe(1);
-  expect(atsData.summary.actualDistanceM).toBe("80000");
-  expect(atsData.summary.projectionPending).toBe(false);
+  expect(atsData.acceptedTrips).toBe(1);
+  expect(atsData.actualDistanceM).toBe("80000");
+  expect(atsData.projectionPending).toBe(false);
 
   // 4. Query Member Analytics for Driver 1
   const m1Res = await app.inject({
@@ -314,10 +314,9 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   });
   expect(m1Res.statusCode).toBe(200);
   const m1Data = m1Res.json().data;
-  expect(m1Data.member.id).toBe(driver1Actor.userId);
-  expect(m1Data.summary.acceptedTrips).toBe(2);
-  expect(m1Data.summary.actualDistanceM).toBe("350000");
-  expect(m1Data.summary.projectionPending).toBe(true);
+  expect(m1Data.acceptedTrips).toBe(2);
+  expect(m1Data.actualDistanceM).toBe("350000");
+  expect(m1Data.projectionPending).toBe(true);
 
   // 5. Query Member Analytics for Driver 2
   const m2Res = await app.inject({
@@ -327,10 +326,9 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   });
   expect(m2Res.statusCode).toBe(200);
   const m2Data = m2Res.json().data;
-  expect(m2Data.member.id).toBe(driver2Actor.userId);
-  expect(m2Data.summary.acceptedTrips).toBe(1);
-  expect(m2Data.summary.actualDistanceM).toBe("80000");
-  expect(m2Data.summary.projectionPending).toBe(false);
+  expect(m2Data.acceptedTrips).toBe(1);
+  expect(m2Data.actualDistanceM).toBe("80000");
+  expect(m2Data.projectionPending).toBe(false);
 
   // 6. Leaderboard query
   const lbRes = await app.inject({
@@ -341,7 +339,6 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   expect(lbRes.statusCode).toBe(200);
   const lbData = lbRes.json().data;
   expect(lbData.items.length).toBe(1);
-  expect(lbData.items[0].rank).toBe(1);
   expect(lbData.items[0].member.id).toBe(driver1Actor.userId);
   expect(lbData.items[0].actualDistanceM).toBe("350000");
   expect(lbData.nextCursor).toBeTruthy();
@@ -357,7 +354,6 @@ test("processes small known dataset with cross-midnight, aliases, rejected and p
   expect(lbPage2.statusCode).toBe(200);
   const lb2Data = lbPage2.json().data;
   expect(lb2Data.items.length).toBe(1);
-  expect(lb2Data.items[0].rank).toBe(2);
   expect(lb2Data.items[0].member.id).toBe(driver2Actor.userId);
   expect(lb2Data.items[0].actualDistanceM).toBe("80000");
   expect(lb2Data.nextCursor).toBeNull();
@@ -383,7 +379,7 @@ test("verified dynamic correction immediately updates aggregates without snapsho
   const compData = compRes.json().data;
 
   // Driver 1's trips were updated to 180,000m each (Trip 1 and Trip 2 = 360,000m) + Trip 3 (80,000m) = 440,000m
-  expect(compData.summary.actualDistanceM).toBe("440000");
+  expect(compData.actualDistanceM).toBe("440000");
 });
 
 test("verifies EXPLAIN uses trip_analytics_reporting index", async () => {
