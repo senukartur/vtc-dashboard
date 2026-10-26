@@ -66,7 +66,27 @@ async function mailFixture(staff: APIRequestContext) {
     throw error;
   }
 }
-export async function approveWithMailDisabled(staff: APIRequestContext, id: string) {
+export async function approveWithMailDisabled(staff: APIRequestContext, nickname: string) {
+  // Public submission deliberately returns no application ID. Resolve this uniquely
+  // named synthetic application only through the current authorized staff API.
+  let cursor: string | null = null,
+    id: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const response = await staff.get(
+      `/api/v1/admin/applications?status=submitted&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    if (response.status() !== 200) throw new Error("SYNTHETIC_STAFF_APPLICATION_LOOKUP_FAILED");
+    const data = (await response.json()).data as {
+      items: { id: string; fields: { nickname: string } }[];
+      nextCursor: string | null;
+    };
+    const matches = data.items.filter((row) => row.fields.nickname === nickname);
+    if (matches.length > 1) throw new Error("SYNTHETIC_APPLICATION_NOT_UNIQUE");
+    id = matches[0]?.id;
+    if (id || !data.nextCursor) break;
+    cursor = data.nextCursor;
+  }
+  if (!id) throw new Error("SYNTHETIC_STAFF_APPLICATION_MISSING");
   const fixture = await mailFixture(staff);
   try {
     const detail = await fixture.admissions.detail(fixture.actor, id);

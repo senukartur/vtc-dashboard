@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "../../shared/ui/dialog.js";
@@ -18,17 +18,16 @@ export function SensitiveValue({
   description,
   value,
   close,
+  returnFocus,
 }: {
   title: string;
   description: string;
   value: string;
   close: () => void;
+  returnFocus: HTMLElement | null;
 }) {
   const { t } = useTranslation("administration"),
-    [copied, setCopied] = useState<boolean | null>(null),
-    [origin] = useState(() =>
-      document.activeElement instanceof HTMLElement ? document.activeElement : null,
-    );
+    [copied, setCopied] = useState<boolean | null>(null);
   return (
     <Dialog
       open
@@ -39,7 +38,13 @@ export function SensitiveValue({
       <DialogContent
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          if (origin?.isConnected) origin.focus();
+          if (
+            returnFocus?.isConnected &&
+            returnFocus.getClientRects().length > 0 &&
+            !returnFocus.matches(":disabled, [aria-disabled=true]") &&
+            !returnFocus.closest("[inert]")
+          )
+            returnFocus.focus();
         }}
       >
         <DialogTitle>{title}</DialogTitle>
@@ -73,6 +78,7 @@ function Invitation({ id }: { id: string }) {
     command = useWorkspaceCommand(),
     copy = useWorkspaceCommand();
   const [link, setLink] = useState<DTO["InvitationLink"] | null>(null);
+  const returnFocus = useRef<HTMLButtonElement | null>(null);
   const data = query.data?.data.data;
   const delivery = useWorkspaceQuery(
     `/mail-deliveries/${data?.deliveryId ?? "none"}`,
@@ -100,7 +106,8 @@ function Invitation({ id }: { id: string }) {
             <Button
               variant="outline"
               disabled={!valid || copy.pending}
-              onClick={async () => {
+              onClick={async (event) => {
+                returnFocus.current = event.currentTarget;
                 const result = await copy.run(
                   `/admin/invitations/${id}/copy-link`,
                   "EnvelopeInvitationLink",
@@ -177,6 +184,7 @@ function Invitation({ id }: { id: string }) {
           title={t("invitation")}
           description={t("privateLink")}
           value={link.link}
+          returnFocus={returnFocus.current}
           close={() => setLink(null)}
         />
       )}

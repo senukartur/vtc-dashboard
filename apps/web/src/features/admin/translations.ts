@@ -81,6 +81,8 @@ export const administrationTranslations = {
     reinstateHelp:
       "Restore this identity with the explicit selected roles and new per-game qualifications. Old sessions and credentials remain invalid.",
     qualifications: "Per-game qualifications",
+    levelLabelLoading: "Loading qualification label…",
+    levelLabelUnavailable: "Qualification label unavailable",
     qualificationWorkspace: "Open qualification configuration and history",
     ets2: "Euro Truck Simulator 2",
     ats: "American Truck Simulator",
@@ -119,7 +121,7 @@ export const administrationTranslations = {
     qualification_configuration: "Qualification rules and promotion thresholds",
     sources: "Trip sources",
     sourceHelp:
-      "Implemented capabilities and runtime activation are separate. Company adapters below are deferred.",
+      "Drivers use personal telemetry credentials. Planned company webhooks for Trucky and VTCBase will be available only to the Director and Deputy Directors once those adapters are supported.",
     ets2telemetry: "Personal telemetry",
     manual: "Manual reports",
     trucky: "Trucky",
@@ -299,6 +301,8 @@ export const administrationTranslations = {
     reinstateHelp:
       "Вернуть прежний аккаунт с явно выбранными ролями и новыми квалификациями по играм. Старые сеансы и ключи останутся недействительными.",
     qualifications: "Квалификации по играм",
+    levelLabelLoading: "Загрузка названия квалификации…",
+    levelLabelUnavailable: "Название квалификации недоступно",
     qualificationWorkspace: "Открыть настройки и историю квалификаций",
     ets2: "Euro Truck Simulator 2",
     ats: "American Truck Simulator",
@@ -338,7 +342,7 @@ export const administrationTranslations = {
     qualification_configuration: "Правила квалификаций и пороги повышения",
     sources: "Источники рейсов",
     sourceHelp:
-      "Наличие реализации и включение в текущей среде различаются. Корпоративные адаптеры ниже отложены.",
+      "Водители используют личные ключи телеметрии. Планируемая настройка корпоративных вебхуков Trucky и VTCBase будет доступна только директору и заместителям после появления этих адаптеров.",
     ets2telemetry: "Личная телеметрия",
     manual: "Ручные отчёты",
     trucky: "Trucky",

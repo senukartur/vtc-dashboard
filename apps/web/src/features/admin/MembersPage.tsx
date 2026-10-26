@@ -12,6 +12,29 @@ import {
 } from "./components.js";
 import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "./transport.js";
 
+type OptionsQuery = ReturnType<typeof useWorkspaceQuery<"EnvelopeReinstatementOptions">>;
+function LevelLabel({
+  game,
+  levelId,
+  options,
+}: {
+  game: "ets2" | "ats";
+  levelId: string;
+  options: OptionsQuery;
+}) {
+  const { t } = useTranslation("administration");
+  const level = options.data?.data.data.levels.find(
+    (row) => row.id === levelId && row.game === game,
+  );
+  return (
+    <span>
+      {level
+        ? `${level.name} · ${t(`qualifications:${level.code}`)}`
+        : t(options.isPending ? "levelLabelLoading" : "levelLabelUnavailable")}
+    </span>
+  );
+}
+
 export function IdentityView({ data }: { data: DTO["Identity"] }) {
   const { t } = useTranslation("administration");
   return (
@@ -117,10 +140,12 @@ function MemberEditor({
   data,
   etag,
   command,
+  options,
 }: {
   data: DTO["MemberAdmin"];
   etag: string | null;
   command: ReturnType<typeof useWorkspaceCommand>;
+  options: OptionsQuery;
 }) {
   const { t } = useTranslation("administration");
   const id = data.profile.member.id;
@@ -133,16 +158,16 @@ function MemberEditor({
     ),
     [reason, setReason] = useState(""),
     [games, setGames] = useState<Record<"ets2" | "ats", string>>({ ets2: "", ats: "" });
-  const options = useWorkspaceQuery(
-    "/admin/reinstatement-options",
-    "EnvelopeReinstatementOptions",
-    data.status === "inactive",
-  );
   const assignments = (["ets2", "ats"] as const)
     .filter((game) => games[game])
     .map((game) => ({ game, levelId: games[game], purpose: "reinstatement", reason }));
   const busy = command.pending || command.seconds > 0,
-    blocked = command.held || busy || stale;
+    blocked = command.held || busy || stale,
+    labelsAvailable = assignments.every((input) =>
+      options.data?.data.data.levels.some(
+        (level) => level.id === input.levelId && level.game === input.game,
+      ),
+    );
   return (
     <section className="stack">
       <h3>{t("roles")}</h3>
@@ -261,8 +286,11 @@ function MemberEditor({
             label={t("reinstate")}
             description={t("reinstateHelp")}
             busy={busy}
-            disabled={command.held || stale || !reason.trim() || !assignments.length}
+            disabled={
+              command.held || stale || !reason.trim() || !assignments.length || !labelsAvailable
+            }
             confirm={async () =>
+              labelsAvailable &&
               !!(await command.run(
                 `/admin/members/${id}/reinstatement`,
                 "EnvelopeCommandResult",
@@ -275,7 +303,9 @@ function MemberEditor({
             <p>{roles.map((role) => t(role)).join(", ")}</p>
             {assignments.map((input) => (
               <p key={input.game}>
-                {t(input.game)}: {input.levelId}
+                {t(input.game)}:{" "}
+                <LevelLabel game={input.game} levelId={input.levelId} options={options} />
+                <span className="admin-id"> · {input.levelId}</span>
               </p>
             ))}
             <p>{reason}</p>
@@ -299,6 +329,7 @@ function MemberDetail({ id, back }: { id: string; back: () => void }) {
   const { t } = useTranslation("administration"),
     command = useWorkspaceCommand(),
     query = useWorkspaceQuery(`/admin/members/${id}`, "EnvelopeMemberAdmin"),
+    options = useWorkspaceQuery("/admin/reinstatement-options", "EnvelopeReinstatementOptions"),
     data = query.data?.data.data,
     director = data?.profile.member.roles.includes("director") ?? false;
   return (
@@ -315,13 +346,23 @@ function MemberDetail({ id, back }: { id: string; back: () => void }) {
           <Badge>{t(data.status)}</Badge>
           <p>{data.email}</p>
           <p>{data.profile.member.roles.map((role) => t(role)).join(", ")}</p>
-          <section>
+          <section className="stack" aria-label={t("qualifications")}>
             <h3>{t("qualifications")}</h3>
+            <QueryState
+              pending={options.isPending}
+              error={options.isError}
+              retry={options.refetch}
+            />
             {data.profile.qualifications.length ? (
               data.profile.qualifications.map((assignment) => (
                 <p key={assignment.id}>
-                  {t(assignment.game)} · <span className="admin-id">{assignment.levelId}</span> ·{" "}
-                  {assignment.assignedAt}
+                  {t(assignment.game)} ·{" "}
+                  <LevelLabel
+                    game={assignment.game}
+                    levelId={assignment.levelId}
+                    options={options}
+                  />{" "}
+                  · <span className="admin-id">{assignment.levelId}</span> · {assignment.assignedAt}
                 </p>
               ))
             ) : (
@@ -332,7 +373,12 @@ function MemberDetail({ id, back }: { id: string; back: () => void }) {
           {director ? (
             <p>{t("protectedDirector")}</p>
           ) : (
-            <MemberEditor data={data} etag={query.data?.etag ?? null} command={command} />
+            <MemberEditor
+              data={data}
+              etag={query.data?.etag ?? null}
+              command={command}
+              options={options}
+            />
           )}
           <StaffIdentity
             key={`identity-${data.identityEpoch}`}

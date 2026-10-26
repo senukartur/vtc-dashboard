@@ -288,7 +288,8 @@ function Audit() {
         retry={query.refetch}
         empty={query.data?.data.data.items.length === 0}
       />
-      <section className="admin-table-scroll" aria-label={t("audit")}>
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: This named overflow region needs focus for native keyboard scrolling. */}
+      <section className="admin-table-scroll" aria-label={t("audit")} tabIndex={0}>
         <table className="admin-safe-table admin-audit-table">
           <thead>
             <tr>

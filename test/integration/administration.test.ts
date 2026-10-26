@@ -95,6 +95,7 @@ async function linkSteam(id: string) {
 async function browser(cookie = directorCookie) {
   const app = await createApp({ ...composed, checkReadiness: async () => true });
   const csrf = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie } });
+  expect(csrf.statusCode).toBe(200);
   return {
     app,
     headers: { cookie, origin, "x-csrf-token": csrf.json().data.token, "idempotency-key": newId() },
@@ -133,10 +134,10 @@ afterAll(async () => {
   await control?.end();
 });
 
-test("new HTTP families enforce current roles, Origin/CSRF, versions and bounded private projections", async () => {
+test("new HTTP read families enforce current roles and bounded private projections", async () => {
   const ordinary = await member(),
     deputy = await member(["deputy_director"]),
-    { app, headers } = await browser();
+    { app } = await browser();
   try {
     for (const path of [
       "/admin/members",
@@ -156,6 +157,16 @@ test("new HTTP families enforce current roles, Origin/CSRF, versions and bounded
           .statusCode,
       ).toBe(200);
     }
+  } finally {
+    await app.close();
+  }
+});
+
+test("member command journey preserves versions, idempotency and protected targets within its own source phase", async () => {
+  const ordinary = await member(),
+    deputy = await member(["deputy_director"]),
+    { app, headers } = await browser();
+  try {
     expect(
       (await app.inject({ url: "/api/v1/qualification-levels?game=ets2", headers })).statusCode,
     ).toBe(404);
@@ -169,6 +180,7 @@ test("new HTTP families enforce current roles, Origin/CSRF, versions and bounded
       "name",
     ]);
     const detail = await app.inject({ url: `/api/v1/admin/members/${ordinary.id}`, headers });
+    expect(detail.statusCode).toBe(200);
     expect(detail.json().data.profile.qualifications).toHaveLength(2);
     expect(Object.keys(detail.json().data).sort()).toEqual([
       "accessEpoch",
@@ -213,6 +225,7 @@ test("new HTTP families enforce current roles, Origin/CSRF, versions and bounded
       ),
     ).toBe(401);
     const after = await app.inject({ url: `/api/v1/admin/members/${ordinary.id}`, headers });
+    expect(after.statusCode).toBe(200);
     expect(after.json().data.profile.member.roles).toEqual(["dispatcher", "driver"]);
     expect(after.json().data.profile.qualifications).toEqual(
       detail.json().data.profile.qualifications,
@@ -414,6 +427,7 @@ test("timezone settings remain partial without qualification setup and update re
   const { app, headers } = await browser();
   try {
     const initial = await app.inject({ url: "/api/v1/admin/company-settings", headers });
+    expect(initial.statusCode).toBe(200);
     expect(initial.json().data.reportingTimezone).toBeNull();
     expect(initial.json().data.launchReady).toBe(false);
     for (const reportingTimezone of ["Not/A_Zone", "+03:00"])
@@ -468,15 +482,16 @@ test("bound succession HTTP accepts only challenge/code and preserves singleton 
     app = await createApp({ identity, administration, checkReadiness: async () => true });
   try {
     const csrf = await app.inject({
-        url: "/api/v1/auth/csrf",
-        headers: { cookie: directorCookie },
-      }),
-      headers = {
-        cookie: directorCookie,
-        origin,
-        "x-csrf-token": csrf.json().data.token,
-        "idempotency-key": newId(),
-      };
+      url: "/api/v1/auth/csrf",
+      headers: { cookie: directorCookie },
+    });
+    expect(csrf.statusCode).toBe(200);
+    const headers = {
+      cookie: directorCookie,
+      origin,
+      "x-csrf-token": csrf.json().data.token,
+      "idempotency-key": newId(),
+    };
     const challenge = await app.inject({
       method: "POST",
       url: "/api/v1/admin/leadership/challenges",

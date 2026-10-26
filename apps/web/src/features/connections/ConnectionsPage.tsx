@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
@@ -25,6 +25,8 @@ function Tokens() {
     revoke = useWorkspaceCommand(),
     [label, setLabel] = useState(""),
     [secret, setSecret] = useState<string | null>(null);
+  const issueTrigger = useRef<HTMLButtonElement | null>(null),
+    returnFocus = useRef<HTMLElement | null>(null);
   const allowed = session.self?.capabilities.includes("trips.submit_own") ?? false,
     recoveryId = issue.failure?.ownResourceId;
   async function revokeToken(id: string) {
@@ -51,12 +53,14 @@ function Tokens() {
           className="stack"
           onSubmit={async (e) => {
             e.preventDefault();
+            const submitter = (e.nativeEvent as SubmitEvent).submitter;
+            returnFocus.current =
+              submitter instanceof HTMLElement ? submitter : issueTrigger.current;
             const result = await issue.run("/me/telemetry-tokens", "EnvelopeTokenIssued", {
               label: label.trim(),
             });
             if (result) {
               setSecret(result.data.token);
-              setLabel("");
             }
           }}
         >
@@ -72,6 +76,7 @@ function Tokens() {
           />
           <Button
             type="submit"
+            ref={issueTrigger}
             disabled={
               issue.pending || revoke.pending || issue.seconds > 0 || !!recoveryId || !label.trim()
             }
@@ -144,6 +149,7 @@ function Tokens() {
           title={t("tokenSecret")}
           description={t("tokenHelp")}
           value={secret}
+          returnFocus={returnFocus.current}
           close={() => setSecret(null)}
         />
       )}

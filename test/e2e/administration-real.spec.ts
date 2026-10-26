@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import type { APIRequestContext, Page } from "@playwright/test";
+import type { APIRequestContext, Page, TestInfo } from "@playwright/test";
 import { testConnection } from "../persistence/support.ts";
 import { privateMail, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import {
@@ -25,14 +25,27 @@ async function confirm(page: Page, label: string) {
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
-async function chooseMember(page: Page, name: string) {
+async function safeStateCapture(page: Page, info: TestInfo, filename: string) {
+  // Call only for empty/error/session-ended views after private content is hidden.
+  await expect(page.locator("html")).toHaveAttribute(
+    "lang",
+    filename.includes("-ru.") ? "ru" : "en",
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await mkdir(info.outputPath("safe"), { recursive: true });
+  await page.screenshot({ path: info.outputPath("safe", filename), fullPage: true });
+}
+async function chooseMember(page: Page, name: string, waitForDetail = true) {
   const master = page.locator(".admin-master");
   await expect(master.locator("tbody tr").first()).toBeVisible();
   for (let index = 0; index < 30; index++) {
     const target = master.getByRole("button", { name, exact: true });
     if (await target.count()) {
       await target.click();
-      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+      if (waitForDetail)
+        await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
       return;
     }
     const next = master.getByRole("button", { name: "Next page", exact: true });
@@ -104,6 +117,15 @@ test("real application review, manual invitation copy and redemption with histor
     await expect(
       page.getByRole("button", { name: "Show valid invitation link", exact: true }),
     ).toBeFocused();
+    await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Dismiss sensitive value", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Show valid invitation link", exact: true }),
+    ).toBeFocused();
     await page.goto(link);
     await expect(page.getByLabel(/^(New password|Новый пароль)$/, { exact: true })).toBeVisible();
     await catalogLanguage(page);
@@ -129,20 +151,36 @@ test("real additive roles, deactivate and explicit same-identity reinstatement",
   try {
     await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
     await chooseMember(page, member.name);
+    await expect(
+      page.getByRole("region", { name: "Per-game qualifications", exact: true }),
+    ).toContainText("Trainee");
     await page.getByLabel("Dispatcher", { exact: true }).check();
     await page.getByLabel("Reason", { exact: true }).first().fill("Fictional additive assignment");
     await confirm(page, "Save selected roles");
     await expect(page.getByLabel("Dispatcher", { exact: true })).toBeChecked();
     await expect(page.getByLabel("Driver", { exact: true })).toBeChecked();
+    // Assignment, departure and later return are separate administrative fixture phases,
+    // not a combined source-throughput measurement. Domain and session state remain real.
+    await resetAccountLimits();
     await page.getByLabel("Reason", { exact: true }).first().fill("Fictional departure");
     await confirm(page, "Deactivate member");
     await expect(
       page.getByRole("button", { name: "Reinstate same member", exact: true }),
     ).toBeVisible();
+    await resetAccountLimits();
     await page.getByLabel("Driver", { exact: true }).check();
     await page.getByLabel("Euro Truck Simulator 2", { exact: true }).selectOption({ index: 1 });
+    const selectedLabel = await page.locator("#reinstate-ets2 option:checked").textContent();
+    if (!selectedLabel) throw new Error("SYNTHETIC_QUALIFICATION_LABEL_REQUIRED");
     await page.getByLabel("Reason", { exact: true }).first().fill("Fictional explicit return");
-    await confirm(page, "Reinstate same member");
+    await page.getByRole("button", { name: "Reinstate same member", exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText(selectedLabel);
+    await expect(page.getByRole("dialog")).toContainText("Euro Truck Simulator 2");
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "Deactivate member", exact: true }),
     ).toBeVisible();
@@ -182,6 +220,16 @@ test("real Steam proof, one-show token, lost issuance recovery and revoke", asyn
     page.getByRole("dialog", { name: "One-time telemetry secret", exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Create credential", exact: true })).toBeFocused();
+  await page.getByLabel("Credential label", { exact: true }).fill("Fictional alternate recorder");
+  await page.getByRole("button", { name: "Create credential", exact: true }).click();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Dismiss sensitive value", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Create credential", exact: true })).toBeFocused();
+  await confirm(page, "Revoke credential · Fictional alternate recorder");
   await page.reload();
   await expect(
     page.getByRole("heading", { name: /^(Connections|Подключения)$/, exact: true }),
@@ -244,6 +292,25 @@ test("real company settings, safe sources/audit and RU/EN responsive keyboard re
     await expect(
       page.getByRole("button", { name: "Save reporting timezone", exact: true }),
     ).toBeFocused();
+    const audit = page.getByRole("region", { name: "Audit history", exact: true });
+    if (await audit.evaluate((element) => element.scrollWidth > element.clientWidth)) {
+      await audit.focus();
+      await expect(audit).toBeFocused();
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Shift+Tab");
+      await expect(audit).toBeFocused();
+      const initialLeft = await audit.evaluate((element) => element.scrollLeft);
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() => audit.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(initialLeft);
+      const right = await audit.evaluate((element) => element.scrollLeft);
+      await page.keyboard.press("ArrowLeft");
+      await expect.poll(() => audit.evaluate((element) => element.scrollLeft)).toBeLessThan(right);
+      expect(await audit.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe(
+        "none",
+      );
+    }
     for (const locale of ["en", "ru"] as const) {
       await catalogLanguage(page, locale);
       expect(
@@ -451,7 +518,7 @@ test("real disabled-mail invitation supports independent copy, first email, supp
       games: ["ets2"],
     });
     expect(submitted.status()).toBe(201);
-    const invitationId = await approveWithMailDisabled(staff, (await submitted.json()).data.id);
+    const invitationId = await approveWithMailDisabled(staff, nickname);
     await staffPage(
       page,
       staff,
@@ -616,6 +683,215 @@ test("real staff Steam replacement applies only verified proof and invalidates t
       ).status(),
     ).toBe(401);
   } finally {
+    await staff.dispose();
+  }
+});
+
+test("controlled administration loading, read-error, explicit retry and empty states render in EN and RU", async ({
+  page,
+}, info) => {
+  const staff = await staffContext();
+  let release: () => void = () => {},
+    entered: () => void = () => {},
+    reads = 0,
+    recover = false;
+  const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+    ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+  await page.route("**/api/v1/admin/applications**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/admin/applications")
+      return route.continue();
+    reads++;
+    if (!recover) {
+      entered();
+      await gate;
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: {
+            code: "SERVICE_UNAVAILABLE",
+            messageKey: "errors.service_unavailable",
+            retryable: true,
+          },
+          meta: { requestId: "synthetic-admin-read-error" },
+        },
+      });
+    } else
+      await route.fulfill({
+        json: {
+          data: { items: [], nextCursor: null },
+          meta: { requestId: "synthetic-admin-empty" },
+        },
+      });
+  });
+  try {
+    await staffPage(page, staff, "/account/admin/applications", /^(Applications|Заявки)$/);
+    await ready;
+    const master = page.locator(".admin-master");
+    await expect(master.getByRole("status")).toHaveText("Loading…");
+    await expect(master.locator(".admin-list button")).toHaveCount(0);
+    release();
+    await expect(master.getByRole("alert")).toContainText("This information is unavailable.");
+    await safeStateCapture(page, info, "administration-read-error-en.png");
+    await catalogLanguage(page, "ru");
+    await expect(master.getByRole("alert")).toContainText("Информация недоступна.");
+    await safeStateCapture(page, info, "administration-read-error-ru.png");
+    await catalogLanguage(page, "en");
+    recover = true;
+    await master.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(
+      master.getByText("There are no records in this view.", { exact: true }),
+    ).toBeVisible();
+    await expect(master.getByRole("alert")).toHaveCount(0);
+    expect(reads).toBe(2);
+    await safeStateCapture(page, info, "administration-empty-recovered-en.png");
+    await catalogLanguage(page, "ru");
+    await expect(
+      master.getByText("В этом списке пока нет записей.", { exact: true }),
+    ).toBeVisible();
+    await safeStateCapture(page, info, "administration-empty-recovered-ru.png");
+  } finally {
+    release();
+    await staff.dispose();
+  }
+});
+
+test("controlled qualification label read failure is explicit and retry restores owning names", async ({
+  page,
+}) => {
+  const staff = await staffContext(),
+    member = await administrationMember();
+  let recover = false;
+  await page.route("**/api/v1/admin/reinstatement-options", async (route) => {
+    if (recover) await route.continue();
+    else
+      await route.fulfill({
+        status: 503,
+        json: {
+          error: {
+            code: "SERVICE_UNAVAILABLE",
+            messageKey: "errors.service_unavailable",
+            retryable: true,
+          },
+          meta: { requestId: "synthetic-qualification-label-error" },
+        },
+      });
+  });
+  try {
+    await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
+    await chooseMember(page, member.name);
+    const qualifications = page.getByRole("region", {
+      name: "Per-game qualifications",
+      exact: true,
+    });
+    await expect(
+      qualifications.getByText("Qualification label unavailable", { exact: true }),
+    ).toHaveCount(2);
+    await expect(qualifications.getByRole("alert")).toContainText(
+      "This information is unavailable.",
+    );
+    recover = true;
+    await qualifications.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(qualifications).toContainText("Trainee");
+    await expect(
+      qualifications.getByText("Qualification label unavailable", { exact: true }),
+    ).toHaveCount(0);
+    await expect(qualifications.getByRole("alert")).toHaveCount(0);
+  } finally {
+    await staff.dispose();
+  }
+});
+
+test("real revoked administration session clears private content before a delayed authorized response arrives", async ({
+  page,
+  context,
+}, info) => {
+  const staff = await staffContext(),
+    viewer = await administrationMember(["deputy_director"]),
+    target = await administrationMember();
+  let release: () => void = () => {},
+    entered: () => void = () => {},
+    attempted: () => void = () => {},
+    capturedPrivate = false;
+  const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+    ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    }),
+    lateAttempt = new Promise<void>((resolve) => {
+      attempted = resolve;
+    });
+  await page.route(`**/api/v1/admin/members/${target.userId}`, async (route) => {
+    const response = await route.fetch();
+    expect(response.status()).toBe(200);
+    capturedPrivate = (await response.json()).data.email === target.email;
+    entered();
+    await gate;
+    try {
+      await route.fulfill({ response });
+    } catch {
+      /* Cancellation after session loss is expected. */
+    } finally {
+      attempted();
+    }
+  });
+  try {
+    expect(
+      (
+        await write(context.request, "/auth/login", {
+          email: viewer.email,
+          password: viewer.password,
+        })
+      ).status(),
+    ).toBe(200);
+    await page.goto("/account/admin/members");
+    await expect(
+      page.getByRole("heading", { name: /^(Members|Участники)$/, exact: true }),
+    ).toBeVisible();
+    await catalogLanguage(page);
+    await chooseMember(page, target.name, false);
+    await ready;
+    expect(capturedPrivate).toBe(true);
+    await expect(page.getByText(target.email, { exact: true })).toHaveCount(0);
+    // Navigation by the deputy and revocation by a separate director are distinct fixture phases.
+    await resetAccountLimits();
+    const current = await staff.get(`/api/v1/admin/members/${viewer.userId}`);
+    expect(current.status()).toBe(200);
+    expect(
+      (
+        await write(
+          staff,
+          `/admin/members/${viewer.userId}/deactivation`,
+          { reason: "Fictional revoked administration session" },
+          current.headers().etag,
+        )
+      ).status(),
+    ).toBe(200);
+    const deniedSelf = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/me" && response.status() === 401,
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await deniedSelf;
+    await expect(
+      page.getByRole("heading", {
+        name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+        exact: true,
+      }),
+    ).toBeVisible();
+    release();
+    await lateAttempt;
+    await expect(page.locator(".admin-detail")).toHaveCount(0);
+    await expect(page.getByText(target.email, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: target.name, exact: true })).toHaveCount(0);
+    expect((await context.request.get("/api/v1/admin/members")).status()).toBe(401);
+    await catalogLanguage(page, "en");
+    await safeStateCapture(page, info, "administration-session-ended-en.png");
+  } finally {
+    release();
     await staff.dispose();
   }
 });
