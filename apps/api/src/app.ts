@@ -6,6 +6,8 @@ import { readinessSchema } from "@vtc/contracts";
 import Fastify from "fastify";
 import { registerAdmissionsRoutes } from "./modules/admissions/http.js";
 import type { Admissions } from "./modules/admissions/service.js";
+import { registerAnalyticsRoutes } from "./modules/analytics/http.js";
+import type { AnalyticsService } from "./modules/analytics/service.js";
 import { registerCatalogRoutes } from "./modules/catalogs/http.js";
 import type { Catalogs } from "./modules/catalogs/service.js";
 import { registerEventRoutes } from "./modules/events/http.js";
@@ -63,6 +65,7 @@ export interface AppOptions {
   events?: Events;
   reconciliation?: Reconciliation;
   tripDecisions?: TripDecisions;
+  analytics?: AnalyticsService;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -202,6 +205,8 @@ export async function createApp(options: AppOptions) {
         options.tripDecisions as TripDecisions,
       ),
     );
+  if (options.identity && options.analytics)
+    await registerAnalyticsRoutes(app, options.identity, options.analytics);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

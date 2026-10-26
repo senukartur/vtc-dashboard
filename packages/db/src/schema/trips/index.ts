@@ -67,6 +67,7 @@ export const trips = mysqlTable(
     index("trip_company_page").on(t.decision, t.createdAt, t.id),
     index("trip_owner_page").on(t.ownerId, t.createdAt, t.id),
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),
+    index("trip_analytics_reporting").on(t.decision, t.reportingAt, t.game, t.ownerId),
     check("trip_version_positive", sql`${t.version} > 0`),
   ],
 );
