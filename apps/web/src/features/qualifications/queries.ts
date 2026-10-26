@@ -11,6 +11,7 @@ import {
   isRuleHistory,
   validateChangedResult,
 } from "./changes.js";
+import { fenceQualificationReads } from "./read-fence.js";
 import {
   type Attempt,
   attemptFor,
@@ -112,6 +113,7 @@ export function useQualificationCommand(
   const pathOf = (key: readonly unknown[]) =>
     typeof key.at(-2) === "string" ? (key.at(-2) as string) : "";
   async function refresh(change: Change, level?: DTO["QualificationLevel"], conflict = false) {
+    await fenceQualificationReads(client, scope, change, session.self?.member.id, conflict);
     if (change.kind === "level")
       await client.invalidateQueries({
         queryKey: scope,
@@ -126,7 +128,9 @@ export function useQualificationCommand(
       client.setQueriesData<LevelsRead>(
         {
           queryKey: scope,
-          predicate: (query) => query.queryKey.at(-1) === "EnvelopeListQualificationLevel",
+          predicate: (query) =>
+            query.queryKey.at(-1) === "EnvelopeListQualificationLevel" &&
+            affectedRead(change, pathOf(query.queryKey), session.self?.member.id, conflict),
         },
         (previous) =>
           previous
@@ -177,6 +181,7 @@ export function useQualificationCommand(
           return dependent(query.queryKey);
         },
       },
+      // Older reads were fenced above; only another post-commit read may be coalesced here.
       { cancelRefetch: false },
     );
   }
