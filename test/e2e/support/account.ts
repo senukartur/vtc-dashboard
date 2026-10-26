@@ -14,6 +14,11 @@ export function accountSecret(kind: "identity" | "mail" | "password") {
     .update(`browser-account-${kind}`)
     .digest("hex");
 }
+export function browserAdmissionsKey() {
+  return createHmac("sha256", guardedAllocation().token)
+    .update("browser-account-admissions")
+    .digest("base64url");
+}
 export const origin = "http://127.0.0.1:4173";
 export async function resetAccountLimits() {
   const connection = await testConnection();

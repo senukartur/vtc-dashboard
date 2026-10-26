@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { testConnection } from "../persistence/support.ts";
-import { origin, privateMail, resetAccountLimits, staffContext, write } from "./support/account.ts";
-import { administrationMember } from "./support/administration.ts";
+import { privateMail, resetAccountLimits, staffContext, write } from "./support/account.ts";
+import {
+  administrationMember,
+  approveWithMailDisabled,
+  controlledInvitationMailFailure,
+  invitationMailJob,
+} from "./support/administration.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 
@@ -384,6 +389,233 @@ test("obsolete delayed application details cannot replace the next selected reco
     await expect(page.getByRole("heading", { name: second, exact: true })).toBeVisible();
   } finally {
     release();
+    await staff.dispose();
+  }
+});
+
+test("real rejection requires a reason and a later application retains the previous decision", async ({
+  page,
+  context,
+}) => {
+  const staff = await staffContext(),
+    email = `${randomUUID()}@example.invalid`,
+    first = `Fictional Rejected ${randomUUID().slice(0, 8)}`,
+    second = `Fictional Return ${randomUUID().slice(0, 8)}`,
+    reason = "Fictional prior decision retained for staff review";
+  try {
+    const submit = (nickname: string) =>
+      write(context.request, "/public/applications", {
+        nickname,
+        email,
+        steamProfileUrl: "https://steamcommunity.com/id/fictional-prior-application",
+        games: ["ets2"],
+      });
+    expect((await submit(first)).status()).toBe(201);
+    await staffPage(page, staff, "/account/admin/applications", /^(Applications|Заявки)$/);
+    await page.getByRole("button", { name: new RegExp(first) }).click();
+    await expect(
+      page.getByRole("button", { name: "Reject application", exact: true }),
+    ).toBeDisabled();
+    await page.getByLabel("Reason", { exact: true }).fill(reason);
+    await confirm(page, "Reject application");
+    await expect(page.getByRole("heading", { name: "Decision", exact: true })).toBeVisible();
+    expect((await submit(second)).status()).toBe(201);
+    await page.goto("/account/admin/applications?status=submitted");
+    await expect(
+      page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
+    ).toBeVisible();
+    await catalogLanguage(page);
+    await page.getByRole("button", { name: new RegExp(second) }).click();
+    const history = page
+      .getByRole("heading", { name: "Application history for this email", exact: true })
+      .locator("..");
+    await expect(history).toContainText(reason);
+    await expect(history).toContainText("Rejected");
+    await expect(page.getByRole("heading", { name: second, exact: true })).toBeVisible();
+  } finally {
+    await staff.dispose();
+  }
+});
+
+test("real disabled-mail invitation supports independent copy, first email, supported resend and blocked ambiguity", async ({
+  page,
+  context,
+}) => {
+  const staff = await staffContext(),
+    nickname = `Fictional Mail ${randomUUID().slice(0, 8)}`;
+  try {
+    const submitted = await write(context.request, "/public/applications", {
+      nickname,
+      email: `${randomUUID()}@example.invalid`,
+      steamProfileUrl: "https://steamcommunity.com/id/fictional-mail",
+      games: ["ets2"],
+    });
+    expect(submitted.status()).toBe(201);
+    const invitationId = await approveWithMailDisabled(staff, (await submitted.json()).data.id);
+    await staffPage(
+      page,
+      staff,
+      "/account/admin/applications?status=approved",
+      /^(Applications|Заявки)$/,
+    );
+    await page.getByRole("button", { name: new RegExp(nickname) }).click();
+    await expect(
+      page.getByText("Email status: Email not requested", { exact: true }),
+    ).toBeVisible();
+    async function copyLink() {
+      await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      const link = await dialog.locator("pre").textContent();
+      if (!link) throw new Error("SYNTHETIC_INVITATION_LINK_REQUIRED");
+      await page.keyboard.press("Escape");
+      return link;
+    }
+    const original = await copyLink(),
+      before = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json()).data;
+    await page.getByRole("button", { name: "Request first invitation email", exact: true }).click();
+    await expect(page.getByText("Email status: Queued", { exact: true })).toBeVisible();
+    const requested = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json())
+      .data;
+    expect(requested.id).toBe(invitationId);
+    expect(requested.expiresAt).toBe(before.expiresAt);
+    expect((await copyLink()) === original).toBe(true);
+    await controlledInvitationMailFailure(staff, requested.deliveryId);
+    const failedJob = await invitationMailJob(requested.deliveryId);
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
+    ).toBeVisible();
+    await catalogLanguage(page);
+    await page.getByRole("button", { name: new RegExp(nickname) }).click();
+    await expect(
+      page.getByText("Email status: Known delivery failure", { exact: true }),
+    ).toBeVisible();
+    expect((await copyLink()) === original).toBe(true);
+    await page.getByRole("button", { name: "Retry rejected email", exact: true }).click();
+    await expect(page.getByText("Email status: Queued", { exact: true })).toBeVisible();
+    const retriedJob = await invitationMailJob(requested.deliveryId);
+    expect(retriedJob.id).toBe(failedJob.id);
+    expect(retriedJob.attempts).toBe(failedJob.attempts);
+    expect(retriedJob.state).toBe("ready");
+    await controlledInvitationMailFailure(staff, requested.deliveryId, true);
+    await page.reload();
+    await expect(
+      page.getByRole("heading", { name: /^(Applications|Заявки)$/, exact: true }),
+    ).toBeVisible();
+    await catalogLanguage(page);
+    await page.getByRole("button", { name: new RegExp(nickname) }).click();
+    await expect(
+      page.getByText("Email status: Outcome unknown; retry is blocked", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Retry rejected email", exact: true }),
+    ).toHaveCount(0);
+    expect((await copyLink()) === original).toBe(true);
+    const state = (await (await staff.get(`/api/v1/admin/invitations/${invitationId}`)).json())
+      .data;
+    const delivery = await staff.get(`/api/v1/mail-deliveries/${state.deliveryId}`);
+    expect(
+      (
+        await write(
+          staff,
+          `/mail-deliveries/${state.deliveryId}/resends`,
+          undefined,
+          delivery.headers().etag,
+        )
+      ).status(),
+    ).toBe(409);
+  } finally {
+    await staff.dispose();
+  }
+});
+
+test("real staff Steam replacement applies only verified proof and invalidates the old telemetry credential", async ({
+  page,
+  context,
+}) => {
+  const member = await administrationMember(),
+    staff = await staffContext();
+  try {
+    expect(
+      (
+        await write(context.request, "/auth/login", {
+          email: member.email,
+          password: member.password,
+        })
+      ).status(),
+    ).toBe(200);
+    await page.goto("/account/connections");
+    await expect(
+      page.getByRole("heading", { name: /^(Connections|Подключения)$/, exact: true }),
+    ).toBeVisible();
+    await catalogLanguage(page);
+    const initialResponse = page.waitForResponse(
+      (r) => r.url().endsWith("/api/v1/me/steam-verifications") && r.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Verify Steam ownership", exact: true }).click();
+    await steamAssertion(
+      context.request,
+      (await (await initialResponse).json()).data.verificationUrl,
+    );
+    await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
+    await expect(
+      page.getByRole("button", { name: "Verify a replacement Steam account", exact: true }),
+    ).toBeVisible();
+    const issued = await write(context.request, "/me/telemetry-tokens", {
+      label: "Fictional replacement proof token",
+    });
+    expect(issued.status()).toBe(201);
+    const token = (await issued.json()).data.token;
+    const replacementResponse = page.waitForResponse(
+      (r) =>
+        r.url().endsWith("/api/v1/me/steam-replacement-verifications") &&
+        r.request().method() === "POST",
+    );
+    await page
+      .getByRole("button", { name: "Verify a replacement Steam account", exact: true })
+      .click();
+    const replacement = (await (await replacementResponse).json()).data;
+    await steamAssertion(context.request, replacement.verificationUrl);
+    const proof = (
+      await (
+        await context.request.get(`/api/v1/me/steam-replacement-verifications/${replacement.id}`)
+      ).json()
+    ).data;
+    expect(proof.state).toBe("verified");
+    const before = (await (await staff.get(`/api/v1/admin/members/${member.userId}`)).json()).data;
+    // These are separate member and staff journeys, not a combined shared-IP load test.
+    await resetAccountLimits();
+    await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
+    await chooseMember(page, member.name);
+    await expect(
+      page.getByRole("button", { name: "Apply verified Steam replacement", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByLabel("Reason", { exact: true })
+      .last()
+      .fill("Fictional verified identity replacement");
+    await confirm(page, "Apply verified Steam replacement");
+    await expect(
+      page.getByRole("link", { name: proof.candidateSteamProfileUrl, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Apply verified Steam replacement", exact: true }),
+    ).toHaveCount(0);
+    const after = (await (await staff.get(`/api/v1/admin/members/${member.userId}`)).json()).data;
+    expect(after.identityEpoch).toBe(before.identityEpoch + 1);
+    expect(
+      JSON.stringify(after.profile.qualifications) ===
+        JSON.stringify(before.profile.qualifications),
+    ).toBe(true);
+    expect(
+      (
+        await context.request.get("/api/telemetry/v1/connection", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).status(),
+    ).toBe(401);
+  } finally {
     await staff.dispose();
   }
 });

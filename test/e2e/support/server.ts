@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { guardedSettings } from "../../persistence/support.ts";
 import { safeChildEnvironment } from "../../support/environment.ts";
-import { accountSecret } from "./account.ts";
+import { accountSecret, browserAdmissionsKey } from "./account.ts";
 
 // The lane prepares its owned schema before Playwright starts the real readiness clock.
 const settings = guardedSettings();
@@ -21,7 +21,7 @@ const app = spawn(process.execPath, ["--import", "tsx", "test/e2e/support/runtim
     VTC_TEST_CONFIG: process.env.VTC_TEST_CONFIG,
     DB_TEST_RESET_ACK: process.env.DB_TEST_RESET_ACK,
     ADMISSIONS_ENABLED: "true",
-    ADMISSIONS_ENCRYPTION_KEY: randomBytes(32).toString("base64url"),
+    ADMISSIONS_ENCRYPTION_KEY: browserAdmissionsKey(),
     MAIL_MODE: "local",
     MAIL_ENCRYPTION_KEY: accountSecret("mail"),
     MAIL_SENDER: "sender@example.invalid",
