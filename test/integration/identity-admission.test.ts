@@ -302,8 +302,8 @@ test("every owned route rejects a denied socket source before actor/current/cryp
   );
   const crypto = vi.spyOn(authEngine, "verifySignInCredential");
   const app = await createApp({ checkReadiness: async () => true, identity: owner });
-  app.get("/api/v1/members", async () => ({ synthetic: true }));
-  app.post("/api/v1/members", async () => ({ synthetic: true }));
+  app.get("/api/v1/unowned-test-route", async () => ({ synthetic: true }));
+  app.post("/api/v1/unowned-test-route", async () => ({ synthetic: true }));
   try {
     const requests = [
       ["GET", "/api/v1/auth/csrf"],
@@ -334,12 +334,12 @@ test("every owned route rejects a denied socket source before actor/current/cryp
     }
     for (const spy of spies) expect(spy.mock.calls.length).toBe(0);
     expect(crypto.mock.calls.length).toBe(0);
-    expect((await app.inject({ url: "/api/v1/members" })).statusCode).toBe(200);
+    expect((await app.inject({ url: "/api/v1/unowned-test-route" })).statusCode).toBe(200);
     expect(
       (
         await app.inject({
           method: "POST",
-          url: "/api/v1/members",
+          url: "/api/v1/unowned-test-route",
           headers: { "content-type": "text/plain" },
           payload: "synthetic",
         })

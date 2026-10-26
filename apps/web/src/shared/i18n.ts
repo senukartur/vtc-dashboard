@@ -3,6 +3,8 @@ import { initReactI18next } from "react-i18next";
 import { accountTranslations } from "../features/account/translations.js";
 import { admissionsTranslations } from "../features/admissions/translations.js";
 import { catalogTranslations } from "../features/catalogs/translations.js";
+import { dashboardTranslations } from "../features/dashboard/translations.js";
+import { driverTranslations } from "../features/drivers/translations.js";
 import { foundationTranslations } from "../features/foundation/translations.js";
 import { qualificationTranslations } from "../features/qualifications/translations.js";
 import { tripTranslations } from "../features/trips/translations.js";
@@ -23,6 +25,8 @@ await i18next.use(initReactI18next).init({
       catalogs: catalogTranslations.en,
       trips: tripTranslations.en,
       qualifications: qualificationTranslations.en,
+      dashboard: dashboardTranslations.en,
+      drivers: driverTranslations.en,
     },
     ru: {
       core: core.ru,
@@ -32,6 +36,8 @@ await i18next.use(initReactI18next).init({
       catalogs: catalogTranslations.ru,
       trips: tripTranslations.ru,
       qualifications: qualificationTranslations.ru,
+      dashboard: dashboardTranslations.ru,
+      drivers: driverTranslations.ru,
     },
   },
 });
