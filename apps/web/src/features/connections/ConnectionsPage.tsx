@@ -271,7 +271,7 @@ export function ConnectionsPage() {
         <>
           {(!data.telemetry || !data.externalIdentities) && <p role="status">{t("partial")}</p>}
           {data.externalIdentities ? (
-            <ExternalIdentity key={scope} />
+            <ExternalIdentity key={`identity:${scope}`} />
           ) : (
             <Card>
               <h2>{t("identity")}</h2>
@@ -279,7 +279,7 @@ export function ConnectionsPage() {
             </Card>
           )}
           {data.telemetry ? (
-            <Tokens key={scope} />
+            <Tokens key={`tokens:${scope}`} />
           ) : (
             <Card>
               <h2>{t("tokens")}</h2>

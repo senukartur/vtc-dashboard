@@ -210,6 +210,9 @@ test("real Steam proof, one-show token, lost issuance recovery and revoke", asyn
   const verification = page.waitForResponse(
     (r) => r.url().endsWith("/api/v1/me/steam-verifications") && r.request().method() === "POST",
   );
+  await expect(
+    page.getByRole("button", { name: "Verify Steam ownership", exact: true }),
+  ).toHaveCount(1);
   await page.getByRole("button", { name: "Verify Steam ownership", exact: true }).click();
   await steamAssertion(context.request, (await (await verification).json()).data.verificationUrl);
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
@@ -710,6 +713,9 @@ test("real staff Steam replacement applies only verified proof and invalidates t
     const initialResponse = page.waitForResponse(
       (r) => r.url().endsWith("/api/v1/me/steam-verifications") && r.request().method() === "POST",
     );
+    await expect(
+      page.getByRole("button", { name: "Verify Steam ownership", exact: true }),
+    ).toHaveCount(1);
     await page.getByRole("button", { name: "Verify Steam ownership", exact: true }).click();
     await steamAssertion(
       context.request,
@@ -1013,6 +1019,12 @@ for (const refreshOutcome of ["success", "failure"] as const) {
     expect((await initialList).status()).toBe(200);
     await catalogLanguage(page);
     await expect(page.getByLabel("Credential label", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Verify a replacement Steam account", exact: true }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: "Verify a replacement Steam account", exact: true }),
+    ).toBeVisible();
     const tokens = page
       .getByRole("heading", { name: "Personal telemetry credentials", exact: true })
       .locator("..");
@@ -1021,6 +1033,8 @@ for (const refreshOutcome of ["success", "failure"] as const) {
     ).toBeVisible();
     let release: () => void = () => {},
       entered: () => void = () => {},
+      releasePost: () => void = () => {},
+      postEntered: () => void = () => {},
       held = true,
       posts = 0,
       issuedId = "",
@@ -1030,6 +1044,12 @@ for (const refreshOutcome of ["success", "failure"] as const) {
       }),
       ready = new Promise<void>((resolve) => {
         entered = resolve;
+      }),
+      postGate = new Promise<void>((resolve) => {
+        releasePost = resolve;
+      }),
+      postReady = new Promise<void>((resolve) => {
+        postEntered = resolve;
       });
     await page.route("**/api/v1/me/telemetry-tokens**", async (route) => {
       if (new URL(route.request().url()).pathname !== "/api/v1/me/telemetry-tokens")
@@ -1041,6 +1061,8 @@ for (const refreshOutcome of ["success", "failure"] as const) {
         const data = (await response.json()).data;
         issuedId = data.info.id;
         issuedSecret = data.token;
+        postEntered();
+        await postGate;
         await route.fulfill({ response });
       } else if (route.request().method() === "GET" && held) {
         held = false;
@@ -1067,11 +1089,23 @@ for (const refreshOutcome of ["success", "failure"] as const) {
     try {
       await page.getByLabel("Credential label", { exact: true }).fill(label);
       await page.getByRole("button", { name: "Create credential", exact: true }).click();
+      await postReady;
+      // The server has committed POST201, but the browser response is gated. Keep
+      // this request below its own 15-second deadline before starting the list read.
+      await page.clock.fastForward(8000);
+      const issued = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/me/telemetry-tokens" &&
+          response.request().method() === "POST",
+      );
+      releasePost();
+      expect((await issued).status()).toBe(201);
       await ready;
-      // The real POST is committed and its subsequent list read is held. Advance
-      // the browser command timer past 15 seconds without sleeping or releasing the read.
-      await page.clock.fastForward(15001);
       const secret = page.getByRole("dialog", { name: "One-time telemetry secret", exact: true });
+      await expect(secret).toBeVisible();
+      // Combined browser command time now exceeds 15 seconds, while the separately
+      // gated read remains below its own unchanged deadline. No wall-clock sleep.
+      await page.clock.fastForward(8001);
       await expect(secret).toBeVisible();
       expect(
         (await secret.locator("pre").textContent()) === issuedSecret && issuedSecret.length > 0,
@@ -1124,6 +1158,7 @@ for (const refreshOutcome of ["success", "failure"] as const) {
       expect(matching[0].id === issuedId && matching[0].revokedAt !== null).toBe(true);
       expect(posts).toBe(1);
     } finally {
+      releasePost();
       release();
       await page.clock.resume();
     }
