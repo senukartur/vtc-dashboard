@@ -147,7 +147,6 @@ export function useTripStatusSummary(game?: "ets2" | "ats") {
 
 export function useUpcomingEvent() {
   const session = useSession();
-  const { i18n } = useTranslation();
   const path = "/me/upcoming-event";
 
   return useQuery({
@@ -157,7 +156,6 @@ export function useUpcomingEvent() {
       session.generation,
       session.self?.identityEpoch,
       session.self?.capabilities.join(","),
-      i18n.resolvedLanguage,
       path,
     ],
     meta: { private: true },

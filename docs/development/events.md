@@ -1,6 +1,6 @@
 # Events and voluntary participation
 
-VTC-034 implements the Events backend APIs from [the browser contract](../contracts/dashboard/openapi.json) and [CONCEPT.MD](../../CONCEPT.MD), scenarios 1, 2, 5, 14, 20–22, 30, 31, 33 and 39. VTC-035 owns rendered RU/EN event workflows; VTC-029 owns trip adjudication; VTC-036 owns subscriptions, notifications and reminders. Source integration does not activate a hosted service or apply a live migration.
+VTC-034 implements the Events backend APIs from [the browser contract](../contracts/dashboard/openapi.json) and [CONCEPT.MD](../../CONCEPT.MD), scenarios 1, 2, 5, 14, 20–22, 30, 31, 33 and 39. The [VTC-035 workspace](event-workspace.md) provides rendered RU/EN event workflows; VTC-029 owns trip adjudication; VTC-036 owns subscriptions, notifications and reminders. Source integration does not activate a hosted service or apply a live migration.
 
 ## Activation and routes
 

@@ -47,6 +47,11 @@ export function Navigation({
             </NavLink>
           )}
           {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/events" onClick={close}>
+              {t("events:title")}
+            </NavLink>
+          )}
+          {session.self?.capabilities.includes("company.read") && (
             <NavLink to="/account/drivers" onClick={close}>
               {t("drivers:directory.title")}
             </NavLink>

@@ -15,7 +15,7 @@ import { AuthPage } from "../features/account/AuthPage.js";
 import type { LinkHandoff } from "../features/account/link.js";
 import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
-import { LandingPage, PublicBoundaryPage } from "../features/landing/LandingPage.js";
+import { LandingPage } from "../features/landing/LandingPage.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
 import { ReadinessPage } from "./ReadinessPage.js";
@@ -85,6 +85,15 @@ const ConnectionsPage = lazy(() =>
 );
 
 const queryClient = createAppQueryClient();
+const EventsPage = lazy(() =>
+  import("../features/events/EventsPage.js").then((m) => ({ default: m.EventsPage })),
+);
+const CreateEventPage = lazy(() =>
+  import("../features/events/EventsPage.js").then((m) => ({ default: m.CreateEventPage })),
+);
+const EventDetailPage = lazy(() =>
+  import("../features/events/EventDetailPage.js").then((m) => ({ default: m.EventDetailPage })),
+);
 const memberPath = "/foundation/member";
 const FoundationPage = lazy(() =>
   import("../features/foundation/FoundationPage.js").then((module) => ({
@@ -184,7 +193,32 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
             <Route path="/" element={<LandingPage />} />
             <Route path="/en" element={<LandingPage />} />
             <Route path="/status" element={<ReadinessPage />} />
-            <Route path="/events" element={<PublicBoundaryPage kind="events" />} />
+            <Route path="/events" element={<EventsPage publicView />} />
+            <Route path="/events/:eventId" element={<EventDetailPage publicView />} />
+            <Route
+              path="/account/events"
+              element={
+                <ProtectedAccount>
+                  <EventsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/events/new"
+              element={
+                <ProtectedAccount>
+                  <CreateEventPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
+              path="/account/events/:eventId"
+              element={
+                <ProtectedAccount>
+                  <EventDetailPage />
+                </ProtectedAccount>
+              }
+            />
             <Route path="/login" element={<AuthPage key="login" kind="login" />} />
             <Route
               path="/password-recovery"

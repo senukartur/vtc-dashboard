@@ -1,0 +1,105 @@
+.event-page {
+  max-width: 74rem;
+  margin: auto;
+}
+.event-heading,
+.event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+.event-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 23rem), 1fr));
+  gap: 1rem;
+}
+.event-card,
+.event-page,
+.dialog-content.event-dialog {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+:where(.event-card h2) > a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+.event-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 0.8rem;
+  margin: 0;
+}
+.event-facts dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.event-facts dd {
+  margin: 0.2rem 0 0;
+}
+.event-description {
+  white-space: pre-wrap;
+}
+.event-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.event-editor-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.event-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.event-form fieldset,
+.event-form .event-wide {
+  grid-column: 1 / -1;
+}
+.event-page textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+.dialog-content.event-dialog {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: 85dvh;
+  overflow-y: auto;
+}
+.event-nearest {
+  padding: 0.55rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.event-nearest a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  justify-content: space-between;
+}
+.app-shell.event-member-shell {
+  grid-template-rows: auto 1fr auto;
+}
+.member-shell > .event-shell-header {
+  grid-column: 2;
+  min-width: 0;
+}
+.event-attendance-row {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 640px) {
+  .event-form {
+    grid-template-columns: 1fr;
+  }
+  .event-actions > .button {
+    width: 100%;
+  }
+}

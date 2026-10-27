@@ -174,7 +174,7 @@ export async function tripBrowserFixture() {
         }),
       );
     }
-    async function newMember() {
+    async function newMember(roles: components["schemas"]["RolesInput"]["roles"] = ["driver"]) {
       const userId = randomUUID(),
         email = `${userId}@example.invalid`,
         password = createHmac("sha256", guardedAllocation().token)
@@ -186,7 +186,7 @@ export async function tripBrowserFixture() {
           userId,
           email,
           name: "Fictional Other Trip Browser Driver",
-          roles: ["driver"],
+          roles,
           ...credential,
         });
         await createQualificationInitialization(unit).initialize(tx, {
@@ -195,7 +195,7 @@ export async function tripBrowserFixture() {
           assignedAt: new Date(Date.now() - 86400000).toISOString(),
         });
       });
-      return { email, password };
+      return { email, password, userId };
     }
     return {
       unit,

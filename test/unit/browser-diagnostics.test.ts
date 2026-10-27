@@ -23,7 +23,13 @@ const valid = {
 };
 const privateText = "SYNTHETIC_PRIVATE_TOKEN=never-publish";
 test("catalog browser failures retain only allowlisted file identifiers", () => {
-  for (const file of ["catalogs", "catalogs-real", "administration-real"]) {
+  for (const file of [
+    "catalogs",
+    "catalogs-real",
+    "administration-real",
+    "events",
+    "events-real",
+  ]) {
     expect(safeBrowserFailure({ ...valid, file })).toEqual({ ...valid, file });
   }
 });
