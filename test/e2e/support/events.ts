@@ -1,8 +1,44 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
 
 type S = components["schemas"];
+export async function selectPastReportEvent(page: Page, eventId: string) {
+  const select = page.locator("#report-event"),
+    field = select.locator("..");
+  async function load(cursor: string | null, action: () => Promise<unknown>) {
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => {
+        const url = new URL(r.url());
+        return (
+          r.request().method() === "GET" &&
+          url.pathname === "/api/v1/events" &&
+          url.searchParams.get("period") === "past" &&
+          url.searchParams.get("cursor") === cursor
+        );
+      }),
+      action(),
+    ]);
+    expect(response.status()).toBe(200);
+    const body = await response.json();
+    // Headers/body receipt does not establish that the selector has rendered this page.
+    await expect(field.getByRole("status")).toHaveCount(0);
+    await expect(field.getByRole("alert")).toHaveCount(0);
+    return body.data.nextCursor as string | null;
+  }
+  let nextCursor = await load(null, () =>
+      page.getByRole("button", { name: "Past events", exact: true }).click(),
+    ),
+    pages = 0;
+  while (!(await select.locator(`option[value="${eventId}"]`).count())) {
+    expect(++pages).toBeLessThanOrEqual(10);
+    expect(nextCursor).not.toBeNull();
+    nextCursor = await load(nextCursor, () =>
+      field.getByRole("button", { name: "Next page", exact: true }).click(),
+    );
+  }
+  await select.selectOption(eventId);
+}
 export const eventId = "e0350000-0000-4000-8000-000000000001";
 export const eventFixture = (): S["EventPublic"] => ({
   id: eventId,

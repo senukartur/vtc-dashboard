@@ -5,6 +5,7 @@ import type { RowDataPacket } from "mysql2/promise";
 import { testConnection } from "../persistence/support.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
+import { selectPastReportEvent } from "./support/events.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
@@ -527,25 +528,7 @@ test("real report event selector links current confirmed event while RSVP alone 
     ).toBe(200);
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const eventPage = page.waitForResponse(
-      (r) =>
-        r.request().method() === "GET" &&
-        new URL(r.url()).pathname === "/api/v1/events" &&
-        new URL(r.url()).searchParams.get("period") === "past",
-    );
-    await page.getByRole("button", { name: "Past events", exact: true }).click();
-    await eventPage;
-    const select = page.locator("#report-event");
-    let pages = 0;
-    while (!(await select.locator(`option[value="${e.id}"]`).count())) {
-      expect(++pages).toBeLessThanOrEqual(10);
-      const read = page.waitForResponse(
-        (r) => r.request().method() === "GET" && new URL(r.url()).pathname === "/api/v1/events",
-      );
-      await page.getByRole("button", { name: "Next page", exact: true }).click();
-      await read;
-    }
-    await select.selectOption(e.id);
+    await selectPastReportEvent(page, e.id);
     const link = page.getByRole("link", { name: "View selected event", exact: true });
     await expect(link).toHaveAttribute("href", `/account/events/${e.id}`);
     await link.click();

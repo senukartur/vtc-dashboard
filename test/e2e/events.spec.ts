@@ -1,10 +1,105 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
 import { catalogLanguage } from "./support/catalogs.ts";
-import { eventId, mockEvents } from "./support/events.ts";
+import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import { expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
+for (const targetPage of [1, 2]) {
+  test(`report event selection settles decoded options through page ${targetPage}`, async ({
+    page,
+  }) => {
+    await mockEvents(page);
+    const cursors: string[] = [],
+      event = {
+        ...eventFixture(),
+        meetingAt: "2020-10-25T12:00:00.000Z",
+        startsAt: "2020-10-25T13:00:00.000Z",
+        status: "completed" as const,
+      };
+    await page.route("**/api/v1/events?*", async (route) => {
+      const url = new URL(route.request().url()),
+        cursor = url.searchParams.get("cursor") ?? "";
+      if (url.searchParams.get("period") !== "past")
+        return route.fulfill({
+          json: {
+            data: { items: [], nextCursor: null },
+            meta: { requestId: "synthetic-report-events" },
+          },
+        });
+      cursors.push(cursor);
+      const first = targetPage === 2 && !cursor;
+      const items = first
+        ? Array.from({ length: 25 }, (_, i) => ({
+            ...event,
+            id: `e0353000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+          }))
+        : [event];
+      await route.fulfill({
+        json: {
+          data: { items, nextCursor: first ? "synthetic-report-event-page-2" : null },
+          meta: { requestId: "synthetic-report-events" },
+        },
+      });
+    });
+    await page.addInitScript(() => {
+      const original = window.fetch.bind(window);
+      let ordinal = 0;
+      window.fetch = async (input, init) => {
+        const response = await original(input, init),
+          url = new URL(input instanceof Request ? input.url : String(input), location.origin);
+        if (url.pathname === "/api/v1/events" && url.searchParams.get("period") === "past") {
+          const json = response.json.bind(response);
+          response.json = async () => {
+            const body = await json();
+            // Hold decoded data before the client promise resolves, after HTTP body completion.
+            await new Promise<void>((resolve) => {
+              const release = () => {
+                  clearTimeout(timer);
+                  window.removeEventListener("synthetic-release-report-decode", release);
+                  resolve();
+                },
+                timer = window.setTimeout(release, 5000);
+              window.addEventListener("synthetic-release-report-decode", release, { once: true });
+              document.documentElement.dataset.reportDecodeOrdinal = String(++ordinal);
+            });
+            return body;
+          };
+        }
+        return response;
+      };
+    });
+    await page.goto("/account/reports/new");
+    await catalogLanguage(page);
+    const selecting = selectPastReportEvent(page, eventId),
+      select = page.locator("#report-event");
+    void selecting.catch(() => {});
+    try {
+      for (let ordinal = 1; ordinal <= targetPage; ordinal++) {
+        await expect(page.locator("html")).toHaveAttribute(
+          "data-report-decode-ordinal",
+          String(ordinal),
+        );
+        await expect(select.locator("..").getByRole("status")).toBeVisible();
+        await expect(select.locator(`option[value="${eventId}"]`)).toHaveCount(0);
+        await page.evaluate(() =>
+          window.dispatchEvent(new Event("synthetic-release-report-decode")),
+        );
+      }
+      await selecting;
+      await expect(select).toHaveValue(eventId);
+      await expect(
+        page.getByRole("link", { name: "View selected event", exact: true }),
+      ).toHaveAttribute("href", `/account/events/${eventId}`);
+      expect(cursors).toEqual(targetPage === 1 ? [""] : ["", "synthetic-report-event-page-2"]);
+    } finally {
+      await page
+        .evaluate(() => window.dispatchEvent(new Event("synthetic-release-report-decode")))
+        .catch(() => {});
+      await selecting.catch(() => {});
+    }
+  });
+}
 for (const status of [412, 503, 429]) {
   test(`attendance page two keeps reviewable drafts and safe authority after ${status}`, async ({
     page,
