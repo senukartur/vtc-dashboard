@@ -7,8 +7,12 @@ import {
   browserPreparationLine,
   browserPreparationPrefix,
   browserProjects,
+  qualificationPhaseAnnotation,
+  qualificationPhaseScenario,
+  qualificationPromotionPhases,
   safeBrowserFailure,
   safeBrowserPreparation,
+  safeQualificationPhase,
 } from "../../scripts/browser-diagnostics.mjs";
 import { collectEvents, qualityReport, safeEvent } from "../../scripts/ci-result.mjs";
 import { browserFailureProof } from "../support/browser-failure-proof.ts";
@@ -22,8 +26,253 @@ const valid = {
   status: "failed",
 };
 const privateText = "SYNTHETIC_PRIVATE_TOKEN=never-publish";
+const promotionPhase = {
+  scenario: qualificationPhaseScenario,
+  phase: "finally-release-held",
+  primaryPhase: "command-arrived",
+};
+function phaseAnnotation(value: unknown = promotionPhase) {
+  return { type: qualificationPhaseAnnotation, description: JSON.stringify(value) };
+}
+function phasePipeline(annotations: unknown, file = "qualifications", status = "timedOut") {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {}),
+    forbidden = () => {
+      throw new Error("PRIVATE_FIELD_READ");
+    };
+  try {
+    const reporter = new SafeBrowserReporter();
+    reporter.onTestBegin();
+    reporter.onTestEnd(
+      {
+        location: { file: resolve(`test/e2e/${file}.spec.ts`), line: 73 },
+        parent: { project: () => ({ name: "tablet-chromium" }) },
+        get title() {
+          return forbidden();
+        },
+        get annotations() {
+          return forbidden();
+        },
+      } as unknown as TestCase,
+      {
+        status,
+        annotations,
+        get errors() {
+          return forbidden();
+        },
+        get attachments() {
+          return forbidden();
+        },
+      } as unknown as TestResult,
+    );
+    const collector = collectEvents();
+    for (const [line] of output.mock.calls) collector.push(`${line}\n`);
+    const event = safeEvent({ stage: "e2e", status: "failure", exitCode: 1, durationMs: 20 });
+    if (!event) throw Error("MISSING_EVENT");
+    return qualityReport(1, 20, [event], undefined, collector.browserFailures) as {
+      browserFailures: unknown[];
+      status: string;
+      exitCode: number;
+    };
+  } finally {
+    output.mockRestore();
+  }
+}
+test("runtime result annotations retain only the controlled promotion's closed phases through the real pipeline", () => {
+  const annotation = phaseAnnotation();
+  Object.defineProperty(annotation, "location", {
+    enumerable: true,
+    get() {
+      throw Error("PRIVATE_LOCATION_READ");
+    },
+  });
+  const report = phasePipeline([annotation]);
+  expect(report.browserFailures).toEqual([
+    {
+      kind: "test",
+      file: "qualifications",
+      project: "tablet-chromium",
+      line: 73,
+      status: "timedOut",
+      ...promotionPhase,
+    },
+  ]);
+  expect(report.status).toBe("failure");
+  expect(report.exitCode).toBe(1);
+  for (const phase of qualificationPromotionPhases)
+    expect(safeQualificationPhase({ ...promotionPhase, phase })).toBeDefined();
+  expect(safeQualificationPhase({ ...promotionPhase, primaryPhase: "none" })).toBeDefined();
+  for (const primaryPhase of ["complete", "finally-release-held"])
+    expect(safeQualificationPhase({ ...promotionPhase, primaryPhase })).toBeUndefined();
+  const safe = safeBrowserFailure(report.browserFailures[0]);
+  expect(safe).not.toBe(report.browserFailures[0]);
+});
+test("invalid, private and extra annotation metadata keeps the known coarse failure", () => {
+  const forbidden = () => {
+    throw Error("PRIVATE_ANNOTATION_FIELD_READ");
+  };
+  const getter = {
+    type: qualificationPhaseAnnotation,
+    get description() {
+      return forbidden();
+    },
+  };
+  const unrelated = {
+    type: "unrelated",
+    get description() {
+      return forbidden();
+    },
+  };
+  const invalid: unknown[] = [
+    undefined,
+    null,
+    {},
+    [],
+    [getter],
+    [unrelated],
+    [phaseAnnotation({ ...promotionPhase, phase: privateText })],
+    [phaseAnnotation({ ...promotionPhase, primaryPhase: privateText })],
+    [phaseAnnotation({ ...promotionPhase, scenario: privateText })],
+    [phaseAnnotation({ ...promotionPhase, payload: privateText })],
+    [{ ...phaseAnnotation(), error: privateText }],
+    [phaseAnnotation(), phaseAnnotation()],
+    Array(33).fill(phaseAnnotation()),
+    [{ type: qualificationPhaseAnnotation, description: privateText.repeat(40) }],
+    [{ type: qualificationPhaseAnnotation, description: "{" }],
+    [phaseAnnotation([privateText])],
+  ];
+  for (const annotations of invalid) {
+    const report = phasePipeline(annotations);
+    expect(report.browserFailures).toEqual([
+      {
+        kind: "test",
+        file: "qualifications",
+        project: "tablet-chromium",
+        line: 73,
+        status: "timedOut",
+      },
+    ]);
+    expect(JSON.stringify(report)).not.toContain(privateText);
+    expect(report.status).toBe("failure");
+  }
+});
+test("unknown or other file metadata cannot carry phases and is not inspected", () => {
+  const poisonous = new Proxy([], {
+    get() {
+      throw Error("ANNOTATIONS_READ");
+    },
+  });
+  for (const file of ["landing", "unknown-file"]) {
+    const report = phasePipeline(poisonous, file);
+    expect(report.browserFailures).toEqual(
+      file === "landing"
+        ? [{ kind: "test", file, project: "tablet-chromium", line: 73, status: "timedOut" }]
+        : [{ kind: "global", category: "unmapped-test", status: "timedOut" }],
+    );
+  }
+  expect(safeBrowserFailure({ ...valid, ...promotionPhase })).toBeUndefined();
+});
+test("an unavailable runtime annotation property cannot suppress a known failure", () => {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const reporter = new SafeBrowserReporter();
+    reporter.onTestBegin();
+    reporter.onTestEnd(
+      {
+        location: { file: resolve("test/e2e/qualifications.spec.ts"), line: 73 },
+        parent: { project: () => ({ name: "tablet-chromium" }) },
+      } as unknown as TestCase,
+      {
+        status: "failed",
+        get annotations() {
+          throw Error(privateText);
+        },
+        get errors() {
+          throw Error("PRIVATE_ERRORS_READ");
+        },
+        get attachments() {
+          throw Error("PRIVATE_ATTACHMENTS_READ");
+        },
+      } as unknown as TestResult,
+    );
+    const collector = collectEvents();
+    for (const [line] of output.mock.calls) collector.push(`${line}\n`);
+    expect(qualityReport(1, 1, [], undefined, collector.browserFailures)).toMatchObject({
+      browserFailures: [
+        {
+          kind: "test",
+          file: "qualifications",
+          project: "tablet-chromium",
+          line: 73,
+          status: "failed",
+        },
+      ],
+    });
+    expect(JSON.stringify(output.mock.calls)).not.toContain(privateText);
+  } finally {
+    output.mockRestore();
+  }
+});
+test("extended records are revalidated at collector and report boundaries with exact keys and unchanged bounds", () => {
+  const value = { ...valid, file: "qualifications", ...promotionPhase };
+  const invalid = [
+    { ...value, error: privateText },
+    { ...value, phase: privateText },
+    { ...value, file: "landing" },
+    { ...value, primaryPhase: {} },
+    { ...value, scenario: null },
+  ];
+  const collector = collectEvents();
+  for (const item of invalid) {
+    expect(safeBrowserFailure(item)).toBeUndefined();
+    collector.push(record(item));
+  }
+  expect(collector.browserFailures).toEqual([]);
+  expect(qualityReport(1, 1, [], undefined, invalid)).toMatchObject({ browserFailures: [] });
+  const line = browserFailureLine(value);
+  expect(line.length).toBeLessThan(1024);
+  collector.push(`${browserFailurePrefix}${"x".repeat(1025)}\n`);
+  for (let i = 0; i < 40; i++) collector.push(`${line}\n`);
+  expect(collector.browserFailures).toHaveLength(32);
+  expect(qualityReport(0, 1, [], undefined, collector.browserFailures)).toMatchObject({
+    status: "success",
+  });
+  expect(JSON.stringify(qualityReport(1, 1, [], undefined, invalid))).not.toContain(privateText);
+});
+test("phase records keep the reporter's existing 32-record bound", () => {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const reporter = new SafeBrowserReporter();
+    reporter.onTestBegin();
+    for (let line = 1; line <= 40; line++)
+      reporter.onTestEnd(
+        {
+          location: { file: resolve("test/e2e/qualifications.spec.ts"), line },
+          parent: { project: () => ({ name: "tablet-chromium" }) },
+        } as unknown as TestCase,
+        { status: "failed", annotations: [phaseAnnotation()] } as TestResult,
+      );
+    expect(output).toHaveBeenCalledTimes(32);
+    const collector = collectEvents();
+    for (const [line] of output.mock.calls) collector.push(`${line}\n`);
+    expect(collector.browserFailures).toHaveLength(32);
+    expect(qualityReport(1, 1, [], undefined, collector.browserFailures)).toMatchObject({
+      exitCode: 1,
+      status: "failure",
+      browserFailures: expect.arrayContaining([expect.objectContaining(promotionPhase)]),
+    });
+  } finally {
+    output.mockRestore();
+  }
+});
 test("catalog browser failures retain only allowlisted file identifiers", () => {
-  for (const file of ["catalogs", "catalogs-real", "administration-real"]) {
+  for (const file of [
+    "catalogs",
+    "catalogs-real",
+    "administration-real",
+    "events",
+    "events-real",
+    "dashboard",
+  ]) {
     expect(safeBrowserFailure({ ...valid, file })).toEqual({ ...valid, file });
   }
 });

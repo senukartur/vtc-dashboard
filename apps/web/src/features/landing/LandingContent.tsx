@@ -6,10 +6,12 @@ import { publicContacts, publicContent, type PublicLocale, publicPath } from "./
 export function LandingContent({
   locale,
   application,
+  events,
   interactive = false,
 }: {
   locale: PublicLocale;
   application?: ReactNode;
+  events?: ReactNode;
   interactive?: boolean;
 }) {
   const c = publicContent[locale];
@@ -37,6 +39,14 @@ export function LandingContent({
           <span>ATS</span>
         </div>
       </section>
+      {events ?? (
+        <section className="landing-section">
+          <h2>{c.events}</h2>
+          <PublicLink interactive={interactive} className="button button-outline" href="/events">
+            {c.events}
+          </PublicLink>
+        </section>
+      )}
       <section id="about" className="landing-section" aria-labelledby="about-title">
         <p className="eyebrow">Yukon Union</p>
         <h2 id="about-title">{c.aboutTitle}</h2>

@@ -731,7 +731,8 @@ export function createIdentity(
         };
         // Always lock the source/actor slot before the category's global row.
         // A denied source never spends another source's or category's budget.
-        if (!(await charge(bucket, 20))) return false;
+        if (!(await charge(bucket, category === "read" && scope === "source" ? 40 : 20)))
+          return false;
         return scope === "actor" || (await charge(`global:${category}`, 200));
       });
       if (!allowed) throw identityError(429);

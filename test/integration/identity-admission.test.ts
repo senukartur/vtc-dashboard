@@ -285,10 +285,106 @@ test("a flooded source cannot charge global after denial; category budgets, rest
   expect(Number(counts[0]?.n)).toBeLessThanOrEqual(2565);
 });
 
+test("source read admission preserves the fortieth boundary across racing services, recreation and a new window", async () => {
+  const source = "synthetic-read-boundary",
+    owner = identity();
+  for (let i = 0; i < 39; i++) await safe(owner.rateLimit("read", source));
+  const results = await Promise.allSettled(
+    Array.from({ length: 3 }, () => safe(identity().rateLimit("read", source))),
+  );
+  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.filter((r) => r.status === "rejected")).toHaveLength(2);
+  for (const result of results)
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ statusCode: 429 });
+  await expect(safe(identity().rateLimit("read", source))).rejects.toMatchObject({
+    statusCode: 429,
+  });
+  const [before] = await safe(
+    control.query<RowDataPacket[]>(
+      "SELECT bucket,count FROM identity_limits WHERE bucket LIKE 'source:read:%' OR bucket='global:read'",
+    ),
+  );
+  expect(Number(before.find((r) => r.bucket === "global:read")?.count)).toBe(40);
+  expect(Number(before.find((r) => r.bucket !== "global:read")?.count)).toBe(41);
+  instant += 60000;
+  await safe(identity().rateLimit("read", source));
+  const [after] = await safe(
+    control.query<RowDataPacket[]>(
+      "SELECT count FROM identity_limits WHERE bucket LIKE 'source:read:%' OR bucket='global:read'",
+    ),
+  );
+  expect(after).toHaveLength(2);
+  expect(after.every((r) => Number(r.count) === 1)).toBe(true);
+});
+test("distinct read source slots retain the global two hundred bound and denied slots do not charge it", async () => {
+  const owner = identity(),
+    used = new Set<number>(),
+    sources: string[] = [];
+  for (let i = 0; sources.length < 6 && i < 4096; i++) {
+    const source = `synthetic-read-source-${i}`,
+      slot = createHmac("sha256", config.secret).update(source).digest()[0];
+    if (slot !== undefined && !used.has(slot)) {
+      used.add(slot);
+      sources.push(source);
+    }
+  }
+  expect(sources).toHaveLength(6);
+  for (const source of sources.slice(0, 5))
+    for (let n = 0; n < 40; n++) await safe(owner.rateLimit("read", source));
+  const count = async () => {
+    const [rows] = await safe(
+      control.query<RowDataPacket[]>(
+        "SELECT count FROM identity_limits WHERE bucket='global:read'",
+      ),
+    );
+    return Number(rows[0]?.count);
+  };
+  expect(await count()).toBe(200);
+  await expect(safe(identity().rateLimit("read", sources[0] as string))).rejects.toMatchObject({
+    statusCode: 429,
+  });
+  expect(await count()).toBe(200);
+  await expect(safe(identity().rateLimit("read", sources[5] as string))).rejects.toMatchObject({
+    statusCode: 429,
+  });
+  expect(await count()).toBe(201);
+  const [rows] = await safe(
+    control.query<RowDataPacket[]>(
+      "SELECT count FROM identity_limits WHERE bucket LIKE 'source:read:%'",
+    ),
+  );
+  expect(rows).toHaveLength(6);
+  expect(rows.every((r) => Number(r.count) <= 41)).toBe(true);
+});
+test("non-read source categories and actor namespaces retain twenty admissions independently", async () => {
+  const owner = identity(),
+    source = "synthetic-preserved-ceilings";
+  for (const category of ["csrf", "login", "challenge", "command"] as const) {
+    for (let n = 0; n < 20; n++) await safe(owner.rateLimit(category, source));
+    await expect(safe(identity().rateLimit(category, source))).rejects.toMatchObject({
+      statusCode: 429,
+    });
+  }
+  for (const category of ["read", "challenge"] as const) {
+    for (let n = 0; n < 20; n++) await safe(owner.rateLimit(category, source, "actor"));
+    await expect(safe(identity().rateLimit(category, source, "actor"))).rejects.toMatchObject({
+      statusCode: 429,
+    });
+  }
+  const [rows] = await safe(
+    control.query<RowDataPacket[]>(
+      "SELECT bucket,count FROM identity_limits WHERE bucket LIKE 'global:%'",
+    ),
+  );
+  expect(rows).toHaveLength(4);
+  expect(rows.every((r) => Number(r.count) === 20)).toBe(true);
+});
+
 test("every owned route rejects a denied socket source before actor/current/crypto or command work, ignoring forwarded addresses", async () => {
   const owner = identity();
   for (const category of ["csrf", "login", "challenge", "command", "read"] as const)
-    for (let n = 0; n < 20; n++) await safe(owner.rateLimit(category, "127.0.0.1"));
+    for (let n = 0; n < (category === "read" ? 40 : 20); n++)
+      await safe(owner.rateLimit(category, "127.0.0.1"));
   const guarded = [
     "authenticate",
     "current",

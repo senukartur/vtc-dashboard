@@ -10,6 +10,7 @@ import { qualificationTranslations } from "../features/qualifications/translatio
 import { tripTranslations } from "../features/trips/translations.js";
 import { administrationTranslations } from "../features/admin/translations.js";
 import { core } from "../i18n/core/resources.js";
+import { eventTranslations } from "../features/events/translations.js";
 
 await i18next.use(initReactI18next).init({
   lng: typeof window !== "undefined" && window.location.pathname === "/en" ? "en" : "ru",
@@ -19,6 +20,7 @@ await i18next.use(initReactI18next).init({
   interpolation: { escapeValue: false },
   resources: {
     en: {
+      events: eventTranslations.en,
       core: core.en,
       administration: administrationTranslations.en,
       foundation: foundationTranslations.en,
@@ -31,6 +33,7 @@ await i18next.use(initReactI18next).init({
       drivers: driverTranslations.en,
     },
     ru: {
+      events: eventTranslations.ru,
       core: core.ru,
       administration: administrationTranslations.ru,
       foundation: foundationTranslations.ru,

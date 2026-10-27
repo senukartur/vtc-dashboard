@@ -350,7 +350,7 @@ export function UpcomingEventWidget({
           <h3 className="font-medium">{event.title}</h3>
           <p className="text-xs muted">{formatUtc(event.startsAt, locale, displayTimezone)}</p>
           <Button asChild variant="outline" className="w-full mt-2">
-            <Link to="/events">{t("upcomingEvent.viewEvent")}</Link>
+            <Link to={`/account/events/${event.id}`}>{t("upcomingEvent.viewEvent")}</Link>
           </Button>
         </div>
       ) : (

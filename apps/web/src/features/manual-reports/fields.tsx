@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
@@ -408,6 +409,7 @@ export function EventSelect({
       </div>
       <State query={query} />
       <p>{t("eventHelp")}</p>
+      {value && <Link to={`/account/events/${value}`}>{t("events:eventLink")}</Link>}
     </div>
   );
 }

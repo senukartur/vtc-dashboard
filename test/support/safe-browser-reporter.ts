@@ -4,6 +4,7 @@ import {
   browserFailureLine,
   browserFiles,
   safeBrowserFailure,
+  safeQualificationAnnotations,
 } from "../../scripts/browser-diagnostics.mjs";
 
 export default class SafeBrowserReporter implements Reporter {
@@ -26,7 +27,18 @@ export default class SafeBrowserReporter implements Reporter {
       project: test.parent.project()?.name,
       status: result.status,
     });
-    this.emit(failure ?? { kind: "global", category: "unmapped-test", status: result.status });
+    let phase: ReturnType<typeof safeQualificationAnnotations>;
+    if (failure?.kind === "test" && failure.file === "qualifications") {
+      try {
+        phase = safeQualificationAnnotations(result.annotations);
+      } catch {
+        /* Invalid metadata keeps the coarse failure. */
+      }
+    }
+    this.emit(
+      (phase && safeBrowserFailure({ ...failure, ...phase })) ??
+        failure ?? { kind: "global", category: "unmapped-test", status: result.status },
+    );
   }
   onError() {
     this.emit({ kind: "global", category: "runner-error", status: "failed" });

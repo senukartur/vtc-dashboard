@@ -4,12 +4,14 @@ import { Card } from "../../shared/ui/primitives.js";
 import { ApplicationForm } from "../admissions/ApplicationForm.js";
 import { publicContent, publicPath } from "./content.js";
 import { LandingContent } from "./LandingContent.js";
+import { PublicEventWidget } from "../events/EventsPage.js";
 export function LandingPage() {
   const { i18n } = useTranslation();
   return (
     <LandingContent
       locale={i18n.resolvedLanguage === "en" ? "en" : "ru"}
       application={<ApplicationForm />}
+      events={<PublicEventWidget />}
       interactive
     />
   );

@@ -4,6 +4,17 @@ import { testConnection } from "../persistence/support.ts";
 import { expect, test } from "./support/fixtures.ts";
 // Manual captures below contain controlled public states only; real HTTP material is never traced.
 test.use({ trace: "off", screenshot: "off", video: "off" });
+// Admissions/landing cases isolate the new widget; Events owns its real API integration.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/v1/public/events?*", (route) =>
+    route.fulfill({
+      json: {
+        data: { items: [], nextCursor: null },
+        meta: { requestId: "synthetic-landing-events" },
+      },
+    }),
+  );
+});
 async function fill(page: Page, locale: "ru" | "en" = "en") {
   const ru = locale === "ru";
   await page
@@ -98,7 +109,7 @@ for (const locale of ["ru", "en"] as const) {
       })
       .click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      locale === "ru" ? "Публичные события ещё готовятся" : "Public events are on the way",
+      locale === "ru" ? "Открытые конвои" : "Public convoys",
     );
     await page
       .getByRole("main")

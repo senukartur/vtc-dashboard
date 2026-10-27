@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import type { TestInfo } from "@playwright/test";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
+import {
+  qualificationPhaseAnnotation,
+  qualificationPhaseScenario,
+  safeQualificationPhase,
+} from "../../scripts/browser-diagnostics.mjs";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { mockQualifications } from "./support/qualifications.ts";
@@ -73,48 +78,98 @@ test("controlled old levels response cannot replace a committed version and curr
 test("controlled promotion refresh must replace pre-command progress history and command ETag", async ({
   page,
 }, info) => {
-  const state = await mockQualifications(page);
+  let phase = "setup",
+    primaryPhase = "none";
+  const annotation = { type: qualificationPhaseAnnotation, description: "" };
+  function mark(next: string) {
+    phase = next;
+    const value = safeQualificationPhase({
+      scenario: qualificationPhaseScenario,
+      phase,
+      primaryPhase,
+    });
+    if (!value) throw new Error("INVALID_QUALIFICATION_PHASE");
+    annotation.description = JSON.stringify(value);
+  }
+  function primaryFailure() {
+    primaryPhase = phase;
+    mark(phase);
+  }
+  mark("setup");
+  info.annotations.push(annotation);
+  const state = await mockQualifications(page).catch((error: unknown) => {
+    primaryFailure();
+    throw error;
+  });
   let assertedCurrent = false;
   state.distinctAssignment = true;
   let releaseCommand = () => {};
   try {
+    mark("initial-route");
     await page.goto("/account/qualifications");
+    mark("initial-reason");
     await page.locator("#assignment-reason").fill("Fictional delayed promotion reads");
     state.memberCommitGate = new Promise<void>((resolve) => {
       releaseCommand = resolve;
     });
+    mark("open-promotion");
     await page.getByRole("button", { name: "Confirm next-level promotion", exact: true }).click();
+    mark("confirm-promotion");
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    mark("command-arrived");
     await expect.poll(() => state.memberCommandArrived).toBe(1);
     state.deferNext = ["progress", "history"];
+    mark("trigger-old-reads");
     await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    mark("old-reads-held");
     await expect.poll(() => state.heldStarted.length).toBe(2);
+    mark("release-promotion");
     releaseCommand();
+    mark("promotion-committed");
     await expect.poll(() => state.memberVersion).toBe(8);
+    mark("release-old-reads");
     await state.releaseHeld();
+    mark("promotion-dialog-settled");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    mark("current-level");
     await expect(
       page.getByRole("heading", { name: "Fictional driver_iii", exact: true }),
     ).toBeVisible();
+    mark("promotion-disabled");
     await expect(
       page.getByRole("button", { name: "Confirm next-level promotion", exact: true }),
     ).toBeDisabled();
     const history = page
       .getByRole("heading", { name: "Assignment history", exact: true })
       .locator("..");
+    mark("history-assignment");
     await expect(history).toContainText("d3200000-0000-4000-8000-000000000002");
+    mark("history-level");
     await expect(history).toContainText("Fictional driver_iii");
+    mark("assignment-purpose");
     await page.locator("#assignment-purpose").selectOption("administrative_correction");
+    mark("assignment-level");
     await page.locator("#assignment-level").selectOption("d3400000-0000-4000-8000-000000000002");
+    mark("open-assignment");
     await page.getByRole("button", { name: "Assign qualification", exact: true }).click();
+    mark("confirm-assignment");
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    mark("assignment-dialog-settled");
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    mark("command-etags");
     expect(state.etags).toEqual(['"v7"', '"v8"']);
     assertedCurrent = true;
+  } catch (error) {
+    primaryFailure();
+    throw error;
   } finally {
+    mark("finally-release-command");
     releaseCommand();
+    mark("finally-release-held");
     await state.releaseHeld();
+    mark("finally-persist-race");
     await persistRace(info, state, "member", assertedCurrent);
+    mark("complete");
   }
 });
 

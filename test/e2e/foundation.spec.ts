@@ -419,9 +419,7 @@ test("VTC019 ordering regression: mobile route closure has one focus owner and o
       await expect(main).toHaveAttribute("data-ordering-focus-count", "0");
       phase = "AFTER_HASH";
       await main.getByRole("link", { name: "Публичные события", exact: true }).click();
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-        "Публичные события ещё готовятся",
-      );
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Открытые конвои");
       await expect(main).toBeFocused();
     }
   } catch {
