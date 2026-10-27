@@ -17,6 +17,7 @@ export default defineConfig({
     "./src/schema/events/index.ts",
     "./src/schema/reconciliation/index.ts",
     "./src/schema/trip-decisions/index.ts",
+    "./src/schema/notifications/index.ts",
   ],
   out: "./migrations",
   strict: true,

@@ -86,7 +86,7 @@ export interface TripsPorts {
   ) => Promise<
     Map<string, { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }>
   >;
-  events?: ReturnType<typeof createOutbox>;
+  events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export interface SourceContext {
   ownerUserId: string;
@@ -856,6 +856,10 @@ export function createTrips(
       const facts = (await factsRepository.read(tx, [row.factId])).get(row.factId)?.evidence;
       if (!facts) throw new Error("SOURCE_FACT_MISSING");
       return {
+        factRevisionId: row.factId,
+        provider: facts.provider,
+        ownerId: facts.ownerUserId,
+        game: facts.game,
         tripId: (await groups.resolve(tx, row.tripId)).id,
         receivedAt: row.receivedAt,
         deliveryMode: row.deliveryMode,
@@ -863,6 +867,39 @@ export function createTrips(
         end: facts.end,
         outcome: facts.outcome,
       };
+    },
+    async notificationStateInTransaction(tx: TxContext, id: string) {
+      const root = await groups.resolve(tx, applicationId(id), "share");
+      return {
+        id: root.id,
+        ownerId: root.ownerId,
+        game: root.game,
+        version: root.version,
+        outcome: root.outcome,
+        decision: root.decision,
+        groupIds: (await groups.members(tx, [root.id], "share")).map((row) => row.id),
+      };
+    },
+    async notificationTargetsInTransaction(
+      tx: TxContext,
+      ids: string[],
+      viewer: { userId: string; capabilities: readonly string[] },
+    ) {
+      if (ids.length > 100) throw new Error("NOTIFICATION_TARGET_BOUND_EXCEEDED");
+      const result = new Map<string, { target: string | null; outcome: string }>();
+      for (const id of [...new Set(ids)].sort()) {
+        const r = await groups.resolve(tx, id, "share");
+        result.set(id, {
+          outcome: r.outcome,
+          target:
+            r.decision === "accepted" ||
+            r.ownerId === viewer.userId ||
+            viewer.capabilities.includes("trips.review")
+              ? r.id
+              : null,
+        });
+      }
+      return result;
     },
     async sourceEvidenceInTransaction(tx: TxContext, sourceRecordId: string) {
       const [row] = await c(tx)

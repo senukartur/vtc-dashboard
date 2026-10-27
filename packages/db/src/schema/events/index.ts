@@ -15,9 +15,11 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
-import { membership } from "../identity/index.js";
 import { catalogFacts } from "../catalogs/index.js";
+import { membership } from "../identity/index.js";
+
 export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+
 const fk = (name: string, column: AnyMySqlColumn, target: AnyMySqlColumn) =>
   foreignKey({ name, columns: [column], foreignColumns: [target] }).onDelete("restrict");
 export const events = mysqlTable(
@@ -26,6 +28,7 @@ export const events = mysqlTable(
     id: idColumn("id").primaryKey(),
     version: int("version", { unsigned: true }).notNull(),
     changeSequence: int("change_sequence", { unsigned: true }).notNull(),
+    notificationPending: boolean("notification_pending").notNull().default(true),
     tripAssessmentPending: boolean("trip_assessment_pending").notNull().default(false),
     tripAssessmentGeneration: int("trip_assessment_generation", { unsigned: true })
       .notNull()
@@ -41,6 +44,7 @@ export const events = mysqlTable(
   (t) => [
     index("event_member_page").on(t.startsAt, t.id),
     index("event_trip_assessment_pending").on(t.tripAssessmentPending, t.id),
+    index("event_notification_pending").on(t.notificationPending, t.id),
     index("event_public_page").on(t.visibility, t.startsAt, t.id),
     check(
       "event_versions_positive",

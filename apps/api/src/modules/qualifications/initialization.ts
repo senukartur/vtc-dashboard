@@ -2,17 +2,18 @@ import type { components } from "@vtc/contracts";
 import { newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   and,
+  desc,
   eq,
   inArray,
   initialQualifications,
+  isNull,
+  lte,
   qualificationAssignments,
-  qualificationStates,
   qualificationLevels,
   qualificationRules,
-  lte,
-  desc,
-  isNull,
+  qualificationStates,
 } from "@vtc/db/qualifications-schema";
+import type { createOutbox } from "../../platform/outbox/events.js";
 import { type Actor, identityError } from "../identity/service.js";
 import { createAssignmentWriter } from "./assignment-writer.js";
 export type Game = "ets2" | "ats";
@@ -30,7 +31,10 @@ export const structuralLevels = {
     "02800000-0000-4000-8000-000000000008",
   ],
 } as const;
-export function createQualificationInitialization(unit: UnitOfWork) {
+export function createQualificationInitialization(
+  unit: UnitOfWork,
+  outbox?: Pick<ReturnType<typeof createOutbox>, "append">,
+) {
   return {
     async administrationLevels(tx: TxContext) {
       const rows = await unit
@@ -152,7 +156,7 @@ export function createQualificationInitialization(unit: UnitOfWork) {
           .limit(1)
           .for("update");
         if (open) throw identityError(409);
-        await createAssignmentWriter(unit, undefined, () => assignedAt)(tx, actor, {
+        await createAssignmentWriter(unit, outbox, () => assignedAt)(tx, actor, {
           userId,
           game: input.game,
           levelId: input.levelId,

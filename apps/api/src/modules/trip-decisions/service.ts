@@ -89,7 +89,7 @@ export function createTripDecisions(
     qualifications: Qualifications;
     manual: ManualReports;
     events: Events;
-    outbox?: ReturnType<typeof createOutbox>;
+    outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   },
   now = () => new Date(),
 ) {
@@ -986,6 +986,20 @@ export function createTripDecisions(
     config,
     handler,
     assessInTransaction: assess,
+    async notificationDecisionInTransaction(tx: TxContext, id: string) {
+      const [row] = await c(tx)
+        .select({
+          tripId: tripDecisions.tripId,
+          outcome: tripDecisions.outcome,
+          sequence: tripDecisions.sequence,
+        })
+        .from(tripDecisions)
+        .where(eq(tripDecisions.id, applicationId(id)))
+        .for("share");
+      if (!row) throw new Error("NOTIFICATION_DECISION_MISSING");
+      const current = await latest(tx, row.tripId);
+      return { ...row, current: current?.id === id };
+    },
     async correctionRequestedInTransaction(
       tx: TxContext,
       id: string,

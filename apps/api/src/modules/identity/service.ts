@@ -1,6 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { components } from "@vtc/contracts";
-import { pagination } from "./pagination.js";
 import {
   applicationId,
   createAudit,
@@ -34,6 +33,7 @@ import {
   validateIdentityConfig,
   verifySignInCredential,
 } from "./engine.js";
+import { pagination } from "./pagination.js";
 import {
   type AssignableRole,
   assignableRoles,
@@ -1668,6 +1668,47 @@ export function createIdentity(
         .select({ id: membership.userId })
         .from(membership)
         .where(after ? gt(membership.userId, applicationId(after)) : undefined)
+        .orderBy(membership.userId)
+        .limit(limit);
+    },
+    async notificationMembersInTransaction(tx: TxContext, ids: string[]) {
+      const current = await lockCompany(tx);
+      if (ids.length > 100) throw new Error("NOTIFICATION_MEMBER_BOUND_EXCEEDED");
+      const locked = await lockMembers(tx, ids);
+      const summaries = await this.memberSummariesInTransaction(tx, ids);
+      const result = new Map<
+        string,
+        {
+          id: string;
+          active: boolean;
+          accessEpoch: number;
+          capabilities: readonly string[];
+          nickname: string;
+        }
+      >();
+      for (const [id, member] of locked)
+        result.set(id, {
+          id,
+          active: member.status === "active",
+          accessEpoch: member.accessEpoch,
+          capabilities: capabilities(await memberRoles(tx, id, current)),
+          nickname: summaries.get(id)?.nickname ?? "Former member",
+        });
+      return result;
+    },
+    async notificationRosterInTransaction(tx: TxContext, after: string | null, limit = 25) {
+      await lockCompany(tx);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25)
+        throw new Error("NOTIFICATION_ROSTER_BOUND_EXCEEDED");
+      return client(tx)
+        .select({ id: membership.userId })
+        .from(membership)
+        .where(
+          and(
+            eq(membership.status, "active"),
+            after ? gt(membership.userId, applicationId(after)) : undefined,
+          ),
+        )
         .orderBy(membership.userId)
         .limit(limit);
     },

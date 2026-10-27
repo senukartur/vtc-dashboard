@@ -14,28 +14,30 @@ import {
   and,
   asc,
   eq,
+  eventAttendanceRevisions,
+  eventAttendances,
+  eventCatalogPins,
+  eventCommands,
+  eventResponseRevisions,
+  eventResponses,
+  eventRevisions,
+  events,
   gt,
   gte,
   inArray,
   lt,
   or,
   sql,
-  events,
-  eventRevisions,
-  eventCatalogPins,
-  eventResponses,
-  eventResponseRevisions,
-  eventAttendances,
-  eventAttendanceRevisions,
-  eventCommands,
 } from "@vtc/db/events-schema";
+import type { SQLWrapper } from "drizzle-orm";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
-import { closed, createOutbox, type CompanyEvent } from "../../platform/outbox/events.js";
+import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
 import { type Page, pagination } from "./pagination.js";
+
 type S = components["schemas"];
 type Event = typeof events.$inferSelect;
 type Revision = typeof eventRevisions.$inferSelect;
@@ -59,8 +61,9 @@ interface Ports {
     "eventContextInTransaction" | "eventRosterInTransaction" | "memberSummariesInTransaction"
   >;
   catalogs?: Pick<Catalogs, "eventReferencesInTransaction">;
-  outbox?: ReturnType<typeof createOutbox>;
+  outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
+  notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
 }
 export function createEvents(
   unit: UnitOfWork,
@@ -411,6 +414,14 @@ export function createEvents(
         category,
       },
     });
+    if (type !== "event.attendance_changed") {
+      await c(tx).update(events).set({ notificationPending: true }).where(eq(events.id, event.id));
+      await ports.notificationChanged?.(
+        tx,
+        event.id,
+        type === "event.response_changed" ? memberId : null,
+      );
+    }
     if (type !== "event.response_changed") {
       await c(tx)
         .update(events)
@@ -596,6 +607,22 @@ export function createEvents(
   }
 
   return {
+    // Correlation inputs are trusted query columns. The caller authorizes the current actor
+    // on the same transaction; Events alone owns this eligibility/table implementation.
+    notificationReminderCondition(fields: {
+      eventId: SQLWrapper;
+      memberId: SQLWrapper;
+      revisionId: SQLWrapper;
+      responseRevisionId: SQLWrapper;
+      now: string;
+    }) {
+      return sql`EXISTS (SELECT 1 FROM ${events} JOIN ${eventResponses}
+        ON ${eventResponses.eventId}=${events.id} AND ${eventResponses.memberId}=${fields.memberId}
+        WHERE ${events.id}=${fields.eventId} AND ${events.currentRevisionId}=${fields.revisionId}
+          AND ${eventResponses.currentRevisionId}=${fields.responseRevisionId}
+          AND ${eventResponses.status}='participating' AND ${events.status}='scheduled'
+          AND ${events.startsAt}>${utcDateTime(fields.now)})`;
+    },
     authorize: (actor: Actor, manage = false) =>
       run(async (tx) => {
         await authorize(tx, actor, manage ? "events.manage" : "company.read");
@@ -611,6 +638,7 @@ export function createEvents(
             version: 1,
             changeSequence: 1,
             tripAssessmentPending: false,
+            notificationPending: true,
             tripAssessmentGeneration: 0,
             attendanceVersion: 1,
             currentRevisionId: null,
@@ -1058,6 +1086,115 @@ export function createEvents(
       });
     },
     // Safe future-consumer seam: immutable change order reconstructs RSVP recipients at that change.
+    async notificationChangeInTransaction(tx: TxContext, change: CompanyEvent) {
+      const e = await lock(tx, change.data.eventId);
+      const r = await revision(tx, change.data.eventRevisionId);
+      if (
+        r.eventId !== e.id ||
+        (change.type === "event.changed" &&
+          (r.id !== change.data.revisionId ||
+            r.version !== change.aggregate.version ||
+            r.sequence !== change.data.changeSequence))
+      )
+        throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      const [prior] =
+        r.version > 1
+          ? await c(tx)
+              .select()
+              .from(eventRevisions)
+              .where(
+                and(eq(eventRevisions.eventId, e.id), eq(eventRevisions.version, r.version - 1)),
+              )
+              .for("share")
+          : [];
+      const changed =
+        r.status === "cancelled"
+          ? "event.cancelled"
+          : prior && prior.startsAt !== r.startsAt
+            ? "event.start_changed"
+            : prior && (prior.route !== r.route || prior.meetingLocation !== r.meetingLocation)
+              ? "event.route_changed"
+              : null;
+      return {
+        eventId: e.id,
+        revisionId: r.id,
+        version: r.version,
+        current: e.currentRevisionId === r.id,
+        category: changed,
+        title: r.title,
+        game: r.game,
+        startsAt: r.startsAt,
+      };
+    },
+    async notificationScheduleInTransaction(
+      tx: TxContext,
+      id: string,
+      after: string | null = null,
+      limit = 25,
+    ) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25)
+        throw new Error("NOTIFICATION_REMINDER_BOUND_EXCEEDED");
+      const e = await lock(tx, id),
+        r = await revision(tx, e.currentRevisionId as string);
+      const members = await c(tx)
+        .select({
+          id: eventResponses.memberId,
+          responseRevisionId: eventResponses.currentRevisionId,
+        })
+        .from(eventResponses)
+        .where(
+          and(
+            eq(eventResponses.eventId, id),
+            eq(eventResponses.status, "participating"),
+            after ? gt(eventResponses.memberId, applicationId(after)) : undefined,
+          ),
+        )
+        .orderBy(asc(eventResponses.memberId))
+        .limit(limit)
+        .for("share");
+      return {
+        eventId: e.id,
+        revisionId: r.id,
+        generation: e.changeSequence,
+        startsAt: r.startsAt,
+        status: r.status,
+        title: r.title,
+        game: r.game,
+        members,
+      };
+    },
+    async reminderEligibleInTransaction(
+      tx: TxContext,
+      eventId: string,
+      memberId: string,
+      revisionId: string,
+      responseRevisionId: string,
+    ) {
+      const e = await lock(tx, eventId);
+      const r = await response(tx, eventId, memberId);
+      return (
+        e.status === "scheduled" &&
+        e.currentRevisionId === revisionId &&
+        at() < e.startsAt &&
+        r?.row.status === "participating" &&
+        r.row.currentRevisionId === responseRevisionId
+      );
+    },
+    async pendingNotificationsInTransaction(tx: TxContext) {
+      return c(tx)
+        .select({ id: events.id })
+        .from(events)
+        .where(eq(events.notificationPending, true))
+        .orderBy(asc(events.id))
+        .limit(25)
+        .for("share");
+    },
+    async acknowledgeNotificationsInTransaction(tx: TxContext, id: string, generation: number) {
+      await c(tx)
+        .update(events)
+        .set({ notificationPending: false })
+        .where(and(eq(events.id, id), eq(events.changeSequence, generation)));
+    },
     async recipientsInTransaction(
       tx: TxContext,
       eventId: string,

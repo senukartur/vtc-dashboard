@@ -588,6 +588,16 @@ if mode == 'manual-only':
     sys.exit(0)
 # The default FULL rehearsal proves prepared adjudication grants only in this owned schema.
 # Baseline activation permissions are subtracted so cleanup revokes only this proof's deltas.
+sql("CREATE TABLE vtc.synthetic_notification_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
+sql(f"INSERT INTO vtc.synthetic_notification_guard VALUES (1,'{manual_proof_run}',NULL);")
+for role in ['runtime', 'jobs']:
+    sql(f"GRANT SELECT ON vtc.synthetic_notification_guard TO 'vtc_{role}'@'%';")
+for service, phase in [('trip-decision-seed', 'seed'), ('manual-runtime', 'disabled')]:
+    print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
+    compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+             f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+             'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+    print(f'Notification restricted grants phase: {phase} PASS', flush=True)
 sql("CREATE TABLE vtc.synthetic_trip_decision_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
 sql(f"INSERT INTO vtc.synthetic_trip_decision_guard VALUES (1,'{manual_proof_run}',NULL);")
 for role in ['runtime', 'jobs']:
@@ -596,11 +606,14 @@ compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only'
          f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'trip-decision-seed',
          'node', 'operations/trip-decisions-grants-smoke.mjs', 'seed'], revision=revision)
 prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
+notification_grants = json.loads((base / 'notifications-grants.prepared.json').read_text())
 baseline = json.loads((base / 'activation-grants.json').read_text())
 deltas = {}
 for role in ['runtime', 'jobs']:
     combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
     for table, permissions in prepared[role].items():
+        combined.setdefault(table, set()).update(permissions)
+    for table, permissions in notification_grants[role].items():
         combined.setdefault(table, set()).update(permissions)
     deltas[role] = {}
     for table, permissions in combined.items():
@@ -618,6 +631,12 @@ try:
                  f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
                  'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
         print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker'), ('manual-runtime', 'read')]:
+        print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
+        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                 'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+        print(f'Notification restricted grants phase: {phase} PASS', flush=True)
 finally:
     for role, tables in deltas.items():
         for table, permissions in tables.items():
@@ -625,6 +644,9 @@ finally:
     for role in ['runtime', 'jobs']:
         sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
     sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
+    for role in ['runtime', 'jobs']:
+        sql(f"REVOKE SELECT ON vtc.synthetic_notification_guard FROM 'vtc_{role}'@'%';")
+    sql("DROP TABLE vtc.synthetic_notification_guard;")
 print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())

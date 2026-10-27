@@ -7,7 +7,7 @@ import {
   utcDateTime,
   utcIso,
 } from "@vtc/db";
-import { eq, outboxEvents, sql } from "@vtc/db/platform-schema";
+import { eq, outboxEvents, outboxRouting, sql } from "@vtc/db/platform-schema";
 
 export function closed(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (
@@ -568,8 +568,105 @@ export function companyEvent(value: unknown): CompanyEvent {
     },
   };
 }
-export function createOutbox(unit: UnitOfWork) {
+export type DomainEvent =
+  | AccessEvent
+  | AdmissionsEvent
+  | CatalogEvent
+  | ReconciliationEvent
+  | TripProposalReviewedEvent
+  | TripDecisionEvent
+  | TripEvent
+  | ManualEvent
+  | QualificationEvent
+  | CompanyEvent;
+export const notificationEventTypes = [
+  "member.access_changed",
+  "application.submitted",
+  "application.decided",
+  "trip.lifecycle_changed",
+  "trip.decision_changed",
+  "manual.report_submitted",
+  "manual.correction_requested",
+  "qualification.assigned",
+  "qualification.promoted",
+  "qualification.progress_changed",
+  "promotion.review_required",
+  "event.changed",
+  "event.response_changed",
+] as const;
+export function domainEvent(input: unknown): DomainEvent {
+  const e = closed(input, [
+    "eventId",
+    "type",
+    "schemaVersion",
+    "aggregate",
+    "occurredAt",
+    "correlationId",
+    "causationId",
+    "data",
+  ]);
+  switch (e.type) {
+    case "member.access_changed":
+      return accessEvent(input);
+    case "application.submitted":
+    case "application.decided":
+    case "invitation.reissued":
+    case "invitation.redeemed":
+      return admissionsEvent(input);
+    case "catalog.published":
+      return catalogEvent(input);
+    case "trip.correction_recorded":
+      return reconciliationEvent(input);
+    case "trip.proposal_reviewed":
+      return tripProposalReviewedEvent(input);
+    case "trip.decision_changed":
+      return tripDecisionEvent(input);
+    case "source.snapshot_stored":
+    case "trip.lifecycle_changed":
+    case "trip.facts_changed":
+      return tripEvent(input);
+    case "manual.draft_saved":
+    case "manual.report_submitted":
+    case "manual.correction_requested":
+      return manualEvent(input);
+    case "qualification.rules_changed":
+    case "qualification.assigned":
+    case "qualification.promoted":
+    case "qualification.progress_changed":
+    case "promotion.review_required":
+      return qualificationEvent(input);
+    case "event.changed":
+    case "event.response_changed":
+    case "event.attendance_changed":
+      return companyEvent(input);
+    default:
+      throw new Error("UNSUPPORTED_EVENT");
+  }
+}
+export function decodeStoredEvent(e: typeof outboxEvents.$inferSelect): DomainEvent {
+  return domainEvent({
+    eventId: e.id,
+    type: e.type.toString(),
+    schemaVersion: e.schemaVersion,
+    aggregate: { kind: e.aggregateKind.toString(), id: e.aggregateId, version: e.aggregateVersion },
+    occurredAt: e.occurredAt,
+    correlationId: e.correlationId,
+    causationId: e.causationId,
+    data: e.data,
+  });
+}
+export function createOutbox(unit: UnitOfWork, options: { notifications?: boolean } = {}) {
   return {
+    async readInTransaction(tx: TxContext, id: string) {
+      const [row] = await unit
+        .client(tx)
+        .select()
+        .from(outboxEvents)
+        .where(eq(outboxEvents.id, applicationId(id)))
+        .for("share");
+      if (!row) throw new Error("EVENT_MISSING");
+      return decodeStoredEvent(row);
+    },
     async append(
       tx: TxContext,
       input:
@@ -613,6 +710,7 @@ export function createOutbox(unit: UnitOfWork) {
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
+      let inserted = false;
       try {
         await client.insert(outboxEvents).values({
           id: e.eventId,
@@ -628,20 +726,34 @@ export function createOutbox(unit: UnitOfWork) {
           fingerprint: hash,
           recordedAt: sql`UTC_TIMESTAMP(3)`,
         });
+        inserted = true;
       } catch (error) {
         if (!duplicateKey(error)) throw error;
       }
       const [saved] = await client
-        .select({ fingerprint: outboxEvents.fingerprint })
+        .select({ fingerprint: outboxEvents.fingerprint, recordedAt: outboxEvents.recordedAt })
         .from(outboxEvents)
         .where(eq(outboxEvents.id, e.eventId))
         .for("share");
       if (!saved?.fingerprint.equals(hash)) throw new Error("EVENT_IDENTITY_CONFLICT");
+      if (
+        options.notifications &&
+        inserted &&
+        notificationEventTypes.some((type) => type === e.type)
+      )
+        await client.insert(outboxRouting).values({
+          eventId: e.eventId,
+          consumer: opaqueUtf8("notifications.v1", 64),
+          eventType: opaqueUtf8(e.type, 64),
+          recordedAt: saved.recordedAt,
+        });
     },
   };
 }
-export function catalogEvents(unit: UnitOfWork) {
-  const outbox = createOutbox(unit);
+export function catalogEvents(
+  unit: UnitOfWork,
+  outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
+) {
   return {
     async append(
       tx: TxContext,
@@ -660,8 +772,10 @@ export function catalogEvents(unit: UnitOfWork) {
     },
   };
 }
-export function admissionsEvents(unit: UnitOfWork) {
-  const outbox = createOutbox(unit);
+export function admissionsEvents(
+  unit: UnitOfWork,
+  outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
+) {
   return {
     async append(
       tx: TxContext,
@@ -686,8 +800,10 @@ export function admissionsEvents(unit: UnitOfWork) {
     },
   };
 }
-export function identityAccessEvents(unit: UnitOfWork) {
-  const outbox = createOutbox(unit);
+export function identityAccessEvents(
+  unit: UnitOfWork,
+  outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
+) {
   return {
     async append(
       tx: TxContext,
