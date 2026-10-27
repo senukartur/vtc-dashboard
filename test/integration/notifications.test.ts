@@ -411,6 +411,47 @@ test("rollback before effect commit and expired reclaim retain gap-safe checkpoi
   await q.execute(reclaimed);
   expect((await service.poll(owner, { cursor: empty.nextCursor })).items).toHaveLength(1);
 });
+
+test("two distinct delivery transactions and a concurrent poll preserve committed recipient order", async () => {
+  const checkpoint = await service.poll(owner),
+    entered = deferred<void>(),
+    release = deferred<void>();
+  await receive();
+  await receive();
+  const held: Handler = {
+      ...service.handler,
+      local: async (tx, ref, claim) => {
+        await service.handler.local?.(tx, ref, claim);
+        entered.resolve();
+        await bounded(release.promise, "concurrent_notification_commit");
+      },
+    },
+    a = queue(held),
+    b = queue();
+  expect(await a.route()).toBe(2);
+  const first = await a.claim(),
+    second = await b.claim();
+  if (!first || !second) throw Error("SYNTHETIC_DISTINCT_CLAIMS_MISSING");
+  const pending = a.execute(first);
+  await bounded(entered.promise, "first_notification_allocation");
+  const following = b.execute(second),
+    polling = service.poll(owner, { cursor: checkpoint.nextCursor });
+  release.resolve();
+  await Promise.all([pending, following]);
+  const observed = await polling;
+  const catchup = await service.poll(owner, { cursor: observed.nextCursor }),
+    delivered = [...observed.items, ...catchup.items];
+  // The concurrent poll may precede the second commit. Its checkpoint must leave that arrival
+  // available to catch-up, while a poll after both commits may return both in the first page.
+  expect(delivered).toHaveLength(2);
+  expect(new Set(delivered.map((r) => r.id)).size).toBe(2);
+  expect((await service.poll(owner, { cursor: catchup.nextCursor })).items).toEqual([]);
+  const [sequences] = await control.query<RowDataPacket[]>(
+    "SELECT sequence FROM notifications WHERE recipient_id=? ORDER BY sequence",
+    [Buffer.from(owner.userId)],
+  );
+  expect(sequences.map((r) => String(r.sequence))).toEqual(["1", "2"]);
+});
 test("preferences serialize pending deliveries, retain saved history, require ETag and make retries conflict-safe", async () => {
   const initial = await service.getPreferences(owner),
     value = { ...initial.data, tripStarted: false },
@@ -589,10 +630,14 @@ test("disabled delivery preserves routing work and mutation invalidation; missed
   const { id, input } = await participating();
   await service.maintenance();
   await drain();
+  const original = (await service.poll(owner)).items.find((r) => r.category === "event.reminder");
+  if (!original) throw Error("SYNTHETIC_PAUSED_REMINDER_MISSING");
   await events.update(director, id, newId(), 1, { ...input, route: "Fictional replacement route" });
-  expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
-    false,
-  );
+  expect(
+    (await service.poll(owner)).items
+      .filter((r) => r.category === "event.reminder")
+      .map((r) => r.id),
+  ).toEqual([original.id]);
   const disabled = createQueue(unit, [], [], undefined, [
     "notifications.deliver",
     "notifications.remind",
@@ -603,7 +648,36 @@ test("disabled delivery preserves routing work and mutation invalidation; missed
   await drain();
   const feed = await service.poll(owner);
   expect(feed.items.some((r) => r.category === "event.route_changed")).toBe(true);
-  expect(feed.items.some((r) => r.category === "event.reminder")).toBe(false);
+  expect(feed.items.filter((r) => r.category === "event.reminder").map((r) => r.id)).toEqual([
+    original.id,
+  ]);
+  expect(feed.items.find((r) => r.id === original.id)?.liveToastEligible).toBe(false);
+  const [saved] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM notifications WHERE subject_id=? AND recipient_id=? AND category='event.reminder'",
+    [Buffer.from(id), Buffer.from(owner.userId)],
+  );
+  expect(Number(saved[0]?.n)).toBe(1);
+  await events.update(director, id, newId(), 2, {
+    ...input,
+    startsAt: new Date(instant + 7200000).toISOString(),
+  });
+  expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
+    false,
+  );
+  await events.cancel(director, id, newId(), 3, "Fictional cancellation after paused schedule");
+  expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
+    false,
+  );
+  instant = Date.now();
+  const missed = await participating();
+  instant += 180000;
+  await service.maintenance();
+  await drain();
+  expect(
+    (await service.poll(owner)).items.some(
+      (r) => r.category === "event.reminder" && r.target?.id === missed.id,
+    ),
+  ).toBe(false);
   instant = Date.now();
   const other = await participating({ startsAt: new Date(instant + 3600000).toISOString() });
   instant += 3600001;
@@ -614,6 +688,117 @@ test("disabled delivery preserves routing work and mutation invalidation; missed
       (r) => r.category === "event.reminder" && r.target?.id === other.id,
     ),
   ).toBe(false);
+});
+
+test("typed old-producer event recovery repairs acknowledged scheduling markers atomically", async () => {
+  const { id, input } = await participating({
+    startsAt: new Date(instant + 7200000).toISOString(),
+  });
+  await service.maintenance();
+  await drain();
+  await service.maintenance();
+  async function marker() {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT notification_pending FROM events WHERE id=?",
+      [Buffer.from(id)],
+    );
+    return Boolean(rows[0]?.notification_pending);
+  }
+  async function oldProducerFinalState() {
+    // A pre-0016 writer preserves an acknowledged false column instead of setting the new marker.
+    // The owning command supplies real immutable history/outbox; no consumer runs between writes.
+    await control.execute("UPDATE events SET notification_pending=0 WHERE id=?", [Buffer.from(id)]);
+  }
+  expect(await marker()).toBe(false);
+  const disabled = createEvents(unit, { cursorKey: key() }, { identity }, now);
+  await disabled.update(director, id, newId(), 1, {
+    ...input,
+    startsAt: new Date(instant + 3600000).toISOString(),
+  });
+  await oldProducerFinalState();
+  expect(await service.maintenance()).toBe(0);
+  const q = queue();
+  await q.route();
+  const claim = await q.claim();
+  if (!claim || claim.kind.toString() !== "notifications.deliver")
+    throw Error("SYNTHETIC_OLD_EVENT_CLAIM_MISSING");
+  await expect(
+    unit.run(async (tx) => {
+      await service.handler.local?.(tx, claim.reference, claim);
+      throw Error("SYNTHETIC_MARKER_REPAIR_ROLLBACK");
+    }),
+  ).rejects.toThrow("SYNTHETIC_MARKER_REPAIR_ROLLBACK");
+  expect(await marker()).toBe(false);
+  expect(await q.receipt("notifications.v1", claim.effectKey.toString())).toBeNull();
+  await q.execute(claim);
+  expect(await marker()).toBe(true);
+  expect(await q.receipt("notifications.v1", claim.effectKey.toString())).not.toBeNull();
+  await service.maintenance();
+  await drain();
+  const first = (await service.poll(owner)).items.find((r) => r.category === "event.reminder");
+  expect(first).toBeDefined();
+  for (const response of ["declined", "participating"] as const) {
+    const own = await events.myResponse(owner, id);
+    await disabled.respond(
+      owner,
+      id,
+      newId(),
+      own.version,
+      response === "declined"
+        ? { response, reason: "Fictional old-producer decline reason" }
+        : { response },
+    );
+    await oldProducerFinalState();
+    await drain();
+    expect(await marker()).toBe(true);
+    await service.maintenance();
+    await drain();
+    const reminders = (await service.poll(owner)).items.filter(
+      (r) => r.category === "event.reminder",
+    );
+    expect(reminders).toHaveLength(response === "participating" ? 1 : 0);
+    if (response === "participating") expect(reminders[0]?.id).not.toBe(first?.id);
+  }
+  await disabled.cancel(director, id, newId(), 2, "Fictional old-producer cancellation");
+  await oldProducerFinalState();
+  await drain();
+  expect(await marker()).toBe(true);
+  await service.maintenance();
+  expect(await marker()).toBe(false);
+  expect((await service.poll(owner)).items.some((r) => r.category === "event.reminder")).toBe(
+    false,
+  );
+});
+
+test("concurrent reminder maintenance owns pending rows and two workers retain one effect", async () => {
+  await participating();
+  const maintenance = await Promise.all([service.maintenance(), service.maintenance()]);
+  expect(maintenance.reduce((a, b) => a + b, 0)).toBe(1);
+  const a = queue(),
+    b = queue(),
+    claims = await Promise.all([a.claim(), b.claim()]);
+  expect(claims.filter(Boolean)).toHaveLength(1);
+  const claim = claims.find(Boolean);
+  if (!claim) throw Error("SYNTHETIC_CONCURRENT_REMINDER_MISSING");
+  expect(claim.kind.toString()).toBe("notifications.remind");
+  await a.execute(claim);
+  await drain();
+  const original = (await service.poll(owner)).items.filter((r) => r.category === "event.reminder");
+  expect(original).toHaveLength(1);
+  // Recovered definition/RSVP source jobs re-mark the schedule after its initial acknowledgement.
+  await service.maintenance();
+  await drain();
+  expect((await service.poll(owner)).items.filter((r) => r.category === "event.reminder")).toEqual(
+    original,
+  );
+  expect(await service.maintenance()).toBe(0);
+  expect(
+    (await service.poll(owner)).items.filter((r) => r.category === "event.reminder"),
+  ).toHaveLength(1);
+  const [pending] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM events WHERE notification_pending=1",
+  );
+  expect(Number(pending[0]?.n)).toBe(0);
 });
 test("six HTTP operations enforce session, CSRF, strict contracts, ETag, replay authorization and logout", async () => {
   const app = await createApp({
@@ -778,11 +963,23 @@ test("routing stays indexed with substantial routed/mixed history and discovers 
   await late;
   expect(await q.route()).toBe(1);
   const [plan] = await control.query<RowDataPacket[]>(
-    "EXPLAIN SELECT e.* FROM outbox_routing r INNER JOIN outbox_events e ON e.id=r.event_id WHERE r.consumer=? ORDER BY r.recorded_at,r.event_id LIMIT 25 FOR UPDATE SKIP LOCKED",
+    "EXPLAIN SELECT r.* FROM outbox_routing r WHERE r.consumer=? ORDER BY r.recorded_at,r.event_id LIMIT 25 FOR UPDATE SKIP LOCKED",
     [Buffer.from("notifications.v1")],
   );
   expect(plan.find((r) => r.table === "r")?.key).toBe("outbox_routing_pending");
   expect(String(plan.find((r) => r.table === "r")?.Extra)).not.toContain("filesort");
+  const ids = [Buffer.from(early.eventId), Buffer.from(later.eventId)];
+  const [evidencePlan] = await control.query<RowDataPacket[]>(
+    "EXPLAIN SELECT e.* FROM outbox_events e WHERE e.id IN (?,?) ORDER BY e.id FOR SHARE",
+    ids,
+  );
+  expect(evidencePlan[0]?.key).toBe("PRIMARY");
+  expect(String(evidencePlan[0]?.Extra)).not.toContain("filesort");
+  const [evidenceWork] = await control.query<RowDataPacket[]>(
+    "EXPLAIN ANALYZE SELECT e.* FROM outbox_events e WHERE e.id IN (?,?) ORDER BY e.id FOR SHARE",
+    ids,
+  );
+  expect(String(Object.values(evidenceWork[0] ?? {})[0])).toContain("rows=2");
   const started = performance.now();
   expect(await q.route()).toBe(0);
   console.log(
@@ -792,6 +989,8 @@ test("routing stays indexed with substantial routed/mixed history and discovers 
       pending: 0,
       index: plan.find((r) => r.table === "r")?.key,
       estimatedRows: plan.find((r) => r.table === "r")?.rows,
+      evidenceIndex: evidencePlan[0]?.key,
+      evidenceRows: 2,
       emptyRouteMs: Math.round(performance.now() - started),
     }),
   );
@@ -1020,6 +1219,65 @@ test("reconciled source aliases delivered out of order retain one canonical life
   await drain();
   expect((await service.poll(owner)).unreadCount).toBe(1);
 });
+
+async function rejectedAliasFixture() {
+  const alias = await receive(payload("completed")),
+    root = await receive(payload("completed")),
+    review = await decisions.review(dispatcher, alias.tripId);
+  await decisions.decide(dispatcher, alias.tripId, newId(), review.version, {
+    decision: "reject",
+    reviewedRevisionId: review.data.factRevisionId,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional rejection superseded by canonical reconciliation",
+  });
+  return { alias, root };
+}
+async function reconcileRejectedAlias(
+  aliasId: string,
+  rootId: string,
+  decision: "unassessed" | "accepted",
+) {
+  await unit.run(async (tx) => {
+    await qualifications.prepareInTransaction(tx, [{ ownerId: owner.userId, game: "ets2" }]);
+    const states = await trips.statesInTransaction(tx, [aliasId, rootId], true),
+      root = states.find((r) => r.id === rootId),
+      alias = states.find((r) => r.id === aliasId);
+    if (!root || !alias) throw Error("SYNTHETIC_REJECTED_GROUP_MISSING");
+    await trips.reconciliation.apply(tx, root, alias);
+  });
+  // Retained canonical projection fixture; immutable alias decision evidence remains unchanged.
+  await control.execute("UPDATE trips SET decision=? WHERE id=?", [decision, Buffer.from(rootId)]);
+}
+test.each(["unassessed", "accepted"] as const)(
+  "a retained rejected decision queued before aliasing cannot reject a canonical %s trip",
+  async (decision) => {
+    const { alias, root } = await rejectedAliasFixture();
+    await reconcileRejectedAlias(alias.tripId, root.tripId, decision);
+    await drain();
+    expect((await service.poll(owner)).items.some((r) => r.category === "trip.rejected")).toBe(
+      false,
+    );
+    expect((await service.poll(director)).items.some((r) => r.category === "trip.rejected")).toBe(
+      false,
+    );
+  },
+);
+test.each(["unassessed", "accepted"] as const)(
+  "a retained rejected decision inserted before aliasing loses its live flag when canonical state is %s",
+  async (decision) => {
+    const { alias, root } = await rejectedAliasFixture();
+    await drain();
+    const saved = (await service.poll(owner)).items.find((r) => r.category === "trip.rejected");
+    if (!saved) throw Error("SYNTHETIC_SAVED_REJECTION_MISSING");
+    expect(saved.liveToastEligible).toBe(true);
+    await reconcileRejectedAlias(alias.tripId, root.tripId, decision);
+    const current = (await service.poll(owner)).items.find((r) => r.id === saved.id);
+    expect(current?.liveToastEligible).toBe(false);
+    expect(current?.target?.id).toBe(root.tripId);
+    expect((await service.history(owner)).items.some((r) => r.id === saved.id)).toBe(true);
+  },
+);
 test("deactivation and return invalidate old sessions, poll/read-through proofs and old reminder epochs", async () => {
   const person = await member(),
     created = await events.create(director, newId(), eventInput()),
@@ -1196,6 +1454,25 @@ test("qualification assignments, eligibility and confirmed promotion notify owne
     ),
   ).toHaveLength(1);
 });
+
+test("notification qualification reads fail visibly without creating missing business state", async () => {
+  const person = await member(),
+    current = await qualifications.progress(person.actor, person.actor.userId, "ets2", "owner");
+  await control.execute("DELETE FROM qualification_states WHERE user_id=? AND game='ets2'", [
+    Buffer.from(person.actor.userId),
+  ]);
+  await expect(
+    unit.run(async (tx) => {
+      await identity.notificationContextInTransaction(tx);
+      return qualifications.notificationAssignmentInTransaction(tx, current.data.assignment.id);
+    }),
+  ).rejects.toThrow("NOTIFICATION_QUALIFICATION_STATE_MISSING");
+  const [states] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM qualification_states WHERE user_id=? AND game='ets2'",
+    [Buffer.from(person.actor.userId)],
+  );
+  expect(Number(states[0]?.n)).toBe(0);
+});
 test("disabled event mutations filter obsolete unread generations immediately before maintenance", async () => {
   const { id, input } = await participating();
   await service.maintenance();
@@ -1246,6 +1523,83 @@ test("disabled event mutations filter obsolete unread generations immediately be
     false,
   );
 });
+
+test("read reminder history survives time changes, declined RSVP, cancellation and expiry", async () => {
+  const { id, input } = await participating();
+  await service.maintenance();
+  await drain();
+  const reminder = (await service.poll(owner)).items.find((r) => r.category === "event.reminder");
+  if (!reminder) throw Error("SYNTHETIC_READ_REMINDER_MISSING");
+  await service.read(owner, reminder.id, newId());
+  await events.update(director, id, newId(), 1, {
+    ...input,
+    startsAt: new Date(instant + 7200000).toISOString(),
+  });
+  const response = await events.myResponse(owner, id);
+  await events.respond(owner, id, newId(), response.version, {
+    response: "declined",
+    reason: "Fictional private historical decline reason",
+  });
+  await events.cancel(director, id, newId(), 2, "Fictional historical cancellation");
+  instant += 10800000;
+  const history = await service.history(owner),
+    retained = history.items.find((r) => r.id === reminder.id);
+  expect(retained?.readAt).toBeTruthy();
+  expect(retained?.liveToastEligible).toBe(false);
+  expect((await service.poll(owner)).unreadCount).toBe(0);
+  const [saved] = await control.query<RowDataPacket[]>(
+    "SELECT invalidated_at FROM notifications WHERE id=?",
+    [Buffer.from(reminder.id)],
+  );
+  expect(saved[0]?.invalidated_at).toBeNull();
+  expect(JSON.stringify(history)).not.toContain("private historical");
+});
+
+test.each([false, true])(
+  "cosmetic reminder edits preserve delivery identity (read=%s)",
+  async (read) => {
+    const { id, input } = await participating();
+    await service.maintenance();
+    await drain();
+    const reminder = (await service.poll(owner)).items.find((r) => r.category === "event.reminder");
+    if (!reminder) throw Error("SYNTHETIC_COSMETIC_REMINDER_MISSING");
+    if (read) await service.read(owner, reminder.id, newId());
+    const disabled = createEvents(unit, { cursorKey: key() }, { identity }, now),
+      writers = read ? [events, disabled] : [disabled, events];
+    for (const [index, writer] of writers.entries()) {
+      await writer.update(director, id, newId(), index + 1, {
+        ...input,
+        title: `Fictional cosmetic title ${index}`,
+        description: `Fictional cosmetic description ${index}`,
+      });
+      await service.maintenance();
+      await drain();
+      const history = await service.history(owner),
+        saved = history.items.filter((r) => r.category === "event.reminder");
+      expect(saved.map((r) => r.id)).toEqual([reminder.id]);
+      expect(Boolean(saved[0]?.readAt)).toBe(read);
+      expect((await service.poll(owner)).unreadCount).toBe(read ? 0 : 1);
+      const [rows] = await control.query<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM notifications WHERE recipient_id=? AND subject_id=? AND category='event.reminder'",
+        [Buffer.from(owner.userId), Buffer.from(id)],
+      );
+      expect(Number(rows[0]?.n)).toBe(1);
+    }
+    await disabled.update(director, id, newId(), 3, {
+      ...input,
+      route: "Fictional revised route while delivery is disabled",
+    });
+    expect((await service.poll(owner)).items.some((r) => r.id === reminder.id)).toBe(true);
+    await service.maintenance();
+    await drain();
+    const afterRoute = await service.history(owner);
+    expect(
+      afterRoute.items.filter((r) => r.category === "event.reminder").map((r) => r.id),
+    ).toEqual([reminder.id]);
+    expect(afterRoute.items.filter((r) => r.category === "event.route_changed")).toHaveLength(1);
+    expect((await service.poll(owner)).unreadCount).toBe(read ? 1 : 2);
+  },
+);
 
 test("fanout commits at most 25 recipients per page and persists continuation with each effect", async () => {
   const credential = await identity.prepareCredential(password);

@@ -165,12 +165,17 @@ export function createEvents(
     }
     return { ...raw, meetingAt, startsAt, endsAt, prescribedMassKg: mass };
   }
-  async function lock(tx: TxContext, id: string, publicOnly = false) {
+  async function lock(
+    tx: TxContext,
+    id: string,
+    publicOnly = false,
+    mode: "update" | "share" = "update",
+  ) {
     const [row] = await c(tx)
       .select()
       .from(events)
       .where(eq(events.id, applicationId(id)))
-      .for("update");
+      .for(mode);
     if (!row || (publicOnly && row.visibility !== "public")) throw identityError(404);
     return row;
   }
@@ -225,12 +230,17 @@ export function createEvents(
       destination: references.find((p) => p.field === "destination")?.label ?? null,
     };
   }
-  async function response(tx: TxContext, eventId: string, memberId: string) {
+  async function response(
+    tx: TxContext,
+    eventId: string,
+    memberId: string,
+    mode: "update" | "share" = "update",
+  ) {
     const [row] = await c(tx)
       .select()
       .from(eventResponses)
       .where(and(eq(eventResponses.eventId, eventId), eq(eventResponses.memberId, memberId)))
-      .for("update");
+      .for(mode);
     if (!row) return null;
     const [r] = await c(tx)
       .select()
@@ -374,6 +384,7 @@ export function createEvents(
     version: number,
     category: CompanyEvent["data"]["category"],
     memberId: string | null,
+    invalidateReminder = true,
   ) {
     const eventId = newId();
     await audit.append(tx, {
@@ -416,11 +427,12 @@ export function createEvents(
     });
     if (type !== "event.attendance_changed") {
       await c(tx).update(events).set({ notificationPending: true }).where(eq(events.id, event.id));
-      await ports.notificationChanged?.(
-        tx,
-        event.id,
-        type === "event.response_changed" ? memberId : null,
-      );
+      if (invalidateReminder)
+        await ports.notificationChanged?.(
+          tx,
+          event.id,
+          type === "event.response_changed" ? memberId : null,
+        );
     }
     if (type !== "event.response_changed") {
       await c(tx)
@@ -508,7 +520,17 @@ export function createEvents(
         startsAt: next.startsAt,
       })
       .where(eq(events.id, e.id));
-    await emit(tx, actor, next, "event.changed", id, version, category, null);
+    await emit(
+      tx,
+      actor,
+      next,
+      "event.changed",
+      id,
+      version,
+      category,
+      null,
+      e.startsAt !== next.startsAt || e.status !== next.status,
+    );
     return { eventId: e.id, revisionId: id, version };
   }
   async function revisionInput(tx: TxContext, r: Revision): Promise<S["EventInput"]> {
@@ -618,7 +640,10 @@ export function createEvents(
     }) {
       return sql`EXISTS (SELECT 1 FROM ${events} JOIN ${eventResponses}
         ON ${eventResponses.eventId}=${events.id} AND ${eventResponses.memberId}=${fields.memberId}
-        WHERE ${events.id}=${fields.eventId} AND ${events.currentRevisionId}=${fields.revisionId}
+        JOIN ${eventRevisions} ON ${eventRevisions.id}=${fields.revisionId}
+          AND ${eventRevisions.eventId}=${events.id}
+        WHERE ${events.id}=${fields.eventId} AND ${eventRevisions.startsAt}=${events.startsAt}
+          AND ${eventRevisions.status}='scheduled'
           AND ${eventResponses.currentRevisionId}=${fields.responseRevisionId}
           AND ${eventResponses.status}='participating' AND ${events.status}='scheduled'
           AND ${events.startsAt}>${utcDateTime(fields.now)})`;
@@ -1085,9 +1110,46 @@ export function createEvents(
         };
       });
     },
+    async repairNotificationScheduleInTransaction(tx: TxContext, change: CompanyEvent) {
+      if (change.type !== "event.changed" && change.type !== "event.response_changed")
+        throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      // Own the mutable marker before taking shared immutable-history locks.
+      const e = await lock(tx, change.data.eventId),
+        r = await revision(tx, change.data.eventRevisionId);
+      let valid = r.eventId === e.id && change.data.changeSequence <= e.changeSequence;
+      if (change.type === "event.changed") {
+        valid &&=
+          change.aggregate.id === e.id &&
+          r.id === change.data.revisionId &&
+          r.version === change.aggregate.version &&
+          r.sequence === change.data.changeSequence;
+      } else {
+        const [responseRevision] = await c(tx)
+          .select({
+            eventId: eventResponseRevisions.eventId,
+            responseId: eventResponseRevisions.responseId,
+            memberId: eventResponseRevisions.memberId,
+            version: eventResponseRevisions.version,
+            sequence: eventResponseRevisions.sequence,
+          })
+          .from(eventResponseRevisions)
+          .where(eq(eventResponseRevisions.id, change.data.revisionId))
+          .for("share");
+        valid &&=
+          responseRevision !== undefined &&
+          responseRevision.eventId === e.id &&
+          responseRevision.responseId === change.aggregate.id &&
+          responseRevision.memberId === change.data.memberId &&
+          responseRevision.version === change.aggregate.version &&
+          responseRevision.sequence === change.data.changeSequence &&
+          r.sequence < responseRevision.sequence;
+      }
+      if (!valid) throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      await c(tx).update(events).set({ notificationPending: true }).where(eq(events.id, e.id));
+    },
     // Safe future-consumer seam: immutable change order reconstructs RSVP recipients at that change.
     async notificationChangeInTransaction(tx: TxContext, change: CompanyEvent) {
-      const e = await lock(tx, change.data.eventId);
+      const e = await lock(tx, change.data.eventId, false, "share");
       const r = await revision(tx, change.data.eventRevisionId);
       if (
         r.eventId !== e.id ||
@@ -1134,7 +1196,7 @@ export function createEvents(
     ) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 25)
         throw new Error("NOTIFICATION_REMINDER_BOUND_EXCEEDED");
-      const e = await lock(tx, id),
+      const e = await lock(tx, id, false, "share"),
         r = await revision(tx, e.currentRevisionId as string);
       const members = await c(tx)
         .select({
@@ -1170,11 +1232,14 @@ export function createEvents(
       revisionId: string,
       responseRevisionId: string,
     ) {
-      const e = await lock(tx, eventId);
-      const r = await response(tx, eventId, memberId);
+      const e = await lock(tx, eventId, false, "share");
+      const r = await response(tx, eventId, memberId, "share"),
+        original = await revision(tx, revisionId);
       return (
         e.status === "scheduled" &&
-        e.currentRevisionId === revisionId &&
+        original.eventId === e.id &&
+        original.status === "scheduled" &&
+        original.startsAt === e.startsAt &&
         at() < e.startsAt &&
         r?.row.status === "participating" &&
         r.row.currentRevisionId === responseRevisionId
@@ -1187,7 +1252,7 @@ export function createEvents(
         .where(eq(events.notificationPending, true))
         .orderBy(asc(events.id))
         .limit(25)
-        .for("share");
+        .for("update", { skipLocked: true });
     },
     async acknowledgeNotificationsInTransaction(tx: TxContext, id: string, generation: number) {
       await c(tx)

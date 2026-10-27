@@ -997,8 +997,20 @@ export function createTripDecisions(
         .where(eq(tripDecisions.id, applicationId(id)))
         .for("share");
       if (!row) throw new Error("NOTIFICATION_DECISION_MISSING");
-      const current = await latest(tx, row.tripId);
-      return { ...row, current: current?.id === id };
+      const root = await ports.trips.notificationStateInTransaction(tx, row.tripId),
+        current = await latest(tx, root.id);
+      return { ...row, current: current?.id === id && root.decision === row.outcome };
+    },
+    async notificationCurrentDecisionsInTransaction(tx: TxContext, canonicalTripIds: string[]) {
+      if (canonicalTripIds.length > 100) throw new Error("NOTIFICATION_DECISION_BOUND_EXCEEDED");
+      const result = new Map<string, { id: string; outcome: Decision["outcome"] }>();
+      // Canonical IDs come from the owning Trips read facade. Each indexed latest lookup reads
+      // one immutable decision, rather than materializing every historical revision in a group.
+      for (const id of [...new Set(canonicalTripIds.map(applicationId))].sort()) {
+        const current = await latest(tx, id);
+        if (current) result.set(id, { id: current.id, outcome: current.outcome });
+      }
+      return result;
     },
     async correctionRequestedInTransaction(
       tx: TxContext,

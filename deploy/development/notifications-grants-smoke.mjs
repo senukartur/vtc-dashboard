@@ -173,7 +173,22 @@ try {
     );
     await assert.rejects(connection.query("DELETE FROM outbox_routing"), denied);
   } else if (phase === "worker") {
-    step = "worker_delivery";
+    step = "worker_business_reads";
+    const [assignments] = await connection.execute(
+      "SELECT assignment_id FROM qualification_states WHERE user_id=? AND game='ets2'",
+      [Buffer.from(refs.owner)],
+    );
+    assert.ok(Buffer.isBuffer(assignments[0]?.assignment_id));
+    await unit.run(async (tx) => {
+      await identity.notificationContextInTransaction(tx);
+      const id = assignments[0].assignment_id.toString();
+      assert.equal(
+        typeof (await composed.qualifications.notificationAssignmentInTransaction(tx, id)).eligible,
+        "boolean",
+      );
+      await composed.trips.contributions.totals(tx, id, "share");
+    });
+    step = "worker_maintenance";
     const service = composed.notifications;
     await service.maintenance();
     const queue = createQueue(
@@ -190,18 +205,50 @@ try {
         "trips.reevaluate",
       ],
     );
-    await runPass(queue, new AbortController().signal);
+    step = "worker_first_pass";
+    const firstPass = await runPass(queue, new AbortController().signal);
     const [before] = await connection.query("SELECT COUNT(*) n FROM notifications");
-    await runPass(queue, new AbortController().signal);
+    step = "worker_duplicate_pass";
+    const secondPass = await runPass(queue, new AbortController().signal);
     const [after] = await connection.query("SELECT COUNT(*) n FROM notifications");
+    const [states] = await connection.query(
+      "SELECT state,COUNT(*) n FROM durable_jobs WHERE kind IN ('notifications.deliver','notifications.remind') GROUP BY state",
+    );
+    const [intents] = await connection.query("SELECT COUNT(*) n FROM outbox_routing");
+    console.log(
+      JSON.stringify({
+        event: "notification_restricted_worker_state",
+        firstStatus: firstPass.status,
+        secondStatus: secondPass.status,
+        firstProcessed: firstPass.processed,
+        secondProcessed: secondPass.processed,
+        before: Number(before[0].n),
+        after: Number(after[0].n),
+        states: Object.fromEntries(states.map((r) => [r.state, Number(r.n)])),
+        intents: Number(intents[0].n),
+      }),
+    );
+    assert.equal(Number(states.find((r) => r.state === "failed")?.n ?? 0), 0);
     assert.equal(Number(after[0].n), Number(before[0].n));
+    step = "worker_mutation_denials";
     for (const statement of [
       "CREATE TABLE forbidden_notification (id INT)",
       "UPDATE outbox_events SET schema_version=99",
       "DELETE FROM notifications",
       "UPDATE outbox_routing SET event_type=event_type",
+      "UPDATE qualification_levels SET code=code",
+      "UPDATE event_responses SET status=status",
+      "UPDATE identity_roles SET role=role",
+      "SELECT * FROM identity_sessions LIMIT 1",
     ])
       await assert.rejects(connection.query(statement), denied);
+    for (const statement of [
+      "UPDATE identity_memberships SET status=status WHERE user_id=?",
+      "UPDATE qualification_assignments SET purpose=purpose WHERE user_id=?",
+      "UPDATE qualification_states SET version=version WHERE user_id=?",
+      "UPDATE trips SET owner_id=owner_id WHERE owner_id=?",
+    ])
+      await assert.rejects(connection.execute(statement, [Buffer.from(refs.owner)]), denied);
   } else {
     step = "runtime_read";
     const owner = await login(email("owner")),
@@ -232,9 +279,23 @@ try {
       await assert.rejects(connection.query(statement), denied);
   }
   console.log(JSON.stringify({ event: "notification_restricted_proof", phase, result: "pass" }));
-} catch {
+} catch (error) {
+  let current = error,
+    nativeErrno = null;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    if (Number.isInteger(current.errno)) nativeErrno = current.errno;
+    current = current.cause;
+  }
   console.error(
-    JSON.stringify({ event: "notification_restricted_proof", phase, step, result: "fail" }),
+    JSON.stringify({
+      event: "notification_restricted_proof",
+      phase,
+      step,
+      result: "fail",
+      category:
+        error?.code === "ERR_ASSERTION" ? "assertion" : nativeErrno ? "database" : "unclassified",
+      nativeErrno,
+    }),
   );
   throw Error("NOTIFICATION_RESTRICTED_PROOF_FAILED");
 } finally {

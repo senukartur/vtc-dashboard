@@ -518,16 +518,32 @@ export function createQueue(
           });
           count += await run(async (tx) => {
             const c = unit.client(tx);
-            const rows = await c
-              .select({ event: outboxEvents })
+            const pending = await c
+              .select()
               .from(outboxRouting)
-              .innerJoin(outboxEvents, eq(outboxEvents.id, outboxRouting.eventId))
               .where(eq(outboxRouting.consumer, name(s.consumer)))
               .orderBy(asc(outboxRouting.recordedAt), asc(outboxRouting.eventId))
               .limit(bounds.routeBatch)
               .for("update", { skipLocked: true });
+            // Lock only mutable intents exclusively; immutable evidence needs SELECT/FOR SHARE.
+            const events = pending.length
+              ? await c
+                  .select()
+                  .from(outboxEvents)
+                  .where(
+                    inArray(
+                      outboxEvents.id,
+                      pending.map((r) => r.eventId),
+                    ),
+                  )
+                  .orderBy(asc(outboxEvents.id))
+                  .for("share")
+              : [];
+            const byId = new Map(events.map((e) => [e.id, e]));
             let inserted = 0;
-            for (const { event: e } of rows) {
+            for (const intent of pending) {
+              const e = byId.get(intent.eventId);
+              if (!e) throw new Error("ROUTING_EVENT_MISSING");
               const [prior] = await c
                 .select({ id: jobs.id })
                 .from(jobs)

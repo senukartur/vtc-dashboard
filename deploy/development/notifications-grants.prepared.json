@@ -13,7 +13,6 @@
     "event_responses": ["SELECT"],
     "event_response_revisions": ["SELECT"],
     "event_revisions": ["SELECT"],
-    "identity_sessions": ["SELECT"],
     "identity_roles": ["SELECT"],
     "identity_users": ["SELECT"],
     "identity_memberships": ["SELECT"],

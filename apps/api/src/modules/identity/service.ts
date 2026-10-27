@@ -262,23 +262,23 @@ export function createIdentity(
     createHmac("sha256", config.secret).update(value).digest();
   const client = (tx: TxContext) => unit.client(tx);
 
-  async function lockCompany(tx: TxContext): Promise<Company> {
-    const [row] = await client(tx)
-      .select()
-      .from(company)
-      .where(eq(company.singleton, 1))
-      .for("update");
+  async function lockCompany(tx: TxContext, mode: "update" | "share" = "update"): Promise<Company> {
+    const [row] = await client(tx).select().from(company).where(eq(company.singleton, 1)).for(mode);
     if (!row) throw identityError(409, "SETUP_REQUIRED");
     return row;
   }
-  async function lockMembers(tx: TxContext, ids: readonly string[]) {
+  async function lockMembers(
+    tx: TxContext,
+    ids: readonly string[],
+    mode: "update" | "share" = "update",
+  ) {
     const result = new Map<string, Member>();
     for (const id of [...new Set(ids)].sort()) {
       const [row] = await client(tx)
         .select()
         .from(membership)
         .where(eq(membership.userId, applicationId(id)))
-        .for("update");
+        .for(mode);
       if (row) result.set(id, row);
     }
     return result;
@@ -1671,11 +1671,22 @@ export function createIdentity(
         .orderBy(membership.userId)
         .limit(limit);
     },
+    async notificationContextInTransaction(tx: TxContext) {
+      await lockCompany(tx, "share");
+    },
     async notificationMembersInTransaction(tx: TxContext, ids: string[]) {
-      const current = await lockCompany(tx);
+      const current = await lockCompany(tx, "share");
       if (ids.length > 100) throw new Error("NOTIFICATION_MEMBER_BOUND_EXCEEDED");
-      const locked = await lockMembers(tx, ids);
-      const summaries = await this.memberSummariesInTransaction(tx, ids);
+      const locked = await lockMembers(tx, ids, "share");
+      // The general summary facade has a writer fence; notification reads must retain S only.
+      const names = locked.size
+        ? await client(tx)
+            .select({ id: user.id, nickname: user.name })
+            .from(user)
+            .where(inArray(user.id, [...locked.keys()]))
+            .for("share")
+        : [];
+      const nicknames = new Map(names.map((row) => [row.id, row.nickname]));
       const result = new Map<
         string,
         {
@@ -1692,12 +1703,12 @@ export function createIdentity(
           active: member.status === "active",
           accessEpoch: member.accessEpoch,
           capabilities: capabilities(await memberRoles(tx, id, current)),
-          nickname: summaries.get(id)?.nickname ?? "Former member",
+          nickname: nicknames.get(id) ?? "Former member",
         });
       return result;
     },
     async notificationRosterInTransaction(tx: TxContext, after: string | null, limit = 25) {
-      await lockCompany(tx);
+      await lockCompany(tx, "share");
       if (!Number.isInteger(limit) || limit < 1 || limit > 25)
         throw new Error("NOTIFICATION_ROSTER_BOUND_EXCEEDED");
       return client(tx)

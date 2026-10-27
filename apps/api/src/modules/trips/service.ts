@@ -886,11 +886,16 @@ export function createTrips(
       viewer: { userId: string; capabilities: readonly string[] },
     ) {
       if (ids.length > 100) throw new Error("NOTIFICATION_TARGET_BOUND_EXCEEDED");
-      const result = new Map<string, { target: string | null; outcome: string }>();
+      const result = new Map<
+        string,
+        { target: string | null; outcome: string; canonicalId: string; decision: string }
+      >();
       for (const id of [...new Set(ids)].sort()) {
         const r = await groups.resolve(tx, id, "share");
         result.set(id, {
           outcome: r.outcome,
+          canonicalId: r.id,
+          decision: r.decision,
           target:
             r.decision === "accepted" ||
             r.ownerId === viewer.userId ||

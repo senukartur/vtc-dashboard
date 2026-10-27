@@ -63,7 +63,7 @@ interface Ports {
     | "authorizeInTransaction"
     | "notificationMembersInTransaction"
     | "notificationRosterInTransaction"
-    | "qualificationContextInTransaction"
+    | "notificationContextInTransaction"
   >;
   trips: Pick<
     Trips,
@@ -74,6 +74,7 @@ interface Ports {
   events: Pick<
     Events,
     | "notificationChangeInTransaction"
+    | "repairNotificationScheduleInTransaction"
     | "recipientsInTransaction"
     | "notificationScheduleInTransaction"
     | "reminderEligibleInTransaction"
@@ -85,7 +86,10 @@ interface Ports {
     Qualifications,
     "notificationAssignmentInTransaction" | "notificationPromotionReviewInTransaction"
   >;
-  decisions: Pick<TripDecisions, "notificationDecisionInTransaction">;
+  decisions: Pick<
+    TripDecisions,
+    "notificationDecisionInTransaction" | "notificationCurrentDecisionsInTransaction"
+  >;
 }
 export function eventReference(raw: unknown) {
   const v = closed(raw, ["eventId", "after"]);
@@ -119,6 +123,7 @@ export async function invalidateEventNotifications(
         eq(notifications.subjectKind, "event"),
         eq(notifications.subjectId, applicationId(eventId)),
         eq(notifications.category, "event.reminder"),
+        isNull(notifications.readAt),
         isNull(notifications.invalidatedAt),
         memberId ? eq(notifications.recipientId, applicationId(memberId)) : undefined,
       ),
@@ -168,20 +173,25 @@ export function createNotifications(
     ];
     return and(
       eq(notifications.recipientId, a.userId),
-      isNull(notifications.invalidatedAt),
-      or(isNull(notifications.expiresAt), gt(notifications.expiresAt, at())),
       or(
-        sql`${notifications.category}<>'event.reminder'`,
+        and(eq(notifications.category, "event.reminder"), sql`${notifications.readAt} IS NOT NULL`),
         and(
-          eq(notifications.recipientAccessEpoch, a.accessEpoch),
-          a.capabilities.includes("events.respond") ? sql`TRUE` : sql`FALSE`,
-          ports.events.notificationReminderCondition({
-            eventId: notifications.subjectId,
-            memberId: notifications.recipientId,
-            revisionId: notifications.reminderRevisionId,
-            responseRevisionId: notifications.reminderResponseId,
-            now: at(),
-          }),
+          isNull(notifications.invalidatedAt),
+          or(isNull(notifications.expiresAt), gt(notifications.expiresAt, at())),
+          or(
+            sql`${notifications.category}<>'event.reminder'`,
+            and(
+              eq(notifications.recipientAccessEpoch, a.accessEpoch),
+              a.capabilities.includes("events.respond") ? sql`TRUE` : sql`FALSE`,
+              ports.events.notificationReminderCondition({
+                eventId: notifications.subjectId,
+                memberId: notifications.recipientId,
+                revisionId: notifications.reminderRevisionId,
+                responseRevisionId: notifications.reminderResponseId,
+                now: at(),
+              }),
+            ),
+          ),
         ),
       ),
       or(inArray(notifications.access, access), eq(notifications.ownerId, a.userId)),
@@ -234,9 +244,25 @@ export function createNotifications(
         a,
       ),
       items: S["Notification"][] = [];
+    const currentDecisions = !history
+      ? await ports.decisions.notificationCurrentDecisionsInTransaction(
+          tx,
+          rows
+            .filter(
+              (r) =>
+                r.category === "trip.rejected" &&
+                r.readAt === null &&
+                r.liveUntil !== null &&
+                r.liveUntil >= at(),
+            )
+            .map((r) => targets.get(r.subjectId)?.canonicalId)
+            .filter((id): id is string => !!id),
+        )
+      : new Map<string, { id: string; outcome: string }>();
     for (const r of rows) {
       if (
         r.category === "event.reminder" &&
+        r.readAt === null &&
         (!r.reminderRevisionId ||
           !r.reminderResponseId ||
           !(await ports.events.reminderEligibleInTransaction(
@@ -265,6 +291,14 @@ export function createNotifications(
         readAt: r.readAt,
         liveToastEligible:
           !(r.category === "trip.started" && trip?.outcome !== "open") &&
+          !(
+            r.category === "trip.rejected" &&
+            (!trip ||
+              trip.canonicalId !== r.subjectId ||
+              trip.decision !== "rejected" ||
+              currentDecisions.get(trip.canonicalId)?.outcome !== "rejected" ||
+              r.effectKey.toString() !== `rejected:${currentDecisions.get(trip.canonicalId)?.id}`)
+          ) &&
           !history &&
           r.readAt === null &&
           r.liveUntil !== null &&
@@ -565,9 +599,11 @@ export function createNotifications(
     validate: eventReference,
     local: async (tx, raw) => {
       const ref = eventReference(raw);
-      await ports.identity.qualificationContextInTransaction(tx, []);
-      const e = await outbox.readInTransaction(tx, ref.eventId),
-        d = await description(tx, e);
+      await ports.identity.notificationContextInTransaction(tx);
+      const e = await outbox.readInTransaction(tx, ref.eventId);
+      if (ref.after === null && (e.type === "event.changed" || e.type === "event.response_changed"))
+        await ports.events.repairNotificationScheduleInTransaction(tx, e);
+      const d = await description(tx, e);
       if (!d) return;
       const ids =
         e.type === "event.changed"
@@ -598,7 +634,7 @@ export function createNotifications(
     validate: reminderReference,
     local: async (tx, raw) => {
       const ref = reminderReference(raw);
-      await ports.identity.qualificationContextInTransaction(tx, []);
+      await ports.identity.notificationContextInTransaction(tx);
       const event = await ports.events.notificationScheduleInTransaction(
           tx,
           ref.eventId,
@@ -632,7 +668,7 @@ export function createNotifications(
           subjectKind: "event",
           subjectId: event.eventId,
           subjectVersion: ref.generation,
-          effectKey: `reminder:${event.revisionId}:${m.responseRevisionId}`,
+          effectKey: `reminder:${event.eventId}:${event.startsAt}:${m.responseRevisionId}`,
           occurredAt: window.due,
           liveUntil: new Date(Date.parse(window.due) + freshnessMs).toISOString(),
           title: event.title,
@@ -692,7 +728,7 @@ export function createNotifications(
     },
     async maintenance() {
       return run(async (tx) => {
-        await ports.identity.qualificationContextInTransaction(tx, []);
+        await ports.identity.notificationContextInTransaction(tx);
         const rows = await ports.events.pendingNotificationsInTransaction(tx);
         for (const row of rows) {
           const event = await ports.events.notificationScheduleInTransaction(tx, row.id),

@@ -633,9 +633,35 @@ try:
         print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
     for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker'), ('manual-runtime', 'read')]:
         print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
-        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
-                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
-                 'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+        previous_grants = None
+        revoked = []
+        try:
+            if phase == 'worker':
+                assert mode == 'full' and re.fullmatch(r'vtc011-[a-f0-9]{16}', project)
+                assert sql('SELECT run_id FROM vtc.synthetic_notification_guard WHERE id=1;').decode().strip() == manual_proof_run
+                previous_grants = sorted(sql("SHOW GRANTS FOR 'vtc_jobs'@'%';").decode().splitlines())
+                # Restrict only positively owned optional deltas. The combined production role
+                # still needs other modules' mutations; Notifications must not rely on them.
+                for table, permissions in deltas['jobs'].items():
+                    mutations = [p for p in permissions if p != 'SELECT' and p not in notification_grants['jobs'].get(table, [])]
+                    if mutations:
+                        revoked.append((table, mutations))
+                        sql(f"REVOKE {','.join(mutations)} ON vtc.{table} FROM 'vtc_jobs'@'%';")
+                print('Notification worker profile: optional business mutations revoked; own notification/queue writes and Event pending marker retained', flush=True)
+            compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                     f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                     'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+        finally:
+            restore_failed = False
+            for table, permissions in reversed(revoked):
+                try:
+                    sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_jobs'@'%';")
+                except Exception:
+                    restore_failed = True
+            if previous_grants is not None:
+                restored = sorted(sql("SHOW GRANTS FOR 'vtc_jobs'@'%';").decode().splitlines())
+                assert not restore_failed and restored == previous_grants, 'NOTIFICATION_JOBS_GRANT_RESTORE_FAILED'
+                print('Notification worker profile: exact prior table/column grants restored and read back', flush=True)
         print(f'Notification restricted grants phase: {phase} PASS', flush=True)
 finally:
     for role, tables in deltas.items():
