@@ -1,9 +1,81 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
-import { expect, test } from "./support/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { eventId, mockEvents } from "./support/events.ts";
+import { expect, test } from "./support/fixtures.ts";
+
 test.use({ trace: "off", screenshot: "off", video: "off" });
+for (const status of [412, 503, 429]) {
+  test(`attendance page two keeps reviewable drafts and safe authority after ${status}`, async ({
+    page,
+  }, info) => {
+    const state = await mockEvents(page, true);
+    state.attendancePages = true;
+    state.event.startsAt = "2020-10-25T13:00:00.000Z";
+    state.event.meetingAt = "2020-10-25T12:00:00.000Z";
+    await page.goto(`/account/events/${eventId}`);
+    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    const attendance = page.getByRole("combobox", {
+      name: "Actual attendance · Fictional Yukon Member",
+      exact: true,
+    });
+    await attendance.selectOption("attended");
+    await page
+      .getByLabel("Private staff note · Fictional Yukon Member", { exact: true })
+      .fill("Fictional page two draft");
+    state.failNext = status;
+    const save = page.getByRole("button", { name: "Record attendance", exact: true });
+    await save.click();
+    await expect(page.getByRole("alert").last()).toBeVisible();
+    const drafts = page.getByRole("region", { name: "Unsaved attendance changes", exact: true });
+    await expect(drafts).toContainText("Fictional page two draft");
+    if (status === 412) {
+      await expect(attendance).toHaveCount(0);
+      await expect(save).toBeDisabled();
+      await viewportCapture(page, info, "attendance-stale-page-two-draft");
+      await page.getByRole("button", { name: "Next page", exact: true }).click();
+      await expect(attendance).toHaveValue("attended");
+      await expect(save).toBeDisabled();
+      await page.getByRole("button", { name: "Keep this draft after review", exact: true }).click();
+    } else {
+      await expect(attendance).toHaveValue("attended");
+      expect(state.attendanceCursors.at(-1)).toBe("synthetic-attendance-page-2-v1");
+    }
+    await save.click();
+    await expect(page.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+    expect(state.preconditions).toEqual(['"v1"', status === 412 ? '"v2"' : '"v1"']);
+    expect(state.keys[0] === state.keys[1]).toBe(status !== 412);
+    expect(state.commands[1]?.body).toEqual(state.commands[0]?.body);
+  });
+}
+test("attendance lost receipt retries the original decision after refreshed collection authority", async ({
+  page,
+}) => {
+  const state = await mockEvents(page, true);
+  state.attendancePages = true;
+  state.event.startsAt = "2020-10-25T13:00:00.000Z";
+  state.event.meetingAt = "2020-10-25T12:00:00.000Z";
+  await page.goto(`/account/events/${eventId}`);
+  await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await page
+    .getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member", exact: true })
+    .selectOption("attended");
+  state.loseAttendanceReceipt = true;
+  await page.getByRole("button", { name: "Record attendance", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("result is unknown");
+  expect(state.attendanceDecisions).toBe(1);
+  await page.getByRole("button", { name: "First page", exact: true }).click();
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  expect(state.attendanceCursors.at(-1)).toBe("synthetic-attendance-page-2-v2");
+  await page.getByRole("button", { name: "Record attendance", exact: true }).click();
+  await expect(page.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+  expect(state.preconditions).toEqual(['"v1"', '"v1"']);
+  expect(state.keys[0]).toBe(state.keys[1]);
+  expect(state.commands[0]?.body).toEqual(state.commands[1]?.body);
+  expect(state.attendanceDecisions).toBe(1);
+});
 test("changing own RSVP from participants page two resets to the current first page", async ({
   page,
 }) => {
@@ -168,6 +240,12 @@ test("event loading and unknown command results preserve exact retry identity an
     .fill("Fictional changed route after uncertainty");
   await save.click();
   await expect(dialog.getByRole("status")).toHaveText("Changes saved.");
+  await dialog.getByLabel("Start time (UTC)", { exact: true }).fill("2099-10-25T14:00");
+  await expect(dialog.getByText("Changes saved.", { exact: true })).toHaveCount(0);
+  await save.click();
+  await expect(dialog.getByRole("status")).toHaveText("Changes saved.");
+  await dialog.getByLabel("Game", { exact: true }).selectOption("ats");
+  await expect(dialog.getByText("Changes saved.", { exact: true })).toHaveCount(0);
   expect(state.keys[2]).not.toBe(state.keys[1]);
   expect(state.commands[2]?.body).toMatchObject({
     prescribedCargoId: state.prescribedCargoId,
@@ -217,11 +295,47 @@ for (const locale of ["en", "ru"] as const) {
       fullPage: true,
       animations: "disabled",
     });
+    state.listPages = true;
+    await page.goto(locale === "en" ? "/en" : "/");
+    const widget = page
+      .getByRole("heading", {
+        name: locale === "en" ? "Public convoys" : "Открытые конвои",
+        exact: true,
+      })
+      .locator("../..");
+    await widget.evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await viewportCapture(page, info, `landing-populated-${locale}`);
+    await widget.screenshot({
+      path: info.outputPath(`landing-widget-${locale}.png`),
+      animations: "disabled",
+    });
+    await page.goto("/account/events");
+    await catalogLanguage(page, locale);
+    await expect(page.getByRole("heading", { name: state.event.title, exact: true })).toBeVisible();
+    await viewportCapture(page, info, `member-list-${locale}`);
+    await page
+      .getByRole("button", { name: locale === "en" ? "Past" : "Прошедшие", exact: true })
+      .click();
+    await expect(
+      page.getByText(locale === "en" ? "Completed" : "Завершено", { exact: true }),
+    ).toBeVisible();
+    await viewportCapture(page, info, `past-list-${locale}`);
+    await page
+      .getByRole("button", {
+        name: locale === "en" ? "Next page" : "Следующая страница",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "Fictional second page convoy", exact: true }),
+    ).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("cursor")).toBe("synthetic-event-page-2");
+    await viewportCapture(page, info, `cursor-list-${locale}`);
   });
 }
 test("RSVP prevents duplicates, retains decline input on stale and clears private state on session loss", async ({
   page,
-}) => {
+}, info) => {
   const state = await mockEvents(page);
   await page.goto(`/account/events/${eventId}`);
   const response = page.getByRole("combobox", { name: "Your response", exact: true });
@@ -230,6 +344,11 @@ test("RSVP prevents duplicates, retains decline input on stale and clears privat
   await reason.fill("   ");
   await page.getByRole("button", { name: "Save response", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Check");
+  for (const locale of ["en", "ru"] as const) {
+    await catalogLanguage(page, locale);
+    await viewportCapture(page, info, `decline-validation-${locale}`);
+  }
+  await catalogLanguage(page);
   expect(state.commands).toHaveLength(0);
   await reason.fill("Fictional retained reason");
   state.failNext = 412;
@@ -243,6 +362,11 @@ test("RSVP prevents duplicates, retains decline input on stale and clears privat
   await page.getByRole("button", { name: "Save response", exact: true }).click();
   await expect.poll(() => state.commands.length).toBe(2);
   await expect(page.getByRole("button", { name: "Loading events…", exact: true })).toBeDisabled();
+  for (const locale of ["en", "ru"] as const) {
+    await catalogLanguage(page, locale);
+    await viewportCapture(page, info, `decline-pending-${locale}`);
+  }
+  await catalogLanguage(page);
   release();
   await expect(page.getByRole("status").filter({ hasText: "Response saved." })).toBeVisible();
   expect(state.preconditions).toEqual(['"v1"', '"v2"']);
@@ -289,8 +413,21 @@ test("organizer stale edit preserves draft, cancellation dialog restores focus, 
   });
   await page.keyboard.press("Escape");
   await catalogLanguage(page);
-  await page.getByRole("button", { name: "Cancel event", exact: true }).click();
-  await page.keyboard.press("Escape");
+  for (const locale of ["ru", "en"] as const) {
+    await catalogLanguage(page, locale);
+    const cancel = page.getByRole("button", {
+      name: locale === "en" ? "Cancel event" : "Отменить событие",
+      exact: true,
+    });
+    await cancel.click();
+    await page
+      .getByRole("dialog")
+      .getByLabel(locale === "en" ? "Private reason" : "Личная причина", { exact: true })
+      .fill("Fictional cancellation review");
+    await viewportCapture(page, info, `cancellation-dialog-${locale}`);
+    await page.keyboard.press("Escape");
+    await expect(cancel).toBeFocused();
+  }
   await expect(page.getByRole("button", { name: "Cancel event", exact: true })).toBeFocused();
   state.event.startsAt = "2020-10-25T13:00:00.000Z";
   state.event.meetingAt = "2020-10-25T12:00:00.000Z";
@@ -303,8 +440,22 @@ test("organizer stale edit preserves draft, cancellation dialog restores focus, 
   state.failNext = 412;
   await page.getByRole("button", { name: "Record attendance", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("changed");
+  await page.getByRole("button", { name: "Keep this draft after review", exact: true }).click();
   await page.getByRole("button", { name: "Record attendance", exact: true }).click();
   await expect(page.getByRole("status").filter({ hasText: "Attendance recorded." })).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member", exact: true })
+    .selectOption("not_attended");
+  await expect(page.getByText("Attendance recorded.", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Record attendance", exact: true }).click();
+  await expect(page.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+  await page
+    .getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member", exact: true })
+    .selectOption("attended");
+  await page
+    .getByLabel("Private staff note · Fictional Yukon Member", { exact: true })
+    .fill("Fictional unsaved note");
+  await expect(page.getByText("Attendance recorded.", { exact: true })).toHaveCount(0);
   await page.screenshot({
     path: info.outputPath("attendance.png"),
     fullPage: true,
@@ -326,6 +477,11 @@ test("public list empty error recovery cursor reset cancelled and inaccessible s
   await page.goto("/events?period=past&cursor=obsolete");
   await catalogLanguage(page);
   await expect(page.getByRole("alert")).toContainText("unavailable");
+  for (const locale of ["en", "ru"] as const) {
+    await catalogLanguage(page, locale);
+    await viewportCapture(page, info, `error-${locale}`);
+  }
+  await catalogLanguage(page);
   state.listStatus = 200;
   state.empty = true;
   await page.getByRole("button", { name: "Start from first page", exact: true }).click();
@@ -341,4 +497,8 @@ test("public list empty error recovery cursor reset cancelled and inaccessible s
   await page.reload();
   await catalogLanguage(page);
   await expect(page.getByRole("alert")).toContainText("do not have access");
+  for (const locale of ["en", "ru"] as const) {
+    await catalogLanguage(page, locale);
+    await viewportCapture(page, info, `inaccessible-${locale}`);
+  }
 });

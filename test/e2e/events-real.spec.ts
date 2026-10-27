@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { Browser, BrowserContextOptions, Page, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
+import type { RowDataPacket } from "mysql2/promise";
+import { testConnection } from "../persistence/support.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
+
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
 test.beforeEach(resetAccountLimits);
 async function create(
@@ -413,6 +416,93 @@ test("real staff attendance is distinct from RSVP and pins current prescribed-lo
       prescribedTrailerTypeId: s.fixture.ids.fixture_trailer,
     });
   } finally {
+    await s.close();
+  }
+});
+test("real page two attendance lost receipt recovers one durable decision and its effects", async ({
+  page,
+  browser,
+}, info) => {
+  test.setTimeout(90000);
+  const s = await scenario(browser, page, info, "attendance_receipt"),
+    control = await testConnection();
+  try {
+    for (let i = 0; i < 26; i++) await s.fixture.newMember();
+    const e = await s.event("members", true, true),
+      first = await s.events.attendance(s.fixture.staff, e.id, { limit: 25 });
+    expect(first.data.items).toHaveLength(25);
+    expect(first.data.nextCursor).not.toBeNull();
+    const second = await s.events.attendance(s.fixture.staff, e.id, {
+        limit: 25,
+        cursor: first.data.nextCursor as string,
+      }),
+      target = second.data.items[0];
+    if (!target) throw Error("SYNTHETIC_SECOND_ATTENDANCE_PAGE_MISSING");
+    async function counts() {
+      const [rows] = await control.query<RowDataPacket[]>(
+        `SELECT
+        (SELECT COUNT(*) FROM event_attendance_revisions WHERE event_id=?) AS history,
+        (SELECT COUNT(*) FROM event_commands WHERE target_id=? AND route='attendance') AS receipts,
+        (SELECT COUNT(*) FROM audit_entries WHERE subject_kind='event' AND subject_id=?) AS audit,
+        (SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=?) AS outbox,
+        (SELECT trip_assessment_generation FROM events WHERE id=?) AS generation`,
+        [e.id, e.id, e.id, e.id, e.id],
+      );
+      const row = rows[0];
+      return Object.fromEntries(
+        Object.entries(row as RowDataPacket).map(([k, v]) => [k, Number(v)]),
+      );
+    }
+    const before = await counts(),
+      manager = await s.actor(),
+      attempts: { key: string; etag: string; body: unknown }[] = [];
+    let loseReceipt = true;
+    await manager.route(`**/api/v1/admin/events/${e.id}/attendance`, async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      attempts.push({
+        key: route.request().headers()["idempotency-key"] as string,
+        etag: route.request().headers()["if-match"] as string,
+        body: route.request().postDataJSON(),
+      });
+      const response = await route.fetch({ timeout: 15000 });
+      expect(response.status()).toBe(200);
+      if (loseReceipt) {
+        loseReceipt = false;
+        await route.abort("failed");
+      } else await route.fulfill({ response });
+    });
+    await manager.goto(`/account/events/${e.id}`);
+    await catalogLanguage(manager);
+    await manager
+      .getByRole("button", { name: "View responses and attendance", exact: true })
+      .click();
+    await manager.getByRole("button", { name: "Next page", exact: true }).click();
+    const select = manager.locator(`#attendance-${target.member.id}`);
+    await select.selectOption("attended");
+    await manager.locator(`#note-${target.member.id}`).fill("Fictional lost receipt proof");
+    await manager.getByRole("button", { name: "Record attendance", exact: true }).click();
+    await expect(manager.getByRole("alert")).toContainText("result is unknown");
+    await expect(select).toHaveValue("attended");
+    const committed = await counts();
+    expect(committed).toEqual({
+      history: 1,
+      receipts: 1,
+      audit: (before.audit as number) + 1,
+      outbox: (before.outbox as number) + 1,
+      generation: (before.generation as number) + 1,
+    });
+    await manager.getByRole("button", { name: "First page", exact: true }).click();
+    await manager.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(select).toHaveValue("attended");
+    await manager.getByRole("button", { name: "Record attendance", exact: true }).click();
+    await expect(manager.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect(attempts[0]?.etag).toBe('"v1"');
+    expect(await counts()).toEqual(committed);
+    expect((await s.events.history(s.fixture.staff, e.id)).attendance).toHaveLength(1);
+  } finally {
+    await control.end();
     await s.close();
   }
 });

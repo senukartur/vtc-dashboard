@@ -131,7 +131,8 @@ export function EventEditor({
             id={`${id}-game`}
             className="input"
             value={form.game}
-            onChange={(e) =>
+            onChange={(e) => {
+              setSaved(false);
               setForm((v) => ({
                 ...v,
                 game: e.target.value as "ets2" | "ats",
@@ -139,8 +140,8 @@ export function EventEditor({
                 destinationCityId: null,
                 prescribedCargoId: null,
                 prescribedTrailerTypeId: null,
-              }))
-            }
+              }));
+            }}
           >
             <option value="ets2">ETS2</option>
             <option value="ats">ATS</option>
@@ -172,7 +173,10 @@ export function EventEditor({
               step="0.001"
               required={key !== "endsAt"}
               value={times[key]}
-              onChange={(e) => setTimes((v) => ({ ...v, [key]: e.target.value }))}
+              onChange={(e) => {
+                setSaved(false);
+                setTimes((v) => ({ ...v, [key]: e.target.value }));
+              }}
             />
             {utcInput(times[key]) && (
               <small>

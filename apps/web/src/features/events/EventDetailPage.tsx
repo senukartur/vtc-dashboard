@@ -15,6 +15,7 @@ import { EventFacts, EventFailureView, EventState, useEventStarted } from "./com
 import { EventEditor } from "./EventEditor.js";
 import { type DTO, responseInput } from "./model.js";
 import { useEventCommand, useEventQuery } from "./queries.js";
+import { EventFailure } from "./transport.js";
 import "./events.css";
 
 export function EventDetailPage({ publicView = false }: { publicView?: boolean }) {
@@ -336,43 +337,110 @@ function CancelEvent({ id, etag, title }: { id: string; etag: string | null; tit
   );
 }
 function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
+  type Row = DTO["AttendanceInput"]["members"][number];
+  type Draft = Row & { nickname: string };
   const started = useEventStarted(event.startsAt);
+  const submission = useRef<{
+    body: DTO["AttendanceInput"];
+    etag: string;
+    signature: string;
+  } | null>(null);
   const { t } = useTranslation("events"),
     [cursor, setCursor] = useState<string | null>(null),
-    [changes, setChanges] = useState<Record<string, DTO["AttendanceInput"]["members"][number]>>({}),
+    [changes, setChanges] = useState<Record<string, Draft>>({}),
+    [needsReview, setNeedsReview] = useState(false),
+    [reviewed, setReviewed] = useState<Record<string, string>>({}),
     [saved, setSaved] = useState(false),
-    command = useEventCommand(),
+    command = useEventCommand((failure) => {
+      if (failure instanceof EventFailure && failure.status === 412) recoverCursor(true);
+    }),
     query = useEventQuery(
       `/admin/events/${id}/attendance?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       "EnvelopeListAttendance",
     );
   const data = query.data?.data.data,
-    closed = event.status === "cancelled" || !started;
+    closed = event.status === "cancelled" || !started,
+    etag = query.data?.etag,
+    body = {
+      members: Object.values(changes).map(({ memberId, attendance, note }) => ({
+        memberId,
+        attendance,
+        note,
+      })),
+    },
+    signature = JSON.stringify(body),
+    retrySubmission = submission.current?.signature === signature ? submission.current : null,
+    reviewComplete =
+      !!retrySubmission ||
+      !needsReview ||
+      Object.keys(changes).every((memberId) => reviewed[memberId] === etag);
+  function recoverCursor(rejected = false) {
+    if (rejected) submission.current = null;
+    if (Object.keys(changes).length && !submission.current) {
+      setNeedsReview(true);
+      setReviewed({});
+    }
+    setCursor(null);
+  }
   return (
     <form
       className="stack"
       onSubmit={async (e) => {
         e.preventDefault();
         setSaved(false);
-        if (!closed && Object.keys(changes).length && query.data?.etag) {
+        if (!closed && Object.keys(changes).length && (retrySubmission || etag) && reviewComplete) {
+          const submitted = retrySubmission ?? { body, etag: etag as string, signature };
+          submission.current = submitted;
           const result = await command.run(
             `/admin/events/${id}/attendance`,
-            { members: Object.values(changes) },
+            submitted.body,
             "EnvelopeCommandResult",
-            query.data.etag,
+            submitted.etag,
             "PUT",
           );
           if (result) {
             setChanges({});
+            submission.current = null;
+            setNeedsReview(false);
+            setReviewed({});
             setCursor(null);
             setSaved(true);
-          } else setCursor(null);
+          }
         }
       }}
     >
       <h2>{t("attendance")}</h2>
       <p>{t("attendanceHelp")}</p>
-      <EventState query={query} {...(cursor ? { reset: () => setCursor(null) } : {})} />
+      {Object.keys(changes).length > 0 && (
+        <section className="stack" aria-label={t("attendanceDrafts")}>
+          <h3>{t("attendanceDrafts")}</h3>
+          {needsReview && <p role="status">{t("reviewAttendance")}</p>}
+          {Object.values(changes).map((draft) => (
+            <div key={draft.memberId}>
+              <p>
+                {draft.nickname}: {t(draft.attendance)}
+                {draft.note ? ` · ${draft.note}` : ""}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={command.pending}
+                onClick={() => {
+                  setSaved(false);
+                  setChanges((previous) => {
+                    const next = { ...previous };
+                    delete next[draft.memberId];
+                    return next;
+                  });
+                }}
+              >
+                {t("removeDraft")}
+              </Button>
+            </div>
+          ))}
+        </section>
+      )}
+      <EventState query={query} {...(cursor ? { reset: () => recoverCursor() } : {})} />
       {data?.items.map((row) => (
         <fieldset className="stack event-attendance-row" key={row.member.id}>
           <legend>{row.member.nickname}</legend>
@@ -399,6 +467,7 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
             disabled={closed || command.pending}
             value={changes[row.member.id]?.attendance ?? ""}
             onChange={(e) => {
+              setSaved(false);
               const value = e.target.value;
               setChanges((previous) => {
                 const next = { ...previous };
@@ -406,6 +475,7 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
                 else
                   next[row.member.id] = {
                     memberId: row.member.id,
+                    nickname: row.member.nickname,
                     attendance: value as "attended" | "not_attended",
                     note: previous[row.member.id]?.note ?? null,
                   };
@@ -427,17 +497,30 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
                 maxLength={2048}
                 disabled={command.pending}
                 value={changes[row.member.id]?.note ?? ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  setSaved(false);
                   setChanges((previous) => ({
                     ...previous,
                     [row.member.id]: {
-                      ...(previous[row.member.id] as DTO["AttendanceInput"]["members"][number]),
+                      ...(previous[row.member.id] as Draft),
                       note: e.target.value || null,
                     },
-                  }))
-                }
+                  }));
+                }}
               />
             </>
+          )}
+          {needsReview && changes[row.member.id] && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!etag || command.pending || reviewed[row.member.id] === etag}
+              onClick={() => {
+                if (etag) setReviewed((previous) => ({ ...previous, [row.member.id]: etag }));
+              }}
+            >
+              {t(reviewed[row.member.id] === etag ? "draftReviewed" : "keepAttendanceDraft")}
+            </Button>
           )}
         </fieldset>
       ))}
@@ -467,7 +550,8 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
           command.pending ||
           command.seconds > 0 ||
           !Object.keys(changes).length ||
-          !query.data?.etag
+          !reviewComplete ||
+          (!etag && !retrySubmission)
         }
       >
         {t("recordAttendance")}

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
+
 type S = components["schemas"];
 export const eventId = "e0350000-0000-4000-8000-000000000001";
 export const eventFixture = (): S["EventPublic"] => ({
@@ -31,6 +32,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     ownAttendance: "unconfirmed" as "unconfirmed" | "attended" | "not_attended",
     status: 200,
     listStatus: 200,
+    listPages: false,
     empty: false,
     session: true,
     keys: [] as string[],
@@ -44,6 +46,11 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     prescribedMassKg: null as string | null,
     prescribedTrailerTypeId: null as string | null,
     attendance: "unconfirmed" as S["Attendance"]["attendance"],
+    attendancePages: false,
+    attendanceCursors: [] as string[],
+    loseAttendanceReceipt: false,
+    attendanceDecisions: 0,
+    attendanceReceipts: new Map<string, { fingerprint: string; version: number }>(),
     participantPages: false,
     participantCursors: [] as string[],
   };
@@ -85,6 +92,14 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
       state.preconditions.push(request.headers()["if-match"] ?? "");
       const body = request.postDataJSON();
       state.commands.push({ method, path: p, body });
+      if (p.endsWith("/attendance")) {
+        const receipt = state.attendanceReceipts.get(request.headers()["idempotency-key"] ?? "");
+        if (receipt) {
+          if (receipt.fingerprint !== JSON.stringify([request.headers()["if-match"], body]))
+            return route.fulfill({ status: 409, json: {} });
+          return reply({ id: eventId, version: receipt.version }, 200, receipt.version);
+        }
+      }
       if (state.gate) await state.gate;
       if (state.failNext) {
         const status = state.failNext;
@@ -110,6 +125,15 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
       if (p.endsWith("/attendance")) {
         state.attendance = body.members[0].attendance;
         state.attendanceVersion++;
+        state.attendanceDecisions++;
+        state.attendanceReceipts.set(request.headers()["idempotency-key"] ?? "", {
+          fingerprint: JSON.stringify([request.headers()["if-match"], body]),
+          version: state.attendanceVersion,
+        });
+        if (state.loseAttendanceReceipt) {
+          state.loseAttendanceReceipt = false;
+          return route.abort("failed");
+        }
         return reply(
           { id: eventId, version: state.attendanceVersion },
           200,
@@ -144,7 +168,30 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     if ((p === "/public/events" || p === "/events") && state.readGate) await state.readGate;
     if (p === "/public/events" || p === "/events")
       return state.listStatus === 200
-        ? reply({ items: state.empty ? [] : [state.event], nextCursor: null })
+        ? reply({
+            items: state.empty
+              ? []
+              : [
+                  {
+                    ...state.event,
+                    ...(url.searchParams.get("period") === "past"
+                      ? {
+                          startsAt: "2020-10-25T13:00:00.000Z",
+                          meetingAt: "2020-10-25T12:00:00.000Z",
+                          status: "completed",
+                        }
+                      : {}),
+                    ...(url.searchParams.has("cursor")
+                      ? {
+                          id: "e0350000-0000-4000-8000-000000000005",
+                          title: "Fictional second page convoy",
+                        }
+                      : {}),
+                  },
+                ],
+            nextCursor:
+              state.listPages && !url.searchParams.has("cursor") ? "synthetic-event-page-2" : null,
+          })
         : route.fulfill({
             status: state.listStatus,
             json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
@@ -185,26 +232,42 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
             : [],
         nextCursor: null,
       });
-    if (p.endsWith("/attendance"))
+    if (p.endsWith("/attendance")) {
+      const cursor = url.searchParams.get("cursor") ?? "";
+      state.attendanceCursors.push(cursor);
+      if (cursor && cursor !== `synthetic-attendance-page-2-v${state.attendanceVersion}`)
+        return route.fulfill({ status: 412, json: {} });
+      const target = {
+        member: { ...accountFixture().data.member, id: fixtureId },
+        response: {
+          response: "declined" as const,
+          declineReason: "Fictional private RSVP reason",
+          version: 2,
+        },
+        attendance: state.attendance,
+        note: null,
+      };
+      const first = Array.from({ length: 25 }, (_, i) => ({
+        ...target,
+        member: {
+          ...target.member,
+          id: `e0352000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+          nickname: `Fictional roster member ${i + 1}`,
+        },
+        response: { response: "unanswered" as const, declineReason: null, version: 1 },
+      }));
       return reply(
         {
-          items: [
-            {
-              member: { ...accountFixture().data.member, id: fixtureId },
-              response: {
-                response: "declined",
-                declineReason: "Fictional private RSVP reason",
-                version: 2,
-              },
-              attendance: state.attendance,
-              note: null,
-            },
-          ],
-          nextCursor: null,
+          items: state.attendancePages && !cursor ? first : [target],
+          nextCursor:
+            state.attendancePages && !cursor
+              ? `synthetic-attendance-page-2-v${state.attendanceVersion}`
+              : null,
         },
         200,
         state.attendanceVersion,
       );
+    }
     if (p === "/catalogs/revisions")
       return route.fulfill({
         status: 503,

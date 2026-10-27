@@ -1,5 +1,11 @@
 export const eventTranslations = {
   en: {
+    attendanceDrafts: "Unsaved attendance changes",
+    reviewAttendance:
+      "Attendance changed. Your drafts are listed here. Find each member in the refreshed pages, review their current attendance and keep or remove the draft before saving again.",
+    removeDraft: "Remove draft",
+    keepAttendanceDraft: "Keep this draft after review",
+    draftReviewed: "Draft reviewed",
     memberResponse: "Response",
     loadingCatalog: "Loading catalog selections…",
     checkUpcoming: "Check the event list for the next convoy",
@@ -97,6 +103,12 @@ export const eventTranslations = {
     savedAttendance: "Attendance recorded.",
   },
   ru: {
+    attendanceDrafts: "Несохранённые изменения посещения",
+    reviewAttendance:
+      "Посещение изменилось. Ваши черновики сохранены здесь. Найдите каждого участника на обновлённых страницах, проверьте текущее посещение и сохраните или удалите черновик перед повторной записью.",
+    removeDraft: "Удалить черновик",
+    keepAttendanceDraft: "Оставить черновик после проверки",
+    draftReviewed: "Черновик проверен",
     memberResponse: "Ответ",
     loadingCatalog: "Загрузка значений каталога…",
     checkUpcoming: "Откройте список событий, чтобы проверить следующий конвой",

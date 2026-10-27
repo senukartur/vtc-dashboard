@@ -1,4 +1,5 @@
 export const browserFiles = {
+  "test/e2e/dashboard.spec.ts": "dashboard",
   "test/e2e/events.spec.ts": "events",
   "test/e2e/events-real.spec.ts": "events-real",
   "test/e2e/administration-real.spec.ts": "administration-real",

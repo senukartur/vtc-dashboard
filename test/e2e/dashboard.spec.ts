@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./support/fixtures.ts";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
+import { expect, test } from "./support/fixtures.ts";
 
 async function switchLanguage(page: Page, locale: "ru" | "en") {
   await page
@@ -56,7 +56,9 @@ test.describe("Company Dashboard E2E", () => {
 
     // Upcoming event widget
     await expect(page.getByRole("heading", { name: "Upcoming Event", exact: true })).toBeVisible();
-    await expect(page.getByText("Autumn Yukon Convoy 2026")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Autumn Yukon Convoy 2026", exact: true }),
+    ).toBeVisible();
   });
 
   test("filters by game and period", async ({ page }) => {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
-import { commandAttempt, type Attempt, type DTO } from "./model.js";
+import { type Attempt, commandAttempt, type DTO } from "./model.js";
 import { eventRead, fail, schema } from "./transport.js";
 
 export function useEventQuery<K extends keyof DTO>(path: string, name: K, enabled = true) {
@@ -47,7 +47,7 @@ export function useEventQuery<K extends keyof DTO>(path: string, name: K, enable
     data: query.isError || (!publicRead && !session.self) ? undefined : query.data,
   };
 }
-export function useEventCommand() {
+export function useEventCommand(onFailure?: (failure: AccountFailure) => void) {
   const session = useSession(),
     client = useQueryClient(),
     active = useRef(true),
@@ -187,6 +187,7 @@ export function useEventCommand() {
       const safe = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
       if (active.current) {
         setFailure(safe);
+        onFailure?.(safe);
         if (safe.kind === "unauthorized") await session.confirmSessionLoss(ctl.signal);
         if (safe.kind === "forbidden") await session.refresh();
         if (safe.retryAfter) {

@@ -8,9 +8,16 @@ import { expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
-async function confirm(page: Page, label: string) {
+async function confirm(page: Page, label: string, commandPath?: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
+  const response = commandPath
+    ? page.waitForResponse(
+        (r) => r.request().method() === "POST" && new URL(r.url()).pathname === commandPath,
+        { timeout: 15000 },
+      )
+    : null;
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  if (response) expect((await response).status()).toBe(201);
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 async function fill(
@@ -184,12 +191,44 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await page.reload();
     await catalogLanguage(page);
     await page.locator("#correction-reason").fill("Fictional distance needs correction");
-    await confirm(page, "Request correction");
+    const correctionPath = `/api/v1/trips/${tripId}/correction-requests`;
+    let releaseReceipt = () => {},
+      receiptHeld = false;
+    const receiptGate = new Promise<void>((resolve) => {
+      releaseReceipt = resolve;
+    });
+    const holdReceipt: Parameters<Page["route"]>[1] = async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      const response = await route.fetch();
+      expect(response.status()).toBe(201);
+      receiptHeld = true;
+      await receiptGate;
+      await route.fulfill({ response });
+    };
+    await page.route(`**${correctionPath}`, holdReceipt);
+    const correction = confirm(page, "Request correction", correctionPath);
+    void correction.catch(() => {});
+    try {
+      await expect.poll(() => receiptHeld, { timeout: 15000 }).toBe(true);
+      // Inject receipt latency beyond the old UI matcher while staying inside the command deadline.
+      await page.waitForTimeout(5500);
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(
+        page.getByRole("dialog").getByRole("button", { name: "Loading…", exact: true }),
+      ).toBeDisabled();
+      releaseReceipt();
+      await correction;
+    } finally {
+      releaseReceipt();
+      await correction.catch(() => {});
+      await page.unroute(`**${correctionPath}`, holdReceipt);
+    }
     current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
     expect(current.summary.actualDistanceM).toBe("123400");
     const requests = (
       await (await page.request.get(`/api/v1/trips/${tripId}/correction-requests?limit=25`)).json()
     ).data.items;
+    expect(requests.filter((r: { status: string }) => r.status === "pending")).toHaveLength(1);
     const requestId = requests.find((r: { status: string }) => r.status === "pending").id;
     await staffPage.reload();
     await catalogLanguage(staffPage);
