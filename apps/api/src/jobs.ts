@@ -8,6 +8,13 @@ import { readConfig } from "./platform/config/env.js";
 import { ownedCli } from "./platform/jobs/process.js";
 import { bounds, createQueue, unknownCommit } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
+import { sql } from "@vtc/db/platform-schema";
+import {
+  acceptanceDiagnostic,
+  acceptanceWorkerScope,
+  acceptanceWorkerPhase,
+  acceptanceSentinelMatches,
+} from "./notifications-acceptance-diagnostics.js";
 import { composeIdentity } from "./use-cases/identity-messaging.js";
 
 await ownedCli(async () => {
@@ -20,12 +27,36 @@ await ownedCli(async () => {
   const abort = new AbortController();
   for (const s of ["SIGINT", "SIGTERM"] as const) process.once(s, () => abort.abort());
   let unit: ReturnType<typeof createUnitOfWork> | undefined;
+  let diagnosticActive = false,
+    diagnosticStep = "jobs_config";
+  function phase(step: string) {
+    diagnosticStep = step;
+    const record = acceptanceWorkerPhase(diagnosticActive, step);
+    if (record) console.error(JSON.stringify(record));
+  }
   try {
     const mode = process.argv[2] ?? "run";
     if (!["run", "inspect"].includes(mode) || process.argv.length > 3)
       throw new Error("INVALID_JOBS_MODE");
     const config = readConfig();
     unit = createUnitOfWork(config.database);
+    const scope = acceptanceWorkerScope(process.env);
+    if (scope) {
+      try {
+        const [rows] = await unit.run((tx) =>
+          unit!
+            .client(tx)
+            .execute(
+              sql`SELECT run_id,image_id,revision FROM notification_acceptance WHERE singleton=1`,
+            ),
+        );
+        diagnosticActive =
+          Array.isArray(rows) && rows.length === 1 && acceptanceSentinelMatches(scope, rows[0]);
+      } catch {
+        /* A failed ownership check grants no diagnostic output and changes no normal work. */
+      }
+    }
+    phase("jobs_compose");
     const composed = config.identity
       ? composeIdentity(
           unit,
@@ -45,24 +76,30 @@ await ownedCli(async () => {
           config.notifications,
         )
       : undefined;
+    phase("jobs_trip_catchup");
     if (mode === "run") await composed?.tripDecisions?.catchup();
+    phase("jobs_notification_maintenance");
     if (mode === "run") await composed?.notifications?.maintenance();
     const messaging = composed?.messaging;
+    phase("jobs_admissions_cleanup");
     const admissionsCleanup =
       mode === "run" ? await cleanupAdmissions(unit, !!composed?.admissions) : "not_run";
     if (admissionsCleanup === "configuration_pending")
       console.error(
         JSON.stringify({ event: "admissions_cleanup_pending", category: "worker_configuration" }),
       );
+    phase("jobs_mail_cleanup");
     const mailCleanup = mode === "run" ? await cleanupMail(unit, !!messaging) : "not_run";
     if (mailCleanup === "configuration_pending")
       console.error(
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
+    phase("jobs_catalog_cleanup");
     if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
     let manualCleanup: "not_run" | "complete" | "configuration_pending" | "storage_unavailable" =
       "not_run";
     if (mode === "run") {
+      phase("jobs_manual_cleanup");
       try {
         manualCleanup =
           (await composed?.manualReports?.maintenance(abort.signal)) ??
@@ -99,6 +136,7 @@ await ownedCli(async () => {
         "notifications.deliver",
         "notifications.remind",
       ]);
+    phase("jobs_pass");
     const result = mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal);
     console.log(
       JSON.stringify({
@@ -115,14 +153,21 @@ await ownedCli(async () => {
       JSON.stringify({
         event: "jobs_failed",
         category: unknownCommit(error) ? "commit_outcome_unknown" : "operation_failed",
+        ...(diagnosticActive ? { diagnostic: acceptanceDiagnostic(error, diagnosticStep) } : {}),
       }),
     );
     process.exitCode = 1;
   } finally {
     try {
       await unit?.close();
-    } catch {
-      console.error(JSON.stringify({ event: "jobs_failed", category: "close_failed" }));
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "jobs_failed",
+          category: "close_failed",
+          ...(diagnosticActive ? { diagnostic: acceptanceDiagnostic(error, "jobs_close") } : {}),
+        }),
+      );
       process.exitCode = 1;
     }
     clearTimeout(watchdog);

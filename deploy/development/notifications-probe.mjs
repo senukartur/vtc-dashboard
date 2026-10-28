@@ -87,7 +87,8 @@ try {
     a.token = csrf.body.data.token;
   }
   const samples = [],
-    seen = new Set();
+    seen = new Set(),
+    expectedSeen = actors.map(() => false);
   const cycles = mode === "poll" ? 12 : 1;
   for (let cycle = 0; cycle < cycles; cycle++) {
     phase = "poll";
@@ -114,6 +115,7 @@ try {
             (!a.expected.subjectId || a.expected.subjectId === item.target?.id)
           ) {
             requireCondition(Number.isFinite(Date.parse(a.expected.occurredAt)));
+            expectedSeen[actorIndex] = true;
             samples.push(Date.now() - Date.parse(a.expected.occurredAt));
           }
         }
@@ -180,8 +182,10 @@ try {
     requireCondition((await request(a, "/api/v1/notifications")).status === 401);
     a.cookies.clear();
     a.token = undefined;
+    a.cookies.clear();
+    a.token = undefined;
   }
-  if (mode === "poll" && actors.some((a) => a.expected)) requireCondition(samples.length > 0);
+  requireCondition(actors.every((a, index) => !a.expected || expectedSeen[index]));
   console.log(
     JSON.stringify({
       event: "notifications_probe_result",

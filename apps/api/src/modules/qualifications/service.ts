@@ -732,7 +732,8 @@ export function createQualifications(
               .where(eq(qualificationRules.levelId, levelId))
               .orderBy(desc(qualificationRules.effectiveAt))
               .limit(1)
-              .for("update");
+              // Company/level writer fences serialize publication; prior rule versions are immutable.
+              .for("share");
             if (latest && effectiveAt <= latest.effectiveAt) throw identityError(409);
             for (const rule of rules) {
               if (rule.type === "max_mass") exact(rule.maxKg as string);
