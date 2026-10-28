@@ -20,6 +20,14 @@ SHA = 'a' * 40
 IMAGE = 'sha256:' + 'b' * 64
 
 
+def completed_controls_receipt():
+    # Historical full-controls release, deliberately different from current notification inputs.
+    return dict(pending=False, complete=True, prepared=True, revision='c' * 40,
+                imageId='sha256:' + 'd' * 64,
+                hashes={'operations.py': 'e' * 64, 'activation.py': 'f' * 64},
+                previous={'operations.py': 'a' * 64})
+
+
 class WindowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -849,6 +857,100 @@ class ControlInstallTests(unittest.TestCase):
             for name, content in self.original.items():
                 self.assertEqual((self.base / name).read_bytes(), content)
         compose.assert_not_called()
+
+    def test_completed_full_controls_receipt_allows_dispatch_without_mutation(self):
+        path = self.base / 'state/controls-update.json'
+        o.atomic_json(path, completed_controls_receipt())
+        retained = path.read_bytes()
+        with patch.object(n, 'Window') as window:
+            n.operation(o, SHA, IMAGE, 'prepare', RUN)
+            window.return_value.prepare.assert_called_once()
+        self.assertEqual(path.read_bytes(), retained)
+
+    def test_completed_full_controls_receipt_allows_notifications_only_install_and_restore(self):
+        path = self.base / 'state/controls-update.json'
+        o.atomic_json(path, completed_controls_receipt())
+        retained = path.read_bytes()
+        update_controls.notifications_install(self.source)
+        self.assertEqual(path.read_bytes(), retained)
+        update_controls.notifications_install(self.source, restore=True)
+        self.assertEqual(path.read_bytes(), retained)
+        self.assertEqual({name: (self.base / name).read_bytes() for name in n.FILES}, self.original)
+
+    def assert_receipt_rejected_before_dispatch_or_install(self):
+        before = {name: (self.base / name).read_bytes() for name in n.FILES}
+        with patch.object(n, 'Window') as window, patch.object(activation, 'private_copy') as copy:
+            for action in [lambda: n.operation(o, SHA, IMAGE, 'prepare', RUN),
+                           lambda: update_controls.notifications_install(self.source)]:
+                with self.assertRaises((RuntimeError, ValueError, OSError)):
+                    action()
+            window.assert_not_called(); copy.assert_not_called()
+        self.assertEqual({name: (self.base / name).read_bytes() for name in n.FILES}, before)
+        self.assertFalse((self.base / 'state/notifications-controls-update.json').exists())
+
+    def test_active_incomplete_malformed_and_unknown_full_controls_receipts_fail_before_work(self):
+        path = self.base / 'state/controls-update.json'
+        receipt = completed_controls_receipt()
+        variants = [None, [], False, {}, receipt | {'pending': True}, receipt | {'pending': 0},
+                    receipt | {'pending': 'false'}, receipt | {'complete': False}, receipt | {'complete': 1},
+                    receipt | {'prepared': False}, receipt | {'revision': 'invalid'},
+                    receipt | {'imageId': 'invalid'}, receipt | {'hashes': {}}, receipt | {'hashes': []},
+                    receipt | {'hashes': {'../foreign': 'e' * 64}}, receipt | {'hashes': {'operations.py': 'invalid'}},
+                    receipt | {'previous': {'foreign.py': 'e' * 64}}, receipt | {'unknown': True}]
+        variants += [{k: v for k, v in receipt.items() if k != missing} for missing in receipt]
+        for value in variants:
+            with self.subTest(valueType=type(value).__name__):
+                o.atomic_json(path, value)
+                retained = path.read_bytes()
+                self.assert_receipt_rejected_before_dispatch_or_install()
+                self.assertEqual(path.read_bytes(), retained)
+        path.write_text('{invalid'); path.chmod(0o600)
+        self.assert_receipt_rejected_before_dispatch_or_install()
+        self.assertEqual(path.read_text(), '{invalid')
+
+    def test_unsafe_full_controls_receipts_are_not_adopted_or_deleted(self):
+        path = self.base / 'state/controls-update.json'
+        unrelated = self.base / 'private/unrelated.json'
+        o.atomic_json(unrelated, completed_controls_receipt())
+        retained = unrelated.read_bytes()
+        for kind in ['public', 'foreign', 'oversize', 'directory', 'symlink', 'dangling', 'hardlink']:
+            with self.subTest(kind=kind):
+                if kind in ['symlink', 'dangling']:
+                    path.symlink_to(unrelated if kind == 'symlink' else self.base / 'absent')
+                elif kind == 'directory': path.mkdir()
+                elif kind == 'hardlink': os.link(unrelated, path)
+                else:
+                    o.atomic_json(path, completed_controls_receipt())
+                    if kind == 'public': path.chmod(0o644)
+                    if kind == 'foreign': os.chown(path, 1000, 1000)
+                    if kind == 'oversize': path.write_bytes(b' ' * 65537)
+                self.assert_receipt_rejected_before_dispatch_or_install()
+                self.assertTrue(path.is_symlink() or path.exists())
+                self.assertEqual(unrelated.read_bytes(), retained)
+                if kind == 'directory': path.rmdir()
+                else: path.unlink()
+
+    def test_terminal_controls_history_does_not_override_existing_acceptance_or_safety_fences(self):
+        path = self.base / 'state/controls-update.json'
+        o.atomic_json(path, completed_controls_receipt())
+        retained = path.read_bytes()
+        for name in ['identity-acceptance', 'jobs-acceptance', 'ingress-check.json',
+                     'recovery-required', '../private/maintenance/enabled']:
+            marker = self.base / 'state' / name
+            marker.parent.mkdir(parents=True, exist_ok=True); marker.write_text('{}')
+            with patch.object(n, 'Window') as window:
+                with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_FENCED$'):
+                    n.operation(o, SHA, IMAGE, 'prepare', RUN)
+                window.assert_not_called()
+            marker.unlink()
+        for name in ['notifications-acceptance', 'identity-acceptance', 'jobs-acceptance', 'ingress-check.json']:
+            marker = self.base / 'state' / name; marker.write_text('{}')
+            with patch.object(activation, 'private_copy') as copy:
+                with self.assertRaisesRegex(RuntimeError, '^ACCEPTANCE_WINDOW$'):
+                    update_controls.notifications_install(self.source)
+                copy.assert_not_called()
+            marker.unlink()
+        self.assertEqual(path.read_bytes(), retained)
 
     def test_interrupted_install_fences_then_exact_source_resumes(self):
         original_copy = activation.private_copy

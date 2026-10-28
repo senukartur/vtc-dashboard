@@ -39,6 +39,38 @@ def hashes(o, names):
     return {name: o.digest(o.BASE / name) for name in names if (o.BASE / name).exists()}
 
 
+def require_notification_controls_idle(o):
+    """A completed full-controls receipt is history, not an active notification fence."""
+    path = o.BASE / 'state/controls-update.json'
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    with os.fdopen(descriptor, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        o.require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o077 and
+                  info.st_nlink == 1 and info.st_size <= 65536, 'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+        content = handle.read(65537)
+    o.require(len(content) <= 65536, 'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+    value = json.loads(content)
+    o.require(isinstance(value, dict) and set(value) ==
+              {'pending', 'complete', 'revision', 'imageId', 'hashes', 'previous', 'prepared'},
+              'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+    o.require(value['pending'] is False and value['complete'] is True and value['prepared'] is True and
+              isinstance(value['revision'], str) and re.fullmatch('[a-f0-9]{40}', value['revision']) and
+              isinstance(value['imageId'], str) and re.fullmatch('sha256:[a-f0-9]{64}', value['imageId']),
+              'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+    # The original package can predate this release or a notification-only subset update.
+    # Validate its closed receipt structure without comparing historical hashes with current controls.
+    for key in ['hashes', 'previous']:
+        mapping = value[key]
+        o.require(isinstance(mapping, dict) and all(isinstance(name, str) and re.fullmatch('[a-z][a-z0-9_.-]*', name) and
+                  isinstance(checksum, str) and re.fullmatch('[a-f0-9]{64}', checksum)
+                  for name, checksum in mapping.items()), 'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+    o.require(bool(value['hashes']) and set(value['previous']) <= set(value['hashes']),
+              'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
+
+
 def failed_child(o, output):
     path = o.BASE / 'state/notifications-failed-child.log'
     with open(path, 'wb') as handle:
@@ -1054,8 +1086,9 @@ class Window:
 
 def operation(o, revision, image_id, mode, run_id):
     o.require(mode in MODES and RUN.fullmatch(run_id), 'NOTIFICATIONS_ARGUMENT_INVALID')
-    o.require(not any((o.BASE / f'state/{n}').exists() for n in ['identity-acceptance', 'jobs-acceptance', 'ingress-check.json', 'controls-update.json']) and
+    o.require(not any((o.BASE / f'state/{n}').exists() for n in ['identity-acceptance', 'jobs-acceptance', 'ingress-check.json']) and
               not (o.BASE / 'state/recovery-required').exists() and not (o.BASE / 'private/maintenance/enabled').exists(), 'NOTIFICATIONS_FENCED')
+    require_notification_controls_idle(o)
     window = Window(o, revision, image_id, run_id)
     if mode == 'prepare':
         return window.prepare()

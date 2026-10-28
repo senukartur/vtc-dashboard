@@ -20,7 +20,8 @@ def notifications_install(source, restore=False):
         o.require(active is not None, 'RELEASE_REQUIRED')
         o.require(not any((o.BASE / f'state/{name}').exists() for name in
                          ['notifications-acceptance', 'identity-acceptance', 'jobs-acceptance',
-                          'ingress-check.json', 'controls-update.json']), 'ACCEPTANCE_WINDOW')
+                          'ingress-check.json']), 'ACCEPTANCE_WINDOW')
+        n.require_notification_controls_idle(o)
         reviewed = n.private_json(o, o.BASE / 'private/notifications-controls-input.json')
         o.require(set(reviewed) == {'revision', 'imageId', 'candidate', 'previous', 'protected'} and
                   reviewed['revision'] == active['revision'] and reviewed['imageId'] == active['imageId'] and
