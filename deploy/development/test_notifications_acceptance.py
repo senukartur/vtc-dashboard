@@ -20,12 +20,17 @@ SHA = 'a' * 40
 IMAGE = 'sha256:' + 'b' * 64
 
 
-def completed_controls_receipt():
+BASE_CONTROL_FILES = frozenset({'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py',
+                                'activation-grants.json', 'identity_acceptance.py', 'ingress_probe.py', 'receive.sh'})
+
+
+def completed_controls_receipt(inventory=None):
     # Historical full-controls release, deliberately different from current notification inputs.
+    names = activation.CONTROL_FILES if inventory is None else inventory
     return dict(pending=False, complete=True, prepared=True, revision='c' * 40,
                 imageId='sha256:' + 'd' * 64,
-                hashes={'operations.py': 'e' * 64, 'activation.py': 'f' * 64},
-                previous={'operations.py': 'a' * 64})
+                hashes={name: 'e' * 64 for name in sorted(names)},
+                previous={name: 'f' * 64 for name in sorted(names)})
 
 
 class WindowTests(unittest.TestCase):
@@ -860,22 +865,48 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_completed_full_controls_receipt_allows_dispatch_without_mutation(self):
         path = self.base / 'state/controls-update.json'
-        o.atomic_json(path, completed_controls_receipt())
-        retained = path.read_bytes()
-        with patch.object(n, 'Window') as window:
-            n.operation(o, SHA, IMAGE, 'prepare', RUN)
-            window.return_value.prepare.assert_called_once()
-        self.assertEqual(path.read_bytes(), retained)
+        for inventory in [activation.CONTROL_FILES, BASE_CONTROL_FILES]:
+            with self.subTest(controlFiles=len(inventory)):
+                o.atomic_json(path, completed_controls_receipt(inventory))
+                retained = path.read_bytes()
+                with patch.object(n, 'Window') as window:
+                    n.operation(o, SHA, IMAGE, 'prepare', RUN)
+                    window.return_value.prepare.assert_called_once()
+                self.assertEqual(path.read_bytes(), retained)
 
     def test_completed_full_controls_receipt_allows_notifications_only_install_and_restore(self):
         path = self.base / 'state/controls-update.json'
-        o.atomic_json(path, completed_controls_receipt())
-        retained = path.read_bytes()
-        update_controls.notifications_install(self.source)
-        self.assertEqual(path.read_bytes(), retained)
-        update_controls.notifications_install(self.source, restore=True)
-        self.assertEqual(path.read_bytes(), retained)
-        self.assertEqual({name: (self.base / name).read_bytes() for name in n.FILES}, self.original)
+        for inventory in [activation.CONTROL_FILES, BASE_CONTROL_FILES]:
+            with self.subTest(controlFiles=len(inventory)):
+                o.atomic_json(path, completed_controls_receipt(inventory))
+                retained = path.read_bytes()
+                update_controls.notifications_install(self.source)
+                self.assertEqual(path.read_bytes(), retained)
+                update_controls.notifications_install(self.source, restore=True)
+                self.assertEqual(path.read_bytes(), retained)
+                self.assertEqual({name: (self.base / name).read_bytes() for name in n.FILES}, self.original)
+
+    def test_completed_receipt_inventories_cover_current_and_published_base_packages(self):
+        self.assertEqual(set(completed_controls_receipt()['hashes']), activation.CONTROL_FILES)
+        self.assertEqual(len(activation.CONTROL_FILES), 11)
+        # This public historical package is fixed at main 06296fc, not the current subset installer.
+        self.assertEqual(len(BASE_CONTROL_FILES), 8)
+        for inventory in [activation.CONTROL_FILES, BASE_CONTROL_FILES]:
+            value = completed_controls_receipt(inventory)
+            self.assertIn('Caddyfile', value['hashes'])
+            self.assertEqual(set(value['hashes']), set(value['previous']))
+
+    def test_unsafe_mapping_basenames_reject_in_both_hash_maps_before_dispatch_or_install(self):
+        path = self.base / 'state/controls-update.json'
+        names = ['../escape', 'sub/file', 'sub\\file', '/absolute', 'C:\\absolute', '.', '..',
+                 '.hidden', '-option', 'file name', 'Cadd\u00fdfile', 'file\n', 'file\x00name', 'file:name']
+        for name in names:
+            with self.subTest(nameKind=repr(name)):
+                value = completed_controls_receipt() | {'hashes': {name: 'e' * 64}, 'previous': {name: 'f' * 64}}
+                o.atomic_json(path, value)
+                retained = path.read_bytes()
+                self.assert_receipt_rejected_before_dispatch_or_install()
+                self.assertEqual(path.read_bytes(), retained)
 
     def assert_receipt_rejected_before_dispatch_or_install(self):
         before = {name: (self.base / name).read_bytes() for name in n.FILES}

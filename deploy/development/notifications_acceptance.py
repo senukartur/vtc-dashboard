@@ -64,7 +64,7 @@ def require_notification_controls_idle(o):
     # Validate its closed receipt structure without comparing historical hashes with current controls.
     for key in ['hashes', 'previous']:
         mapping = value[key]
-        o.require(isinstance(mapping, dict) and all(isinstance(name, str) and re.fullmatch('[a-z][a-z0-9_.-]*', name) and
+        o.require(isinstance(mapping, dict) and all(isinstance(name, str) and re.fullmatch('[A-Za-z][A-Za-z0-9_.-]*', name) and
                   isinstance(checksum, str) and re.fullmatch('[a-f0-9]{64}', checksum)
                   for name, checksum in mapping.items()), 'NOTIFICATIONS_CONTROLS_RECEIPT_INVALID')
     o.require(bool(value['hashes']) and set(value['previous']) <= set(value['hashes']),
