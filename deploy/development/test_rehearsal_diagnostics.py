@@ -1,6 +1,7 @@
 """Safe phase diagnostics are tested without starting Docker or loading private state."""
 import ast
 import collections
+import copy
 import contextlib
 import io
 import hashlib
@@ -11,7 +12,19 @@ import subprocess
 import time
 import unittest
 import tempfile
+import types
+import sys
+from unittest.mock import patch
 import rehearsal_evidence
+
+
+def predecessor_assertion_digest(node):
+    # Preserve predecessor assertion coverage modulo the single path-local rename that
+    # prevents it from shadowing the new global handoff writer. Operators/values stay exact.
+    comparable = copy.deepcopy(node)
+    for name in ast.walk(comparable):
+        if isinstance(name, ast.Name) and name.id == 'receipt_path': name.id = 'receipt'
+    return hashlib.sha256(ast.dump(comparable, include_attributes=False).encode()).hexdigest()
 
 
 class RehearsalEvidenceTests(unittest.TestCase):
@@ -89,6 +102,96 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
         exec(compile(ast.Module(body=[function], type_ignores=[]), '<rehearsal-diagnostic>', 'exec'), namespace)
         self.phase = namespace['rehearsal_phase']
 
+    def test_actual_cleanup_path_assignment_cannot_shadow_final_core_receipt_writer(self):
+        core = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'core')
+        writer = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'receipt')
+        assignments = [n for n in ast.walk(core) if isinstance(n, ast.Assign) and len(n.targets) == 1 and
+                       isinstance(n.targets[0], ast.Name) and n.targets[0].id in ('receipt', 'receipt_path')]
+        calls = [n for n in ast.walk(core) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and
+                 isinstance(n.value.func, ast.Name) and n.value.func.id == 'receipt' and
+                 len(n.value.args) == 3 and isinstance(n.value.args[1], ast.Constant) and n.value.args[1].value == 'core']
+        self.assertEqual((len(assignments), len(calls)), (1, 1))
+        def execute(old_shadow):
+            writes = []
+            assignment = copy.deepcopy(assignments[0])
+            if old_shadow: assignment.targets[0].id = 'receipt'
+            tail = copy.deepcopy(core); tail.name = 'core_tail'; tail.body = [assignment, copy.deepcopy(calls[0])]
+            base = pathlib.Path('/synthetic')
+            owner = types.SimpleNamespace(BASE=base, digest=lambda path: 'c' * 64 if path.name == 'current.json' else 'd' * 64,
+                                          atomic_json=lambda path, value: writes.append((path, value)))
+            namespace = dict(base=base, ops=owner, race_state={'directory': 'owned'}, intent={'receipt': 'ack.json'},
+                image_id='sha256:' + 'a' * 64, checksum='b' * 64, image_archive=base / 'test-image.tar',
+                binding=lambda: {'sourceFingerprint': 'e' * 64}, time=types.SimpleNamespace(time=lambda: 123))
+            exec(compile(ast.Module(body=[copy.deepcopy(writer), tail], type_ignores=[]), '<actual-core-receipt-tail>', 'exec'), namespace)
+            if old_shadow:
+                with self.assertRaisesRegex(TypeError, "object is not callable"):
+                    namespace['core_tail']()
+                self.assertEqual(writes, [])
+            else:
+                namespace['core_tail']()
+                self.assertEqual(writes, [(base / 'state/rehearsal-core.json', {
+                    'binding': {'sourceFingerprint': 'e' * 64}, 'completedUtc': 123, 'imageId': 'sha256:' + 'a' * 64,
+                    'checksum': 'b' * 64, 'archive': str(base / 'test-image.tar'),
+                    'currentSha256': 'c' * 64, 'composeSha256': 'd' * 64})])
+        execute(True)
+        execute(False)
+
+    def test_actual_fresh_handoff_restores_core_network_and_default_tls_context(self):
+        original = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'handoff_context')
+        core = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'core')
+        def effect(node):
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                call = node.value
+                if call.func.attr == 'run' and call.args and isinstance(call.args[0], ast.List):
+                    start = call.args[0].elts[:3]
+                    destination = call.args[0].elts[3] if len(call.args[0].elts) > 3 else None
+                    if len(start) == 3 and all(isinstance(v, ast.Constant) for v in start) and [v.value for v in start] == ['docker', 'network', 'connect'] and \
+                            isinstance(destination, ast.JoinedStr) and any(isinstance(v, ast.Constant) and v.value == '_frontend' for v in destination.values):
+                        return 'network'
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Subscript):
+                target = node.targets[0]
+                if isinstance(target.slice, ast.Constant) and target.slice.value == 'SSL_CERT_FILE': return 'ca'
+            return None
+        core_effects = {effect(node): ast.dump(node, include_attributes=False) for node in ast.walk(core) if effect(node)}
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary); (base / 'state').mkdir(); (base / 'private').mkdir()
+            (base / 'test-image.tar').touch(); (base / 'test-ca.crt').write_text('fictional-public-ca-fixture')
+            (base / 'compose.yaml').write_text('{}')
+            (base / 'private/operator.env').write_text('OPERATOR_TOKEN=NONFUNCTIONAL_FIXTURE\n')
+            image, revision, project = 'sha256:' + 'a' * 64, 'b' * 40, 'vtc011-0123456789abcdef'
+            reviewed = {'sourceFingerprint': 'c' * 64}
+            (base / 'state/rehearsal-core.json').write_text(json.dumps({'binding': reviewed, 'completedUtc': 123,
+                'imageId': image, 'currentSha256': 'd' * 64, 'composeSha256': 'd' * 64,
+                'checksum': 'e' * 64, 'archive': str(base / 'test-image.tar')}))
+            def execute(omitted):
+                environment = {'REHEARSAL_PROJECT': project, 'REHEARSAL_REVISION': revision,
+                               'REHEARSAL_VOLUME': project + '-config', 'HOSTNAME': 'f' * 12}
+                commands, contexts = [], []
+                owner = types.ModuleType('operations')
+                owner.digest = lambda _: 'd' * 64
+                owner.validate_image = lambda *args: self.assertEqual(args, (image, revision))
+                owner.current = lambda: {'imageId': image, 'runId': 100}
+                owner.compose = lambda *args, **kwargs: None
+                owner.run = lambda args: commands.append(args)
+                function = copy.deepcopy(original)
+                function.body = [node for node in function.body if effect(node) not in omitted]
+                namespace = dict(pathlib=types.SimpleNamespace(Path=lambda value: base if str(value) == '/opt/vtc-development' else pathlib.Path(value)),
+                    json=json, os=types.SimpleNamespace(environ=environment), time=types.SimpleNamespace(time=lambda: 123),
+                    binding=lambda: reviewed, ssl=types.SimpleNamespace(create_default_context=lambda **options: contexts.append(options)))
+                with patch.dict(sys.modules, {'operations': owner}):
+                    exec(compile(ast.Module(body=[function], type_ignores=[]), '<actual-fresh-handoff>', 'exec'), namespace)
+                    value = namespace['handoff_context']()
+                self.assertEqual(value[:3], (base, owner, project))
+                self.assertEqual(contexts, [{'cafile': str(base / 'test-ca.crt')}])
+                # A default native HTTPS client uses this fresh process's route/trust, not get()'s explicit context.
+                self.assertEqual(commands, [['docker', 'network', 'connect', project + '_frontend', 'f' * 12]])
+                self.assertEqual(environment.get('SSL_CERT_FILE'), str(base / 'test-ca.crt'))
+            for omitted in ({'network', 'ca'}, {'network'}, {'ca'}):
+                with self.assertRaises(AssertionError): execute(omitted)
+            execute(set())
+            handoff_effects = {effect(node): ast.dump(node, include_attributes=False) for node in original.body if effect(node)}
+            self.assertEqual(handoff_effects, core_effects)
+
     def test_existing_module_bindings_cannot_shadow_the_phase_helper(self):
         stores = [n for n in ast.walk(self.source) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == 'rehearsal_phase']
         self.assertEqual(stores, [])
@@ -132,7 +235,7 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
 
     def test_composition_retains_all_predecessor_assertions_and_required_tail_phases(self):
         coverage = json.loads(pathlib.Path(__file__).with_name('rehearsal-coverage.json').read_text())
-        actual = collections.Counter(hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+        actual = collections.Counter(predecessor_assertion_digest(node)
                                      for node in ast.walk(self.source) if isinstance(node, ast.Assert))
         self.assertEqual(coverage['originalAssertionCount'], 124)
         self.assertFalse(collections.Counter(coverage['originalAssertions']) - actual)
@@ -147,7 +250,7 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
         coverage = json.loads(pathlib.Path(__file__).with_name('rehearsal-coverage.json').read_text())
         self.assertEqual(coverage['integratedMain'], '06296fc00e0408ea672d9ae12003a9ac49508411')
         self.assertEqual(sum(coverage['integratedCleanupAssertions'].values()), 4)
-        actual = collections.Counter(hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+        actual = collections.Counter(predecessor_assertion_digest(node)
                                      for node in ast.walk(self.source) if isinstance(node, ast.Assert))
         expected = collections.Counter(coverage['originalAssertions']) + collections.Counter(coverage['integratedCleanupAssertions'])
         self.assertFalse(expected - actual)

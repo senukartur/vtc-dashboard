@@ -1,5 +1,6 @@
 """Fixed root-owned, isolated notification acceptance. No shared activation or provider calls."""
 import concurrent.futures
+import datetime
 import hashlib
 import ipaddress
 import json
@@ -43,6 +44,70 @@ def failed_child(o, output):
     with open(path, 'wb') as handle:
         os.fchmod(handle.fileno(), 0o600)
         handle.write(output[-65536:]); handle.flush(); os.fsync(handle.fileno())
+
+
+def fixture_json(path, value):
+    """Publish only fixture-facing non-secret signals with their final mode before rename."""
+    temporary = path.with_name('.' + path.name + '-' + secrets.token_hex(16) + '.tmp')
+    owned = None
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        owned = os.fstat(descriptor)
+        with os.fdopen(descriptor, 'w') as handle:
+            os.fchmod(handle.fileno(), 0o644)
+            json.dump(value, handle); handle.flush(); os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        owned = None
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+    except Exception:
+        if owned is not None:
+            try:
+                current = temporary.lstat()
+                if (current.st_dev, current.st_ino) == (owned.st_dev, owned.st_ino): temporary.unlink()
+            except Exception: pass
+        raise
+
+
+def worker_log_output(o, identity):
+    """Caller validates its acknowledged CID. Docker keeps container stderr on CLI stderr."""
+    o.require(isinstance(identity, str) and re.fullmatch('[a-f0-9]{64}', identity), 'NOTIFICATIONS_LOG_IDENTITY_INVALID')
+    directory = o.BASE / 'state'
+    parent = directory.lstat()
+    o.require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == 0 and not parent.st_mode & 0o077,
+              'NOTIFICATIONS_LOG_DIRECTORY_INVALID')
+    path = directory / 'last-child.stderr'
+    # A private path absent before this synchronous command proves current-call creation.
+    # Filesystem timestamps can precede the userspace clock even for a freshly created empty file.
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        pass
+    else:
+        with os.fdopen(descriptor, 'rb') as handle:
+            previous = os.fstat(handle.fileno())
+            o.require(stat.S_ISREG(previous.st_mode) and previous.st_uid == 0 and
+                      not previous.st_mode & 0o077 and previous.st_nlink == 1,
+                      'NOTIFICATIONS_LOG_STDERR_INVALID')
+            current = path.lstat()
+            o.require((current.st_dev, current.st_ino) == (previous.st_dev, previous.st_ino),
+                      'NOTIFICATIONS_LOG_STDERR_INVALID')
+            path.unlink()
+    try: path.lstat()
+    except FileNotFoundError: pass
+    else: raise RuntimeError('NOTIFICATIONS_LOG_STDERR_INVALID')
+    # Owning control commands are serialized here; concurrent collectors would need per-call capture paths.
+    output = o.run(['docker', 'logs', identity], timeout=10)
+    o.require(isinstance(output, bytes), 'NOTIFICATIONS_LOG_OUTPUT_INVALID')
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, 'rb') as handle:
+        info = os.fstat(handle.fileno())
+        o.require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o077 and
+                  info.st_nlink == 1, 'NOTIFICATIONS_LOG_STDERR_INVALID')
+        handle.seek(max(0, info.st_size - 65536))
+        errors = handle.read(65536)
+    return output[-65536:] + b'\n' + errors
 
 
 def worker_failure(output, tables):
@@ -96,6 +161,140 @@ def worker_state(value):
             'exitCode': state.get('ExitCode') if type(state.get('ExitCode')) is int and 0 <= state['ExitCode'] <= 255 else None,
             'oomKilled': state.get('OOMKilled') if type(state.get('OOMKilled')) is bool else None,
             'dead': state.get('Dead') if type(state.get('Dead')) is bool else None}
+
+
+def parent_tick_result(value, state, now):
+    """Project only the current allocation's receipt; never export its private binding fields."""
+    unavailable = lambda reason: {'availability': 'unavailable', 'reason': reason}
+    if not isinstance(value, dict):
+        return unavailable('malformed')
+    if value.get('revision') != state.get('revision') or value.get('imageId') != state.get('imageId'):
+        return unavailable('binding_mismatch')
+    attempted = value.get('attemptedUtc')
+    if type(attempted) is not int or type(state.get('startedUtc')) is not int or attempted > now:
+        return unavailable('malformed')
+    if attempted < state['startedUtc']:
+        return unavailable('stale')
+    statuses = {'not_attempted', 'running', 'completed', 'failed', 'skipped_safety_fence',
+                'skipped_control_failure', 'skipped_acceptance_window'}
+    categories = {'safety_fence', 'client_timeout', 'client_failed', 'control_failed'}
+    steps = value.get('steps')
+    if (not isinstance(value.get('status'), str) or value['status'] not in {'running', 'completed', 'failed', 'completed_with_skips'} or
+            not isinstance(steps, dict) or set(steps) != {'validation', 'heartbeat', 'jobs'}):
+        return unavailable('malformed')
+    result = {'availability': 'available', 'status': value['status'], 'attemptedUtc': attempted, 'steps': {}}
+    for key in ['finishedUtc', 'completedUtc']:
+        if key in value:
+            if type(value[key]) is not int or not attempted <= value[key] <= now:
+                return unavailable('malformed')
+            result[key] = value[key]
+    for name, step in steps.items():
+        if not isinstance(step, dict) or not isinstance(step.get('status'), str) or step['status'] not in statuses:
+            return unavailable('malformed')
+        projected = {'status': step['status']}
+        if 'category' in step:
+            if not isinstance(step['category'], str) or step['category'] not in categories:
+                return unavailable('malformed')
+            projected['category'] = step['category']
+        for key in ['attemptedUtc', 'durationMs']:
+            if key in step:
+                number = step[key]
+                if type(number) is not int or number < 0 or (key == 'attemptedUtc' and not attempted <= number <= now):
+                    return unavailable('malformed')
+                projected[key] = number
+        result['steps'][name] = projected
+    return result
+
+
+def parent_tick_receipt(window, state):
+    # BASE and the state are already bound by this Window's positive allocation/controls receipt.
+    if state.get('runId') != window.run_id or state.get('revision') != window.revision or state.get('imageId') != window.image_id:
+        return {'availability': 'unavailable', 'reason': 'binding_mismatch'}
+    path = window.o.BASE / 'state/tick-last.json'
+    try:
+        value = private_json(window.o, path)
+    except FileNotFoundError:
+        return {'availability': 'unavailable', 'reason': 'missing'}
+    except Exception:
+        return {'availability': 'unavailable', 'reason': 'read_failed'}
+    return parent_tick_result(value, state, int(time.time()))
+
+
+def scheduler_failure(stage, error):
+    stages = {'prepare', 'start', 'exercise', 'tick', 'inspect', 'complete', 'cleanup'}
+    codes = {'TICK_FAILED', 'OPERATION_CHILD_FAILED', 'NOTIFICATIONS_WORKER_FAILED',
+             'NOTIFICATIONS_EXERCISE_FAILED', 'NOTIFICATIONS_WINDOW_REHEARSAL_INCOMPLETE',
+             'NOTIFICATIONS_SHARED_STATE_CHANGED'}
+    code = error.args[0] if isinstance(error, RuntimeError) and len(error.args) == 1 else None
+    return {'stage': stage if isinstance(stage, str) and stage in stages else 'unknown',
+            'code': code if isinstance(code, str) and code in codes else 'unknown'}
+
+
+class ObservationBudget:
+    """One observation deadline; delegated operations can only shorten existing bounds."""
+    def __init__(self, base, deadline):
+        self.base, self.deadline = base, deadline
+
+    def __getattr__(self, name):
+        return getattr(self.base, name)
+
+    def remaining(self, maximum):
+        value = self.deadline - time.monotonic()
+        self.base.require(value > 0, 'NOTIFICATIONS_INTERRUPT_OBSERVATION_DEADLINE')
+        return min(maximum, value)
+
+    def run(self, arguments, *, timeout=180, **options):
+        return self.base.run(arguments, timeout=self.remaining(timeout), **options)
+
+
+def interruption_target(o, value):
+    keys = ['runId', 'requestId', 'tripId', 'sourceRecordId', 'eventId']
+    o.require(isinstance(value, dict) and all(isinstance(value.get(k), str) and RUN.fullmatch(value[k]) for k in keys),
+              'NOTIFICATIONS_INTERRUPT_TARGET_INVALID')
+    return {k: value[k] for k in keys}
+
+
+def interrupted_lease_observation(value):
+    """Retain closed wire types before strict validation; never copy unknown SQL values."""
+    fields = ('state', 'attempts', 'leaseUntilUtc', 'observedUtc', 'unexpired', 'completedAt')
+    kinds = {str: 'string', int: 'integer', bool: 'boolean', type(None): 'null', dict: 'object', list: 'array'}
+    row = value if isinstance(value, dict) else {}
+    result = {'object': isinstance(value, dict), 'exactKeys': isinstance(value, dict) and set(value) == set(fields),
+              'types': {key: kinds.get(type(row[key]), 'other') if key in row else 'missing' for key in fields},
+              'state': row.get('state') if isinstance(row.get('state'), str) and row['state'] in
+                       {'ready', 'running', 'completed', 'failed'} else 'unknown',
+              'attempts': row.get('attempts') if type(row.get('attempts')) is int else None,
+              'unexpired': row.get('unexpired') if type(row.get('unexpired')) is int and row['unexpired'] in (0, 1) else None,
+              'completedAtNull': 'completedAt' in row and row['completedAt'] is None,
+              'timestampFormat': False, 'timestampParse': False, 'remainingMs': None}
+    pattern = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z'
+    if all(isinstance(row.get(key), str) and re.fullmatch(pattern, row[key]) for key in ('leaseUntilUtc', 'observedUtc')):
+        result['timestampFormat'] = True
+        try:
+            lease, observed = (datetime.datetime.fromisoformat(row[key].replace('Z', '+00:00'))
+                               for key in ('leaseUntilUtc', 'observedUtc'))
+            result.update(timestampParse=True, remainingMs=round((lease - observed).total_seconds() * 1000))
+        except ValueError:
+            pass
+    return result
+
+
+def interrupted_lease(o, value):
+    o.require(isinstance(value, dict) and set(value) == {'state', 'attempts', 'leaseUntilUtc', 'observedUtc', 'unexpired', 'completedAt'},
+              'NOTIFICATIONS_INTERRUPTED_LEASE_INVALID')
+    o.require(value['state'] == 'running' and type(value['attempts']) is int and value['attempts'] >= 1 and
+              type(value['unexpired']) is int and value['unexpired'] == 1 and value['completedAt'] is None,
+              'NOTIFICATIONS_INTERRUPTED_LEASE_INVALID')
+    pattern = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z'
+    o.require(all(isinstance(value[k], str) and re.fullmatch(pattern, value[k]) for k in ['leaseUntilUtc', 'observedUtc']),
+              'NOTIFICATIONS_INTERRUPTED_LEASE_INVALID')
+    try:
+        lease = datetime.datetime.fromisoformat(value['leaseUntilUtc'].replace('Z', '+00:00'))
+        observed = datetime.datetime.fromisoformat(value['observedUtc'].replace('Z', '+00:00'))
+    except ValueError:
+        raise RuntimeError('NOTIFICATIONS_INTERRUPTED_LEASE_INVALID') from None
+    o.require(lease > observed, 'NOTIFICATIONS_INTERRUPTED_LEASE_INVALID')
+    return value
 
 
 def occupied_ranges(o, inventory):
@@ -219,9 +418,18 @@ class Window:
         names = [f'{self.network}-{r}' for r in ROLES]
         self.containers = WindowContainers(o, revision, image_id, run_id, self.directory, names, self.bound, self.save)
 
-    def sql(self, statement):
+    def sql(self, statement, *, timeout=30):
         return self.o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B'],
-                              revision=self.revision, image_id=self.image_id, data=statement.encode(), timeout=30)
+                              revision=self.revision, image_id=self.image_id, data=statement.encode(), timeout=min(30, timeout))
+
+    def worker_logs(self, identity, budget=None):
+        state = self.bound()
+        names = [name for name, record in state['containers'].items() if name in self.containers.names and
+                 record.get('phase') == 'created' and record.get('id') == identity and record.get('imageId') == self.image_id]
+        self.o.require(len(names) == 1, 'NOTIFICATIONS_LOG_RECEIPT_REQUIRED')
+        controller = self.observed_containers(budget) if budget is not None else self.containers
+        controller.validate(names[0], identity)
+        return worker_log_output(budget or self.o, identity)
 
     def save(self, state):
         self.o.atomic_json(self.marker, state)
@@ -412,7 +620,7 @@ class Window:
             except Exception:
                 pass  # An unavailable sample stays null; it is never reported as zero usage.
             result = self.o.run(['docker', 'wait', identity], timeout=55).decode().strip()
-            output = self.o.run(['docker', 'logs', identity], timeout=10)
+            output = self.worker_logs(identity)
             if result != '0':
                 failed_child(self.o, output)
                 state = self.bound()
@@ -471,7 +679,7 @@ class Window:
             if time.time() * 1000 < state.get('pausedUntilUtcMs', 0):
                 result = 'skipped_requested_pause'
             elif request and request['kind'] == 'interrupt':
-                self.interrupt()
+                self.interrupt(request)
                 result = 'interrupted_owned_worker'
             elif request and request['kind'] == 'overlap':
                 self.overlap()
@@ -489,8 +697,7 @@ class Window:
             self.save(state)
             raise
         state = self.bound(); state['ticks'][-1].update(status=result, finishedUtc=int(time.time()), after=self.work_sample()); self.save(state)
-        self.o.atomic_json(self.directory / 'exchange/tick.json', {'count': len(state['ticks']), 'finishedUtc': int(time.time()), 'status': result})
-        os.chmod(self.directory / 'exchange/tick.json', 0o644)
+        fixture_json(self.directory / 'exchange/tick.json', {'count': len(state['ticks']), 'finishedUtc': int(time.time()), 'status': result})
 
     def request(self, state):
         path = self.directory / 'exchange/request.json'
@@ -500,12 +707,16 @@ class Window:
         self.o.require(stat.S_ISREG(info.st_mode) and info.st_uid == 1000 and not info.st_mode & 0o077 and
                        info.st_size <= 1024, 'NOTIFICATIONS_FIXTURE_REQUEST_INVALID')
         value = json.loads(path.read_text())
+        self.o.require(isinstance(value, dict), 'NOTIFICATIONS_FIXTURE_REQUEST_INVALID')
         self.o.require(value.get('runId') == self.run_id and value.get('kind') in ['pause', 'interrupt', 'overlap'] and
                        type(value.get('createdUtc')) is int and state['startedUtc'] * 1000 <= value['createdUtc'] <= time.time() * 1000 and
                        (value.get('scenario') == 6 if value['kind'] == 'pause' else value.get('scenario') == 8),
                        'NOTIFICATIONS_FIXTURE_REQUEST_INVALID')
-        expected = {'runId', 'scenario', 'kind', 'createdUtc'} | ({'untilUtc'} if value['kind'] == 'pause' else set())
+        expected = {'runId', 'scenario', 'kind', 'createdUtc'} | ({'untilUtc'} if value['kind'] == 'pause' else
+                   {'requestId', 'tripId', 'sourceRecordId', 'eventId'} if value['kind'] == 'interrupt' else set())
         self.o.require(set(value) == expected, 'NOTIFICATIONS_FIXTURE_REQUEST_INVALID')
+        if value['kind'] == 'interrupt':
+            interruption_target(self.o, value)
         if value['kind'] == 'pause':
             self.o.require(type(value['untilUtc']) is int and 120000 < value['untilUtc'] - value['createdUtc'] <= 180000,
                            'NOTIFICATIONS_FIXTURE_REQUEST_INVALID')
@@ -519,9 +730,38 @@ class Window:
         self.o.require(json.loads(self.o.run(['docker', 'inspect', record['id']], timeout=10))[0]['State']['Running'],
                        'NOTIFICATIONS_FIXTURE_NOT_RUNNING')
         state['lastRequestUtcMs'] = value['createdUtc']; self.save(state)
+        if value['kind'] == 'interrupt':
+            value['fixtureId'] = record['id']
         return value
 
-    def interrupt(self):
+    def observed_containers(self, budget):
+        return WindowContainers(budget, self.revision, self.image_id, self.run_id, self.directory,
+                                self.containers.names, self.bound, self.save)
+
+    def interruption_fixture(self, request, budget):
+        name = next(n for n in self.containers.names if n.endswith('-fixture'))
+        record = self.bound()['containers'].get(name)
+        self.o.require(record and record['phase'] == 'created' and record['id'] == request['fixtureId'],
+                       'NOTIFICATIONS_INTERRUPT_FIXTURE_CHANGED')
+        self.observed_containers(budget).validate(name, record['id'])
+        info = json.loads(budget.run(['docker', 'inspect', record['id']], timeout=10))[0]
+        self.o.require(info['State']['Running'], 'NOTIFICATIONS_INTERRUPT_FIXTURE_EXITED')
+
+    def interruption_armed(self, request, binding, budget):
+        path = self.directory / 'exchange/interrupt-armed.json'
+        if not path.exists():
+            return False
+        info = path.lstat()
+        self.o.require(stat.S_ISREG(info.st_mode) and info.st_uid == 1000 and not info.st_mode & 0o077 and info.st_size <= 1024,
+                       'NOTIFICATIONS_INTERRUPT_ARMED_INVALID')
+        self.o.require(json.loads(path.read_text()) == dict(binding, phase='armed'), 'NOTIFICATIONS_INTERRUPT_ARMED_INVALID')
+        self.interruption_fixture(request, budget)
+        return True
+
+    def interrupt(self, request):
+        target = interruption_target(self.o, request)
+        self.o.require(target['runId'] == self.run_id and isinstance(request.get('fixtureId'), str) and
+                       re.fullmatch(r'[a-f0-9]{64}', request['fixtureId']), 'NOTIFICATIONS_INTERRUPT_TARGET_INVALID')
         name = next(n for n in self.containers.names if n.endswith('-interrupted'))
         started = time.monotonic()
         record = {'stage': 'create', 'claimed': False, 'queries': 0, 'status': 'running'}
@@ -531,30 +771,99 @@ class Window:
         primary, identity = None, None
         try:
             identity = self.containers.create('interrupted', [*self.environment('jobs'), self.image_id, 'node', 'dist/jobs.js', 'run'], wait=False)
+            budget = ObservationBudget(self.o, time.monotonic() + 55)
+            observed = self.observed_containers(budget)
+            binding = dict(target, workerId=identity)
+            record.update(workerId=identity, role='interrupted')
             record['stage'] = 'start'; remember()
-            self.o.run(['docker', 'start', identity], timeout=10)
-            record['stage'] = 'claim_wait'; remember()
-            deadline = time.monotonic() + 10
+            budget.run(['docker', 'start', identity], timeout=10)
+            record['stage'] = 'startup'; remember()
+            startup = ObservationBudget(self.o, min(budget.deadline, time.monotonic() + 30))
             while True:
-                claimed = self.sql(f"SELECT HEX(id) FROM {self.schema}.durable_jobs WHERE kind='notifications.deliver' AND state='running' ORDER BY id LIMIT 1;").decode().strip()
+                phase = worker_phase(self.worker_logs(identity, startup))
+                values = json.loads(startup.run(['docker', 'inspect', identity], timeout=10))
+                self.o.require(len(values) == 1 and values[0]['Id'] == identity, 'NOTIFICATIONS_INTERRUPT_CONTAINER_CHANGED')
+                record['workerState'] = worker_state(values[0]); record['workerPhase'] = phase; remember()
+                self.o.require(values[0]['State']['Running'], 'NOTIFICATIONS_INTERRUPT_WORKER_EXITED')
+                if phase == 'jobs_trip_catchup':
+                    break
+                self.o.require(phase in [None, 'jobs_compose'], 'NOTIFICATIONS_STARTUP_BARRIER_BYPASSED')
+                startup.remaining(1)
+                time.sleep(min(0.1, startup.remaining(0.1)))
+            self.interruption_fixture(request, startup)
+            event_hex = target['eventId'].encode('ascii').hex()
+            trip_hex = target['tripId'].encode('ascii').hex()
+            predicate = (f"e.id=UNHEX('{event_hex}') AND e.type='trip.lifecycle_changed' AND e.schema_version=1 "
+                f"AND e.aggregate_kind='trip' AND e.aggregate_id=UNHEX('{trip_hex}') "
+                f"AND JSON_UNQUOTE(JSON_EXTRACT(e.data,'$.tripId'))='{target['tripId']}' "
+                f"AND JSON_UNQUOTE(JSON_EXTRACT(e.data,'$.sourceRecordId'))='{target['sourceRecordId']}'")
+            invisible = self.sql(f"SELECT COUNT(*) FROM {self.schema}.outbox_events e WHERE {predicate};", timeout=startup.remaining(30))
+            self.o.require(invisible.strip() == b'0', 'NOTIFICATIONS_PRODUCER_ALREADY_COMMITTED')
+            record['producerUncommittedAtStartup'] = True; remember()
+            startup.remaining(1)
+            fixture_json(self.directory / 'exchange/interrupt-ready.json', dict(binding, phase='startup_ready'))
+            record['stage'] = 'arming'; remember()
+            arm = ObservationBudget(self.o, min(budget.deadline, time.monotonic() + 10))
+            while not self.interruption_armed(request, binding, arm):
+                self.interruption_fixture(request, arm)
+                time.sleep(min(0.1, arm.remaining(0.1)))
+            visible = self.sql(f"SELECT COUNT(*) FROM {self.schema}.outbox_events e WHERE {predicate};", timeout=budget.remaining(30))
+            self.o.require(visible.strip() == b'1', 'NOTIFICATIONS_INTERRUPT_TARGET_NOT_COMMITTED')
+            record['targetBound'] = True; remember()
+            record['stage'] = 'claim_wait'; remember()
+            claim = ObservationBudget(self.o, min(budget.deadline, time.monotonic() + 10))
+            def claim_time(maximum):
+                try:
+                    return claim.remaining(maximum)
+                except RuntimeError:
+                    if time.monotonic() >= budget.deadline:
+                        raise
+                    raise RuntimeError('NOTIFICATIONS_LEASE_NOT_OBSERVED') from None
+            while True:
+                claimed = self.sql(f"SELECT HEX(j.id) FROM {self.schema}.durable_jobs j JOIN {self.schema}.outbox_events e ON e.id=j.event_id "
+                    f"WHERE {predicate} AND j.kind='notifications.deliver' AND j.schema_version=1 AND j.consumer='notifications.v1' "
+                    f"AND JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.eventId'))='{target['eventId']}' AND j.state='running' ORDER BY j.id LIMIT 1;",
+                    timeout=claim_time(30)).decode().strip()
                 record['queries'] += 1
                 if claimed:
+                    claim_time(1)
+                    self.o.require(re.fullmatch(r'[A-Fa-f0-9]{72}', claimed) and
+                                   RUN.fullmatch(bytes.fromhex(claimed).decode('ascii')), 'NOTIFICATIONS_INTERRUPTED_JOB_INVALID')
                     record['claimed'] = True
                     break
-                self.o.require(time.monotonic() < deadline, 'NOTIFICATIONS_LEASE_NOT_OBSERVED')
-                time.sleep(0.1)
+                time.sleep(min(0.1, claim_time(0.1)))
             record['stage'] = 'stop'; remember()
-            self.containers.stop(name)
+            values = json.loads(budget.run(['docker', 'inspect', identity], timeout=10))
+            self.o.require(len(values) == 1 and values[0]['Id'] == identity and values[0]['State']['Running'],
+                           'NOTIFICATIONS_INTERRUPT_WORKER_EXITED')
+            record['processRunningBeforeStop'] = True; remember()
+            observed.stop(name)
+            record['processAbsent'] = True; remember()
+            record['stage'] = 'lease_proof'; remember()
+            raw_lease = self.sql("SELECT JSON_OBJECT('state',j.state,'attempts',j.attempts,"
+                "'leaseUntilUtc',DATE_FORMAT(j.lease_until,'%Y-%m-%dT%H:%i:%s.%fZ'),"
+                "'observedUtc',DATE_FORMAT(UTC_TIMESTAMP(3),'%Y-%m-%dT%H:%i:%s.%fZ'),"
+                "'unexpired',CAST(j.lease_until>UTC_TIMESTAMP(3) AS UNSIGNED),'completedAt',j.completed_at) "
+                f"FROM {self.schema}.durable_jobs j JOIN {self.schema}.outbox_events e ON e.id=j.event_id "
+                f"WHERE j.id=UNHEX('{claimed}') AND {predicate} AND j.kind='notifications.deliver' AND j.schema_version=1 AND j.consumer='notifications.v1' "
+                f"AND JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.eventId'))='{target['eventId']}';",
+                timeout=budget.remaining(30))
+            value = json.loads(raw_lease)
+            record['leaseObservation'] = interrupted_lease_observation(value); remember()
+            lease = interrupted_lease(self.o, value)
+            record['lease'] = lease; remember()
             record['stage'] = 'ack'; remember()
-            self.o.atomic_json(self.directory / 'exchange/interrupted.json', {'runId': self.run_id, 'jobIdHex': claimed, 'stoppedUtc': int(time.time())})
-            os.chmod(self.directory / 'exchange/interrupted.json', 0o644)
+            budget.remaining(1)
+            fixture_json(self.directory / 'exchange/interrupted.json', dict(binding, phase='stopped', jobIdHex=claimed,
+                                                                          processAbsent=True, lease=lease))
+            budget.remaining(1)
             record.update(status='pass', elapsedMs=round((time.monotonic() - started) * 1000)); remember()
         except Exception as error:
             primary = error
             record['workerPhase'] = None
             if identity is not None:
                 try:
-                    output = self.o.run(['docker', 'logs', identity], timeout=10)
+                    output = self.worker_logs(identity)
                     record['workerPhase'] = worker_phase(output)
                     record['workerFailure'] = worker_failure(output, self.bound().get('diagnosticTables', []))
                 except Exception:
@@ -566,8 +875,14 @@ class Window:
                     record['workerState'] = worker_state(values[0])
                 except Exception:
                     record['workerStateUnavailable'] = True
-            record.update(status='failed', elapsedMs=round((time.monotonic() - started) * 1000),
-                          reason='claim_not_observed' if isinstance(error, RuntimeError) and error.args == ('NOTIFICATIONS_LEASE_NOT_OBSERVED',) else 'operation_failed')
+            reasons = {'NOTIFICATIONS_LEASE_NOT_OBSERVED': 'claim_not_observed',
+                       'NOTIFICATIONS_INTERRUPT_OBSERVATION_DEADLINE': 'observation_deadline',
+                       'NOTIFICATIONS_INTERRUPT_WORKER_EXITED': 'worker_exited',
+                       'NOTIFICATIONS_STARTUP_BARRIER_BYPASSED': 'barrier_bypassed',
+                       'NOTIFICATIONS_INTERRUPT_ARMED_INVALID': 'armed_mismatch',
+                       'NOTIFICATIONS_INTERRUPTED_LEASE_INVALID': 'lease_invalid'}
+            reason = reasons.get(error.args[0], 'operation_failed') if isinstance(error, RuntimeError) and len(error.args) == 1 and isinstance(error.args[0], str) else 'operation_failed'
+            record.update(status='failed', elapsedMs=round((time.monotonic() - started) * 1000), reason=reason)
             remember()
             raise
         finally:
@@ -621,8 +936,7 @@ class Window:
                     raise
                 time.sleep(1)
         os.chmod(self.directory / 'exchange/ca.crt', 0o644)
-        self.o.atomic_json(self.directory / 'exchange/tick.json', {'count': 0, 'finishedUtc': int(time.time()), 'status': 'not_started'})
-        os.chmod(self.directory / 'exchange/tick.json', 0o644)
+        fixture_json(self.directory / 'exchange/tick.json', {'count': 0, 'finishedUtc': int(time.time()), 'status': 'not_started'})
         state = self.bound(); state.update(phase='running', schedule=True, startedUtc=int(time.time())); self.save(state)
 
     def exercise(self):
@@ -675,6 +989,7 @@ class Window:
             'duplicateMinuteSkips': state.get('duplicateMinuteSkips', 0),
             'pausedTickCount': state.get('pausedTickCount', 0), 'capturedUtc': int(time.time()),
             'workerFailure': state.get('lastWorkerFailure'), 'interruption': state.get('interruption'),
+            'parentTick': parent_tick_receipt(self, state), 'schedulerFailure': state.get('schedulerFailure'),
         })
         # Failed/unknown CREATE acknowledgements remain recovery blockers even if names match.
         for resource, phase in state['allocations'].items():
@@ -786,8 +1101,10 @@ def rehearse(o):
     window = Window(o, revision, image_id, run_id)
     original = hashes(o, PROTECTED)
     completed = False
+    stage, primary = 'prepare', None
     try:
         for mode in ['prepare', 'start', 'exercise']:
+            stage = mode
             with o.lock():
                 operation(o, revision, image_id, mode, run_id)
             print(json.dumps({'event': 'notifications_window_rehearsal', 'phase': mode, 'result': 'pass'}), flush=True)
@@ -797,6 +1114,7 @@ def rehearse(o):
         deadline = time.monotonic() + 1700
         while time.monotonic() < deadline:
             if time.time() >= next_minute:
+                stage = 'tick'
                 previous = __import__('sys').argv
                 try:
                     __import__('sys').argv = ['operations.py', 'tick']
@@ -804,16 +1122,31 @@ def rehearse(o):
                 finally:
                     __import__('sys').argv = previous
                 next_minute = (int(time.time()) // 60 + 1) * 60
+            stage = 'inspect'
             with o.lock():
                 window.inspect()
                 if window.bound()['phase'] == 'completed':
                     completed = True
                     break
             time.sleep(1)
+        stage = 'complete'
         o.require(completed, 'NOTIFICATIONS_WINDOW_REHEARSAL_INCOMPLETE')
+    except Exception as error:
+        primary = error
+        try:
+            state = window.bound(); state['schedulerFailure'] = scheduler_failure(stage, error); window.save(state)
+        except Exception:
+            print(json.dumps({'event': 'notifications_window_secondary_failure', 'stage': 'retention', 'code': 'unavailable'}), flush=True)
+        raise
     finally:
-        if window.marker.exists():
-            with o.lock():
-                window.cleanup()
-        o.require(hashes(o, PROTECTED) == original, 'NOTIFICATIONS_SHARED_STATE_CHANGED')
+        try:
+            if window.marker.exists():
+                with o.lock():
+                    window.cleanup()
+            o.require(hashes(o, PROTECTED) == original, 'NOTIFICATIONS_SHARED_STATE_CHANGED')
+        except Exception:
+            if primary is None:
+                raise
+            # Retain the original scheduler failure; failed cleanup keeps its existing recovery fence.
+            print(json.dumps({'event': 'notifications_window_secondary_failure', 'stage': 'cleanup', 'code': 'unavailable'}), flush=True)
     print(json.dumps({'event': 'notifications_window_rehearsal', 'phase': 'complete', 'result': 'pass'}), flush=True)

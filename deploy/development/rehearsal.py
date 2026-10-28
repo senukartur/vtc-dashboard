@@ -560,8 +560,8 @@ def core():
                         # Test-only root investigation: the harness created and removed the foreign
                         # object, observed create rejection, and verifies no CID receipt/unknown object.
                         # The operator has no automatic uncertain-creation reconciliation command.
-                        receipt = base / race_state['directory'] / intent['receipt']
-                        assert not receipt.exists() or receipt.read_text().strip() == ''
+                        receipt_path = base / race_state['directory'] / intent['receipt']
+                        assert not receipt_path.exists() or receipt_path.read_text().strip() == ''
                         assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
                         race_state['containers'].pop(race_name)
                         ops.atomic_json(base / 'state/identity-acceptance', race_state)
@@ -847,6 +847,9 @@ def handoff_context():
     assert image_archive == base / 'test-image.tar' and image_archive.is_file()
     config = json.loads((base / 'compose.yaml').read_text())
     original_compose = ops.compose
+    # Each group is a fresh Root process/container; restore core's scoped transport prerequisites.
+    ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
+    os.environ['SSL_CERT_FILE'] = str(base / 'test-ca.crt')
     context = ssl.create_default_context(cafile=str(base / 'test-ca.crt'))
     token = dict(line.split('=', 1) for line in (base / 'private/operator.env').read_text().splitlines())['OPERATOR_TOKEN']
     def compose(args, *, revision, image_id=None, project=project, **kwargs):

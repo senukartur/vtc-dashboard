@@ -1,6 +1,8 @@
 """Fixed-operation failure paths; real MySQL/HTTPS/minute work belongs to the window rehearsal."""
 import json
+import contextlib
 import http.server
+import io
 import os
 import pathlib
 import subprocess
@@ -23,7 +25,7 @@ class WindowTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.base = pathlib.Path(self.temp.name)
-        (self.base / 'state').mkdir()
+        (self.base / 'state').mkdir(mode=0o700)
         (self.base / 'private/maintenance').mkdir(parents=True)
         self.patch = patch.object(o, 'BASE', self.base)
         self.patch.start(); self.addCleanup(self.patch.stop)
@@ -46,40 +48,264 @@ class WindowTests(unittest.TestCase):
                 n.operation(o, SHA, IMAGE, mode, run)
         self.assertFalse(self.window.marker.exists())
 
+    def test_owned_worker_logs_capture_initial_empty_stderr_phase_and_final_stdout(self):
+        self.interrupt_fixture()
+        phase = b'{"event":"jobs_acceptance_phase","phase":"jobs_trip_catchup"}\n'
+        failure = json.dumps({'event': 'jobs_failed', 'category': 'operation_failed', 'diagnostic': {
+            'category': 'database', 'step': 'jobs_pass', 'nativeErrno': 1142, 'message': 'fictional private body'}}).encode()
+        replies = iter([(b'', b''), (b'', phase), (b'{"event":"jobs_result","status":"completed"}\n', failure)])
+        def reply(args, **_options):
+            self.assertEqual(args, ['docker', 'logs', 'c' * 64])
+            output, errors = next(replies)
+            path = self.base / 'state/last-child.stderr'; path.write_bytes(errors); path.chmod(0o600)
+            now = n.time.time_ns(); os.utime(path, ns=(now, now))
+            return output
+        with patch.object(o, 'run', side_effect=reply):
+            self.assertIsNone(n.worker_phase(self.window.worker_logs('c' * 64)))
+            self.assertEqual(n.worker_phase(self.window.worker_logs('c' * 64)), 'jobs_trip_catchup')
+            final = self.window.worker_logs('c' * 64)
+        self.assertIn(b'jobs_result', final)
+        projection = n.worker_failure(final, [])
+        self.assertEqual(projection['nativeErrno'], 1142)
+        self.assertNotIn('fictional private', json.dumps(projection))
+        self.window.containers.validate.assert_called_with('synthetic-interrupted', 'c' * 64)
+        with patch.object(o, 'run') as command:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LOG_RECEIPT_REQUIRED$'):
+                self.window.worker_logs('d' * 64)
+            command.assert_not_called()
+
+    def test_log_tails_are_bounded_and_new_file_does_not_depend_on_clock_precision(self):
+        path = self.base / 'state/last-child.stderr'
+        def reply(_args, **_options):
+            path.write_bytes(b'e' * 70000); path.chmod(0o600)
+            os.utime(path, ns=(0, 0))
+            return b'o' * 70000
+        with patch.object(o, 'run', side_effect=reply), patch.object(n.time, 'time_ns', side_effect=AssertionError('clock comparison')):
+            value = n.worker_log_output(o, 'c' * 64)
+        self.assertEqual(value, b'o' * 65536 + b'\n' + b'e' * 65536)
+        # A preceding private tail is retired before the command; it cannot be adopted if no new file is created.
+        with patch.object(o, 'run', return_value=b''):
+            with self.assertRaises(FileNotFoundError): n.worker_log_output(o, 'c' * 64)
+        self.assertFalse(path.exists())
+        with patch.object(o, 'run') as command:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LOG_IDENTITY_INVALID$'):
+                n.worker_log_output(o, '../foreign')
+            command.assert_not_called()
+
+    def test_log_reader_preserves_unrelated_public_linked_or_foreign_input(self):
+        path = self.base / 'state/last-child.stderr'
+        target = self.base / 'private/unrelated'; target.write_bytes(b'fictional unrelated'); target.chmod(0o600)
+        for kind in ['public', 'hardlink', 'symlink', 'foreign']:
+            if kind == 'hardlink': os.link(target, path)
+            elif kind == 'symlink': path.symlink_to(target)
+            else:
+                path.write_bytes(b'fictional prior'); path.chmod(0o644 if kind == 'public' else 0o600)
+                if kind == 'foreign': os.chown(path, 1000, 1000)
+            with patch.object(o, 'run') as command:
+                with self.assertRaises((RuntimeError, OSError)): n.worker_log_output(o, 'c' * 64)
+                command.assert_not_called()
+            self.assertTrue(path.exists()); self.assertEqual(target.read_bytes(), b'fictional unrelated')
+            path.unlink()
+        path.parent.chmod(0o755)
+        with patch.object(o, 'run') as command:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LOG_DIRECTORY_INVALID$'):
+                n.worker_log_output(o, 'c' * 64)
+            command.assert_not_called()
+
+    def test_log_reader_requires_new_private_file_and_preserves_command_primary(self):
+        path = self.base / 'state/last-child.stderr'
+        def reply(_args, **_options):
+            self.assertFalse(path.exists())
+            path.write_bytes(b'fictional public tail'); path.chmod(0o644)
+            return b''
+        with patch.object(o, 'run', side_effect=reply):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LOG_STDERR_INVALID$'):
+                n.worker_log_output(o, 'c' * 64)
+        path.chmod(0o600)
+        primary = RuntimeError('fictional command failure')
+        with patch.object(o, 'run', side_effect=primary):
+            with self.assertRaises(RuntimeError) as caught: n.worker_log_output(o, 'c' * 64)
+        self.assertIs(caught.exception, primary)
+        self.assertFalse(path.exists())
+
+    def test_log_reader_rejects_replacement_after_retiring_prior_tail(self):
+        path = self.base / 'state/last-child.stderr'; path.write_bytes(b'previous'); path.chmod(0o600)
+        original = pathlib.Path.unlink
+        def replaced(value, *args, **options):
+            original(value, *args, **options)
+            if value == path:
+                path.write_bytes(b'fictional collision'); path.chmod(0o600)
+        with patch.object(pathlib.Path, 'unlink', new=replaced), patch.object(o, 'run') as command:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LOG_STDERR_INVALID$'):
+                n.worker_log_output(o, 'c' * 64)
+            command.assert_not_called()
+        self.assertEqual(path.read_bytes(), b'fictional collision')
+
+    def test_fixture_signal_has_final_mode_before_rename_under_private_umask(self):
+        path = self.base / 'state/tick.json'; path.write_text('{"old":true}'); path.chmod(0o644)
+        parent_mode = (path.parent.stat().st_mode & 0o777)
+        original = os.replace
+        def replace(source, target):
+            self.assertEqual(source.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(json.loads(source.read_text()), {'count': 1})
+            self.assertEqual(json.loads(target.read_text()), {'old': True})
+            original(source, target)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+        old = os.umask(0o077)
+        try:
+            with patch.object(n.os, 'replace', side_effect=replace): n.fixture_json(path, {'count': 1})
+        finally: os.umask(old)
+        self.assertEqual(json.loads(path.read_text()), {'count': 1})
+        self.assertEqual(path.parent.stat().st_mode & 0o777, parent_mode)
+        self.assertFalse(any(p.name.endswith('.tmp') for p in path.parent.iterdir()))
+
+    def test_fixture_signal_collision_and_cleanup_failure_preserve_unrelated_data_and_primary(self):
+        path = self.base / 'state/tick.json'; path.write_text('{"old":true}')
+        collision = path.with_name('.tick.json-' + 'a' * 32 + '.tmp')
+        collision.write_text('fictional unrelated collision')
+        with patch.object(n.secrets, 'token_hex', return_value='a' * 32):
+            with self.assertRaises(FileExistsError): n.fixture_json(path, {'count': 1})
+        self.assertEqual(collision.read_text(), 'fictional unrelated collision')
+        self.assertEqual(json.loads(path.read_text()), {'old': True})
+        primary = OSError('fictional rename failure')
+        with patch.object(n.os, 'replace', side_effect=primary), \
+                patch.object(pathlib.Path, 'unlink', side_effect=OSError('fictional cleanup failure')):
+            with self.assertRaises(OSError) as caught: n.fixture_json(path, {'count': 1})
+        self.assertIs(caught.exception, primary)
+        self.assertEqual(collision.read_text(), 'fictional unrelated collision')
+        self.assertEqual(json.loads(path.read_text()), {'old': True})
+
+    def parent_tick(self):
+        return dict(revision=SHA, imageId=IMAGE, attemptedUtc=100, finishedUtc=130, status='failed',
+                    steps={'validation': {'status': 'completed', 'attemptedUtc': 100, 'durationMs': 2},
+                           'heartbeat': {'status': 'failed', 'category': 'client_failed', 'durationMs': 4},
+                           'jobs': {'status': 'completed', 'durationMs': 15000}})
+
+    def test_parent_tick_retains_only_closed_current_step_outcomes(self):
+        value = self.parent_tick()
+        value.update(account='fictional private account', body='fictional private body')
+        value['steps']['heartbeat']['message'] = 'fictional raw command and credential'
+        result = n.parent_tick_result(value, dict(revision=SHA, imageId=IMAGE, startedUtc=90), 140)
+        self.assertEqual(result['availability'], 'available')
+        self.assertEqual(result['steps']['heartbeat'], dict(status='failed', category='client_failed', durationMs=4))
+        self.assertEqual(result['steps']['jobs'], dict(status='completed', durationMs=15000))
+        for private in [SHA, IMAGE, 'account', 'body', 'credential', 'message']:
+            self.assertNotIn(private, json.dumps(result))
+
+    def test_parent_tick_rejects_stale_binding_and_malformed_categories(self):
+        state = dict(revision=SHA, imageId=IMAGE, startedUtc=90)
+        for change, reason in [({'attemptedUtc': 89}, 'stale'), ({'imageId': 'other'}, 'binding_mismatch'),
+                               ({'status': []}, 'malformed'), ({'finishedUtc': 141}, 'malformed'),
+                               ({'attemptedUtc': True}, 'malformed'), ({'steps': {}}, 'malformed')]:
+            self.assertEqual(n.parent_tick_result(self.parent_tick() | change, state, 140),
+                             dict(availability='unavailable', reason=reason))
+        value = self.parent_tick(); value['steps']['heartbeat']['category'] = ['private']
+        self.assertEqual(n.parent_tick_result(value, state, 140)['reason'], 'malformed')
+        self.assertEqual(n.parent_tick_result(None, state, 140)['reason'], 'malformed')
+
+    def test_parent_tick_file_requires_own_run_private_receipt_and_reports_missing(self):
+        state = self.state(startedUtc=90)
+        self.assertEqual(n.parent_tick_receipt(self.window, state)['reason'], 'missing')
+        o.atomic_json(self.base / 'state/tick-last.json', self.parent_tick())
+        with patch.object(n.time, 'time', return_value=140):
+            self.assertEqual(n.parent_tick_receipt(self.window, state)['availability'], 'available')
+            self.assertEqual(n.parent_tick_receipt(self.window, state | {'runId': 'other'})['reason'], 'binding_mismatch')
+        (self.base / 'state/tick-last.json').chmod(0o644)
+        self.assertEqual(n.parent_tick_receipt(self.window, state)['reason'], 'read_failed')
+
+    def test_scheduler_failure_diagnostics_are_closed(self):
+        self.assertEqual(n.scheduler_failure('tick', RuntimeError('TICK_FAILED')), dict(stage='tick', code='TICK_FAILED'))
+        self.assertEqual(n.scheduler_failure(['private'], RuntimeError({'private': 'body'})), dict(stage='unknown', code='unknown'))
+
+    def test_rehearsal_retention_and_cleanup_failures_preserve_primary_scheduler_error(self):
+        primary = RuntimeError('TICK_FAILED')
+        window = Mock()
+        window.bound.return_value = self.state()
+        window.save.side_effect = RuntimeError('fictional private retention failure')
+        window.cleanup.side_effect = RuntimeError('fictional private cleanup failure')
+        output = io.StringIO()
+        with patch.object(n, 'Window', return_value=window), patch.object(n, 'hashes', return_value={}), \
+                patch.object(n, 'operation', side_effect=primary), patch.object(o, 'current', return_value={'revision': SHA, 'imageId': IMAGE}), \
+                patch.object(o, 'lock', side_effect=contextlib.nullcontext), contextlib.redirect_stdout(output):
+            with self.assertRaises(RuntimeError) as caught:
+                n.rehearse(o)
+        self.assertIs(caught.exception, primary)
+        self.assertNotIn('fictional private', output.getvalue())
+        self.assertIn('retention', output.getvalue()); self.assertIn('cleanup', output.getvalue())
+        window.cleanup.assert_called_once()
+
+    def test_rehearsal_cleanup_only_failure_stays_fatal(self):
+        failure = RuntimeError('fictional cleanup failure')
+        window = Mock()
+        window.bound.return_value = {'phase': 'completed'}
+        window.cleanup.side_effect = failure
+        with patch.object(n, 'Window', return_value=window), patch.object(n, 'hashes', return_value={}), \
+                patch.object(n, 'operation'), patch.object(o, 'current', return_value={'revision': SHA, 'imageId': IMAGE}), \
+                patch.object(o, 'lock', side_effect=contextlib.nullcontext), patch.object(n.time, 'time', return_value=100), \
+                patch.object(n.time, 'monotonic', return_value=0), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RuntimeError) as caught:
+                n.rehearse(o)
+        self.assertIs(caught.exception, failure)
+
+    def interrupt_request(self):
+        return dict(runId=RUN, requestId='11111111-1111-4111-8111-111111111111',
+                    tripId='22222222-2222-4222-8222-222222222222',
+                    sourceRecordId='33333333-3333-4333-8333-333333333333',
+                    eventId='44444444-4444-4444-8444-444444444444', fixtureId='d' * 64)
+
     def interrupt_fixture(self):
-        self.state()
+        self.state(containers={'synthetic-interrupted': {'phase': 'created', 'id': 'c' * 64, 'imageId': IMAGE}})
         self.window.directory.mkdir(parents=True)
         (self.window.directory / 'exchange').mkdir()
         containers = Mock()
-        containers.names = ['synthetic-interrupted']
+        containers.names = ['synthetic-interrupted', 'synthetic-fixture']
         containers.create.return_value = 'c' * 64
         self.window.containers = containers
+        self.window.observed_containers = Mock(return_value=containers)
+        self.window.interruption_fixture = Mock()
+        self.window.interruption_armed = Mock(return_value=True)
         return containers
+
+    def interrupt_reply(self, args, **_kwargs):
+        if args[:2] == ['docker', 'logs']:
+            path = self.base / 'state/last-child.stderr'
+            path.write_bytes(b'{"event":"jobs_acceptance_phase","phase":"jobs_trip_catchup"}\n')
+            path.chmod(0o600)
+            now = n.time.time_ns(); os.utime(path, ns=(now, now))
+            return b''
+        if args[:2] == ['docker', 'inspect']:
+            return json.dumps([{'Id': args[2], 'State': {'Running': True, 'ExitCode': 0, 'OOMKilled': False, 'Dead': False}}]).encode()
+        return b''
+
+    def interrupt_lease(self):
+        return dict(state='running', attempts=1, leaseUntilUtc='2026-10-28T00:01:00.000000Z',
+                    observedUtc='2026-10-28T00:00:00.000000Z', unexpired=1, completedAt=None)
 
     def test_interrupt_claim_timeout_retains_closed_stage_and_primary_when_stop_fails(self):
         containers = self.interrupt_fixture()
         containers.stop.side_effect = RuntimeError('private cleanup detail')
-        self.window.sql = Mock(return_value=b'')
-        with patch.object(o, 'run', return_value=b''), patch.object(n.time, 'sleep'), \
-                patch.object(n.time, 'monotonic', side_effect=[100, 100, 101, 111, 112]):
+        counts = iter([b'0', b'1'])
+        self.window.sql = Mock(side_effect=lambda _sql, **_options: next(counts, b''))
+        now = [100.0]
+        with patch.object(o, 'run', side_effect=self.interrupt_reply), \
+                patch.object(n.time, 'monotonic', side_effect=lambda: now[0]), \
+                patch.object(n.time, 'sleep', side_effect=lambda _delay: now.__setitem__(0, now[0] + 6)):
             with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_LEASE_NOT_OBSERVED$'):
-                self.window.interrupt()
+                self.window.interrupt(self.interrupt_request())
         record = self.window.bound()['interruption']
-        self.assertEqual(record, {'stage': 'claim_wait', 'claimed': False, 'queries': 2,
-                                  'status': 'failed', 'reason': 'claim_not_observed',
-                                  'elapsedMs': 12000, 'stopFailed': True, 'workerPhase': None,
-                                  'workerFailure': None, 'workerStateUnavailable': True})
+        self.assertEqual((record['stage'], record['reason'], record['claimed'], record['queries']),
+                         ('claim_wait', 'claim_not_observed', False, 2))
+        self.assertTrue(record['producerUncommittedAtStartup'] and record['targetBound'] and record['stopFailed'])
         self.assertNotIn('private', json.dumps(record))
 
     def test_interrupt_query_failure_has_closed_reason_without_exception_text(self):
         containers = self.interrupt_fixture()
-        self.window.sql = Mock(side_effect=RuntimeError('private query account and body'))
-        with patch.object(o, 'run', return_value=b''):
+        self.window.sql = Mock(side_effect=[b'0', b'1', RuntimeError('private query account and body')])
+        with patch.object(o, 'run', side_effect=self.interrupt_reply):
             with self.assertRaisesRegex(RuntimeError, '^private query account and body$'):
-                self.window.interrupt()
+                self.window.interrupt(self.interrupt_request())
         record = self.window.bound()['interruption']
-        self.assertEqual((record['stage'], record['reason'], record['claimed']),
-                         ('claim_wait', 'operation_failed', False))
+        self.assertEqual((record['stage'], record['reason'], record['claimed']), ('claim_wait', 'operation_failed', False))
         self.assertNotIn('private', json.dumps(record))
         containers.stop.assert_called_once_with('synthetic-interrupted')
 
@@ -87,21 +313,183 @@ class WindowTests(unittest.TestCase):
         containers = self.interrupt_fixture()
         containers.create.side_effect = RuntimeError('uncertain private create detail')
         with self.assertRaisesRegex(RuntimeError, '^uncertain private create detail$'):
-            self.window.interrupt()
+            self.window.interrupt(self.interrupt_request())
         self.assertEqual(self.window.bound()['interruption']['stage'], 'create')
         containers.stop.assert_not_called()
 
-    def test_interrupt_success_ack_follows_positive_claim_and_stop(self):
+    def test_interrupt_success_binds_source_event_ascii_job_and_postkill_unexpired_lease(self):
         containers = self.interrupt_fixture()
-        self.window.sql = Mock(return_value=('d' * 32).encode())
-        with patch.object(o, 'run', return_value=b''):
-            self.window.interrupt()
+        request = self.interrupt_request()
+        job = '55555555-5555-4555-8555-555555555555'.encode().hex().upper()
+        self.window.sql = Mock(side_effect=[b'0', b'1', job.encode(), json.dumps(self.interrupt_lease()).encode()])
+        with patch.object(o, 'run', side_effect=self.interrupt_reply):
+            self.window.interrupt(request)
         record = self.window.bound()['interruption']
-        self.assertEqual((record['stage'], record['status'], record['claimed'], record['queries']),
-                         ('ack', 'pass', True, 1))
+        self.assertEqual((record['stage'], record['status'], record['claimed'], record['queries']), ('ack', 'pass', True, 1))
+        self.assertTrue(record['processAbsent'] and record['producerUncommittedAtStartup'] and record['targetBound'])
         self.assertEqual(containers.stop.call_count, 2)
         ack = json.loads((self.window.directory / 'exchange/interrupted.json').read_text())
-        self.assertEqual((ack['runId'], ack['jobIdHex']), (RUN, 'd' * 32))
+        ready = json.loads((self.window.directory / 'exchange/interrupt-ready.json').read_text())
+        for key in ['runId', 'requestId', 'tripId', 'sourceRecordId', 'eventId']:
+            self.assertEqual(ack[key], request[key]); self.assertEqual(ready[key], request[key])
+        self.assertEqual((ack['workerId'], ack['jobIdHex'], ack['phase']), ('c' * 64, job, 'stopped'))
+        self.assertEqual(len(job), 72)
+        self.assertEqual(ack['lease'], self.interrupt_lease())
+        queries = [call.args[0] for call in self.window.sql.call_args_list]
+        self.assertIn(request['eventId'].encode().hex(), queries[2])
+        self.assertIn(request['tripId'].encode().hex(), queries[2])
+        self.assertIn(request['sourceRecordId'], queries[2])
+        self.assertIn("j.consumer='notifications.v1'", queries[2])
+        self.assertIn('completed_at', queries[3])
+
+    def test_interrupt_worker_exit_and_bypassed_company_barrier_fail_before_claim(self):
+        for phase, running, reason in [(None, False, 'worker_exited'), ('jobs_pass', True, 'barrier_bypassed')]:
+            self.interrupt_fixture()
+            def reply(args, **_kwargs):
+                if args[:2] == ['docker', 'logs']:
+                    path = self.base / 'state/last-child.stderr'
+                    path.write_bytes(json.dumps({'event': 'jobs_acceptance_phase', 'phase': phase}).encode())
+                    path.chmod(0o600)
+                    now = n.time.time_ns(); os.utime(path, ns=(now, now))
+                    return b''
+                if args[:2] == ['docker', 'inspect']:
+                    return json.dumps([{'Id': args[2], 'State': {'Running': running, 'ExitCode': 1, 'OOMKilled': False, 'Dead': False}}]).encode()
+                return b''
+            self.window.sql = Mock()
+            with patch.object(o, 'run', side_effect=reply):
+                with self.assertRaises(RuntimeError):
+                    self.window.interrupt(self.interrupt_request())
+            self.assertEqual(self.window.bound()['interruption']['reason'], reason)
+            self.window.sql.assert_not_called()
+            self.assertFalse((self.window.directory / 'exchange/interrupted.json').exists())
+            # Reuse only this test's synthetic directory for the next independent fake allocation.
+            if phase is None:
+                self.window.marker.unlink()
+                (self.window.directory / 'exchange').rmdir(); self.window.directory.rmdir()
+
+    def test_observation_budget_shares_absolute_deadline_and_never_extends_child_bounds(self):
+        now = [10.0]
+        budget = n.ObservationBudget(o, 15.0)
+        with patch.object(n.time, 'monotonic', side_effect=lambda: now[0]), patch.object(o, 'run', return_value=b'') as run:
+            budget.run(['fixed'], timeout=30)
+            self.assertEqual(run.call_args.kwargs['timeout'], 5)
+            now[0] = 14.0
+            budget.run(['fixed'], timeout=10)
+            self.assertEqual(run.call_args.kwargs['timeout'], 1)
+            now[0] = 15.0
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPT_OBSERVATION_DEADLINE$'):
+                budget.run(['fixed'], timeout=10)
+            self.assertEqual(run.call_count, 2)
+
+    def test_armed_ack_rejects_stale_worker_request_event_or_unowned_file(self):
+        self.interrupt_fixture()
+        request = self.interrupt_request()
+        binding = n.interruption_target(o, request) | {'workerId': 'c' * 64}
+        path = self.window.directory / 'exchange/interrupt-armed.json'
+        path.write_text(json.dumps(binding | {'phase': 'armed'})); path.chmod(0o600); os.chown(path, 1000, 1000)
+        self.assertTrue(n.Window.interruption_armed(self.window, request, binding, n.ObservationBudget(o, n.time.monotonic() + 1)))
+        for key in ['requestId', 'workerId', 'eventId', 'tripId', 'sourceRecordId', 'phase']:
+            path.write_text(json.dumps(binding | {'phase': 'armed', key: 'stale'}))
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPT_ARMED_INVALID$'):
+                n.Window.interruption_armed(self.window, request, binding, n.ObservationBudget(o, n.time.monotonic() + 1))
+        path.write_text(json.dumps(binding | {'phase': 'armed'})); os.chown(path, 0, 0)
+        with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPT_ARMED_INVALID$'):
+            n.Window.interruption_armed(self.window, request, binding, n.ObservationBudget(o, n.time.monotonic() + 1))
+
+    def test_postkill_lease_requires_running_unexpired_uncompleted_target(self):
+        self.assertEqual(n.interrupted_lease(o, self.interrupt_lease()), self.interrupt_lease())
+        for values in [{'state': 'ready'}, {'unexpired': 0}, {'unexpired': True}, {'completedAt': 'fictional completed time'}, {'attempts': 0},
+                       {'leaseUntilUtc': self.interrupt_lease()['observedUtc']}, {'observedUtc': '2026-13-28T00:00:00.000000Z'}]:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPTED_LEASE_INVALID$'):
+                n.interrupted_lease(o, self.interrupt_lease() | values)
+
+    def test_postkill_lease_observation_preserves_types_without_unknown_values(self):
+        valid = n.interrupted_lease_observation(self.interrupt_lease())
+        self.assertTrue(valid['object'] and valid['exactKeys'] and valid['timestampFormat'] and valid['timestampParse'])
+        self.assertEqual((valid['types']['unexpired'], valid['unexpired'], valid['remainingMs']), ('integer', 1, 60000))
+        boolean = n.interrupted_lease_observation(self.interrupt_lease() | {'unexpired': True})
+        self.assertEqual((boolean['types']['unexpired'], boolean['unexpired']), ('boolean', None))
+        expired = n.interrupted_lease_observation(self.interrupt_lease() | {'observedUtc': '2026-10-28T00:02:00.000000Z'})
+        self.assertEqual(expired['remainingMs'], -60000)
+        self.assertFalse(n.interrupted_lease_observation(None)['object'])
+        private = 'fictional-private-input-that-must-not-be-echoed'
+        value = n.interrupted_lease_observation({'state': private, 'attempts': private, 'leaseUntilUtc': private,
+            'observedUtc': private, 'unexpired': private, 'completedAt': private, private: private})
+        self.assertNotIn(private, json.dumps(value))
+        self.assertFalse(value['exactKeys'] or value['timestampFormat'] or value['timestampParse'])
+        malformed = n.interrupted_lease_observation(self.interrupt_lease() | {'observedUtc': '2026-13-28T00:00:00.000000Z'})
+        self.assertTrue(malformed['timestampFormat']); self.assertFalse(malformed['timestampParse'])
+
+    def test_invalid_lease_observation_survives_primary_validation_and_secondary_stop_failure(self):
+        containers = self.interrupt_fixture()
+        containers.stop.side_effect = [None, RuntimeError('fictional private cleanup error')]
+        job = '55555555-5555-4555-8555-555555555555'.encode().hex().upper()
+        invalid = self.interrupt_lease() | {'unexpired': True}
+        self.window.sql = Mock(side_effect=[b'0', b'1', job.encode(), json.dumps(invalid).encode()])
+        with patch.object(o, 'run', side_effect=self.interrupt_reply):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPTED_LEASE_INVALID$'):
+                self.window.interrupt(self.interrupt_request())
+        record = self.window.bound()['interruption']
+        self.assertEqual((record['stage'], record['reason']), ('lease_proof', 'lease_invalid'))
+        self.assertEqual(record['leaseObservation']['types']['unexpired'], 'boolean')
+        self.assertTrue(record['processAbsent'] and record['stopFailed'])
+        self.assertNotIn('lease', record)
+        self.assertNotIn('fictional private', json.dumps(record))
+
+    def test_cold_start_does_not_consume_claim_time_and_late_stop_cannot_escape_absolute_budget(self):
+        for late_stop in [False, True]:
+            containers = self.interrupt_fixture()
+            now = [100.0]
+            def reply(args, **kwargs):
+                if args[:2] == ['docker', 'logs'] and now[0] < 125:
+                    path = self.base / 'state/last-child.stderr'; path.write_bytes(b''); path.chmod(0o600)
+                    current = n.time.time_ns(); os.utime(path, ns=(current, current))
+                    return b''
+                return self.interrupt_reply(args, **kwargs)
+            if late_stop:
+                containers.stop.side_effect = lambda _name: now.__setitem__(0, 156.0)
+            job = '55555555-5555-4555-8555-555555555555'.encode().hex().upper()
+            self.window.sql = Mock(side_effect=[b'0', b'1', job.encode(), json.dumps(self.interrupt_lease()).encode()])
+            with patch.object(o, 'run', side_effect=reply), patch.object(n.time, 'monotonic', side_effect=lambda: now[0]), \
+                    patch.object(n.time, 'sleep', side_effect=lambda _delay: now.__setitem__(0, now[0] + 5)):
+                if late_stop:
+                    with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPT_OBSERVATION_DEADLINE$'):
+                        self.window.interrupt(self.interrupt_request())
+                else:
+                    self.window.interrupt(self.interrupt_request())
+            self.assertEqual(self.window.sql.call_args_list[2].kwargs['timeout'], 10)
+            self.assertEqual(self.window.observed_containers.call_args_list[0].args[0].deadline, 155)
+            record = self.window.bound()['interruption']
+            self.assertEqual(record['status'], 'failed' if late_stop else 'pass')
+            self.assertEqual((self.window.directory / 'exchange/interrupted.json').exists(), not late_stop)
+            if not late_stop:
+                self.assertIn("'unexpired',CAST(j.lease_until>UTC_TIMESTAMP(3) AS UNSIGNED)", self.window.sql.call_args_list[3].args[0])
+                self.assertEqual(record['leaseObservation']['types']['unexpired'], 'integer')
+                for path in (self.window.directory / 'exchange').iterdir():
+                    path.unlink()
+                self.window.marker.unlink()
+                (self.window.directory / 'exchange').rmdir(); self.window.directory.rmdir()
+
+    def test_visible_before_startup_or_missing_after_arm_never_claims_an_unbound_job(self):
+        for counts in [[b'1'], [b'0', b'0']]:
+            containers = self.interrupt_fixture()
+            self.window.sql = Mock(side_effect=counts)
+            with patch.object(o, 'run', side_effect=self.interrupt_reply):
+                with self.assertRaisesRegex(RuntimeError, 'NOTIFICATIONS_(PRODUCER_ALREADY_COMMITTED|INTERRUPT_TARGET_NOT_COMMITTED)'):
+                    self.window.interrupt(self.interrupt_request())
+            self.assertFalse(self.window.bound()['interruption']['claimed'])
+            self.assertFalse((self.window.directory / 'exchange/interrupted.json').exists())
+            containers.stop.assert_called_once_with('synthetic-interrupted')
+            if len(counts) == 1:
+                self.window.marker.unlink()
+                (self.window.directory / 'exchange').rmdir(); self.window.directory.rmdir()
+
+    def test_interrupt_target_rejects_noncanonical_identifiers_before_container_creation(self):
+        containers = self.interrupt_fixture()
+        for values in [{'eventId': 'private SQL fragment'}, {'tripId': None}, {'sourceRecordId': 'a' * 64}, {'fixtureId': 'not-a-cid'}]:
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_INTERRUPT_TARGET_INVALID$'):
+                self.window.interrupt(self.interrupt_request() | values)
+        containers.create.assert_not_called()
 
     def test_worker_phase_is_bounded_closed_and_never_retains_private_fields(self):
         output = b'private prefix\n' + json.dumps({'event': 'jobs_acceptance_phase', 'phase': 'jobs_pass',

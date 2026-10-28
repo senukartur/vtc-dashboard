@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { readFile, writeFile, lstat } from "node:fs/promises";
+import { readFile, lstat } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
-import { createUnitOfWork, newId } from "@vtc/db";
+import { createUnitOfWork, newId, type TxContext } from "@vtc/db";
 import { sql } from "@vtc/db/platform-schema";
 import {
   createQualificationInitialization,
@@ -24,6 +24,13 @@ import {
   acceptanceSourceStream,
   type AcceptanceSourceKind,
 } from "./notifications-acceptance-sources.js";
+import {
+  acceptanceInterruptionHandshake,
+  interruptionStartupAck,
+  interruptionStopAck,
+  writeAcceptanceSignal,
+  type InterruptionTarget,
+} from "./notifications-acceptance-handshake.js";
 
 type S = components["schemas"];
 type FixtureActor = { id: string; email: string; password: string; cookie: string };
@@ -88,7 +95,7 @@ const path = (name: string) => `/acceptance/${name}`;
 const instant = () => new Date().toISOString();
 const streamIdentities = new Map<string, ReturnType<typeof acceptanceSourceStream>>();
 async function save(name: string, value: unknown) {
-  await writeFile(path(name), JSON.stringify(value), { mode: 0o600 });
+  await writeAcceptanceSignal(path(name), value);
 }
 async function rows<T>(query: ReturnType<typeof sql>) {
   const [result] = await unit.run((tx) => unit.client(tx).execute(query));
@@ -143,7 +150,13 @@ async function member(
   const signed = await identity.login(email, password);
   return { id, email, password, cookie: signed.cookies.map((c) => c.split(";", 1)[0]).join("; ") };
 }
-async function source(owner: Actor, kind: AcceptanceSourceKind = "fresh", sourceId = newId()) {
+type SourceReceipt = { id: string; occurredAt: number; sourceId: string; sourceRecordId: string };
+async function source(
+  owner: Actor,
+  kind: AcceptanceSourceKind = "fresh",
+  sourceId = newId(),
+  beforeCommit?: (tx: TxContext, receipt: SourceReceipt) => Promise<void>,
+) {
   const at = Date.now();
   const stream =
     streamIdentities.get(sourceId) ??
@@ -155,19 +168,22 @@ async function source(owner: Actor, kind: AcceptanceSourceKind = "fresh", source
   const payload = acceptanceSourcePayload(kind, at, { ...stream, sourceId, eventId: newId() });
   const previousStep = operationStep;
   operationStep = "source_store";
-  const result = await unit.run((tx) =>
-    trips.storeInTransaction(tx, "ets2telemetry", payload, {
+  const result = await unit.run(async (tx) => {
+    const stored = await trips.storeInTransaction(tx, "ets2telemetry", payload, {
       ownerUserId: owner.userId,
       connection: { state: "unknown", referenceId: null },
-    }),
-  );
+    });
+    const receipt = {
+      id: stored.tripId,
+      occurredAt: kind === "completed" || kind === "unknown" ? at : stream.startedUtcMs,
+      sourceId,
+      sourceRecordId: stored.sourceRecordId,
+    };
+    await beforeCommit?.(tx, receipt);
+    return receipt;
+  });
   operationStep = previousStep;
-  return {
-    id: result.tripId,
-    occurredAt: kind === "completed" || kind === "unknown" ? at : stream.startedUtcMs,
-    sourceId,
-    sourceRecordId: result.sourceRecordId,
-  };
+  return result;
 }
 function eventInput(extra: Partial<S["EventInput"]> = {}): S["EventInput"] {
   return {
@@ -244,6 +260,15 @@ const evidence: {
   status: string;
   failure?: ReturnType<typeof acceptanceDiagnostic> & { ordinal: number };
   teardownFailure?: ReturnType<typeof acceptanceDiagnostic>;
+  interruptionSecondary?: ReturnType<typeof acceptanceDiagnostic>;
+  interruptionProof?: {
+    jobBound: boolean;
+    processAbsent: boolean;
+    oldAttempt: number;
+    recoveredAttempt: number;
+    leaseUntilUtc: string;
+    completedUtc: string;
+  };
   observations: {
     actorOrdinal: number;
     sourceOccurredUtcMs: number;
@@ -1161,34 +1186,107 @@ try {
       });
       await one(8, async () => {
         await beforeNextMinute();
-        const interruptedTrip = await source(owner);
-        await unit.run(async (tx) => {
-          operationStep = "interrupt_lock";
-          await unit
-            .client(tx)
-            .execute(
-              sql`SELECT recipient_id FROM notification_recipients WHERE recipient_id=${Buffer.from(owner.userId)} FOR UPDATE`,
+        const requestId = newId();
+        let interruptedTrip: SourceReceipt | undefined;
+        let stopped: ReturnType<typeof interruptionStopAck> | undefined;
+        async function signal(name: string) {
+          try {
+            return JSON.parse(await readFile(path(name), "utf8"));
+          } catch (error) {
+            if (error && typeof error === "object" && "code" in error && error.code === "ENOENT")
+              return null;
+            throw error;
+          }
+        }
+        const target = await acceptanceInterruptionHandshake<
+          InterruptionTarget,
+          ReturnType<typeof interruptionStartupAck>,
+          TxContext
+        >({
+          producer: async (prepared) => {
+            let binding: InterruptionTarget | undefined;
+            interruptedTrip = await source(owner, "fresh", newId(), async (tx, receipt) => {
+              operationStep = "interrupt_company";
+              // The same owning company writer fence is the worker catch-up's first lock.
+              await identity.qualificationContextInTransaction(tx, []);
+              const [events] = await unit
+                .client(tx)
+                .execute(
+                  sql`SELECT LOWER(CAST(id AS CHAR)) id FROM outbox_events WHERE type='trip.lifecycle_changed' AND schema_version=1 AND aggregate_kind='trip' AND aggregate_id=${Buffer.from(receipt.id)} AND JSON_UNQUOTE(JSON_EXTRACT(data,'$.sourceRecordId'))=${receipt.sourceRecordId}`,
+                );
+              assert.ok(Array.isArray(events) && events.length === 1);
+              const eventId = (events[0] as { id: string }).id;
+              assert.match(
+                eventId,
+                /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+              );
+              binding = {
+                runId: run,
+                requestId,
+                tripId: receipt.id,
+                sourceRecordId: receipt.sourceRecordId,
+                eventId,
+              };
+              await prepared(binding);
+              operationStep = "interrupt_commit";
+            });
+            assert.ok(binding);
+            return binding;
+          },
+          startup: async (binding) => {
+            operationStep = "interrupt_startup";
+            await save("request.json", {
+              ...binding,
+              scenario: 8,
+              kind: "interrupt",
+              createdUtc: Date.now(),
+            });
+            const ready = await until(
+              async () => await signal("interrupt-ready.json"),
+              (value) => value !== null,
+              40,
+              250,
             );
-          await save("request.json", {
-            runId: run,
-            scenario: 8,
-            kind: "interrupt",
-            createdUtc: Date.now(),
-          });
-          operationStep = "interrupt_ack";
-          await until(
-            async () => {
-              try {
-                return JSON.parse(await readFile(path("interrupted.json"), "utf8"));
-              } catch {
-                return null;
-              }
-            },
-            (v) => v?.runId === run,
-            20,
-            250,
-          );
+            return interruptionStartupAck(ready, binding);
+          },
+          recipient: (body) => unit.run(body),
+          lockRecipient: async (tx) => {
+            operationStep = "interrupt_lock";
+            const [locked] = await unit
+              .client(tx)
+              .execute(
+                sql`SELECT CAST(recipient_id AS CHAR) recipientId FROM notification_recipients WHERE recipient_id=${Buffer.from(owner.userId)} FOR UPDATE`,
+              );
+            assert.ok(Array.isArray(locked) && locked.length === 1);
+            assert.equal((locked[0] as { recipientId: string }).recipientId, owner.userId);
+          },
+          afterCommit: async (tx, binding, ready) => {
+            operationStep = "interrupt_armed";
+            await save("interrupt-armed.json", { ...ready, phase: "armed" });
+            operationStep = "interrupt_ack";
+            const value = await until(
+              async () => await signal("interrupted.json"),
+              (ack) => ack !== null,
+              20,
+              250,
+            );
+            operationStep = "interrupt_binding";
+            const ack = interruptionStopAck(value, ready);
+            const [result] = await unit
+              .client(tx)
+              .execute(
+                sql`SELECT COUNT(*) n FROM durable_jobs j JOIN outbox_events e ON e.id=j.event_id WHERE j.id=UNHEX(${ack.jobIdHex}) AND j.kind='notifications.deliver' AND j.consumer='notifications.v1' AND e.id=${Buffer.from(binding.eventId)} AND e.type='trip.lifecycle_changed' AND e.schema_version=1 AND e.aggregate_kind='trip' AND e.aggregate_id=${Buffer.from(binding.tripId)} AND JSON_UNQUOTE(JSON_EXTRACT(e.data,'$.tripId'))=${binding.tripId} AND JSON_UNQUOTE(JSON_EXTRACT(e.data,'$.sourceRecordId'))=${binding.sourceRecordId} AND JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.eventId'))=${binding.eventId}`,
+              );
+            assert.ok(Array.isArray(result));
+            assert.equal(Number((result[0] as { n: number })?.n), 1);
+            stopped = ack;
+          },
+          secondary: (error) => {
+            evidence.interruptionSecondary = acceptanceDiagnostic(error, "interrupt_cleanup");
+          },
         });
+        assert.ok(interruptedTrip && stopped);
+        const killed = stopped;
         await save("request.json", {
           runId: run,
           scenario: 8,
@@ -1204,20 +1302,28 @@ try {
           (r) => Number(r[0]?.n) === 0,
           150,
         );
-        const interrupted = JSON.parse(await readFile(path("interrupted.json"), "utf8"));
-        operationStep = "interrupt_binding";
-        assert.equal(interrupted.runId, run);
         operationStep = "interrupt_recovery";
         const recovered = await until(
           async () =>
-            await rows<{ attempts: number; state: string }>(
-              sql`SELECT attempts,state FROM durable_jobs WHERE id=UNHEX(${interrupted.jobIdHex})`,
+            await rows<{ attempts: number; state: string; completedUtc: string | null }>(
+              sql`SELECT attempts,state,DATE_FORMAT(completed_at,'%Y-%m-%dT%H:%i:%s.%fZ') completedUtc FROM durable_jobs WHERE id=UNHEX(${killed.jobIdHex}) AND event_id=${Buffer.from(target.eventId)}`,
             ),
           (value) => value[0]?.state === "completed",
           150,
         );
         operationStep = "interrupt_attempts";
-        assert.ok(Number(recovered[0]?.attempts) >= 2);
+        assert.ok(Number(recovered[0]?.attempts) >= killed.lease.attempts + 1);
+        const completedUtc = recovered[0]?.completedUtc;
+        assert.ok(completedUtc && Number.isFinite(Date.parse(completedUtc)));
+        assert.ok(Date.parse(completedUtc) >= Date.parse(killed.lease.leaseUntilUtc));
+        evidence.interruptionProof = {
+          jobBound: true,
+          processAbsent: true,
+          oldAttempt: killed.lease.attempts,
+          recoveredAttempt: Number(recovered[0]?.attempts),
+          leaseUntilUtc: killed.lease.leaseUntilUtc,
+          completedUtc,
+        };
         operationStep = "interrupt_effects";
         const [effects] = await rows<{ n: number }>(
           sql`SELECT COUNT(*) n FROM notifications WHERE subject_id=${Buffer.from(interruptedTrip.id)} AND category='trip.started'`,
