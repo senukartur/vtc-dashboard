@@ -2,7 +2,7 @@
 
 **Status:** v1.0 implementation baseline adopted under the owner's conditional agreement authorization of 2026-10-17; final independent review and merge evidence are tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3). This is not an implemented API. **Source baseline:** [telemetry discovery](../research/telemetry.md). **Card:** [VTC-003](https://trello.com/c/lQrxZ13N).
 
-This contract bridges the local ETS2Telemetry recorder and this dashboard. Its HTTP version is independent of native Named Pipe protocol v1 and trip-export format v1. The [concept](../../CONCEPT.MD) governs qualifications, privacy, manual reports and analytics. The [request schema](telemetry-v1.schema.json), [examples](examples/README.md) and [acceptance matrix](telemetry-v1-acceptance.md) form the versioned baseline.
+This contract bridges the local ETS2Telemetry recorder and this dashboard. Its HTTP version is independent of native Named Pipe protocol v1 and trip-export format v1. The [concept](../CONCEPT.MD) governs qualifications, privacy, manual reports and analytics. The [request schema](telemetry-v1.schema.json), [examples](examples/README.md) and [acceptance matrix](telemetry-v1-acceptance.md) form the versioned baseline.
 
 ## Scope and initial synchronization
 

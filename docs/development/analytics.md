@@ -1,6 +1,6 @@
 # Company and driver analytics APIs
 
-VTC-032 implements the read-only analytics APIs for company-level and member-level summaries, time-series distributions, and driver leaderboards based strictly on accepted canonical trips. Approved product direction remains in [CONCEPT.MD](../../CONCEPT.MD); the browser API contract is documented in [OpenAPI specification](../contracts/dashboard/openapi.json).
+VTC-032 implements the read-only analytics APIs for company-level and member-level summaries, time-series distributions, and driver leaderboards based strictly on accepted canonical trips. Approved product direction remains in [CONCEPT.MD](../CONCEPT.MD); the browser API contract is documented in [OpenAPI specification](../contracts/dashboard/openapi.json).
 
 ## Core aggregation principles
 

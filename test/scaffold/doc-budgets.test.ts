@@ -5,7 +5,7 @@ import { test } from "node:test";
 // These files are read at the start of most agent sessions; details belong in linked docs.
 const budgets = [
   ["AGENTS.md", 1200],
-  ["CONCEPT.MD", 6000],
+  ["docs/CONCEPT.MD", 6000],
 ] as const;
 
 for (const [file, limit] of budgets) {

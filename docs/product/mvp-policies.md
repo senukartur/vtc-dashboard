@@ -1,6 +1,6 @@
 # MVP Product Policies
 
-Owner-approved detailed product rules for the MVP. [CONCEPT.MD](../../CONCEPT.MD) gives the short idea and feature list; this file holds the normative rules and acceptance scenarios that implementation, contracts and tests follow. Scenario numbers are stable references.
+Owner-approved detailed product rules for the MVP. [CONCEPT.MD](../CONCEPT.MD) gives the short idea and feature list; this file holds the normative rules and acceptance scenarios that implementation, contracts and tests follow. Scenario numbers are stable references.
 
 Change this file only when the owner approves new or changed behavior. Edit the affected rule or scenario in place, keep it concise, and update affected contracts and tests together. Do not add status, dates, card progress or evidence logs; put those in the PR description.
 
@@ -26,7 +26,7 @@ Maintain project-reviewed RU/EN labels separately from canonical/source IDs. The
 
 Track game build, DLC/map coverage, provenance, publication version, and additions/changes/retirements. Preserve historical entities and rule references after DLC updates. Use an explicit import/diff/review/publish workflow; arbitrary mod support is later work.
 
-The project's technical maintainer prepares updates; the Director or Deputy Director reviews and publishes them. Maintenance is an operational responsibility, not an additional dashboard role. The [VTC-002 source hand-off](docs/research/catalog-source-follow-up.md) records the measured coverage and remaining source/import/release gates.
+The project's technical maintainer prepares updates; the Director or Deputy Director reviews and publishes them. Maintenance is an operational responsibility, not an additional dashboard role. The [VTC-002 source hand-off](../research/catalog-source-follow-up.md) records the measured coverage and remaining source/import/release gates.
 
 ### Catalog source use basis
 

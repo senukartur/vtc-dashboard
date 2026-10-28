@@ -4,8 +4,8 @@ Detailed rules for coding agents, moved out of the always-loaded [AGENTS.md](../
 
 ## Where to look
 
-- Product idea and features: [CONCEPT.MD](../../CONCEPT.MD). Detailed approved rules and acceptance scenarios: [product policies](../product/mvp-policies.md). Card scope, acceptance checklists, dependencies and status: the [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard), which is the only card source. Primary-source links: [research references](../research/references.md).
-- Commands and environment: [CONTRIBUTING.md](../../CONTRIBUTING.md) and [workspace](workspace.md). Docker is the preferred local app/MySQL environment.
+- Product idea and features: [CONCEPT.MD](../CONCEPT.MD). Detailed approved rules and acceptance scenarios: [product policies](../product/mvp-policies.md). Card scope, acceptance checklists, dependencies and status: the [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard), which is the only card source. Primary-source links: [research references](../research/references.md).
+- Commands and environment: [CONTRIBUTING.md](../CONTRIBUTING.md) and [workspace](workspace.md). Docker is the preferred local app/MySQL environment.
 - Before schema changes or synthetic `db:test`/`db:recovery` resets: [persistence](persistence.md).
 - CI: [ci](ci.md). Identity: [identity](identity.md). Review, rules and dependencies: [review](review.md). Engineering skills: [skill registry](agent-skills.md).
 - Keep the idea and feature list in CONCEPT.MD, detailed approved rules in the product policies, execution scope in Trello cards, and verified technical decisions in implementation contracts/ADRs. Do not create competing copies of the requirements.

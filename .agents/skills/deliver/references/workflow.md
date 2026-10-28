@@ -8,7 +8,7 @@ architect -> implementer -> verifier -> reviewer -> draft PR
                  +-- fixes -----+-----------+
 ```
 
-Read root `AGENTS.md` and `CONCEPT.MD` before planning. Read the assigned Trello card, `docs/development/agent-rules.md`, `CONTRIBUTING.md` and relevant implementation contracts. Resolve these paths from the task repository root. They own requirements, dependencies, ownership and verification; this skill does not supersede them.
+Read root `AGENTS.md` and `docs/CONCEPT.MD` before planning. Read the assigned Trello card, `docs/development/agent-rules.md`, `docs/CONTRIBUTING.md` and relevant implementation contracts. Resolve these paths from the task repository root. They own requirements, dependencies, ownership and verification; this skill does not supersede them.
 
 Speak Russian unless the owner chooses another language. Write plans, commits, reports saved in the repository, and PR text in English.
 

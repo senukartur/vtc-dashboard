@@ -8,7 +8,7 @@ metadata:
 
 # React Testing
 
-Read [AGENTS.md](../../../AGENTS.md), [contributor commands](../../../CONTRIBUTING.md), the card's acceptance criteria and current test configuration. [Source and license](../../../docs/development/agent-skills.md#provenance-and-license).
+Read [AGENTS.md](../../../AGENTS.md), [contributor commands](../../../docs/CONTRIBUTING.md), the card's acceptance criteria and current test configuration. [Source and license](../../../docs/development/agent-skills.md#provenance-and-license).
 
 ## Identify the available test lane
 

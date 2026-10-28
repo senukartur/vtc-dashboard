@@ -40,9 +40,9 @@ Import from the old websites, full Trucky/VTCBase integrations, visas, reputatio
 
 ## Where details live
 
-- Detailed product rules, permission matrix and acceptance scenarios: [MVP product policies](docs/product/mvp-policies.md).
-- Architecture: [overview](docs/architecture/README.md), [stack](docs/decisions/stack.md), [hosting](docs/decisions/hosting.md). Stack: React/Vite SPA and Fastify API on Node.js 24 with MySQL 8.4.
-- Telemetry contract: [v1](docs/contracts/telemetry-v1.md). Cards: [Trello](https://trello.com/b/NwhwurSM/vtcdashboard).
+- Detailed product rules, permission matrix and acceptance scenarios: [MVP product policies](product/mvp-policies.md).
+- Architecture: [overview](architecture/README.md), [stack](decisions/stack.md), [hosting](decisions/hosting.md). Stack: React/Vite SPA and Fastify API on Node.js 24 with MySQL 8.4.
+- Telemetry contract: [v1](contracts/telemetry-v1.md). Cards: [Trello](https://trello.com/b/NwhwurSM/vtcdashboard).
 
 ## Changing this file
 
