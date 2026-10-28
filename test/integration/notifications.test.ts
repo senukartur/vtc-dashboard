@@ -216,6 +216,12 @@ async function drain(q = queue()) {
   }
   throw new Error("SYNTHETIC_NOTIFICATION_DRAIN_EXHAUSTED");
 }
+async function repairOneMaterial() {
+  return unit.run(async (tx) => {
+    await identity.notificationContextInTransaction(tx);
+    return events.repairPendingNotificationMaterialInTransaction(tx);
+  });
+}
 function payload(
   kind: "started" | "completed" = "started",
   extra: { backfill?: boolean; age?: number } = {},
@@ -1600,6 +1606,619 @@ test.each([false, true])(
     expect((await service.poll(owner)).unreadCount).toBe(read ? 1 : 2);
   },
 );
+
+test.each([
+  ["start", "before"],
+  ["route", "before"],
+  ["start", "between-pages"],
+  ["route", "between-pages"],
+  ["start", "disabled"],
+  ["route", "disabled"],
+] as const)("material %s survives a cosmetic successor (%s)", async (kind, stage) => {
+  const { id, input } = await participating();
+  const audience = [owner, observer];
+  if (stage === "between-pages") {
+    const credential = await identity.prepareCredential(password);
+    for (let index = 0; index < 25; index++) {
+      const userId = newId(),
+        email = `${userId}@example.invalid`;
+      await unit.run((tx) =>
+        identity.insertWithCredential(tx, {
+          userId,
+          email,
+          name: "Fictional Material Change Participant",
+          ...credential,
+          roles: ["driver"],
+        }),
+      );
+      const login = await identity.login(email, password);
+      audience.push(
+        await identity.authenticate(
+          new Headers({ cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") }),
+        ),
+      );
+    }
+  }
+  for (const participant of audience.slice(1)) {
+    const current = await events.myResponse(participant, id);
+    await events.respond(participant, id, newId(), current.version, { response: "participating" });
+  }
+  await drain();
+  const writer =
+    stage === "disabled" ? createEvents(unit, { cursorKey: key() }, { identity }, now) : events;
+  const material =
+    kind === "start"
+      ? { ...input, startsAt: new Date(instant + 4200000).toISOString() }
+      : {
+          ...input,
+          route: "Fictional Material Route",
+          meetingLocation: "Fictional Material Meeting",
+        };
+  await writer.update(director, id, newId(), 1, material);
+  const q = queue();
+  let firstPageRecipient: Actor | undefined;
+  if (stage === "between-pages") {
+    expect(await q.route()).toBe(1);
+    const claim = await q.claim();
+    if (!claim) throw Error("SYNTHETIC_MATERIAL_CLAIM_MISSING");
+    await q.execute(claim);
+    const [prepared] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM notifications WHERE subject_id=? AND category=?",
+      [Buffer.from(id), `event.${kind === "start" ? "start" : "route"}_changed`],
+    );
+    expect(Number(prepared[0]?.n)).toBe(0);
+    const delivery = await q.claim();
+    if (!delivery) throw Error("SYNTHETIC_MATERIAL_DELIVERY_MISSING");
+    expect(delivery.reference).toMatchObject({ phase: "deliver", after: null });
+    await q.execute(delivery);
+    const [page] = await control.query<RowDataPacket[]>(
+      "SELECT CAST(recipient_id AS CHAR) recipientId FROM notifications WHERE subject_id=? AND category=? ORDER BY recipient_id",
+      [Buffer.from(id), `event.${kind === "start" ? "start" : "route"}_changed`],
+    );
+    expect(page).toHaveLength(25);
+    firstPageRecipient = audience.find((actor) => actor.userId === page[0]?.recipientId);
+    expect(firstPageRecipient).toBeDefined();
+    const [continuations] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM durable_jobs WHERE state='ready'",
+    );
+    expect(Number(continuations[0]?.n)).toBe(1);
+  }
+  const lateParticipant = (await member()).actor;
+  const late = await events.myResponse(lateParticipant, id);
+  await writer.respond(lateParticipant, id, newId(), late.version, { response: "participating" });
+  const cosmetic = {
+    ...material,
+    title: "Fictional Current Cosmetic Title",
+    description: "Fictional cosmetic successor",
+  };
+  await writer.update(director, id, newId(), 2, cosmetic);
+  await drain(q);
+  const category = `event.${kind === "start" ? "start" : "route"}_changed`;
+  const [effects] = await control.query<RowDataPacket[]>(
+    "SELECT CAST(recipient_id AS CHAR) recipientId,CAST(effect_key AS CHAR) effectKey FROM notifications WHERE subject_id=? AND category=? ORDER BY recipient_id",
+    [Buffer.from(id), category],
+  );
+  expect(effects.map((r) => r.recipientId).sort()).toEqual(audience.map((a) => a.userId).sort());
+  expect(new Set(effects.map((r) => r.effectKey))).toEqual(new Set([`event:${id}:2`]));
+  expect(
+    (await service.poll(lateParticipant)).items.filter(
+      (r) => r.target?.id === id && r.category === category,
+    ),
+  ).toEqual([]);
+  const projected = (await service.poll(firstPageRecipient ?? owner)).items.filter(
+    (r) => r.target?.id === id && r.category === category,
+  );
+  expect(projected).toHaveLength(1);
+  expect(projected[0]?.display.eventTitle).toBe(cosmetic.title);
+  expect(projected[0]?.liveToastEligible).toBe(true);
+  await drain(q);
+  const [replayed] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM notifications WHERE subject_id=? AND category=?",
+    [Buffer.from(id), category],
+  );
+  expect(Number(replayed[0]?.n)).toBe(audience.length);
+});
+
+test.each([
+  ["start", false],
+  ["route", false],
+  ["start", true],
+  ["route", true],
+] as const)(
+  "newer material %s suppresses obsolete live alerts (already inserted=%s)",
+  async (kind, inserted) => {
+    const { id, input } = await participating();
+    await drain();
+    const first =
+      kind === "start"
+        ? { ...input, startsAt: new Date(instant + 4200000).toISOString() }
+        : { ...input, route: "Fictional first changed route" };
+    await events.update(director, id, newId(), 1, first);
+    if (inserted) await drain();
+    const next =
+      kind === "start"
+        ? { ...first, startsAt: new Date(instant + 4800000).toISOString() }
+        : { ...first, route: "Fictional next changed route" };
+    await events.update(director, id, newId(), 2, next);
+    const category = `event.${kind === "start" ? "start" : "route"}_changed`;
+    if (inserted) {
+      const old = (await service.poll(owner)).items.filter((r) => r.category === category);
+      expect(old).toHaveLength(1);
+      expect(old[0]?.liveToastEligible).toBe(false);
+    }
+    await events.update(director, id, newId(), 3, {
+      ...next,
+      title: "Fictional Latest Material Title",
+    });
+    await drain();
+    const rows = (await service.poll(owner)).items.filter((r) => r.category === category);
+    expect(rows).toHaveLength(inserted ? 2 : 1);
+    expect(rows.filter((r) => r.liveToastEligible)).toHaveLength(1);
+    expect(rows.every((r) => r.display.eventTitle === "Fictional Latest Material Title")).toBe(
+      true,
+    );
+  },
+);
+
+test.each([
+  ["start", false],
+  ["route", false],
+  ["start", true],
+  ["route", true],
+] as const)(
+  "material reversion %s does not revive an older transition (already inserted=%s)",
+  async (kind, inserted) => {
+    const { id, input } = await participating();
+    await drain();
+    const first =
+      kind === "start"
+        ? { ...input, startsAt: new Date(instant + 4200000).toISOString() }
+        : { ...input, route: "Fictional reverted route" };
+    await events.update(director, id, newId(), 1, first);
+    if (inserted) await drain();
+    const category = `event.${kind === "start" ? "start" : "route"}_changed`;
+    const old = (await service.poll(owner)).items.find((row) => row.category === category);
+    expect(Boolean(old)).toBe(inserted);
+    const intermediate =
+      kind === "start"
+        ? { ...first, startsAt: new Date(instant + 4800000).toISOString() }
+        : { ...first, route: "Fictional intermediate route" };
+    await events.update(director, id, newId(), 2, intermediate);
+    await events.update(director, id, newId(), 3, first);
+    await events.update(director, id, newId(), 4, {
+      ...first,
+      title: "Fictional Current Reverted Material",
+    });
+    if (old) {
+      const current = (await service.poll(owner)).items.find((row) => row.id === old.id);
+      expect(current?.liveToastEligible).toBe(false);
+      expect((await service.history(owner)).items.some((row) => row.id === old.id)).toBe(true);
+    }
+    await drain();
+    const rows = (await service.poll(owner)).items.filter((row) => row.category === category);
+    expect(rows).toHaveLength(inserted ? 2 : 1);
+    expect(rows.filter((row) => row.liveToastEligible)).toHaveLength(1);
+    expect(
+      rows.every((row) => row.display.eventTitle === "Fictional Current Reverted Material"),
+    ).toBe(true);
+    const [effects] = await control.query<RowDataPacket[]>(
+      "SELECT subject_version FROM notifications WHERE subject_id=? AND recipient_id=? AND category=? ORDER BY subject_version",
+      [Buffer.from(id), Buffer.from(owner.userId), category],
+    );
+    expect(effects.map((row) => Number(row.subject_version))).toEqual(inserted ? [2, 4] : [4]);
+    await drain();
+    expect(
+      (await service.poll(owner)).items.filter((row) => row.category === category),
+    ).toHaveLength(rows.length);
+  },
+);
+
+test("material maintenance discovers legacy state after permanent jobs and reminder markers completed", async () => {
+  const { id, input } = await participating();
+  await drain();
+  await service.maintenance();
+  const [completed] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM durable_jobs WHERE kind='notifications.deliver' AND state='completed'",
+  );
+  expect(Number(completed[0]?.n)).toBeGreaterThan(0);
+  await control.execute(
+    "UPDATE events SET notification_material=NULL,notification_pending=0 WHERE id=?",
+    [Buffer.from(id)],
+  );
+  const first = await repairOneMaterial();
+  expect(first).toMatchObject({ eventId: id, complete: true, throughVersion: 1, scanned: 1 });
+  const [before] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  await events.update(director, id, newId(), 1, {
+    ...input,
+    route: "Fictional Legacy Producer Route",
+  });
+  await drain();
+  // Emulate the prior writer's unchanged derived column after its real immutable command/job history.
+  await control.execute(
+    "UPDATE events SET notification_material=?,notification_pending=0 WHERE id=?",
+    [JSON.stringify(before[0]?.material), Buffer.from(id)],
+  );
+  const [stale] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material_pending pending,notification_pending reminders FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(Number(stale[0]?.pending)).toBe(1);
+  expect(Number(stale[0]?.reminders)).toBe(0);
+  await service.maintenance();
+  const [fixed] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material,notification_material_pending pending,notification_pending reminders FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(fixed[0]?.material).toMatchObject({
+    schemaVersion: 1,
+    throughVersion: 2,
+    routeVersion: 2,
+    startVersion: 1,
+  });
+  expect(Number(fixed[0]?.pending)).toBe(0);
+  expect(Number(fixed[0]?.reminders)).toBe(0);
+  expect(await repairOneMaterial()).toBeNull();
+});
+
+test("material prefix repair is bounded, rolls back and advances monotonically with two workers", async () => {
+  const { id, input } = await participating();
+  await drain();
+  for (let version = 2; version <= 27; version++)
+    await events.update(director, id, newId(), version - 1, {
+      ...input,
+      description: `Fictional retained revision ${version}`,
+    });
+  await drain();
+  await control.execute(
+    "UPDATE events SET notification_material=NULL,notification_pending=0 WHERE id=?",
+    [Buffer.from(id)],
+  );
+  await expect(
+    unit.run(async (tx) => {
+      await identity.notificationContextInTransaction(tx);
+      expect(await events.repairPendingNotificationMaterialInTransaction(tx)).toMatchObject({
+        throughVersion: 25,
+        complete: false,
+        scanned: 25,
+      });
+      throw new Error("SYNTHETIC_MATERIAL_REPAIR_ROLLBACK");
+    }),
+  ).rejects.toThrow("SYNTHETIC_MATERIAL_REPAIR_ROLLBACK");
+  const [rolledBack] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(rolledBack[0]?.material).toBeNull();
+  const raced = await Promise.all([repairOneMaterial(), repairOneMaterial()]);
+  const final = await repairOneMaterial();
+  const batches = [...raced, final].filter((r) => r !== null);
+  expect(batches.reduce((sum, r) => sum + r.scanned, 0)).toBe(27);
+  expect(batches.every((r) => r.scanned <= 25)).toBe(true);
+  expect(new Set(batches.map((r) => r.throughVersion)).size).toBe(batches.length);
+  const [stored] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material,notification_material_pending pending FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(stored[0]?.material).toEqual({
+    schemaVersion: 1,
+    throughVersion: 27,
+    startVersion: 1,
+    routeVersion: 1,
+    statusVersion: 1,
+  });
+  expect(Number(stored[0]?.pending)).toBe(0);
+  expect(await repairOneMaterial()).toBeNull();
+  console.log(
+    JSON.stringify({
+      event: "notification_material_repair_work",
+      revisions: 27,
+      batches: batches.map((r) => r.scanned),
+      maxBatch: 25,
+      rollbackPreserved: true,
+    }),
+  );
+});
+
+test("material preparation rejects corrupt state and gaps without publishing a partial prefix", async () => {
+  const { id, input } = await participating();
+  await drain();
+  await control.execute("UPDATE events SET notification_material=? WHERE id=?", [
+    JSON.stringify({
+      schemaVersion: 2,
+      throughVersion: 1,
+      startVersion: 1,
+      routeVersion: 1,
+      statusVersion: 1,
+    }),
+    Buffer.from(id),
+  ]);
+  await expect(repairOneMaterial()).rejects.toThrow("EVENT_NOTIFICATION_MATERIAL_INVALID");
+  await control.execute("UPDATE events SET notification_material=NULL WHERE id=?", [
+    Buffer.from(id),
+  ]);
+  await events.update(director, id, newId(), 1, { ...input, title: "Fictional Gap Two" });
+  await events.update(director, id, newId(), 2, { ...input, title: "Fictional Gap Three" });
+  // Failure injection removes only this fixture's unreferenced intermediate immutable definition.
+  await control.execute("DELETE FROM event_revisions WHERE event_id=? AND version=2", [
+    Buffer.from(id),
+  ]);
+  await expect(repairOneMaterial()).rejects.toThrow("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+  const [rows] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material,notification_material_pending pending FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(rows[0]?.material).toBeNull();
+  expect(Number(rows[0]?.pending)).toBe(1);
+});
+
+test("material preparation and its delivery continuation commit or roll back together", async () => {
+  const { id, input } = await participating();
+  await drain();
+  await events.update(director, id, newId(), 1, { ...input, route: "Fictional Atomic Material" });
+  await control.execute("UPDATE events SET notification_material=NULL WHERE id=?", [
+    Buffer.from(id),
+  ]);
+  const q = queue();
+  await q.route();
+  const claim = await q.claim();
+  if (!claim) throw Error("SYNTHETIC_MATERIAL_ATOMIC_CLAIM_MISSING");
+  const reference = claim.reference as { eventId: string };
+  const deliveryCount = async () => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT COUNT(*) n FROM durable_jobs WHERE JSON_UNQUOTE(JSON_EXTRACT(reference,'$.eventId'))=? AND JSON_UNQUOTE(JSON_EXTRACT(reference,'$.phase'))='deliver'",
+      [reference.eventId],
+    );
+    return Number(rows[0]?.n);
+  };
+  await expect(
+    unit.run(async (tx) => {
+      await service.handler.local?.(tx, claim.reference, claim);
+      throw new Error("SYNTHETIC_MATERIAL_CONTINUATION_ROLLBACK");
+    }),
+  ).rejects.toThrow("SYNTHETIC_MATERIAL_CONTINUATION_ROLLBACK");
+  const [rolledBack] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(rolledBack[0]?.material).toBeNull();
+  expect(await deliveryCount()).toBe(0);
+  expect(await q.receipt("notifications.v1", claim.effectKey.toString())).toBeNull();
+  await q.execute(claim);
+  expect(await deliveryCount()).toBe(1);
+  const [timestamps] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) total,COALESCE(SUM(j.available_at<>o.recorded_at),0) mismatches FROM durable_jobs j INNER JOIN outbox_events o ON JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.eventId'))=CAST(o.id AS CHAR) WHERE JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.eventId'))=? AND JSON_UNQUOTE(JSON_EXTRACT(j.reference,'$.phase'))='deliver'",
+    [reference.eventId],
+  );
+  expect(Number(timestamps[0]?.total)).toBe(1);
+  expect(Number(timestamps[0]?.mismatches)).toBe(0);
+  expect((await service.poll(owner)).items.some((r) => r.category === "event.route_changed")).toBe(
+    false,
+  );
+  await drain(q);
+  expect(
+    (await service.poll(owner)).items.filter((r) => r.category === "event.route_changed"),
+  ).toHaveLength(1);
+  await drain(q);
+  expect(await deliveryCount()).toBe(1);
+});
+
+test("material generated discovery rejects coercion and uses its index among healthy events", async () => {
+  const { id, input } = await participating();
+  await drain();
+  const valid = {
+    schemaVersion: 1,
+    throughVersion: 1,
+    startVersion: 1,
+    routeVersion: 1,
+    statusVersion: 1,
+  };
+  for (const value of [
+    null,
+    {},
+    { ...valid, throughVersion: null },
+    { ...valid, throughVersion: "1" },
+    { ...valid, throughVersion: true },
+    { ...valid, throughVersion: 0 },
+    { ...valid, throughVersion: 1.5 },
+    { ...valid, schemaVersion: 2 },
+    { ...valid, startVersion: 2 },
+    { ...valid, extra: 1 },
+  ]) {
+    await control.execute("UPDATE events SET notification_material=CAST(? AS JSON) WHERE id=?", [
+      JSON.stringify(value),
+      Buffer.from(id),
+    ]);
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT notification_material_pending pending FROM events WHERE id=?",
+      [Buffer.from(id)],
+    );
+    expect(Number(rows[0]?.pending)).toBe(1);
+  }
+  // JSON Schema/Number.isInteger accept the numeric value 1.0; strings and fractional values do not qualify.
+  for (const value of [
+    JSON.stringify(valid),
+    '{"schemaVersion":1.0,"throughVersion":1.0,"startVersion":1.0,"routeVersion":1.0,"statusVersion":1.0}',
+  ]) {
+    await control.execute("UPDATE events SET notification_material=CAST(? AS JSON) WHERE id=?", [
+      value,
+      Buffer.from(id),
+    ]);
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT notification_material_pending pending FROM events WHERE id=?",
+      [Buffer.from(id)],
+    );
+    expect(Number(rows[0]?.pending)).toBe(0);
+  }
+  const copies = JSON.stringify(
+    Array.from({ length: 1000 }, () => ({ id: newId(), revision: newId() })),
+  );
+  // Representative index fixtures clone a real valid definition; no producer behavior is claimed for these rows.
+  await control.execute(
+    `INSERT INTO events(id,version,change_sequence,notification_pending,notification_material,trip_assessment_pending,trip_assessment_generation,attendance_version,current_revision_id,game,visibility,status,starts_at,created_at)
+    SELECT fixture.id,1,1,0,JSON_OBJECT('schemaVersion',1,'throughVersion',1,'startVersion',1,'routeVersion',1,'statusVersion',1),0,0,1,fixture.revision,e.game,e.visibility,e.status,e.starts_at,e.created_at
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(id CHAR(36) PATH '$.id',revision CHAR(36) PATH '$.revision')) fixture CROSS JOIN events e WHERE e.id=?`,
+    [copies, Buffer.from(id)],
+  );
+  await control.execute(
+    `INSERT INTO event_revisions(id,event_id,version,sequence,actor_id,recorded_at,category,status,title,description,game,server,organizer,meeting_location,route,meeting_at,starts_at,ends_at,visibility,prescribed_mass_kg,private_reason)
+    SELECT fixture.revision,fixture.id,1,1,r.actor_id,r.recorded_at,'created',r.status,r.title,r.description,r.game,r.server,r.organizer,r.meeting_location,r.route,r.meeting_at,r.starts_at,r.ends_at,r.visibility,r.prescribed_mass_kg,NULL
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(id CHAR(36) PATH '$.id',revision CHAR(36) PATH '$.revision')) fixture CROSS JOIN event_revisions r WHERE r.event_id=? AND r.version=1`,
+    [copies, Buffer.from(id)],
+  );
+  await control.execute(
+    "UPDATE events SET notification_material=NULL,notification_pending=0 WHERE id=?",
+    [Buffer.from(id)],
+  );
+  await control.query("ANALYZE TABLE events");
+  const [plan] = await control.query<RowDataPacket[]>(
+    "EXPLAIN SELECT * FROM events WHERE notification_material_pending=1 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED",
+  );
+  expect(plan[0]?.key).toBe("event_notification_material_pending");
+  const [actual] = await control.query<RowDataPacket[]>(
+    "EXPLAIN ANALYZE SELECT * FROM events WHERE notification_material_pending=1 ORDER BY id LIMIT 1",
+  );
+  const text = String(Object.values(actual[0] ?? {})[0]);
+  const examined = [...text.matchAll(/actual time=[^\n]*?rows=(\d+) loops=(\d+)/g)].map((m) => ({
+    rows: Number(m[1]),
+    loops: Number(m[2]),
+  }));
+  expect(examined.length).toBeGreaterThan(0);
+  expect(examined.every((r) => r.rows <= 1 && r.loops === 1)).toBe(true);
+  expect(await repairOneMaterial()).toMatchObject({ eventId: id, complete: true, scanned: 1 });
+  expect(await repairOneMaterial()).toBeNull();
+  await events.update(director, id, newId(), 1, { ...input, route: "Fictional Projection Route" });
+  // Substantial representative cosmetic history tests query work, not the producer command path.
+  const cosmetics = Array.from({ length: 2000 }, (_, n) => ({ id: newId(), version: n + 3 }));
+  await control.execute(
+    `INSERT INTO event_revisions(id,event_id,version,sequence,actor_id,recorded_at,category,status,title,description,game,server,organizer,meeting_location,route,meeting_at,starts_at,ends_at,visibility,prescribed_mass_kg,private_reason)
+    SELECT fixture.id,r.event_id,fixture.version,r.sequence+fixture.version-r.version,r.actor_id,r.recorded_at,'updated',r.status,'Fictional Projection Cosmetic',r.description,r.game,r.server,r.organizer,r.meeting_location,r.route,r.meeting_at,r.starts_at,r.ends_at,r.visibility,r.prescribed_mass_kg,NULL
+    FROM JSON_TABLE(?, '$[*]' COLUMNS(id CHAR(36) PATH '$.id',version INT PATH '$.version')) fixture CROSS JOIN event_revisions r WHERE r.event_id=? AND r.version=2`,
+    [JSON.stringify(cosmetics), Buffer.from(id)],
+  );
+  await control.execute(
+    "UPDATE events SET version=2002,change_sequence=change_sequence+2000,current_revision_id=?,notification_material=JSON_OBJECT('schemaVersion',1,'throughVersion',2002,'startVersion',1,'routeVersion',2,'statusVersion',1) WHERE id=?",
+    [Buffer.from(cosmetics.at(-1)?.id as string), Buffer.from(id)],
+  );
+  const versions = Array.from({ length: 100 }, (_, n) => n + 2);
+  const projected = await unit.run(async (tx) => {
+    await identity.notificationContextInTransaction(tx);
+    return events.notificationChangeProjectionsInTransaction(
+      tx,
+      versions.map((version) => ({ eventId: id, version, category: "event.route_changed" })),
+    );
+  });
+  expect(projected.get(`${id}:2:event.route_changed`)).toMatchObject({
+    effective: true,
+    title: "Fictional Projection Cosmetic",
+  });
+  expect(projected.size).toBe(100);
+  expect([...projected.values()].filter((row) => row.effective)).toHaveLength(1);
+  const projectionQuery = `SELECT e.id,r.version,current_definition.title,e.notification_material FROM events e INNER JOIN event_revisions r ON r.event_id=e.id INNER JOIN event_revisions current_definition ON current_definition.id=e.current_revision_id WHERE ${versions.map(() => "(e.id=? AND r.version=?)").join(" OR ")} ORDER BY e.id,r.version FOR SHARE`,
+    projectionParameters = versions.flatMap((version) => [Buffer.from(id), version]);
+  const [projectionPlan] = await control.query<RowDataPacket[]>(
+    `EXPLAIN ${projectionQuery}`,
+    projectionParameters,
+  );
+  expect(projectionPlan.find((row) => row.table === "r")?.key).toBe("event_revision_version");
+  const [projectionActual] = await control.query<RowDataPacket[]>(
+    `EXPLAIN ANALYZE ${projectionQuery}`,
+    projectionParameters,
+  );
+  const projectionText = String(Object.values(projectionActual[0] ?? {})[0]),
+    projectionWork = [
+      ...projectionText.matchAll(/actual time=[^\n]*?rows=([\d.]+) loops=(\d+)/g),
+    ].map((m) => Number(m[1]) * Number(m[2]));
+  expect(projectionWork.length).toBeGreaterThan(0);
+  expect(projectionWork.every((work) => work <= 100)).toBe(true);
+  console.log(
+    JSON.stringify({
+      event: "notification_material_pending_plan",
+      healthyEvents: 1000,
+      pendingEvents: 1,
+      index: plan[0]?.key,
+      maxActualRows: Math.max(...examined.map((r) => r.rows)),
+      repairedDefinitions: 1,
+      projectionIndex: "event_revision_version",
+      cosmeticHistory: 2000,
+      projectionMaxActualWork: Math.max(...projectionWork),
+      projectedDefinitions: projected.size,
+    }),
+  );
+});
+
+test("same-event writers keep combined material anchors atomic and cancellation terminal", async () => {
+  const { id, input } = await participating();
+  await drain();
+  const changed = {
+      ...input,
+      startsAt: new Date(instant + 4200000).toISOString(),
+      route: "Fictional Combined Route",
+    },
+    cosmetic = { ...input, title: "Fictional Concurrent Title" };
+  const results = await Promise.allSettled([
+    events.update(director, id, newId(), 1, changed),
+    events.update(director, id, newId(), 1, cosmetic),
+  ]);
+  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  const conflict = results.find((r) => r.status === "rejected");
+  expect(conflict?.status === "rejected" && conflict.reason.statusCode).toBe(412);
+  const materialVersion = results[0]?.status === "fulfilled" ? 2 : 3;
+  await events.update(director, id, newId(), 2, { ...changed, title: cosmetic.title });
+  await events.update(director, id, newId(), 3, {
+    ...changed,
+    title: cosmetic.title,
+    route: "Fictional Final Route",
+  });
+  await events.update(director, id, newId(), 4, {
+    ...changed,
+    title: cosmetic.title,
+    route: "Fictional Final Route",
+    description: "Fictional last cosmetic",
+  });
+  const [before] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(before[0]?.material).toMatchObject({
+    throughVersion: 5,
+    startVersion: materialVersion,
+    routeVersion: 4,
+    statusVersion: 1,
+  });
+  await drain();
+  const live = (await service.poll(owner)).items.filter(
+    (r) => r.target?.id === id && r.liveToastEligible,
+  );
+  expect(live.map((r) => r.category).sort()).toEqual([
+    "event.route_changed",
+    "event.start_changed",
+  ]);
+  await events.cancel(director, id, newId(), 5, "Fictional terminal cancellation");
+  await expect(events.update(director, id, newId(), 6, changed)).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  await drain();
+  const final = (await service.poll(owner)).items.filter((r) => r.target?.id === id);
+  expect(final.filter((r) => r.liveToastEligible).map((r) => r.category)).toEqual([
+    "event.cancelled",
+  ]);
+  expect(final).toHaveLength(3);
+  expect((await service.history(owner)).items.filter((r) => r.target?.id === id)).toHaveLength(3);
+  const [terminal] = await control.query<RowDataPacket[]>(
+    "SELECT notification_material material FROM events WHERE id=?",
+    [Buffer.from(id)],
+  );
+  expect(terminal[0]?.material).toEqual({
+    schemaVersion: 1,
+    throughVersion: 6,
+    startVersion: 6,
+    routeVersion: 6,
+    statusVersion: 6,
+  });
+});
 
 test("fanout commits at most 25 recipients per page and persists continuation with each effect", async () => {
   const credential = await identity.prepareCredential(password);

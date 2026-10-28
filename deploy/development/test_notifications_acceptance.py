@@ -772,8 +772,8 @@ class WindowTests(unittest.TestCase):
         self.state(allocations={role: 'created' for role in self.window.accounts})
         drops = []
         def sql(query):
-            if query.startswith('SELECT COALESCE'):
-                return RUN.encode()
+            if query.startswith('SELECT JSON_OBJECT'):
+                return json.dumps({'metadata': RUN}).encode()
             if query.startswith('SELECT COUNT(*) FROM information_schema.SCHEMATA'):
                 return b'0'
             if query.startswith('DROP USER'):
@@ -790,13 +790,113 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(state['allocations'], {'runtime': 'created', 'jobs': 'removed', 'migrator': 'removed'})
         self.assertFalse(state['schedule']); self.assertTrue(self.window.marker.exists())
 
+    def cleanup_accounts_fixture(self, records, drops, *, before_read=None, after_schema=None, fail_drop=None):
+        self.state(allocations={role: 'created' for role in self.window.accounts}, sharedGrantsSha256='a' * 64, scenario=0)
+        self.window.shared_grants = Mock(return_value='a' * 64)
+        counts = {}
+        def sql(query):
+            role = next((role for role, account in self.window.accounts.items() if account in query), None)
+            if query.startswith(('SELECT COALESCE', 'SELECT JSON_OBJECT')):
+                counts[role] = counts.get(role, 0) + 1
+                if before_read: before_read(role, counts[role])
+                row = records.get(role)
+                if row is None: return b''
+                marker = row.get('metadata')
+                if query.startswith('SELECT JSON_OBJECT'):
+                    return json.dumps({'metadata': marker}).encode() + b'\n'
+                # Actual old query's COALESCE cannot distinguish present missing metadata from absence.
+                if marker is None: return b'\n'
+                return (marker if isinstance(marker, str) else json.dumps(marker)).encode() + b'\n'
+            if query.startswith('SELECT COUNT(*) FROM information_schema.SCHEMATA'):
+                if after_schema: after_schema()
+                return b'0'
+            if query.startswith('DROP USER'):
+                drops.append(role)
+                if fail_drop: fail_drop(role)
+                records.pop(role, None)
+                return b''
+            if query.startswith('SELECT COUNT(*) FROM mysql.user'):
+                return b'1' if role in records else b'0'
+            self.fail('Unexpected cleanup query')
+        return sql
+
+    def test_present_accounts_without_exact_typed_metadata_never_authorize_a_drop(self):
+        for marker in [None, '', ' ', RUN + ' ', 'fictional foreign run', '{malformed', {}, [], 1, True]:
+            with self.subTest(markerType=type(marker).__name__):
+                records, drops = {'runtime': {'metadata': marker}}, []
+                sql = self.cleanup_accounts_fixture(records, drops)
+                with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+                    with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_ACCOUNT_OWNERSHIP_INVALID$'):
+                        self.window.cleanup()
+                self.assertEqual(drops, [])
+                self.assertTrue(self.window.marker.exists())
+                self.assertEqual(records['runtime']['metadata'], marker)
+
+    def test_present_replacement_between_preflight_and_drop_retains_fence_without_drop(self):
+        records, drops = {'runtime': {'metadata': RUN}}, []
+        def replace(role, count):
+            if role == 'runtime' and count == 2: records[role] = {'metadata': None}
+        sql = self.cleanup_accounts_fixture(records, drops, before_read=replace)
+        with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_CLEANUP_INCOMPLETE$'):
+                self.window.cleanup()
+        self.assertEqual(drops, [])
+        self.assertTrue(self.window.marker.exists())
+        self.assertIsNone(records['runtime']['metadata'])
+
+    def test_absent_accounts_skip_drop_and_cannot_authorize_a_later_same_name_replacement(self):
+        records, drops = {}, []
+        sql = self.cleanup_accounts_fixture(records, drops, after_schema=lambda: records.update(runtime={'metadata': None}))
+        with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_ACCOUNT_REMAINS$'):
+                self.window.cleanup()
+        self.assertEqual(drops, [])
+        self.assertTrue(self.window.marker.exists())
+        self.assertIsNone(records['runtime']['metadata'])
+
+    def test_exact_owned_account_cleanup_retries_after_partial_removal_without_redropping_absent_accounts(self):
+        records = {role: {'metadata': RUN} for role in self.window.accounts}
+        drops = []
+        failed = [False]
+        def fail_once(role):
+            if role == 'runtime' and not failed[0]:
+                failed[0] = True
+                raise RuntimeError('fictional DCL failure')
+        sql = self.cleanup_accounts_fixture(records, drops, fail_drop=fail_once)
+        with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_CLEANUP_INCOMPLETE$'):
+                self.window.cleanup()
+            self.assertTrue(self.window.marker.exists())
+            self.window.cleanup()
+        self.assertEqual(drops, ['runtime', 'jobs', 'migrator', 'runtime'])
+        self.assertEqual(records, {})
+        self.assertFalse(self.window.marker.exists())
+
+    def test_genuinely_absent_account_cleanup_is_idempotent_and_issues_no_drop(self):
+        records, drops = {}, []
+        sql = self.cleanup_accounts_fixture(records, drops)
+        with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+            self.window.cleanup()
+        self.assertEqual(drops, [])
+        self.assertFalse(self.window.marker.exists())
+
+    def test_present_matching_metadata_without_current_acknowledgement_is_not_owned(self):
+        records, drops = {'runtime': {'metadata': RUN}}, []
+        sql = self.cleanup_accounts_fixture(records, drops)
+        state = self.window.bound(); state['allocations']['runtime'] = 'removed'; self.window.save(state)
+        with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql):
+            with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_ACCOUNT_RECEIPT_REQUIRED$'):
+                self.window.cleanup()
+        self.assertEqual(drops, [])
+        self.assertTrue(self.window.marker.exists())
+
     def test_shared_grant_change_keeps_fence_and_never_reverts_unowned_rights(self):
         self.state(allocations={role: 'removed' for role in ['schema', 'network', *self.window.accounts]},
                    sharedGrantsSha256='a' * 64)
         queries = []
         def sql(query):
             queries.append(query)
-            return b'' if query.startswith('SELECT COALESCE') else b'0'
+            return b'' if query.startswith('SELECT JSON_OBJECT') else b'0'
         with patch.object(self.window.containers, 'stop'), patch.object(self.window, 'sql', side_effect=sql), patch.object(self.window, 'shared_grants', return_value='b' * 64):
             with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_SHARED_GRANTS_CHANGED$'):
                 self.window.cleanup()
@@ -809,7 +909,7 @@ class WindowTests(unittest.TestCase):
         queries = []
         def sql(query):
             queries.append(query)
-            if query.startswith('SELECT COALESCE'):
+            if query.startswith('SELECT JSON_OBJECT'):
                 return b''
             if query.startswith('SELECT COUNT(*) FROM information_schema.SCHEMATA'):
                 return b'1'

@@ -74,6 +74,10 @@ interface Ports {
   events: Pick<
     Events,
     | "notificationChangeInTransaction"
+    | "notificationChangeProjectionsInTransaction"
+    | "notificationMaterialInTransaction"
+    | "prepareNotificationMaterialInTransaction"
+    | "repairPendingNotificationMaterialInTransaction"
     | "repairNotificationScheduleInTransaction"
     | "recipientsInTransaction"
     | "notificationScheduleInTransaction"
@@ -92,10 +96,34 @@ interface Ports {
   >;
 }
 export function eventReference(raw: unknown) {
-  const v = closed(raw, ["eventId", "after"]);
-  return {
+  const phased = raw !== null && typeof raw === "object" && Object.hasOwn(raw, "phase");
+  const v = closed(
+    raw,
+    phased
+      ? ["eventId", "after", "phase", "throughVersion", "currentVersion"]
+      : ["eventId", "after"],
+  );
+  const base = {
     eventId: applicationId(v.eventId as string),
     after: v.after === null ? null : applicationId(v.after as string),
+  };
+  if (!phased) return base;
+  if (
+    !["prepare", "deliver"].includes(v.phase as string) ||
+    !Number.isInteger(v.throughVersion) ||
+    !Number.isInteger(v.currentVersion) ||
+    (v.throughVersion as number) < 0 ||
+    (v.currentVersion as number) < 1 ||
+    (v.currentVersion as number) > 4294967295 ||
+    (v.throughVersion as number) > (v.currentVersion as number) ||
+    (v.phase === "deliver" && v.throughVersion !== v.currentVersion)
+  )
+    throw new Error("INVALID_NOTIFICATION_MATERIAL_REFERENCE");
+  return {
+    ...base,
+    phase: v.phase as "prepare" | "deliver",
+    throughVersion: v.throughVersion as number,
+    currentVersion: v.currentVersion as number,
   };
 }
 export function reminderReference(raw: unknown) {
@@ -238,6 +266,18 @@ export function createNotifications(
     rows: Row[],
     history: boolean,
   ): Promise<S["Notification"][]> {
+    const eventChanges = await ports.events.notificationChangeProjectionsInTransaction(
+      tx,
+      rows
+        .filter((row) =>
+          ["event.start_changed", "event.route_changed", "event.cancelled"].includes(row.category),
+        )
+        .map((row) => ({
+          eventId: row.subjectId,
+          version: row.subjectVersion,
+          category: row.category,
+        })),
+    );
     const targets = await ports.trips.notificationTargetsInTransaction(
         tx,
         rows.filter((r) => r.subjectKind === "trip").map((r) => r.subjectId),
@@ -281,15 +321,26 @@ export function createNotifications(
       }
       const trip = r.subjectKind === "trip" ? targets.get(r.subjectId) : null;
       const targetId = r.subjectKind === "trip" ? trip?.target : r.subjectId;
+      const eventChange = eventChanges.get(`${r.subjectId}:${r.subjectVersion}:${r.category}`);
+      const materialEvent = [
+        "event.start_changed",
+        "event.route_changed",
+        "event.cancelled",
+      ].includes(r.category);
       items.push({
         id: r.id,
         category: r.category,
         messageKey: `notifications.${r.category}`,
-        display: { actorNickname: r.actorNickname, game: r.game, eventTitle: r.eventTitle },
+        display: {
+          actorNickname: r.actorNickname,
+          game: eventChange?.game ?? r.game,
+          eventTitle: eventChange?.title ?? r.eventTitle,
+        },
         target: targetId ? { kind: r.subjectKind, id: targetId } : null,
         occurredAt: r.occurredAt,
         readAt: r.readAt,
         liveToastEligible:
+          (!materialEvent || eventChange?.effective === true) &&
           !(r.category === "trip.started" && trip?.outcome !== "open") &&
           !(
             r.category === "trip.rejected" &&
@@ -575,7 +626,7 @@ export function createNotifications(
     }
     if (e.type === "event.changed") {
       const change = await ports.events.notificationChangeInTransaction(tx, e);
-      if (!change.current || !change.category) return null;
+      if (!change.effective || !change.category) return null;
       return {
         ...base,
         category: change.category,
@@ -601,7 +652,42 @@ export function createNotifications(
       const ref = eventReference(raw);
       await ports.identity.notificationContextInTransaction(tx);
       const e = await outbox.readInTransaction(tx, ref.eventId);
-      if (ref.after === null && (e.type === "event.changed" || e.type === "event.response_changed"))
+      if ("phase" in ref && e.type !== "event.changed")
+        throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      const availableAt =
+        e.type === "event.changed"
+          ? await outbox.recordedAtInTransaction(tx, ref.eventId)
+          : e.occurredAt;
+      let material:
+        | { phase: "deliver"; throughVersion: number; currentVersion: number }
+        | undefined;
+      if (e.type === "event.changed") {
+        if (!("phase" in ref) || ref.phase === "prepare") {
+          await ports.events.repairNotificationScheduleInTransaction(tx, e);
+          const progress = await ports.events.prepareNotificationMaterialInTransaction(tx, e);
+          await enqueueEvent(tx, ref.eventId, ref.after, availableAt, {
+            phase: progress.complete ? "deliver" : "prepare",
+            throughVersion: progress.throughVersion,
+            currentVersion: progress.currentVersion,
+          });
+          return;
+        }
+        const progress = await ports.events.notificationMaterialInTransaction(tx, e);
+        if (!progress.complete) {
+          await enqueueEvent(tx, ref.eventId, ref.after, availableAt, {
+            phase: "prepare",
+            throughVersion: progress.throughVersion,
+            currentVersion: progress.currentVersion,
+          });
+          return;
+        }
+        material = {
+          phase: "deliver",
+          throughVersion: progress.throughVersion,
+          currentVersion: progress.currentVersion,
+        };
+      }
+      if (ref.after === null && e.type === "event.response_changed")
         await ports.events.repairNotificationScheduleInTransaction(tx, e);
       const d = await description(tx, e);
       if (!d) return;
@@ -623,7 +709,7 @@ export function createNotifications(
         if (recipient) await insert(tx, recipient, d);
       }
       if (ids.length === 25)
-        await enqueueEvent(tx, ref.eventId, ids.at(-1) as string, e.occurredAt);
+        await enqueueEvent(tx, ref.eventId, ids.at(-1) as string, availableAt, material);
     },
   };
   const reminderHandler: Handler = {
@@ -683,14 +769,22 @@ export function createNotifications(
     },
   };
   const queue = createQueue(unit, [handler, reminderHandler]);
-  async function enqueueEvent(tx: TxContext, eventId: string, after: string, availableAt: string) {
+  async function enqueueEvent(
+    tx: TxContext,
+    eventId: string,
+    after: string | null,
+    availableAt: string,
+    material?: { phase: "prepare" | "deliver"; throughVersion: number; currentVersion: number },
+  ) {
     await queue.enqueue(tx, {
       kind: handler.kind,
       schemaVersion: 1,
       consumer: handler.consumer,
-      effectKey: `${eventId}:${after}`,
+      effectKey: material
+        ? `${eventId}:material:${material.phase}:${material.throughVersion}:${material.currentVersion}:${after ?? "first"}`
+        : `${eventId}:${after}`,
       eventId: null,
-      reference: { eventId, after },
+      reference: { eventId, after, ...material },
       availableAt,
       maxAttempts: 5,
     });
@@ -741,6 +835,7 @@ export function createNotifications(
             );
           await ports.events.acknowledgeNotificationsInTransaction(tx, row.id, event.generation);
         }
+        await ports.events.repairPendingNotificationMaterialInTransaction(tx);
         return rows.length;
       });
     },

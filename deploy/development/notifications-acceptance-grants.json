@@ -120,7 +120,12 @@
     "trip_contributions": ["INSERT", "SELECT", "UPDATE"],
     "qualification_states": ["INSERT", "SELECT", "UPDATE(version)"],
     "qualification_promotion_reviews": ["INSERT", "SELECT", "UPDATE"],
-    "events": ["SELECT", "UPDATE(notification_pending)", "UPDATE(version,trip_assessment_pending)"],
+    "events": [
+      "SELECT",
+      "UPDATE(notification_pending)",
+      "UPDATE(version,trip_assessment_pending)",
+      "UPDATE(notification_material)"
+    ],
     "trip_proposals": ["SELECT"],
     "trip_proposal_reviews": ["SELECT"],
     "trip_resolutions": ["SELECT"],

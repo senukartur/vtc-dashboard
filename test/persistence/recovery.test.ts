@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +15,7 @@ import {
   guardedSettings,
   hasCode,
   manualPriorFolder,
+  notificationMaterialPriorFolder,
   notificationsPriorFolder,
   reconciliationPriorFolder,
   reset,
@@ -118,7 +120,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 17);
+      assert.equal(await runMigrations(settings), 18);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -175,7 +177,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 17);
+      assert.equal(await runMigrations(settings), 18);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -350,7 +352,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 17);
+      assert.equal(await runMigrations(guardedSettings()), 18);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_origin_shape','trip_fact_destination_shape','trip_fact_cargo_shape','trip_fact_adr_shape')",
@@ -445,7 +447,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 17);
+        assert.equal(await runMigrations(settings), 18);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -503,7 +505,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 17);
+      assert.equal(await runMigrations(guardedSettings()), 18);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -558,7 +560,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 17);
+      assert.equal(await runMigrations(guardedSettings()), 18);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -578,9 +580,10 @@ await recoveryTest(
       folder = await notificationsPriorFolder();
       assert.equal(await runMigrations(settings, { folder }), 16);
       const journal = JSON.parse(
-          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
-        ),
-        entry = journal.entries.at(-1);
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      journal.entries = journal.entries.slice(0, 17);
+      const entry = journal.entries.at(-1);
       assert.equal(entry?.idx, 16);
       const source = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8");
       await writeFile(
@@ -611,10 +614,186 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 17);
+      assert.equal(await runMigrations(guardedSettings()), 18);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "material prefix partial DDL preserves the seventeen-entry history and remains sticky",
+  async () => {
+    const connection = await testConnection(),
+      settings = guardedSettings();
+    let folder: string | undefined;
+    try {
+      await reset(connection);
+      folder = await notificationMaterialPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 17);
+      await connection.query(
+        "INSERT INTO audit_entries(id,actor_kind,actor_id,operation,subject_kind,subject_id,occurred_at,reason,company_id) VALUES ('03600000-0000-4000-8000-000000000017','system',NULL,'configuration.changed','company','03600000-0000-4000-8000-000000000001','2026-01-01 00:00:00.000','operator_request',NULL)",
+      );
+      const [before] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+      );
+      const journal = JSON.parse(
+          await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+        ),
+        entry = journal.entries.at(-1);
+      assert.equal(entry.idx, 17);
+      assert.equal(entry.tag, "0017_event_notification_material");
+      const source = await readFile(join(migrationFolder, `${entry.tag}.sql`), "utf8"),
+        first = source.split("--> statement-breakpoint")[0];
+      assert.ok(first);
+      assert.ok(first.includes("ADD `notification_material` json"));
+      await writeFile(
+        join(folder, `${entry.tag}.sql`),
+        `${first}\n--> statement-breakpoint\nALTER TABLE synthetic_material_missing ADD COLUMN fault INT;\n`,
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const [columns] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
+      );
+      assert.deepEqual(
+        columns.map((r) => r.COLUMN_NAME),
+        ["notification_material"],
+      );
+      const [retained] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version LIMIT 17",
+      );
+      assert.deepEqual(retained, before);
+      const [dirty] = await connection.query<RowDataPacket[]>(
+        "SELECT state,applied_at FROM _vtc_migrations ORDER BY version DESC LIMIT 1",
+      );
+      assert.equal(dirty[0]?.state, "applying");
+      assert.equal(dirty[0]?.applied_at, null);
+      const [sentinel] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM audit_entries WHERE id='03600000-0000-4000-8000-000000000017'",
+      );
+      assert.equal(Number(sentinel[0]?.n), 1);
+      await assert.rejects(
+        runMigrations(settings, { folder, lockTimeoutSeconds: 0 }),
+        /MIGRATION_RECOVERY_REQUIRED/,
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "material recovery reconstructs the known empty disposable baseline and complete generated index",
+  async () => {
+    const connection = await testConnection(),
+      settings = guardedSettings();
+    try {
+      // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
+      // This is not a live backup/restore procedure and never stamps or replays the partial schema.
+      await reset(connection);
+      assert.equal(await runMigrations(settings), 18);
+      assert.equal(await runMigrations(settings), 0);
+      const [columns] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
+      );
+      assert.equal(columns.length, 2);
+      assert.ok(String(columns[1]?.EXTRA).includes("VIRTUAL GENERATED"));
+      const [index] = await connection.query<RowDataPacket[]>(
+        "SELECT COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND INDEX_NAME='event_notification_material_pending' ORDER BY SEQ_IN_INDEX",
+      );
+      assert.deepEqual(
+        index.map((r) => r.COLUMN_NAME),
+        ["notification_material_pending", "id"],
+      );
+    } finally {
+      await connection.end();
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "material migration committed finalization survives an unknown acknowledgement without rewriting history",
+  async () => {
+    const settings = guardedSettings(),
+      connection = await testConnection();
+    let folder: string | undefined, gate: Awaited<ReturnType<typeof journalAckGate>> | undefined;
+    let pending: Promise<{ applied: number } | { error: unknown }> | undefined;
+    try {
+      await reset(connection);
+      folder = await notificationMaterialPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 17);
+      const [prefix] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+      );
+      const source = await readFile(
+        join(migrationFolder, "0017_event_notification_material.sql"),
+        "utf8",
+      );
+      const statements = source
+        .split("--> statement-breakpoint")
+        .filter((statement) => statement.trim());
+      assert.equal(statements.length, 3);
+      const expected = createHash("sha256").update(source).digest("hex");
+      gate = await journalAckGate("finalize", undefined, statements);
+      const started = performance.now();
+      pending = runMigrations(gate.settings).then(
+        (applied) => ({ applied }),
+        (error: unknown) => ({ error }),
+      );
+      await bounded(gate.withheld, "material_final_ack", 10000);
+      assert.equal(gate.facts.okPackets, 1);
+      const [history] = await connection.query<RowDataPacket[]>(
+        "SELECT version,CAST(hash AS CHAR) hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+      );
+      assert.equal(history.length, 18);
+      assert.equal(history.at(-1)?.hash, expected);
+      assert.equal(history.at(-1)?.state, "applied");
+      assert.ok(history.at(-1)?.applied_at);
+      const [retained] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version LIMIT 17",
+      );
+      assert.deepEqual(retained, prefix);
+      const [index] = await connection.query<RowDataPacket[]>(
+        "SELECT COUNT(*) n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND INDEX_NAME='event_notification_material_pending'",
+      );
+      assert.equal(Number(index[0]?.n), 2);
+      const result = await pending;
+      assert.ok("error" in result, "UNKNOWN_MATERIAL_FINAL_ACK_MUST_NOT_SUCCEED");
+      assert.ok(hasCode("PROTOCOL_SEQUENCE_TIMEOUT")(result.error));
+      assert.equal(databaseFailureContext(result.error)?.operation, "migration_journal_finalize");
+      assert.equal(databaseFailureContext(result.error)?.wireDeadlineMs, 5000);
+      assert.ok(performance.now() - started >= 4500 && performance.now() - started < 7000);
+      await until(async () => {
+        const [lock] = await connection.query<RowDataPacket[]>("SELECT IS_USED_LOCK(?) owner", [
+          migrationLockName(settings.database),
+        ]);
+        return lock[0]?.owner === null && gate?.activeSockets() === 0;
+      });
+      assert.equal(gate.facts.statements, 3);
+      assert.equal(gate.facts.finalizations, 1);
+      assert.equal(gate.facts.ends, 1);
+      assert.equal(await runMigrations(settings, { lockTimeoutSeconds: 0 }), 0);
+      const [unchanged] = await connection.query<RowDataPacket[]>(
+        "SELECT version,CAST(hash AS CHAR) hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+      );
+      assert.deepEqual(unchanged, history);
+    } finally {
+      try {
+        await gate?.close();
+      } finally {
+        try {
+          await pending;
+        } finally {
+          await connection.end();
+          if (folder) await rm(folder, { recursive: true });
+        }
+      }
     }
   },
   SCHEMA_SETUP_TIMEOUT_MS,

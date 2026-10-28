@@ -657,6 +657,17 @@ export function decodeStoredEvent(e: typeof outboxEvents.$inferSelect): DomainEv
 }
 export function createOutbox(unit: UnitOfWork, options: { notifications?: boolean } = {}) {
   return {
+    async recordedAtInTransaction(tx: TxContext, id: string) {
+      // Immutable server-recorded time provides a stable immediate-job fingerprint.
+      const [row] = await unit
+        .client(tx)
+        .select({ recordedAt: outboxEvents.recordedAt })
+        .from(outboxEvents)
+        .where(eq(outboxEvents.id, applicationId(id)))
+        .for("share");
+      if (!row) throw new Error("EVENT_MISSING");
+      return row.recordedAt;
+    },
     async readInTransaction(tx: TxContext, id: string) {
       const [row] = await unit
         .client(tx)

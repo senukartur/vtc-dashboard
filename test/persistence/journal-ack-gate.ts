@@ -1,10 +1,14 @@
-import { createConnection, createServer, type AddressInfo, type Socket } from "node:net";
+import { type AddressInfo, createConnection, createServer, type Socket } from "node:net";
 import { deferred } from "../support/concurrency.ts";
 import { guardedSettings } from "./support.ts";
 
 // Transparent plaintext transport for this guarded synthetic allocation only. All result
 // bytes come from real MySQL; one real journal OK packet is withheld, never synthesized.
-export async function journalAckGate(target: "insert" | "finalize", positiveFinalization?: number) {
+export async function journalAckGate(
+  target: "insert" | "finalize",
+  positiveFinalization?: number,
+  expectedStatements?: readonly string[],
+) {
   if (
     positiveFinalization !== undefined &&
     (target !== "finalize" ||
@@ -12,6 +16,15 @@ export async function journalAckGate(target: "insert" | "finalize", positiveFina
       positiveFinalization < 1)
   )
     throw new Error("INVALID_SYNTHETIC_FINALIZATION_GATE");
+  if (
+    expectedStatements !== undefined &&
+    (!Array.isArray(expectedStatements) ||
+      expectedStatements.length === 0 ||
+      expectedStatements.some((statement) => typeof statement !== "string" || !statement.trim()) ||
+      new Set(expectedStatements).size !== expectedStatements.length)
+  )
+    throw new Error("INVALID_SYNTHETIC_STATEMENT_OBSERVER");
+  const observedStatements = expectedStatements && new Set(expectedStatements);
   const settings = guardedSettings();
   const withheld = deferred<void>();
   const waiterForwarded = deferred<void>();
@@ -116,7 +129,13 @@ export async function journalAckGate(target: "insert" | "finalize", positiveFina
           const finalize = query.startsWith("UPDATE _vtc_migrations");
           if (insert) facts.inserts++;
           if (finalize) facts.finalizations++;
-          if (query.startsWith("CREATE TABLE synthetic_parent")) facts.statements++;
+          // Observe exact wire bytes without changing the forwarded statement.
+          if (
+            observedStatements
+              ? observedStatements.has(query)
+              : query.startsWith("CREATE TABLE synthetic_parent")
+          )
+            facts.statements++;
           if (query.startsWith("SELECT RELEASE_LOCK")) facts.releases++;
           if (
             (target === "insert" && insert) ||

@@ -189,6 +189,7 @@ try {
       await composed.trips.contributions.totals(tx, id, "share");
     });
     step = "worker_maintenance";
+    await connection.query("UPDATE events SET notification_material=notification_material");
     const service = composed.notifications;
     await service.maintenance();
     const queue = createQueue(
@@ -238,6 +239,8 @@ try {
       "UPDATE outbox_routing SET event_type=event_type",
       "UPDATE qualification_levels SET code=code",
       "UPDATE event_responses SET status=status",
+      "UPDATE events SET starts_at=starts_at",
+      "UPDATE events SET version=version",
       "UPDATE identity_roles SET role=role",
       "SELECT * FROM identity_sessions LIMIT 1",
     ])

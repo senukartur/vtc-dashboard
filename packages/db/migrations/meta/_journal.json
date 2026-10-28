@@ -120,6 +120,13 @@
       "when": 1793123945203,
       "tag": "0016_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1793218102210,
+      "tag": "0017_event_notification_material",
+      "breakpoints": true
     }
   ]
 }

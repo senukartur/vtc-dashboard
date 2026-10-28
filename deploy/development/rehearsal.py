@@ -47,6 +47,113 @@ def binding():
 def receipt(o, group, value):
     o.atomic_json(o.BASE / f'state/rehearsal-{group}.json', dict(binding=binding(), completedUtc=int(time.time()), **value))
 
+def rehearsal_database_identity(o, revision, image_id):
+    """Read back only the disposable database created by the acknowledged rehearsal startup."""
+    config = json.loads((o.BASE / 'compose.yaml').read_text())
+    network_name, volume_name = config['networks']['database']['name'], config['volumes']['mysql']['name']
+    identity = o.compose(['ps', '-a', '-q', 'db'], revision=revision, image_id=image_id).decode().strip()
+    o.require(re.fullmatch('[a-f0-9]{64}', identity), 'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    values = json.loads(o.run(['docker', 'inspect', identity], timeout=10))
+    o.require(len(values) == 1, 'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    info = values[0]
+    o.require(info['Id'] == identity and info['State']['Running'] is True and
+              isinstance(info['Image'], str) and re.fullmatch('sha256:[a-f0-9]{64}', info['Image']) and
+              isinstance(info['Created'], str) and bool(info['Created']) and
+              info['Config']['Image'] == config['services']['db']['image'] and
+              info['Config']['Labels'].get('com.docker.compose.project') == o.PROJECT and
+              info['Config']['Labels'].get('com.docker.compose.service') == 'db' and
+              info['Config']['Labels'].get('vtc011.rehearsal') == o.PROJECT,
+              'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    mounts = [mount for mount in info['Mounts'] if mount['Destination'] == '/var/lib/mysql']
+    o.require(len(mounts) == 1 and mounts[0]['Type'] == 'volume' and mounts[0]['Name'] == volume_name,
+              'NOTIFICATIONS_PROOF_DATABASE_STORAGE_INVALID')
+    attachment = info['NetworkSettings']['Networks'].get(network_name)
+    o.require(attachment and re.fullmatch('[a-f0-9]{64}', attachment['NetworkID']),
+              'NOTIFICATIONS_PROOF_DATABASE_NETWORK_INVALID')
+    networks = json.loads(o.run(['docker', 'network', 'inspect', attachment['NetworkID']], timeout=10))
+    volumes = json.loads(o.run(['docker', 'volume', 'inspect', volume_name], timeout=10))
+    o.require(len(networks) == 1 and networks[0]['Id'] == attachment['NetworkID'] and
+              networks[0]['Name'] == network_name and networks[0]['Internal'] is True and
+              networks[0]['Labels'].get('vtc011.rehearsal') == o.PROJECT and
+              len(volumes) == 1 and volumes[0]['Name'] == volume_name and
+              isinstance(volumes[0]['CreatedAt'], str) and bool(volumes[0]['CreatedAt']) and
+              volumes[0]['Labels'].get('vtc011.rehearsal') == o.PROJECT,
+              'NOTIFICATIONS_PROOF_DATABASE_ALLOCATION_INVALID')
+    return dict(project=o.PROJECT, revision=revision, applicationImage=image_id, id=identity,
+                image=info['Image'], created=info['Created'], network=attachment['NetworkID'],
+                volume=volume_name, volumeCreated=volumes[0]['CreatedAt'])
+
+
+def notification_account_cleanup_proof(o, revision, image_id):
+    """Only the rehearsal's positively owned disposable server may host these synthetic accounts."""
+    import notifications_acceptance as n
+    o.require(os.environ.get('REHEARSAL_PROJECT') == o.PROJECT and
+              re.fullmatch('vtc011-[a-f0-9]{16}', o.PROJECT) and
+              os.environ.get('REHEARSAL_REVISION') == revision and
+              os.environ.get('REHEARSAL_VOLUME') == o.PROJECT + '-config',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_REHEARSAL_REQUIRED')
+    o.validate_image(image_id, revision)
+    receipt = n.private_json(o, o.BASE / 'state/notification-proof-database.json')
+    o.require(receipt == rehearsal_database_identity(o, revision, image_id),
+              'NOTIFICATIONS_PROOF_DATABASE_RECEIPT_CHANGED')
+    window = n.Window(o, revision, image_id, str(uuid.uuid4()))
+    o.require(not window.marker.exists(), 'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+    o.require(window.sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='{window.schema}';").strip() == b'0',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+    baseline = window.shared_grants()
+    state = dict(runId=window.run_id, schema=window.schema, accounts=window.accounts,
+                 revision=revision, imageId=image_id, directory=str(window.directory),
+                 controls=n.hashes(o, n.FILES), protected=n.hashes(o, n.PROTECTED), containers={},
+                 ticks=[], scenario=0, phase='preparing', schedule=False,
+                 expiresUtc=int(time.time()) + n.WINDOW_SECONDS, sharedGrantsSha256=baseline,
+                 allocations={'schema': 'removed', 'network': 'removed'})
+    window.save(state)
+    for role, account in window.accounts.items():
+        o.require(window.sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{account}';").strip() == b'0',
+                  'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+        state['allocations'][role] = 'creating'; window.save(state)
+        window.sql(f"CREATE USER '{account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}' ATTRIBUTE '{{\"vtcNotifications\":\"{window.run_id}\"}}';")
+        state['allocations'][role] = 'created'; window.save(state)
+    original_sql, drops = window.sql, []
+    def traced(statement, **options):
+        if statement.startswith('DROP USER'):
+            drops.append(statement)
+        return original_sql(statement, **options)
+    window.sql = traced
+    runtime = window.accounts['runtime']
+    def refuse():
+        try:
+            window.cleanup()
+        except RuntimeError as error:
+            o.require(error.args == ('NOTIFICATIONS_ACCOUNT_OWNERSHIP_INVALID',), 'NOTIFICATIONS_OWNERSHIP_PROOF_WRONG_FAILURE')
+        else:
+            raise RuntimeError('NOTIFICATIONS_OWNERSHIP_PROOF_UNSAFE_CLEANUP')
+        o.require(not drops and window.marker.exists() and
+                  original_sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{runtime}' AND Host='%';").strip() == b'1',
+                  'NOTIFICATIONS_OWNERSHIP_PROOF_ACCOUNT_CHANGED')
+    for marker in [None, '', 'fictional-foreign-window', {}]:
+        original_sql(f"ALTER USER '{runtime}'@'%' ATTRIBUTE '{json.dumps({'vtcNotifications': marker})}';")
+        row = original_sql(f"SELECT JSON_OBJECT('metadata',JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')) FROM mysql.user WHERE User='{runtime}' AND Host='%';")
+        o.require(row != b'' and set(json.loads(row)) == {'metadata'}, 'NOTIFICATIONS_OWNERSHIP_PROOF_PRESENCE_LOST')
+        refuse()
+    # The fixture owns both CREATE acknowledgements inside this disposable server. The old Window
+    # receipt must not authorize deleting its same-name replacement without the current marker.
+    original_sql(f"DROP USER '{runtime}'@'%';")
+    original_sql(f"CREATE USER '{runtime}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
+    refuse()
+    original_sql(f"ALTER USER '{runtime}'@'%' ATTRIBUTE '{json.dumps({'vtcNotifications': window.run_id})}';")
+    absent = window.accounts['migrator']
+    original_sql(f"DROP USER '{absent}'@'%';")
+    o.require(original_sql(f"SELECT JSON_OBJECT('metadata',JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')) FROM mysql.user WHERE User='{absent}' AND Host='%';") == b'',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_ABSENCE_INVALID')
+    window.cleanup()
+    o.require(len(drops) == 2 and all(absent not in statement for statement in drops) and not window.marker.exists(),
+              'NOTIFICATIONS_OWNERSHIP_PROOF_ABSENT_DROP')
+    print(json.dumps({'event': 'notifications_account_cleanup_proof', 'negativeCases': 5,
+                      'presentWithoutMarkerRetained': True, 'acknowledgedReplacementRetained': True,
+                      'absentDropCount': 0, 'ownedDrops': 2, 'result': 'pass'}), flush=True)
+
+
 def core():
     with rehearsal_phase('core-control-preflight'):
         mode = os.environ.get('REHEARSAL_MODE', 'full')
@@ -297,10 +404,15 @@ def core():
 
 
     with rehearsal_phase('initial-database-startup'):
+        assert not compose(['ps', '-a', '-q', 'db'], revision=revision).strip()
+        assert not ops.run(['docker', 'volume', 'ls', '-q', '--filter', f'name=^{project}_mysql$'], timeout=10).strip()
+        assert not ops.run(['docker', 'network', 'ls', '-q', '--filter', f'name=^{project}_database$'], timeout=10).strip()
         compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
+        ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))
     with rehearsal_phase('initial-migration'):
         compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
     with rehearsal_phase('core-production-codec-grants'):
+        notification_account_cleanup_proof(ops, revision, image_id)
         ops.jobs_grants_locked(revision)
         # Exercise the known existing-installation SELECT revocation, not only fresh setup.
         sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")

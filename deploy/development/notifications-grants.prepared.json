@@ -9,7 +9,7 @@
     "notification_recipients": ["SELECT", "INSERT", "UPDATE"],
     "notifications": ["SELECT", "INSERT"],
     "outbox_routing": ["SELECT", "INSERT", "DELETE"],
-    "events": ["SELECT", "UPDATE(notification_pending)"],
+    "events": ["SELECT", "UPDATE(notification_pending)", "UPDATE(notification_material)"],
     "event_responses": ["SELECT"],
     "event_response_revisions": ["SELECT"],
     "event_revisions": ["SELECT"],

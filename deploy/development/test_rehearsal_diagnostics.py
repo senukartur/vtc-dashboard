@@ -7,6 +7,7 @@ import io
 import hashlib
 import json
 import pathlib
+import re
 import os
 import subprocess
 import time
@@ -14,7 +15,7 @@ import unittest
 import tempfile
 import types
 import sys
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import rehearsal_evidence
 
 
@@ -101,6 +102,79 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
                          rehearsal_started=time.monotonic(), phase='remove')
         exec(compile(ast.Module(body=[function], type_ignores=[]), '<rehearsal-diagnostic>', 'exec'), namespace)
         self.phase = namespace['rehearsal_phase']
+
+    def test_native_ownership_proof_database_identity_requires_exact_owned_attachments(self):
+        function = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'rehearsal_database_identity')
+        project, cid, network = 'vtc011-' + 'a' * 16, 'b' * 64, 'c' * 64
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary)
+            config = {'services': {'db': {'image': 'mysql:8.4.11@sha256:' + 'd' * 64}},
+                      'networks': {'database': {'name': project + '_database'}}, 'volumes': {'mysql': {'name': project + '_mysql'}}}
+            (base / 'compose.yaml').write_text(json.dumps(config))
+            container = dict(Id=cid, Image='sha256:' + 'e' * 64, Created='fictional-created', State={'Running': True},
+                Config={'Image': config['services']['db']['image'], 'Labels': {'com.docker.compose.project': project,
+                    'com.docker.compose.service': 'db', 'vtc011.rehearsal': project}},
+                Mounts=[{'Destination': '/var/lib/mysql', 'Type': 'volume', 'Name': project + '_mysql'}],
+                NetworkSettings={'Networks': {project + '_database': {'NetworkID': network}}})
+            net = dict(Id=network, Name=project + '_database', Internal=True, Labels={'vtc011.rehearsal': project})
+            volume = dict(Name=project + '_mysql', CreatedAt='fictional-volume-created', Labels={'vtc011.rehearsal': project})
+            def execute(change=None):
+                info, owned_network, owned_volume = copy.deepcopy((container, net, volume))
+                if change: change(info, owned_network, owned_volume)
+                def require(condition, code):
+                    if not condition: raise RuntimeError(code)
+                def run(args, **options):
+                    self.assertEqual(options, {'timeout': 10})
+                    if args[:2] == ['docker', 'inspect']: return json.dumps([info]).encode()
+                    if args[:3] == ['docker', 'network', 'inspect']: return json.dumps([owned_network]).encode()
+                    if args[:3] == ['docker', 'volume', 'inspect']: return json.dumps([owned_volume]).encode()
+                    self.fail('Unexpected native proof control')
+                owner = types.SimpleNamespace(BASE=base, PROJECT=project, require=require, run=run,
+                    compose=lambda args, **options: (self.assertEqual(args, ['ps', '-a', '-q', 'db']) or cid.encode()))
+                namespace = dict(json=json, re=re)
+                exec(compile(ast.Module(body=[copy.deepcopy(function)], type_ignores=[]), '<actual-database-identity>', 'exec'), namespace)
+                return namespace['rehearsal_database_identity'](owner, 'f' * 40, 'sha256:' + '1' * 64)
+            self.assertEqual(execute(), dict(project=project, revision='f' * 40, applicationImage='sha256:' + '1' * 64,
+                id=cid, image='sha256:' + 'e' * 64, created='fictional-created', network=network,
+                volume=project + '_mysql', volumeCreated='fictional-volume-created'))
+            for change in [lambda c, n, v: c['State'].update(Running=False),
+                           lambda c, n, v: c.update(Id='f' * 64),
+                           lambda c, n, v: c.update(Image=None),
+                           lambda c, n, v: c.update(Created=None),
+                           lambda c, n, v: c['Config'].update(Image='foreign'),
+                           lambda c, n, v: c['Config']['Labels'].update({'com.docker.compose.project': 'foreign'}),
+                           lambda c, n, v: c['Mounts'][0].update(Name='foreign'),
+                           lambda c, n, v: n.update(Id='f' * 64),
+                           lambda c, n, v: n.update(Internal=False),
+                           lambda c, n, v: v.update(CreatedAt=None),
+                           lambda c, n, v: v.update(Labels={'vtc011.rehearsal': 'foreign'})]:
+                with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_PROOF_DATABASE_'):
+                    execute(change)
+
+    def test_native_ownership_proof_rejects_changed_acknowledged_database_before_window_allocation(self):
+        function = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'notification_account_cleanup_proof')
+        project, revision, image = 'vtc011-' + 'a' * 16, 'b' * 40, 'sha256:' + 'c' * 64
+        expected = dict(id='d' * 64, image='sha256:' + 'e' * 64, created='created', network='f' * 64,
+                        volume=project + '_mysql', volumeCreated='volume-created')
+        with tempfile.TemporaryDirectory() as temporary:
+            base = pathlib.Path(temporary); (base / 'state').mkdir()
+            path = base / 'state/notification-proof-database.json'
+            fixture = types.ModuleType('notifications_acceptance')
+            fixture.private_json = lambda owner, target: json.loads(target.read_text())
+            fixture.Window = Mock()
+            def require(condition, code):
+                if not condition: raise RuntimeError(code)
+            owner = types.SimpleNamespace(BASE=base, PROJECT=project, require=require, validate_image=lambda *args: None)
+            environment = dict(REHEARSAL_PROJECT=project, REHEARSAL_REVISION=revision, REHEARSAL_VOLUME=project + '-config')
+            for field in expected:
+                path.write_text(json.dumps(expected | {field: 'changed'}))
+                namespace = dict(os=types.SimpleNamespace(environ=environment), re=re,
+                    rehearsal_database_identity=lambda *args: expected)
+                with patch.dict(sys.modules, {'notifications_acceptance': fixture}):
+                    exec(compile(ast.Module(body=[copy.deepcopy(function)], type_ignores=[]), '<actual-account-proof>', 'exec'), namespace)
+                    with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_PROOF_DATABASE_RECEIPT_CHANGED$'):
+                        namespace['notification_account_cleanup_proof'](owner, revision, image)
+                fixture.Window.assert_not_called()
 
     def test_actual_cleanup_path_assignment_cannot_shadow_final_core_receipt_writer(self):
         core = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'core')
@@ -213,11 +287,25 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
                   and node.items[0].context_expr.func.id == 'rehearsal_phase'}
         startup = phases['initial-database-startup'].body
         migration = phases['initial-migration'].body
-        self.assertEqual(len(startup), 1)
+        self.assertEqual(len(startup), 5)
+        # Fresh allocation guards precede the unchanged bounded startup; its identity receipt
+        # follows the successful acknowledgement rather than authorizing an existing server.
+        self.assertTrue(all(isinstance(node, ast.Assert) for node in startup[:3]))
+        self.assertEqual([ast.unparse(node.test) for node in startup[:3]], [
+            "not compose(['ps', '-a', '-q', 'db'], revision=revision).strip()",
+            "not ops.run(['docker', 'volume', 'ls', '-q', '--filter', f'name=^{project}_mysql$'], timeout=10).strip()",
+            "not ops.run(['docker', 'network', 'ls', '-q', '--filter', f'name=^{project}_database$'], timeout=10).strip()",
+        ])
+        self.assertEqual(ast.unparse(startup[4]),
+                         "ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))")
+        startup_calls = [node for node in startup if isinstance(node, ast.Expr)
+                         and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                         and node.value.func.id == 'compose']
+        self.assertEqual(len(startup_calls), 1)
         self.assertEqual(len(migration), 1)
-        self.assertEqual(ast.literal_eval(startup[0].value.args[0]), ['up', '-d', '--wait', 'db'])
+        self.assertEqual(ast.literal_eval(startup_calls[0].value.args[0]), ['up', '-d', '--wait', 'db'])
         self.assertEqual(ast.literal_eval(migration[0].value.args[0]), ['run', '--rm', '--no-deps', 'migrate'])
-        self.assertEqual(next(k.value.value for k in startup[0].value.keywords if k.arg == 'timeout'), 240)
+        self.assertEqual(next(k.value.value for k in startup_calls[0].value.keywords if k.arg == 'timeout'), 240)
         self.assertNotIn('timeout', [k.arg for k in migration[0].value.keywords])
 
     def test_failures_are_timed_rethrown_and_redacted(self):

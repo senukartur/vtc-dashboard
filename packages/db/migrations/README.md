@@ -8,3 +8,6 @@ MySQL DDL may implicitly commit. A failed migration remains dirty and refuses au
 
 
 VTC-025 adds `0012_manual_reports.sql`: twelve manual/evidence/generation tables and dual-format trip pins. Parent-first inline FKs/indexes plus one deferred cyclic pointer FK preserve final generated schema while reducing implicit DDL rounds. Published0000–0011 bytes/journal prefix remain unchanged. Drain writers for the entire migration. [Manual rollout/rollback and partial-DDL boundaries](../../../docs/development/manual-reports.md#migration-and-rollback-boundary) are required; format2 writes require a compatible reader.
+
+
+VTC-036 appends `0017_event_notification_material.sql` without rewriting `0016` or earlier assets. It adds Events-owned nullable material-prefix JSON, virtual pending discovery and its index. No history-copy seed runs in DDL; bounded owning repair fills prefixes after upgrade. Index construction still evaluates retained Events and must satisfy unchanged native DDL/recovery budgets. Preserve additive columns during a producer rollback, pause incompatible notification readers, and catch up before enabling current delivery; see [material identity upgrade](../../../docs/development/notifications.md#material-identity-upgrade-and-repair).

@@ -81,6 +81,31 @@ test("worker references reject extensions, nonplain objects, invalid versions an
     expect(() => reminderReference({ eventId, generation, after: null })).toThrow();
   expect(() => validateNotificationsConfig({ cursorKey: "REPLACE_WITH_KEY" })).toThrow();
 });
+test("material preparation accepts exact legacy and closed phased references", () => {
+  const legacy = { eventId: newId(), after: newId() };
+  expect(eventReference(legacy)).toEqual(legacy);
+  for (const phase of ["prepare", "deliver"] as const) {
+    const current = { ...legacy, phase, throughVersion: 26, currentVersion: 26 };
+    expect(eventReference(current)).toEqual(current);
+  }
+  const preparing = { ...legacy, phase: "prepare", throughVersion: 0, currentVersion: 1 };
+  expect(eventReference(preparing)).toEqual(preparing);
+  for (const patch of [
+    { phase: "unknown" },
+    { throughVersion: -1 },
+    { throughVersion: 2 },
+    { throughVersion: "0" },
+    { currentVersion: null },
+    { currentVersion: 2 ** 32 },
+    { currentVersion: 1.5 },
+    { phase: "deliver" },
+    { reason: "Fictional private reason" },
+  ])
+    expect(() => eventReference({ ...preparing, ...patch })).toThrow();
+  expect(() => eventReference({ ...legacy, phase: "prepare" })).toThrow();
+  expect(() => eventReference({ ...legacy, throughVersion: 1 })).toThrow();
+});
+
 test("typed event decoder rejects unknown family/version and leaked fields instead of casting JSON", () => {
   const id = newId(),
     e = {

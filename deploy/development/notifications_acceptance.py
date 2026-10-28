@@ -1001,6 +1001,18 @@ class Window:
                 state.update(phase='completed', schedule=False, scenario=9); self.save(state)
         print(json.dumps({'event': 'notifications_acceptance', 'phase': state['phase'], 'scenario': state['scenario'], 'ticks': len(state['ticks']), 'result': 'inspected'}), flush=True)
 
+    def account_owned(self, role, state):
+        account = self.accounts[role]
+        row = self.sql(f"SELECT JSON_OBJECT('metadata',JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')) FROM mysql.user WHERE User='{account}' AND Host='%';")
+        if row == b'':
+            return False
+        value = json.loads(row)
+        self.o.require(isinstance(value, dict) and set(value) == {'metadata'} and
+                       isinstance(value['metadata'], str) and value['metadata'] == self.run_id,
+                       'NOTIFICATIONS_ACCOUNT_OWNERSHIP_INVALID')
+        self.o.require(state['allocations'].get(role) == 'created', 'NOTIFICATIONS_ACCOUNT_RECEIPT_REQUIRED')
+        return True
+
     def cleanup(self):
         state = self.bound()
         self.stop_all(state)
@@ -1026,10 +1038,7 @@ class Window:
         # Failed/unknown CREATE acknowledgements remain recovery blockers even if names match.
         for resource, phase in state['allocations'].items():
             self.o.require(phase in ['created', 'removed'], 'NOTIFICATIONS_ALLOCATION_UNCERTAIN')
-        for role, account in self.accounts.items():
-            metadata = self.sql(f"SELECT COALESCE(JSON_UNQUOTE(JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')),'') FROM mysql.user WHERE User='{account}' AND Host='%';").decode().strip()
-            self.o.require(not metadata or metadata == self.run_id, 'NOTIFICATIONS_ACCOUNT_OWNERSHIP_INVALID')
-            self.o.require(not metadata or state['allocations'].get(role) == 'created', 'NOTIFICATIONS_ACCOUNT_RECEIPT_REQUIRED')
+        present = {role: self.account_owned(role, state) for role in self.accounts}
         exists = self.sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='{self.schema}';").strip() == b'1'
         if exists:
             self.o.require(state['allocations'].get('schema') == 'created', 'NOTIFICATIONS_SCHEMA_RECEIPT_REQUIRED')
@@ -1044,8 +1053,14 @@ class Window:
         for role, account in self.accounts.items():
             if state['allocations'].get(role) != 'created':
                 continue
+            if not present[role]:
+                # An absent row grants no authority to remove a future same-name replacement.
+                state['allocations'][role] = 'removed'; self.save(state)
+                continue
             try:
-                self.sql(f"DROP USER IF EXISTS '{account}'@'%';")
+                # Recheck current metadata immediately before this acknowledged account's DCL.
+                if self.account_owned(role, state):
+                    self.sql(f"DROP USER '{account}'@'%';")
                 state['allocations'][role] = 'removed'; self.save(state)
             except Exception:
                 failed = True
