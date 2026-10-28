@@ -160,7 +160,7 @@ class TickTests(unittest.TestCase):
         for outcome, remaining in [(RuntimeError('OPERATION_CHILD_FAILED'), b'a' * 12), (b'', b'b' * 12)]:
             with self.subTest(remaining=remaining):
                 responses = [b'a' * 12, json.dumps([self.cleanup_info()]).encode(), outcome, remaining, remaining]
-                with patch.object(ops, 'run', side_effect=responses) as run, patch.object(ops.time, 'monotonic', side_effect=[0, 0, 0, 10]), patch.object(ops.time, 'sleep'):
+                with patch.object(ops, 'run', side_effect=responses) as run, patch.object(ops, 'wait_owned_jobs_absent', side_effect=RuntimeError('WORKER_STILL_PRESENT')):
                     with self.assertRaisesRegex(RuntimeError, '^WORKER_RECOVERY_REQUIRED$'):
                         ops.stop_owned_jobs('a' * 40)
                 self.assertEqual(sum(call.args[0][:3] == ['docker', 'rm', '-f'] for call in run.call_args_list), 1)
@@ -183,6 +183,37 @@ class TickTests(unittest.TestCase):
                 ops.wait_owned_jobs_absent(['docker', 'ps'])
         self.assertEqual(run.call_count, 1)
         self.assertLessEqual(sleep.call_args.args[0], 0.11)
+
+    def test_partial_batch_disappearance_revalidates_survivor_before_removal(self):
+        survivor = self.cleanup_info()
+        survivor['Id'] = 'b' * 64
+        survivor['Name'] = f'/{ops.PROJECT}-heartbeat'
+        survivor['Config']['Labels']['com.docker.compose.service'] = 'heartbeat'
+        responses = [('a' * 12 + ' ' + 'b' * 12).encode(), RuntimeError('OPERATION_CHILD_FAILED'),
+                     b'b' * 12, json.dumps([survivor]).encode(), b'', b'']
+        with patch.object(ops, 'run', side_effect=responses) as run:
+            ops.stop_owned_jobs('a' * 40)
+        self.assertEqual(run.call_args_list[3].args[0], ['docker', 'inspect', 'b' * 12])
+        self.assertEqual(run.call_args_list[4].args[0], ['docker', 'rm', '-f', 'b' * 64])
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def test_partial_batch_replacement_or_wrong_owner_never_authorizes_removal(self):
+        wrong_owner = self.cleanup_info()
+        wrong_owner['Id'] = 'b' * 64
+        wrong_owner['Config']['Labels']['com.docker.compose.service'] = 'wrong'
+        for tail in [[b'c' * 12], [b'b' * 12, json.dumps([wrong_owner]).encode()]]:
+            responses = [('a' * 12 + ' ' + 'b' * 12).encode(), RuntimeError('OPERATION_CHILD_FAILED'), *tail]
+            with patch.object(ops, 'run', side_effect=responses) as run:
+                with self.assertRaisesRegex(RuntimeError, '^WORKER_RECOVERY_REQUIRED$'):
+                    ops.stop_owned_jobs('a' * 40)
+            self.assertFalse(any(call.args[0][:3] == ['docker', 'rm', '-f'] for call in run.call_args_list))
+
+    def test_repeated_partial_disappearance_shares_discovery_deadline(self):
+        responses = [('a' * 12 + ' ' + 'b' * 12).encode(), RuntimeError('OPERATION_CHILD_FAILED'), b'b' * 12]
+        with patch.object(ops, 'run', side_effect=responses) as run, patch.object(ops.time, 'monotonic', side_effect=[0, 0, 10, 19, 20]):
+            with self.assertRaisesRegex(RuntimeError, '^WORKER_RECOVERY_REQUIRED$'):
+                ops.stop_owned_jobs('a' * 40)
+        self.assertEqual([call.kwargs['timeout'] for call in run.call_args_list], [10, 10, 1])
 
 
 class ChildOutcomeTests(unittest.TestCase):

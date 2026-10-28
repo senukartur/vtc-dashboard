@@ -631,16 +631,18 @@ print('Trip decision restricted grants: runtime accept/replay/derived correction
 with ops.lock():
     for boundary in ['inspect', 'remove']:
         original_run = ops.run
-        fixture_id = original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
-            '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-jobs',
-            '--label', f'vtc011.rehearsal={project}',
-            '--label', f'com.docker.compose.project={project}',
-            '--label', 'com.docker.compose.service=jobs', image_id,
-            'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip()
+        fixture_ids = []
+        for service in (['jobs', 'heartbeat'] if boundary == 'inspect' else ['jobs']):
+            fixture_ids.append(original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
+                '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-{service}',
+                '--label', f'vtc011.rehearsal={project}',
+                '--label', f'com.docker.compose.project={project}',
+                '--label', f'com.docker.compose.service={service}', image_id,
+                'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip())
         injected = []
         def removal_race(args, **kwargs):
             if not injected and boundary == 'inspect' and args[:2] == ['docker', 'inspect']:
-                original_run(['docker', 'rm', '-f', fixture_id], timeout=20)
+                original_run(['docker', 'rm', '-f', fixture_ids[0]], timeout=20)
                 injected.append(boundary)
             result = original_run(args, **kwargs)
             if not injected and boundary == 'remove' and args[:3] == ['docker', 'rm', '-f']:
@@ -653,14 +655,17 @@ with ops.lock():
         finally:
             ops.run = original_run
             # The fixture ID, never a rediscovered/replacement name, owns fallback cleanup.
-            remaining = original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10)
-            if remaining.strip():
-                original_run(['docker', 'rm', '-f', fixture_id], timeout=20)
+            remaining = []
+            for fixture_id in fixture_ids:
+                if original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10).strip():
+                    remaining.append(fixture_id)
+            if remaining:
+                original_run(['docker', 'rm', '-f', *remaining], timeout=20)
         assert injected == [boundary]
-        assert not remaining.strip()
+        assert not remaining
         assert not (base / 'state/recovery-required').exists()
         assert not (base / 'private/maintenance/enabled').exists()
-print('Worker cleanup race rehearsal: real Docker disappearance before inspection and lost removal reply recovered only after absence proof', flush=True)
+print('Worker cleanup race rehearsal: real Docker partial-batch disappearance, validated survivor removal and lost removal reply recovered only after absence proof', flush=True)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
     ops.tick_locked(revision, image_id)
