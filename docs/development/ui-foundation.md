@@ -1,6 +1,6 @@
 # UI and localization foundation
 
-[VTC-012](https://trello.com/c/oFcRxl5S) provides reusable presentation conventions in the existing React/Vite SPA. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD); wire values and authorization rules remain in the [browser contract](../contracts/dashboard/README.md). This does not implement authentication, company workflows or domain endpoints.
+[VTC-012](https://trello.com/c/oFcRxl5S) provides reusable presentation conventions in the existing React/Vite SPA. Product policy remains in [CONCEPT.MD](../CONCEPT.MD); wire values and authorization rules remain in the [browser contract](../contracts/dashboard/README.md). This does not implement authentication, company workflows or domain endpoints.
 
 ## Entry points and composition
 

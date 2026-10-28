@@ -1,6 +1,6 @@
 # VTC-006 workspace baseline
 
-**Scope:** repository scaffold and reproducible local development. [CONTRIBUTING.md](../../CONTRIBUTING.md) is the command reference. The owner selected Docker for local development; production remains portable Node.js with final Hostland verification in VTC-041.
+**Scope:** repository scaffold and reproducible local development. [CONTRIBUTING.md](../CONTRIBUTING.md) is the command reference. The owner selected Docker for local development; production remains portable Node.js with final Hostland verification in VTC-041.
 
 ## Implementation and ownership
 

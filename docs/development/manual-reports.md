@@ -1,6 +1,6 @@
 # Manual reports and private evidence (VTC-025)
 
-The [reviewed browser contract](../contracts/dashboard/manual-reports.md), [OpenAPI](../contracts/dashboard/openapi.json) and [CONCEPT.MD](../../CONCEPT.MD#manual-report-review-and-resubmission) govern this implementation. VTC-025 preserves drafts, original submissions, immutable revisions, correction requests and private screenshots. It does not implement VTC-029 acceptance, contribution recalculation or VTC-030 forms. A submission receipt creates review work, never qualification or statistics credit. No gameplay date is inferred from receipt or decision time.
+The [reviewed browser contract](../contracts/dashboard/manual-reports.md), [OpenAPI](../contracts/dashboard/openapi.json) and [product policies](../product/mvp-policies.md#manual-report-review-and-resubmission) govern this implementation. VTC-025 preserves drafts, original submissions, immutable revisions, correction requests and private screenshots. It does not implement VTC-029 acceptance, contribution recalculation or VTC-030 forms. A submission receipt creates review work, never qualification or statistics credit. No gameplay date is inferred from receipt or decision time.
 
 ## Activation and configuration
 

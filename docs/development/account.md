@@ -1,6 +1,6 @@
 # VTC-017 account lifecycle
 
-[VTC-017](https://trello.com/c/GxOre5i3) adds RU/EN account workflows to the existing Yukon Union React shell. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD); [identity](identity.md), [admissions](admissions.md) and the [browser contract](../contracts/dashboard/README.md) own authorization, bounds and wire semantics. This adds no authentication method, schema, production activation or external provider integration.
+[VTC-017](https://trello.com/c/GxOre5i3) adds RU/EN account workflows to the existing Yukon Union React shell. Product policy remains in [CONCEPT.MD](../CONCEPT.MD); [identity](identity.md), [admissions](admissions.md) and the [browser contract](../contracts/dashboard/README.md) own authorization, bounds and wire semantics. This adds no authentication method, schema, production activation or external provider integration.
 
 ## Routes and one-time links
 

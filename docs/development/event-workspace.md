@@ -1,6 +1,6 @@
 # Event workspace
 
-VTC-035 adds the RU/EN event UI over the existing [Events APIs](events.md). Product policy remains in [CONCEPT.MD](../../CONCEPT.MD), especially scenarios 1, 2, 5, 14, 20–22, 30, 31, 33 and 39. This source integration does not activate Events, apply migrations, send notifications or deploy the service.
+VTC-035 adds the RU/EN event UI over the existing [Events APIs](events.md). Product policy remains in [product policies](../product/mvp-policies.md), especially scenarios 1, 2, 5, 14, 20–22, 30, 31, 33 and 39. This source integration does not activate Events, apply migrations, send notifications or deploy the service.
 
 ## Routes and use
 

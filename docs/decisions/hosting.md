@@ -54,7 +54,7 @@ Export/import only the newly created system data and evidence selected for cutov
 
 - [x] Owner separated development/testing from final hosting and approved up to USD 20/month for staging.
 - [x] Owner database family and notification timing decisions recorded.
-- VTC-004 research deliverables are documented in the [backlog](../planning/mvp-trello-backlog.md#vtc-004); [PR #4](https://github.com/senukartur/vtc-dashboard/pull/4) and [Trello](https://trello.com/c/OZ84Rfk4) record final independent review/merge and card completion. Hosted execution is not required by this planning card.
+- VTC-004 research deliverables are documented in the [research and decision docs](../research/development-hosting.md); [PR #4](https://github.com/senukartur/vtc-dashboard/pull/4) and [Trello](https://trello.com/c/OZ84Rfk4) record final independent review/merge and card completion. Hosted execution is not required by this planning card.
 - [ ] VTC-005/006/008/009 deliver tested runtime/configuration, reproducible local setup and CI.
 - [ ] VTC-011 provisions staging within budget and records actual deployment/persistence/recovery and synthetic cron/poll evidence; later feature cards provide actual jobs/notification integration evidence.
 - [ ] VTC-040 completes integrated testing; VTC-041 proves Hostland compatibility, annual cost, transfer and restore before final cutover; VTC-042 records final release acceptance.

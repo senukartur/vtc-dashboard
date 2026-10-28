@@ -8,7 +8,7 @@ metadata:
 
 # React Testing
 
-Read [AGENTS.md](../../../AGENTS.md), [contributor commands](../../../CONTRIBUTING.md), the card's acceptance criteria and current test configuration. [Source and license](../../../docs/development/agent-skills.md#provenance-and-license).
+Read [AGENTS.md](../../../AGENTS.md), [contributor commands](../../../docs/CONTRIBUTING.md), the card's acceptance criteria and current test configuration. [Source and license](../../../docs/development/agent-skills.md#provenance-and-license).
 
 ## Identify the available test lane
 
@@ -41,7 +41,7 @@ Mocks establish browser behavior; they do not establish server enforcement, MySQ
 
 ## Project-specific regressions
 
-Select the relevant numbered scenarios from `CONCEPT.MD`; do not replicate the entire product suite for every UI change. Useful cases include:
+Select the relevant numbered scenarios from `docs/product/mvp-policies.md`; do not replicate the entire product suite for every UI change. Useful cases include:
 
 - Manual-report fields/evidence and absence of an invented trip date; rejected/pending versus accepted totals; stale review revisions and no self-approval action.
 - Canonical catalog IDs surviving translation, long RU/EN labels and missing/ambiguous catalog data.

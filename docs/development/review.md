@@ -1,6 +1,6 @@
 # Review, repository rules and dependency hygiene
 
-[VTC-010](https://trello.com/c/czpF65wG) owns this process. Read [AGENTS.md](../../AGENTS.md) and the [Definition of Done](../planning/mvp-trello-backlog.md#definition-of-done). Product approval, independent review, passing CI, merge and production acceptance are separate evidence.
+[VTC-010](https://trello.com/c/czpF65wG) owns this process. Read [AGENTS.md](../../AGENTS.md) and the [Definition of Done](agent-rules.md#definition-of-done). Product approval, independent review, passing CI, merge and production acceptance are separate evidence.
 
 ## Review before merge
 
@@ -50,7 +50,7 @@ pnpm -r outdated
 pnpm audit
 ```
 
-Use the pinned runtime from [CONTRIBUTING.md](../../CONTRIBUTING.md). `outdated` covers the root and recursive packages separately; audit advisories and registry updates are different signals. Record network/tool failures as missing evidence, never as no vulnerabilities. Apply fixes in reviewed PRs with normal checks; do not use automatic fix/force commands. Remove this manual exception only after that hosted proof and add the reviewed root npm entry. Historical research spikes are outside the root runtime; reassess their manifests before promoting any spike to supported code.
+Use the pinned runtime from [CONTRIBUTING.md](../CONTRIBUTING.md). `outdated` covers the root and recursive packages separately; audit advisories and registry updates are different signals. Record network/tool failures as missing evidence, never as no vulnerabilities. Apply fixes in reviewed PRs with normal checks; do not use automatic fix/force commands. Remove this manual exception only after that hosted proof and add the reviewed root npm entry. Historical research spikes are outside the root runtime; reassess their manifests before promoting any spike to supported code.
 
 ## Evidence and remaining gates
 

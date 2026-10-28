@@ -2,7 +2,7 @@
 
 A company dashboard for an ETS2/ATS virtual trucking community: driver and trip analytics, qualification checks, manual reporting, convoys, and member administration.
 
-Start with [CONCEPT.MD](CONCEPT.MD). It contains the project idea, approved MVP requirements and permission matrix, working stack/architecture, deployment constraints, delivery phases, and 42 acceptance scenarios. The repository now includes the VTC-006 API/web scaffold, root tooling and local Docker environment alongside planning/contracts and isolated research probes. Domain features remain future work.
+Start with [CONCEPT.MD](docs/CONCEPT.MD). It describes the project idea, roles and main features. Detailed approved rules, the permission matrix and 42 acceptance scenarios are in the [MVP product policies](docs/product/mvp-policies.md). The repository now includes the VTC-006 API/web scaffold, root tooling and local Docker environment alongside planning/contracts and isolated research probes. Domain features remain future work.
 
 Read [AGENTS.md](AGENTS.md) before contributing. This is a public repository: secrets, real member data, private diagnostics, and hosting-account details must stay out of Git, PRs, and public logs.
 
@@ -15,14 +15,13 @@ node scripts/setup-local.mjs
 docker compose up --build --watch
 ```
 
-Open [the local UI](http://127.0.0.1:5173). The setup helper only needs host Node 18+; a Docker-only equivalent is in [CONTRIBUTING.md](CONTRIBUTING.md). The application itself uses pinned Node 24.22.0, pnpm 12.14.0 and MySQL 8.4.11 inside containers. No credentials or seed accounts are committed.
+Open [the local UI](http://127.0.0.1:5173). The setup helper only needs host Node 18+; a Docker-only equivalent is in [CONTRIBUTING.md](docs/CONTRIBUTING.md). The application itself uses pinned Node 24.22.0, pnpm 12.14.0 and MySQL 8.4.11 inside containers. No credentials or seed accounts are committed.
 
-Run `docker compose exec app pnpm check`, `pnpm db:check`, `pnpm smoke:local` or `pnpm build` inside that container. See [the command reference](CONTRIBUTING.md) and [workspace evidence](docs/development/workspace.md) for portable native builds, health/readiness, data persistence and pending gates. The initial page is a bilingual connection screen, not an implemented company dashboard.
+Run `docker compose exec app pnpm check`, `pnpm db:check`, `pnpm smoke:local` or `pnpm build` inside that container. See [the command reference](docs/CONTRIBUTING.md) and [workspace evidence](docs/development/workspace.md) for portable native builds, health/readiness, data persistence and pending gates. The initial page is a bilingual connection screen, not an implemented company dashboard.
 
 ## Planning
 
-- [MVP Trello backlog](docs/planning/mvp-trello-backlog.md): requirements, implementation cards, dependencies, parallel-agent workflow, CI/review gates, deployment, and deferred work.
-- [Trello card index](docs/planning/trello-card-index.md): direct links to all 53 imported cards and their start dependencies.
+- [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard): implementation cards, acceptance checklists, dependencies and status. Delivery rules are in the [agent rules](docs/development/agent-rules.md).
 - [VTC-001 approval record](docs/product/mvp-policies.md): requirements sign-off and links to the canonical concept. Product decisions are approved; [PR #1](https://github.com/senukartur/vtc-dashboard/pull/1) and the linked Trello card record documentation delivery and review/merge evidence.
 - [VTC-002 catalog investigation](docs/research/catalogs.md): measured source comparison, [official-DLC audit](docs/research/dlc-coverage-2026-10-17.md), [approved downstream hand-off](docs/research/catalog-source-follow-up.md), and [offline experiment commands](spikes/catalogs/README.md).
 - [VTC-003 telemetry investigation](docs/research/telemetry.md): frozen client-source findings, [agreed HTTP contract/schema](docs/contracts/telemetry-v1.md), [synthetic examples](docs/contracts/examples/README.md), and [client/server acceptance matrix](docs/contracts/telemetry-v1-acceptance.md). Initial upload of all retained local game trips is required; [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) tracks final independent review/merge, while real integration remains pending.

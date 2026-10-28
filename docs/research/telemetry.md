@@ -2,7 +2,7 @@
 
 **Observed:** 2026-10-17. **Status:** research complete; v1.0 implementation baseline adopted under the owner's conditional agreement authorization. [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) tracks final independent review and merge. No client/server integration has been implemented here.
 
-The [VTC-003 card](https://trello.com/c/lQrxZ13N) owns this investigation and the [HTTP contract](../contracts/telemetry-v1.md). The dashboard's [approved concept](../../CONCEPT.MD) remains authoritative for company decisions. The owner additionally requires automatic initial upload of **all retained local game trips**, followed by ongoing synchronization. An opt-in selection of old trips is not the agreed MVP behavior.
+The [VTC-003 card](https://trello.com/c/lQrxZ13N) owns this investigation and the [HTTP contract](../contracts/telemetry-v1.md). The dashboard's [approved concept](../CONCEPT.MD) remains authoritative for company decisions. The owner additionally requires automatic initial upload of **all retained local game trips**, followed by ongoing synchronization. An opt-in selection of old trips is not the agreed MVP behavior.
 
 The owner also confirmed: an imported trip with unknown historical qualification stays visible but waits for staff review before statistics/progress credit; sufficiently supported historical trips use normal automatic validation. MVP synchronization is client-to-server only, without downloading dashboard-only manual reports into telemetry. Mandatory manual review solely because a trip is old/unbound was proposed but not approved and is not a product requirement.
 

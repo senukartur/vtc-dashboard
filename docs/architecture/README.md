@@ -1,6 +1,6 @@
 # VTC-005 architecture baseline
 
-**Status:** implementation specification; adoption and independent review are tracked in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and VTC-005. The [review correction record](review-vtc-005.md) describes the five read-contract fixes. These documents specify future software, not implemented services. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD).
+**Status:** implementation specification; adoption and independent review are tracked in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) and VTC-005. The [review correction record](review-vtc-005.md) describes the five read-contract fixes. These documents specify future software, not implemented services. Product policy remains in [CONCEPT.MD](../CONCEPT.MD).
 
 Read the [stack decision](../decisions/stack.md), [module boundaries](modules.md), [data/transaction rules](data-and-transactions.md), [adapter interfaces](ports.md), and [dashboard contract](../contracts/dashboard/README.md). The existing [telemetry v1.0 contract](../contracts/telemetry-v1.md) is unchanged.
 
@@ -45,7 +45,7 @@ test/                       # unit/integration/contract/E2E support and journeys
 deploy/                     # separate staging and final-host launch adapters
 ```
 
-VTC-006 creates these scaffold/ownership paths; feature modules, schema/migrations and deployment implementations remain their owning cards' work. [CONTRIBUTING.md](../../CONTRIBUTING.md) describes the local Docker workflow and portable builds. Avoid importing server/database code into the web bundle. Routes validate and invoke commands; React does not implement qualification or access policy. Share transport schemas and pure value types, not repositories or service singletons. Each module exports an explicit public facade; only composition imports implementation factories.
+VTC-006 creates these scaffold/ownership paths; feature modules, schema/migrations and deployment implementations remain their owning cards' work. [CONTRIBUTING.md](../CONTRIBUTING.md) describes the local Docker workflow and portable builds. Avoid importing server/database code into the web bundle. Routes validate and invoke commands; React does not implement qualification or access policy. Share transport schemas and pure value types, not repositories or service singletons. Each module exports an explicit public facade; only composition imports implementation factories.
 
 ## Request and command flow
 

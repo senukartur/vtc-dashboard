@@ -1,6 +1,6 @@
 # Member administration and connection settings
 
-[VTC-038](https://trello.com/c/deMxSaXu) composes the existing Identity, Admissions, Qualifications, Messaging, External Identities and Telemetry owners into the RU/EN account workspace. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD); the [browser contract](../contracts/dashboard/README.md) owns wire shapes. Implementation and local synthetic verification do not activate hosting, real mail, provider accounts or production launch configuration.
+[VTC-038](https://trello.com/c/deMxSaXu) composes the existing Identity, Admissions, Qualifications, Messaging, External Identities and Telemetry owners into the RU/EN account workspace. Product policy remains in [CONCEPT.MD](../CONCEPT.MD); the [browser contract](../contracts/dashboard/README.md) owns wire shapes. Implementation and local synthetic verification do not activate hosting, real mail, provider accounts or production launch configuration.
 
 ## Workspace and current authority
 
