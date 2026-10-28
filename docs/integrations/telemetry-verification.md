@@ -2,7 +2,7 @@
 
 **Status, 2026-10-24: preparation only.** The owner selected plan and integration protocol only. No desktop uploader, recording enablement, game capture or client/server execution is delivered here. All four implementation checklist items on [VTC-024](https://trello.com/c/aluAoQAX) remain incomplete. Procedures below are future work, not test results or permission to operate another repository, games or hosted services.
 
-The [concept](../../CONCEPT.MD), [VTC-024 backlog scope](../planning/mvp-trello-backlog.md#vtc-024), frozen [v1.0 contract](../contracts/telemetry-v1.md), [schema](../contracts/telemetry-v1.schema.json) and [TEL acceptance matrix](../contracts/telemetry-v1-acceptance.md) remain authoritative. This document assigns implementation seams and reproducible evidence procedures; it does not revise the contract or duplicate its normative matrix. Relevant concept scenarios are 1, 12, 25–29, 35 and 38; they remain expectations until exercised against a named candidate.
+The [concept](../../CONCEPT.MD), [VTC-024 card scope](https://trello.com/c/aluAoQAX), frozen [v1.0 contract](../contracts/telemetry-v1.md), [schema](../contracts/telemetry-v1.schema.json) and [TEL acceptance matrix](../contracts/telemetry-v1-acceptance.md) remain authoritative. This document assigns implementation seams and reproducible evidence procedures; it does not revise the contract or duplicate its normative matrix. Relevant concept scenarios are 1, 12, 25–29, 35 and 38; they remain expectations until exercised against a named candidate.
 
 ## Baselines and evidence limits
 

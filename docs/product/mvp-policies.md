@@ -15,4 +15,4 @@ All VTC-001 product decisions were confirmed by the owner in the requirements co
 
 Repository review/merge evidence is required for documentation delivery and is recorded in PR #1 and Trello. Actual qualification limits, promotion thresholds, and the reporting timezone are configured before launch. Catalog/telemetry/hosting verification and upload limits/capacity have separate owners in the [follow-up table](../../CONCEPT.MD#configuration-and-implementation-follow-up); their investigation is not part of completed VTC-001 product clarification.
 
-Use CONCEPT.MD for future product edits. Keep the [implementation backlog](../planning/mvp-trello-backlog.md) and relevant contracts/cards aligned with it.
+Use CONCEPT.MD for future product edits. Keep the [Trello cards](https://trello.com/b/NwhwurSM/vtcdashboard) and relevant contracts aligned with it.

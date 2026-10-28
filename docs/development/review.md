@@ -1,6 +1,6 @@
 # Review, repository rules and dependency hygiene
 
-[VTC-010](https://trello.com/c/czpF65wG) owns this process. Read [AGENTS.md](../../AGENTS.md) and the [Definition of Done](../planning/mvp-trello-backlog.md#definition-of-done). Product approval, independent review, passing CI, merge and production acceptance are separate evidence.
+[VTC-010](https://trello.com/c/czpF65wG) owns this process. Read [AGENTS.md](../../AGENTS.md) and the [Definition of Done](agent-rules.md#definition-of-done). Product approval, independent review, passing CI, merge and production acceptance are separate evidence.
 
 ## Review before merge
 

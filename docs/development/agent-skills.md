@@ -1,6 +1,6 @@
 # Project engineering skills
 
-The seven ECC-derived engineering skills below are shared guidance for Codex and Claude Code. Product policy stays in [CONCEPT.MD](../../CONCEPT.MD), scope in the [backlog](../planning/mvp-trello-backlog.md), and permissions/ownership in [AGENTS.md](../../AGENTS.md). Skills do not implement features, install libraries, authorize delegation, or grant merge/deployment access.
+The seven ECC-derived engineering skills below are shared guidance for Codex and Claude Code. Product policy stays in [CONCEPT.MD](../../CONCEPT.MD), scope in [Trello](https://trello.com/b/NwhwurSM/vtcdashboard), and permissions/ownership in the [agent rules](agent-rules.md). Skills do not implement features, install libraries, authorize delegation, or grant merge/deployment access.
 
 ## Discovery and selection
 

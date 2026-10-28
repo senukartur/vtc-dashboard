@@ -6,7 +6,7 @@
 
 **Updated:** 2026-10-17.
 
-**Planning baseline:** [MVP Trello backlog](docs/planning/mvp-trello-backlog.md).
+**Planning baseline:** [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard).
 
 **Card:** [VTC-001 — Confirm MVP policies, permissions, and acceptance scenarios](https://trello.com/c/GE2YTTXT/1-vtc-001-confirm-mvp-policies-permissions-and-acceptance-scenarios).
 
@@ -27,8 +27,7 @@ Members inspect personal/company totals, driver profiles, and trip history; sign
 
 - This document is the product and architecture starting point.
 - [AGENTS.md](AGENTS.md) defines contributor/agent instructions and public-repository data-handling rules. Credentials, real driver data, private infrastructure details, and raw diagnostics must not enter public commits, PRs, or logs.
-- [MVP Trello backlog](docs/planning/mvp-trello-backlog.md) contains 42 MVP implementation/discovery cards, 11 later cards, ownership boundaries, dependencies, CI/deployment work, and the parallel-agent protocol.
-- [Trello card index](docs/planning/trello-card-index.md) links directly to the imported tasks.
+- [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard) holds the MVP and later cards, their scope, acceptance checklists and dependencies. Delivery rules, Definition of Ready/Done and the parallel-agent protocol are in the [agent rules](docs/development/agent-rules.md).
 - [VTC-001 requirements record](docs/product/mvp-policies.md) preserves the earlier document path and points to this approved baseline.
 - The permission matrix, source-specific timing, and acceptance scenarios below are normative product requirements. The working stack and architecture remain subject to VTC-002–005 verification.
 - [VTC-005 architecture](docs/architecture/README.md), [stack ADR](docs/decisions/stack.md) and [browser API](docs/contracts/dashboard/README.md) specify module/transaction/adapter boundaries, wire schemas and fictional UI examples. [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5) records independent review and adoption; these contracts are not new product-policy approvals or implemented services.
@@ -147,7 +146,7 @@ Production deployment must use a CI-verified revision, serialize migrations/depl
 | Events, notifications, administration | VTC-034–038 | Integrated permission-aware member workflows |
 | Hardening, regression, production rehearsal, pilot | VTC-039–042 | Restore/deploy evidence and owner-approved MVP release |
 
-Card numbers are stable identifiers, not a mandatory serial schedule. Use the dependency graph and module ownership in the backlog. Give each implementation agent one bounded card and its own branch/worktree; coordinate root tooling, contracts, migration journals, and shared integration points through their owner.
+Card numbers are stable identifiers, not a mandatory serial schedule. Use the card dependencies in Trello and module ownership in the architecture docs. Give each implementation agent one bounded card and its own branch/worktree; coordinate root tooling, contracts, migration journals, and shared integration points through their owner.
 
 ## Permission matrix
 
@@ -220,7 +219,7 @@ Membership application review and event management belong to the director and de
 | Review membership applications | Director or deputy. |
 | Create and manage events | Director or deputy. |
 | Review manual reports and disputed trips | Dispatcher, director, or deputy. A manual report must be reviewed by someone other than its author; no role may approve its own report. |
-| Configure company-wide webhook integrations | Director or deputy; external provider adapters remain deferred as defined in the backlog. |
+| Configure company-wide webhook integrations | Director or deputy; external provider adapters remain deferred as defined on the Later cards in Trello. |
 | Transfer company leadership | Serving director only, with additional verification. |
 
 Accepted-trip visibility does not make its restricted rejection/review history or evidence public to other members. Public event information on the landing page remains supported by the planning baseline; member-only driver and trip visibility does not imply anonymous public access.
@@ -427,6 +426,6 @@ All product criteria were confirmed by the owner in this conversation, including
 
 - [VTC Dashboard repository](https://github.com/senukartur/vtc-dashboard) and [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard).
 - [Telemetry repository](https://github.com/senukartur/ets2telemetry) and its [concept](https://github.com/senukartur/ets2telemetry/blob/main/concept.md) are integration context; this dashboard's owner-selected MySQL decision supersedes the older server-stack suggestion for this repository.
-- [Detailed discovery and primary-source references](docs/planning/mvp-trello-backlog.md#9-research-and-integration-references) cover catalogs, SDKs, provider APIs, UI, database/runtime documentation, hosting, and email research. Recheck external behavior and terms during the responsible discovery card.
+- [Detailed discovery and primary-source references](docs/research/references.md) cover catalogs, SDKs, provider APIs, UI, database/runtime documentation, hosting, and email research. Recheck external behavior and terms during the responsible discovery card.
 
-Write repository documentation in English; product localization is Russian and English. Keep this concept authoritative for cross-cutting product requirements, the backlog for execution scope/dependencies, and implementation contracts/ADRs for verified technical detail. Record later owner-approved changes and update affected cards/contracts/scenarios together. Keep dated observations distinct from current implementation evidence.
+Write repository documentation in English; product localization is Russian and English. Keep this concept authoritative for cross-cutting product requirements, Trello cards for execution scope/dependencies, and implementation contracts/ADRs for verified technical detail. Record later owner-approved changes and update affected cards/contracts/scenarios together. Keep dated observations distinct from current implementation evidence.

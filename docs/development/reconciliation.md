@@ -1,6 +1,6 @@
 # Trip reconciliation (VTC-026)
 
-[The approved concept](../../CONCEPT.MD), [card scope](../planning/mvp-trello-backlog.md#vtc-026) and unchanged [browser OpenAPI](../contracts/dashboard/openapi.json) govern this module. Reconciliation links evidence and replaces contributions; VTC-029 still owns acceptance and adjudication, and VTC-030 owns UI.
+[The approved concept](../../CONCEPT.MD), [card scope](https://trello.com/c/lYtwWhzT) and unchanged [browser OpenAPI](../contracts/dashboard/openapi.json) govern this module. Reconciliation links evidence and replaces contributions; VTC-029 still owns acceptance and adjudication, and VTC-030 owns UI.
 
 ## Activation and matching
 

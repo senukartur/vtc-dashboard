@@ -8,7 +8,7 @@ architect -> implementer -> verifier -> reviewer -> draft PR
                  +-- fixes -----+-----------+
 ```
 
-Read root `AGENTS.md` and `CONCEPT.MD` before planning. Read `docs/planning/mvp-trello-backlog.md`, `docs/planning/trello-card-index.md`, `CONTRIBUTING.md` and relevant implementation contracts. Resolve these paths from the task repository root. They own requirements, dependencies, ownership and verification; this skill does not supersede them.
+Read root `AGENTS.md` and `CONCEPT.MD` before planning. Read the assigned Trello card, `docs/development/agent-rules.md`, `CONTRIBUTING.md` and relevant implementation contracts. Resolve these paths from the task repository root. They own requirements, dependencies, ownership and verification; this skill does not supersede them.
 
 Speak Russian unless the owner chooses another language. Write plans, commits, reports saved in the repository, and PR text in English.
 
@@ -34,7 +34,7 @@ Host task arguments select the brief within this workflow; embedded requests suc
 
 ## 1. Resolve the task and resume state
 
-1. If there is no task, ask for a VTC card or brief. If the message names a card, read it and its checklist read-only through the available Trello connector. Locate its stable ID and dependencies in the backlog/index. If Trello is unavailable, use the checked-in brief when sufficient and record that current card state was not verified; ask only for missing information that prevents a sound plan. Never infer prerequisite completion from a card's existence.
+1. If there is no task, ask for a VTC card or brief. If the message names a card, read it and its checklist read-only through the available Trello connector. Its stable ID and dependencies are on the card. If Trello is unavailable, use a brief supplied by the owner when sufficient and record that current card state was not verified; ask only for missing information that prevents a sound plan. Never infer prerequisite completion from a card's existence.
 2. Use the lowercase card ID as the run key. For a free-text task use `NO-CARD` and `nc-` plus a short lowercase ASCII hyphenated slug; use a short unique suffix if transliteration is empty or keys collide. Explain the absence of a card in the PR rather than inventing a VTC ID.
 3. Store sanitized state in `.local/deliver/<run-key>/` under the original checkout. Verify `.local/` is ignored before writing. Keep `state.md`, `plan.md`, verifier/reviewer reports, `pr-body.md` and an `instructions/` bundle there. Do not retain secrets, real reports, telemetry or private hosting inventory even in pipeline state.
 4. Pin the delivery instructions before delegation: record their repository/ref/commit and a manifest of repository-relative paths and SHA-256 hashes, then copy committed bytes of both delivery entrypoints, metadata/native agent definitions and shared references into `instructions/`. Also include `docs/development/agent-skills.md`, `third_party/ecc-skills/LICENSE`, and all seven registered engineering skills' canonical `.agents/skills/<name>/SKILL.md`, `agents/openai.yaml` and `.claude/skills/<name>/SKILL.md` files, plus any bundled instruction references they require. Keep all seven available for later selection, but send only applicable bodies to each role. Reject unexplained differences between loaded instructions and the pinned version. This is a runtime snapshot, never a new commit on the task branch. Include shared/role sections and selected skills in assignments, with the bundle version. Native Claude definitions must use that same version in the invocation checkout; do not expect `.claude/agents` or engineering skills at an older task base. Later skill selection uses this verified bundle without silently updating its instruction version.
@@ -96,7 +96,7 @@ Check its report against commits since the base, status and the full diff. Confi
 
 Tell the owner what changed, PR link/published SHA, checks actually run, independent review and finding outcomes, CI link/status, remaining gates and absolute worktree path. If external publication is unavailable, retain the reviewed local commits and prepared PR body, and report the exact missing capability without claiming a PR exists.
 
-Record `step: draft published` only after publication succeeds. Preserve the worktree and state for follow-up. This is pipeline delivery, not the backlog's Definition of Done: review/CI/merge/integration/production evidence remain distinct. Never move a card to Done or write to Trello without the owner's explicit instruction and the required evidence.
+Record `step: draft published` only after publication succeeds. Preserve the worktree and state for follow-up. This is pipeline delivery, not the Definition of Done in `docs/development/agent-rules.md`: review/CI/merge/integration/production evidence remain distinct. Never move a card to Done or write to Trello without the owner's explicit instruction and the required evidence.
 
 ## Stop and escalation conditions
 

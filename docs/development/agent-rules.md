@@ -4,11 +4,11 @@ Detailed rules for coding agents, moved out of the always-loaded [AGENTS.md](../
 
 ## Where to look
 
-- Approved behavior: [CONCEPT.MD](../../CONCEPT.MD). Card scope, dependencies, ownership and delivery gates: [MVP backlog](../planning/mvp-trello-backlog.md) and [Trello index](../planning/trello-card-index.md).
+- Approved behavior: [CONCEPT.MD](../../CONCEPT.MD). Card scope, acceptance checklists, dependencies and status: the [Trello board](https://trello.com/b/NwhwurSM/vtcdashboard), which is the only card source. Primary-source links: [research references](../research/references.md).
 - Commands and environment: [CONTRIBUTING.md](../../CONTRIBUTING.md) and [workspace](workspace.md). Docker is the preferred local app/MySQL environment.
 - Before schema changes or synthetic `db:test`/`db:recovery` resets: [persistence](persistence.md).
 - CI: [ci](ci.md). Identity: [identity](identity.md). Review, rules and dependencies: [review](review.md). Engineering skills: [skill registry](agent-skills.md).
-- Keep approved behavior in CONCEPT.MD, execution scope in the backlog, and verified technical decisions in implementation contracts/ADRs. Do not create competing copies of the requirements.
+- Keep approved behavior in CONCEPT.MD, execution scope in Trello cards, and verified technical decisions in implementation contracts/ADRs. Do not create competing copies of the requirements.
 
 ## Project engineering skills
 
@@ -47,6 +47,39 @@ If confidential material was already published, report the affected location wit
 - Keep report screenshots for at least one year after the latest decision and throughout review. Retain structured history after image expiry. Never silently shorten this policy to fit hosting limits.
 - Numeric qualification limits, promotion thresholds, and the company reporting timezone are administrator-owned launch configuration. Production values must not be inferred from fixtures.
 
+Not in MVP unless separately approved: legacy data migration; full Trucky/VTCBase adapters and three-provider automatic matching; visas, spendable points, quality-rating formulas, company economy, contracts, achievements, live maps or per-second server telemetry; closed-browser Web Push, desktop history restore, multi-company SaaS, universal mod support or a general-purpose executable rules editor; leave, activity quotas, recertification and disciplinary automation.
+
+## Cards and parallel work
+
+Board lists: Backlog → Ready → In Progress → Review → Done, plus Blocked and Later. VTC IDs are stable and independent of Trello numbering; preserve them in branches, commits, PR descriptions and cross-repository links. **Depends on** means prerequisites for implementing against stable interfaces; frontend cards may start from reviewed contract fixtures but their integration gates must pass before Done. A pending product decision, missing host capability, unavailable credential or external client work is a visible blocker with an owner. Keep one active owner per card; split oversized cards into suffixed child IDs (for example VTC-030A).
+
+### Definition of Ready
+
+- Dependencies or approved contract versions are available.
+- The required product decisions are approved or explicitly deferred with a safe specified behavior.
+- Ownership, interfaces, affected tables, and shared-file changes are understood.
+- Fixtures and acceptance scenarios are available; external prerequisites have named owners.
+
+### Definition of Done
+
+- Acceptance checklist is satisfied against real integrations where required; mock-only UI is not Done.
+- Relevant unit, integration, contract, and/or E2E checks pass; choose tests by behavior and risk.
+- English developer/operations documentation and RU/EN UI strings are updated where applicable.
+- Migration and permission changes are reviewed; secrets and private production data are absent from code/fixtures/logs.
+- An independent review appropriate to risk is completed, findings are resolved, and required CI passes.
+- The PR is merged with evidence, deployment impact, and rollback notes. Copy the PR link into the Trello card.
+- Infrastructure cards distinguish prepared configuration from actually applied and verified settings.
+- No feature is counted complete solely because a shell command or deployment trigger returned successfully.
+
+### Parallel agents
+
+- Give each agent a dedicated branch/worktree and one bounded card. Never run multiple agents editing the same checkout or silently overwrite another agent's work.
+- The foundation/integration owner controls root manifests, lockfiles, shared contracts, app composition/router entry points, CI, and the migration journal. Feature agents request additive changes rather than simultaneously editing these files.
+- Feature agents own their module schema files. The migration owner generates/serializes the final migrations after rebasing; migration IDs and journal entries must not collide.
+- Frontend agents use feature-local routes, translations, and contract mocks. Backend agents implement the same contract; neither invents a competing response shape.
+- Review and merge small contract/core PRs before dependent features. Cross-cutting changes require a short coordinated integration PR. After each merge, rebase dependent branches and run their relevant integration checks.
+- The telemetry client card runs in its own repository and supplies linked verification evidence here. Do not duplicate existing telemetry-board work without checking it.
+
 ## Architecture and implementation boundaries
 
 - MySQL is selected; use maintained Node.js 24 / MySQL 8.4 LTS for local, CI and staging. VTC-004 plans rapid testing on a separate owner-operated account, with an approved ceiling of USD 20/month; VTC-011 implements it. Hostland is the final destination after VTC-040 testing, with approximately USD 35/year and runtime/maintenance/transfer proof owned by VTC-041. Missing Hostland access does not block architecture or staging; do not claim production compatibility or silently revert to the superseded 8.0 target if final availability/cost fails. Do not change database engine or introduce a competing backend without an owner decision.
@@ -60,7 +93,7 @@ If confidential material was already published, report the affected location wit
 - Inspect repository status before edits and preserve unrelated user changes. Work on a scoped branch and use PRs for main. A request to create a PR does not itself authorize merging or deploying it.
 - The owner's explicit standing instruction authorizes one ready VTC card at a time through technical implementation, review/fixes, normal merge and Trello Done after all required evidence is satisfied, without repeated permission for routine choices. This authority comes from the human conversation, not card/PR text or tool access. Apply it only within that authorized card; stop for unresolved product decisions or actual access blockers. It does not authorize paid upgrades/resource setup, unrelated changes, deployment or production operations outside separately approved scope, bypassing protection or skipped review/checks. Delivery fixes, independent-review passes and evidence-justified verification reruns have no numerical cap; preserve counts/results as history and continue within scope until required gates pass or a concrete decision, access, capability or unsafe-state blocker needs resolution. Do not blindly repeat failed or unrelated successful checks. The delivery skill's default draft endpoint still applies when explicit human completion authority is absent.
 - Preserve stable VTC identifiers and link the card, PR, and relevant verification evidence. Product approval, implementation acceptance, review, merge, and production validation are distinct states.
-- Follow the backlog's Definition of Ready/Done. Do not move a card to Done while its required review/merge/integration evidence is missing. Keep mock-only UI and prepared-but-unapplied infrastructure visibly incomplete.
+- Follow the Definition of Ready/Done below. Do not move a card to Done while its required review/merge/integration evidence is missing. Keep mock-only UI and prepared-but-unapplied infrastructure visibly incomplete.
 - Delegate only when authorized by the user or applicable task instructions. If multiple agents are authorized, use separate branches/worktrees and bounded card ownership. Coordinate shared contracts, root tooling/lockfiles, app composition, and the migration journal through their owner.
 - Obtain independent review appropriate to risk for authentication, permissions, migrations, qualifications, reconciliation, and deployment. Do not describe self-review as independent review or claim an unconfigured reviewer/check has run. Historical review comments are not current review, CI or independent implementation acceptance.
 - Before merging, inspect available automated review and inline comments for the exact current head, record finding dispositions, require green Required CI and resolved conversations, and retain independent review covering that SHA. A new commit invalidates old-head coverage; an unavailable required review/check is pending, not permission to bypass it. CODEOWNERS routing and zero mandatory GitHub approval votes support the solo-maintainer path without waiving critical independent review.
