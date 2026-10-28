@@ -1,6 +1,6 @@
 # VTC-008 test tooling
 
-[VTC-008](https://trello.com/c/x9ItpOEL) supplies reusable test infrastructure and a real built-app smoke journey. Feature owners still own domain tests. Read [CONTRIBUTING.md](../../CONTRIBUTING.md), the [persistence contract](persistence.md), [fixture provenance](../../test/fixtures/README.md) and the applicable [concept scenarios](../../CONCEPT.MD#acceptance-scenarios-for-the-confirmed-decisions).
+[VTC-008](https://trello.com/c/x9ItpOEL) supplies reusable test infrastructure and a real built-app smoke journey. Feature owners still own domain tests. Read [CONTRIBUTING.md](../../CONTRIBUTING.md), the [persistence contract](persistence.md), [fixture provenance](../../test/fixtures/README.md) and the applicable [concept scenarios](../product/mvp-policies.md#acceptance-scenarios-for-the-confirmed-decisions).
 
 ## Run locally
 

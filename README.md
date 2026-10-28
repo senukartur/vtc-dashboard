@@ -2,7 +2,7 @@
 
 A company dashboard for an ETS2/ATS virtual trucking community: driver and trip analytics, qualification checks, manual reporting, convoys, and member administration.
 
-Start with [CONCEPT.MD](CONCEPT.MD). It contains the project idea, approved MVP requirements and permission matrix, working stack/architecture, deployment constraints, delivery phases, and 42 acceptance scenarios. The repository now includes the VTC-006 API/web scaffold, root tooling and local Docker environment alongside planning/contracts and isolated research probes. Domain features remain future work.
+Start with [CONCEPT.MD](CONCEPT.MD). It describes the project idea, roles and main features. Detailed approved rules, the permission matrix and 42 acceptance scenarios are in the [MVP product policies](docs/product/mvp-policies.md). The repository now includes the VTC-006 API/web scaffold, root tooling and local Docker environment alongside planning/contracts and isolated research probes. Domain features remain future work.
 
 Read [AGENTS.md](AGENTS.md) before contributing. This is a public repository: secrets, real member data, private diagnostics, and hosting-account details must stay out of Git, PRs, and public logs.
 
