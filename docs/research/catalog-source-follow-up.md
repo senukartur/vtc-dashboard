@@ -22,7 +22,7 @@ Maintain project-authored translations instead of redistributing a base-game loc
 
 ## Current implementation hand-off — 2026-10-20
 
-The owner's selected delivery scope is now authoritative in the [owner-approved source-use scope](../../CONCEPT.MD#catalog-source-use-basis). The historical source-provider questions below remain a record of the 2026-10-17 research, not a requirement to obtain a separate reply before this closed non-commercial use. No outreach or provider grant is claimed. Actual full-source preparation, reviewed private artifacts and current acceptance limits are recorded in the [catalog implementation guide](../development/catalogs.md#migration-and-evidence); public Git still excludes the corpus and bulk labels.
+The owner's selected delivery scope is now authoritative in the [owner-approved source-use scope](../product/mvp-policies.md#catalog-source-use-basis). The historical source-provider questions below remain a record of the 2026-10-17 research, not a requirement to obtain a separate reply before this closed non-commercial use. No outreach or provider grant is claimed. Actual full-source preparation, reviewed private artifacts and current acceptance limits are recorded in the [catalog implementation guide](../development/catalogs.md#migration-and-evidence); public Git still excludes the corpus and bulk labels.
 
 ## Reuse verification result (historical 2026-10-17 finding)
 

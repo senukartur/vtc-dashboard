@@ -1,6 +1,6 @@
 # Project engineering skills
 
-The seven ECC-derived engineering skills below are shared guidance for Codex and Claude Code. Product policy stays in [CONCEPT.MD](../../CONCEPT.MD), scope in the [backlog](../planning/mvp-trello-backlog.md), and permissions/ownership in [AGENTS.md](../../AGENTS.md). Skills do not implement features, install libraries, authorize delegation, or grant merge/deployment access.
+The seven ECC-derived engineering skills below are shared guidance for Codex and Claude Code. Product policy stays in [CONCEPT.MD](../CONCEPT.MD), scope in [Trello](https://trello.com/b/NwhwurSM/vtcdashboard), and permissions/ownership in the [agent rules](agent-rules.md). Skills do not implement features, install libraries, authorize delegation, or grant merge/deployment access.
 
 ## Discovery and selection
 
@@ -41,7 +41,7 @@ The native [Claude roles](../../.claude/agents/implementer.md) retain their expl
 - Performance advice requires measurements rather than blanket memoization, arbitrary thresholds or imported benchmark claims. Tests use configured tooling; VTC-008 remains the broader test-tooling owner.
 - Design guidance keeps content states and rendered review. ECC's checker script, authenticated reference service, external agents/commands/rules and unrelated skill dependencies are not imported. Local synthetic observations replace mandatory JSON; missing rendered evidence stays pending.
 
-This adds instructions and metadata only. Syntax/link/selection checks do not prove live host invocation, subagent behavior, application tests, CI enforcement or independent review. Actual features follow their cards and [contributor commands](../../CONTRIBUTING.md).
+This adds instructions and metadata only. Syntax/link/selection checks do not prove live host invocation, subagent behavior, application tests, CI enforcement or independent review. Actual features follow their cards and [contributor commands](../CONTRIBUTING.md).
 
 ## Provenance and license
 

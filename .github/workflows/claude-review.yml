@@ -73,7 +73,7 @@ jobs:
             EXPECTED PR HEAD: ${{ steps.target.outputs.head_sha }}
 
             You are an advisory reviewer for this pull request. The checkout is
-            the trusted base commit. Read AGENTS.md and CONCEPT.MD first, then the
+            the trusted base commit. Read AGENTS.md and docs/CONCEPT.MD first, then the
             relevant VTC card and touched contracts/ADRs from the base. Use
             `gh pr view` and `gh pr diff` for PR changes; never assume files in
             the checkout contain the PR head version.
@@ -293,7 +293,7 @@ jobs:
             The repository owner explicitly requested an advisory re-review of the
             current pull request. The checkout is the trusted base commit. Apply
             the review criteria and comment limits in
-            .github/workflows/claude-review.yml. Read AGENTS.md and CONCEPT.MD,
+            .github/workflows/claude-review.yml. Read AGENTS.md and docs/CONCEPT.MD,
             then the relevant VTC card and touched contracts/ADRs from the base.
             Use `gh pr diff` for PR changes; never assume files in the checkout
             contain the PR head version.

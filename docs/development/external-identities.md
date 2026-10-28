@@ -1,6 +1,6 @@
 # Steam ownership and basic TruckersMP linkage
 
-[VTC-018](https://trello.com/c/fX4nCOcK) implements the backend external identity module. Product policy remains in [CONCEPT.MD](../../CONCEPT.MD#steam-identity-changes), with browser DTOs in the [canonical contract](../contracts/dashboard/README.md). Steam is a linked identity. Email/password remains the login method; provider downtime, bans or VTC membership never deactivate local membership, change roles/qualifications, apply discipline or alter trips. VTC-038 owns account/administration screens.
+[VTC-018](https://trello.com/c/fX4nCOcK) implements the backend external identity module. Product policy remains in [product policies](../product/mvp-policies.md#steam-identity-changes), with browser DTOs in the [canonical contract](../contracts/dashboard/README.md). Steam is a linked identity. Email/password remains the login method; provider downtime, bans or VTC membership never deactivate local membership, change roles/qualifications, apply discipline or alter trips. VTC-038 owns account/administration screens.
 
 ## Activation and ownership
 

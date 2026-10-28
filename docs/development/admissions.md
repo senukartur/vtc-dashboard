@@ -1,6 +1,6 @@
 # VTC-015 admissions and onboarding
 
-The admissions module implements the [approved application/invitation policy](../../CONCEPT.MD#membership-application-fields) through the [browser API](../contracts/dashboard/README.md). VTC-016/017 own the public/member UI, VTC-018 owns verified Steam identity, and VTC-028 owns full qualifications. Submitted Steam URLs are unverified applicant evidence; validation performs no provider request or ownership inference.
+The admissions module implements the [approved application/invitation policy](../product/mvp-policies.md#membership-application-fields) through the [browser API](../contracts/dashboard/README.md). VTC-016/017 own the public/member UI, VTC-018 owns verified Steam identity, and VTC-028 owns full qualifications. Submitted Steam URLs are unverified applicant evidence; validation performs no provider request or ownership inference.
 
 ## Activation and owning boundaries
 

@@ -1,6 +1,6 @@
 # Dashboard browser API v1
 
-**Status:** VTC-005 implementation contract; review/adoption is recorded in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5), not proof of an implemented API. [OpenAPI JSON](openapi.json) is the wire reference; [synthetic examples](examples.json), [UI coverage](ui-coverage.md), [domain events](events.md) and the [architecture](../../architecture/README.md) specify behavior that structural schemas cannot enforce. Product requirements remain [CONCEPT.MD](../../../CONCEPT.MD). The separate [telemetry v1.0 API](../telemetry-v1.md) is unchanged.
+**Status:** VTC-005 implementation contract; review/adoption is recorded in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5), not proof of an implemented API. [OpenAPI JSON](openapi.json) is the wire reference; [synthetic examples](examples.json), [UI coverage](ui-coverage.md), [domain events](events.md) and the [architecture](../../architecture/README.md) specify behavior that structural schemas cannot enforce. Product requirements remain [CONCEPT.MD](../../CONCEPT.MD). The separate [telemetry v1.0 API](../telemetry-v1.md) is unchanged.
 
 ## Transport and security
 

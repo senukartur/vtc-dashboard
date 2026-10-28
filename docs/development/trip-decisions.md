@@ -1,6 +1,6 @@
 # Canonical trip decisions and review
 
-VTC-029 implements the disabled-by-default acceptance coordinator over the owning [Trips](trips.md), [Manual Reports](manual-reports.md), [Qualifications](qualifications.md), [Reconciliation](reconciliation.md), [Events](events.md) and pure [rule engine](qualification-rules.md) facades. Approved policy remains in [CONCEPT.MD](../../CONCEPT.MD); the [browser contract](../contracts/dashboard/openapi.json) preserves existing Decision operations and adds the named proposal-decision response union and optional immutable event-association proposal references described below. Frozen telemetry wire bytes are unchanged. UI, analytics consumers and notification delivery remain VTC-030/032/036.
+VTC-029 implements the disabled-by-default acceptance coordinator over the owning [Trips](trips.md), [Manual Reports](manual-reports.md), [Qualifications](qualifications.md), [Reconciliation](reconciliation.md), [Events](events.md) and pure [rule engine](qualification-rules.md) facades. Approved policy remains in [CONCEPT.MD](../CONCEPT.MD); the [browser contract](../contracts/dashboard/openapi.json) preserves existing Decision operations and adds the named proposal-decision response union and optional immutable event-association proposal references described below. Frozen telemetry wire bytes are unchanged. UI, analytics consumers and notification delivery remain VTC-030/032/036.
 
 ## Classification and effective state
 

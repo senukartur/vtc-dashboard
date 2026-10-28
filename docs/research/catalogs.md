@@ -2,7 +2,7 @@
 
 **Investigated:** 2026-10-17. **Status:** discovery result and executable experiments prepared for review. The owner approved all-official-DLC coverage, own translations/English fallback, director/deputy publication and transfer of the three unavailable ATS sources to VTC-019 before launch. This is not a published production catalog; review and merged delivery evidence remain required for VTC-002 Done.
 
-**Card:** [VTC-002](https://trello.com/c/c32UL1jR/2-vtc-002-investigate-and-prototype-versioned-game-catalogs). **Policy:** [CONCEPT.MD](../../CONCEPT.MD#game-catalogs-and-localization). **Experiment:** [catalog spike](../../spikes/catalogs/README.md).
+**Card:** [VTC-002](https://trello.com/c/c32UL1jR/2-vtc-002-investigate-and-prototype-versioned-game-catalogs). **Policy:** [product policies](../product/mvp-policies.md#game-catalogs-and-localization). **Experiment:** [catalog spike](../../spikes/catalogs/README.md).
 
 ## Recommendation
 

@@ -1,6 +1,6 @@
 # Manual report contract evolution (VTC-025)
 
-This is the contract stage of [VTC-025](https://trello.com/c/vvzoG7gy). The [OpenAPI](openapi.json) owns wire shapes; [CONCEPT.MD](../../../CONCEPT.MD#manual-report-review-and-resubmission) owns product policy. These operations do not establish runtime, database, filesystem or hosted activation evidence. The dependent implementation follows independent review and merge of this contract.
+This is the contract stage of [VTC-025](https://trello.com/c/vvzoG7gy). The [OpenAPI](openapi.json) owns wire shapes; [product policies](../../product/mvp-policies.md#manual-report-review-and-resubmission) owns product policy. These operations do not establish runtime, database, filesystem or hosted activation evidence. The dependent implementation follows independent review and merge of this contract.
 
 ## Coordinated response migration
 

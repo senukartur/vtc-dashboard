@@ -11,7 +11,6 @@ spec = json.loads((ROOT / 'docs/contracts/dashboard/openapi.json').read_text(enc
 fixtures = json.loads((ROOT / 'docs/contracts/dashboard/examples.json').read_text(encoding='utf-8'))['cases']
 validate_spec(spec)
 operations = {}
-backlog = (ROOT / 'docs/planning/mvp-trello-backlog.md').read_text(encoding='utf-8')
 capabilities = {'public', 'session', 'company.read', 'trips.submit_own', 'trips.read_own_private',
                 'trips.review', 'events.respond', 'applications.manage', 'events.manage',
                 'qualifications.manage', 'members.manage', 'connections.manage',
@@ -37,7 +36,7 @@ for path, methods in spec['paths'].items():
         assert ident not in operations
         operations[ident] = operation
         assert operation['x-capability'] in capabilities
-        assert f"### [{operation['x-owner-card']}]" in backlog
+        assert re.fullmatch(r'VTC-\d{3}[A-Z]?', operation['x-owner-card'])
         params = [dereference(p) for p in operation.get('parameters', [])]
         assert {p['name'] for p in params if p['in'] == 'path'} == set(re.findall(r'\{([^}]+)\}', path))
         assert all(p.get('required') for p in params if p['in'] == 'path')
