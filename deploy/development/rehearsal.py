@@ -626,6 +626,41 @@ finally:
         sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
     sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
 print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
+# Real Docker objects prove absence after a lost removal reply and after an
+# auto-removal wins the inventory/inspection race. Only the reply boundary is injected.
+with ops.lock():
+    for boundary in ['inspect', 'remove']:
+        original_run = ops.run
+        fixture_id = original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
+            '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-jobs',
+            '--label', f'vtc011.rehearsal={project}',
+            '--label', f'com.docker.compose.project={project}',
+            '--label', 'com.docker.compose.service=jobs', image_id,
+            'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip()
+        injected = []
+        def removal_race(args, **kwargs):
+            if not injected and boundary == 'inspect' and args[:2] == ['docker', 'inspect']:
+                original_run(['docker', 'rm', '-f', fixture_id], timeout=20)
+                injected.append(boundary)
+            result = original_run(args, **kwargs)
+            if not injected and boundary == 'remove' and args[:3] == ['docker', 'rm', '-f']:
+                injected.append(boundary)
+                raise RuntimeError('OPERATION_CHILD_FAILED')
+            return result
+        ops.run = removal_race
+        try:
+            ops.stop_owned_jobs(revision, image_id)
+        finally:
+            ops.run = original_run
+            # The fixture ID, never a rediscovered/replacement name, owns fallback cleanup.
+            remaining = original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10)
+            if remaining.strip():
+                original_run(['docker', 'rm', '-f', fixture_id], timeout=20)
+        assert injected == [boundary]
+        assert not remaining.strip()
+        assert not (base / 'state/recovery-required').exists()
+        assert not (base / 'private/maintenance/enabled').exists()
+print('Worker cleanup race rehearsal: real Docker disappearance before inspection and lost removal reply recovered only after absence proof', flush=True)
 with ops.lock():
     heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
     ops.tick_locked(revision, image_id)

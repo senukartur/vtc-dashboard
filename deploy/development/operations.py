@@ -274,7 +274,16 @@ def stop_owned_jobs(revision, image_id=None):
                 all(re.fullmatch(r'[a-f0-9]{12,64}', identity) for identity in ids),
                 'WORKER_INVENTORY_INVALID')
         if ids:
-            inspected = json.loads(run(['docker', 'inspect', *ids], timeout=WORKER_CONTROL_TIMEOUT))
+            try:
+                inspection = run(['docker', 'inspect', *ids], timeout=WORKER_CONTROL_TIMEOUT)
+            except RuntimeError as error:
+                if error.args != ('OPERATION_CHILD_FAILED',):
+                    raise
+                # Auto-removal may finish between inventory and inspection. No
+                # deletion is authorized without ownership; require absence instead.
+                wait_owned_jobs_absent(inventory)
+                return
+            inspected = json.loads(inspection)
             require(len(inspected) == len(ids), 'WORKER_OWNERSHIP_INVALID')
             seen = set()
             for identity, info in zip(ids, inspected):
@@ -287,12 +296,32 @@ def stop_owned_jobs(revision, image_id=None):
                 seen.add(info['Name'])
             # Validate every name/project/service tuple before removing any container.
             # Stale accepted images must also be stoppable before migration/restore.
-            run(['docker', 'rm', '-f', *ids], timeout=20)
-        require(not run(inventory, timeout=WORKER_CONTROL_TIMEOUT).strip(), 'WORKER_STILL_PRESENT')
+            try:
+                run(['docker', 'rm', '-f', *[info['Id'] for info in inspected]], timeout=20)
+            except (RuntimeError, subprocess.TimeoutExpired) as error:
+                if isinstance(error, RuntimeError) and error.args != ('OPERATION_CHILD_FAILED',):
+                    raise
+                # Docker --rm and explicit removal can overlap. A failed client
+                # is not completion: only the bounded absence proof may recover it.
+                pass
+        wait_owned_jobs_absent(inventory)
     except BaseException:
         maintenance(True)
         recovery_intent()
         raise RuntimeError('WORKER_RECOVERY_REQUIRED') from None
+
+
+def wait_owned_jobs_absent(inventory):
+    """Observe removal without retrying deletion or adopting replacement containers."""
+    deadline = time.monotonic() + WORKER_CONTROL_TIMEOUT
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'WORKER_STILL_PRESENT')
+        if not run(inventory, timeout=min(WORKER_CONTROL_TIMEOUT, remaining)).strip():
+            return
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'WORKER_STILL_PRESENT')
+        time.sleep(min(0.2, remaining))
 
 
 def jobs_locked(revision, image_id):

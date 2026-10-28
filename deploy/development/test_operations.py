@@ -131,8 +131,58 @@ class TickTests(unittest.TestCase):
                                       'com.docker.compose.service': 'jobs'}}}
         with patch.object(ops, 'run', side_effect=[identity.encode(), json.dumps([info]).encode(), b'', b'']) as run:
             ops.stop_owned_jobs('a' * 40)
-        self.assertEqual([call.kwargs['timeout'] for call in run.call_args_list], [10, 10, 20, 10])
-        self.assertEqual(run.call_args_list[2].args[0], ['docker', 'rm', '-f', identity])
+        self.assertEqual([call.kwargs['timeout'] for call in run.call_args_list[:3]], [10, 10, 20])
+        self.assertGreater(run.call_args_list[3].kwargs['timeout'], 0)
+        self.assertLessEqual(run.call_args_list[3].kwargs['timeout'], 10)
+        self.assertEqual(run.call_args_list[2].args[0], ['docker', 'rm', '-f', info['Id']])
+
+    def cleanup_info(self):
+        return {'Id': 'a' * 64, 'Name': f'/{ops.PROJECT}-jobs',
+                'Config': {'Labels': {'com.docker.compose.project': ops.PROJECT,
+                                      'com.docker.compose.service': 'jobs'}}}
+
+    def test_auto_removal_in_progress_requires_eventual_absence_without_second_delete(self):
+        for outcome in [RuntimeError('OPERATION_CHILD_FAILED'), subprocess.TimeoutExpired('private', 20), b'']:
+            with self.subTest(outcome=type(outcome).__name__):
+                responses = [b'a' * 12, json.dumps([self.cleanup_info()]).encode(), outcome, b'a' * 12, b'']
+                with patch.object(ops, 'run', side_effect=responses) as run, patch.object(ops.time, 'sleep'):
+                    ops.stop_owned_jobs('a' * 40)
+                self.assertEqual(sum(call.args[0][:3] == ['docker', 'rm', '-f'] for call in run.call_args_list), 1)
+                self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def test_auto_removal_between_inventory_and_inspection_never_authorizes_delete(self):
+        with patch.object(ops, 'run', side_effect=[b'a' * 12, RuntimeError('OPERATION_CHILD_FAILED'), b'a' * 12, b'']) as run, patch.object(ops.time, 'sleep'):
+            ops.stop_owned_jobs('a' * 40)
+        self.assertFalse(any(call.args[0][:3] == ['docker', 'rm', '-f'] for call in run.call_args_list))
+        self.assertFalse((self.base / 'state/recovery-required').exists())
+
+    def test_persistent_or_replacement_container_keeps_recovery_fenced(self):
+        for outcome, remaining in [(RuntimeError('OPERATION_CHILD_FAILED'), b'a' * 12), (b'', b'b' * 12)]:
+            with self.subTest(remaining=remaining):
+                responses = [b'a' * 12, json.dumps([self.cleanup_info()]).encode(), outcome, remaining, remaining]
+                with patch.object(ops, 'run', side_effect=responses) as run, patch.object(ops.time, 'monotonic', side_effect=[0, 0, 0, 10]), patch.object(ops.time, 'sleep'):
+                    with self.assertRaisesRegex(RuntimeError, '^WORKER_RECOVERY_REQUIRED$'):
+                        ops.stop_owned_jobs('a' * 40)
+                self.assertEqual(sum(call.args[0][:3] == ['docker', 'rm', '-f'] for call in run.call_args_list), 1)
+                self.assertTrue((self.base / 'state/recovery-required').exists())
+                self.assertTrue((self.base / 'private/maintenance/enabled').exists())
+
+    def test_poll_failure_and_unrelated_control_error_keep_recovery_fenced(self):
+        for responses in [
+                [b'a' * 12, json.dumps([self.cleanup_info()]).encode(), RuntimeError('OPERATION_CHILD_FAILED'), OSError('private')],
+                [b'a' * 12, json.dumps([self.cleanup_info()]).encode(), RuntimeError('UNRELATED_CONTROL_FAILURE')],
+                [b'a' * 12, RuntimeError('UNRELATED_CONTROL_FAILURE')]]:
+            with self.subTest(count=len(responses)), patch.object(ops, 'run', side_effect=responses):
+                with self.assertRaisesRegex(RuntimeError, '^WORKER_RECOVERY_REQUIRED$'):
+                    ops.stop_owned_jobs('a' * 40)
+                self.assertTrue((self.base / 'state/recovery-required').exists())
+
+    def test_absence_poll_has_one_total_budget_and_no_success_after_deadline(self):
+        with patch.object(ops, 'run', return_value=b'a' * 12) as run, patch.object(ops.time, 'monotonic', side_effect=[0, 0, 9.9, 10]), patch.object(ops.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, '^WORKER_STILL_PRESENT$'):
+                ops.wait_owned_jobs_absent(['docker', 'ps'])
+        self.assertEqual(run.call_count, 1)
+        self.assertLessEqual(sleep.call_args.args[0], 0.11)
 
 
 class ChildOutcomeTests(unittest.TestCase):
