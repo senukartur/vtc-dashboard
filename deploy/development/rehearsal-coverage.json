@@ -6,6 +6,7 @@
     "core-production-codec-grants",
     "core-identity-ingress-acceptance",
     "core-restricted-domain-profiles",
+    "core-worker-cleanup-races",
     "core-durable-jobs"
   ],
   "recovery": [
@@ -149,5 +150,13 @@
     "fbe5bad990d3960fc137363b0fc177d67596bf3e7778aed0cc1b10e50c068f57": 1,
     "fdeba85e3802403fc1a41d829b8b361c4cf172bc10a1081f7e48088bf62bc33c": 1
   },
-  "originalAssertionCount": 124
+  "originalAssertionCount": 124,
+  "integratedMain": "06296fc00e0408ea672d9ae12003a9ac49508411",
+  "integratedCleanupAssertions": {
+    "b85bf89c3271498c19a0fdd233f8d18686c487dcc6e967d2c37189fb079614e6": 1,
+    "76fc5fc3ce9c6c399dacfb6d147d68047ea1a934728958f3dfc076bc55dc130a": 1,
+    "29caf9daeb492ec635c3b85046b0e3bdaa4c276f497c63f47ed1621e3e28ddec": 1,
+    "6c1490993d27cab9d29f19e46972c159219fcab3aea9fae9f193eded3f919e89": 1
+  },
+  "integratedCleanupBlockSha256": "7315b13b322c0d1af1806ada67c68ca9e45d67b19f6a3bbc20c1832c5d425f29"
 }

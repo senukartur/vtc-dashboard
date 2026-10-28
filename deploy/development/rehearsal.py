@@ -692,6 +692,47 @@ def core():
                 sql(f"REVOKE SELECT ON vtc.synthetic_notification_guard FROM 'vtc_{role}'@'%';")
             sql("DROP TABLE vtc.synthetic_notification_guard;")
         print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
+    with rehearsal_phase('core-worker-cleanup-races'):
+        # Real Docker objects prove absence after a lost removal reply and after an
+        # auto-removal wins the inventory/inspection race. Only the reply boundary is injected.
+        with ops.lock():
+            for boundary in ['inspect', 'remove']:
+                original_run = ops.run
+                fixture_ids = []
+                for service in (['jobs', 'heartbeat'] if boundary == 'inspect' else ['jobs']):
+                    fixture_ids.append(original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
+                        '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-{service}',
+                        '--label', f'vtc011.rehearsal={project}',
+                        '--label', f'com.docker.compose.project={project}',
+                        '--label', f'com.docker.compose.service={service}', image_id,
+                        'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip())
+                injected = []
+                def removal_race(args, **kwargs):
+                    if not injected and boundary == 'inspect' and args[:2] == ['docker', 'inspect']:
+                        original_run(['docker', 'rm', '-f', fixture_ids[0]], timeout=20)
+                        injected.append(boundary)
+                    result = original_run(args, **kwargs)
+                    if not injected and boundary == 'remove' and args[:3] == ['docker', 'rm', '-f']:
+                        injected.append(boundary)
+                        raise RuntimeError('OPERATION_CHILD_FAILED')
+                    return result
+                ops.run = removal_race
+                try:
+                    ops.stop_owned_jobs(revision, image_id)
+                finally:
+                    ops.run = original_run
+                    # The fixture ID, never a rediscovered/replacement name, owns fallback cleanup.
+                    remaining = []
+                    for fixture_id in fixture_ids:
+                        if original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10).strip():
+                            remaining.append(fixture_id)
+                    if remaining:
+                        original_run(['docker', 'rm', '-f', *remaining], timeout=20)
+                assert injected == [boundary]
+                assert not remaining
+                assert not (base / 'state/recovery-required').exists()
+                assert not (base / 'private/maintenance/enabled').exists()
+        print('Worker cleanup race rehearsal: real Docker partial-batch disappearance, validated survivor removal and lost removal reply recovered only after absence proof', flush=True)
     with rehearsal_phase('core-durable-jobs'):
         with ops.lock():
             heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())

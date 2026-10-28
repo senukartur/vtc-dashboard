@@ -143,6 +143,25 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
                   and n.items[0].context_expr.func.id == 'rehearsal_phase']
         self.assertEqual(phases, coverage['recovery'])
 
+    def test_composition_retains_exact_reviewed_main_cleanup_race_block(self):
+        coverage = json.loads(pathlib.Path(__file__).with_name('rehearsal-coverage.json').read_text())
+        self.assertEqual(coverage['integratedMain'], '06296fc00e0408ea672d9ae12003a9ac49508411')
+        self.assertEqual(sum(coverage['integratedCleanupAssertions'].values()), 4)
+        actual = collections.Counter(hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
+                                     for node in ast.walk(self.source) if isinstance(node, ast.Assert))
+        expected = collections.Counter(coverage['originalAssertions']) + collections.Counter(coverage['integratedCleanupAssertions'])
+        self.assertFalse(expected - actual)
+        core = next(n for n in self.source.body if isinstance(n, ast.FunctionDef) and n.name == 'core')
+        phases = [n for n in ast.walk(core) if isinstance(n, ast.With) and
+                  isinstance(n.items[0].context_expr, ast.Call) and
+                  isinstance(n.items[0].context_expr.func, ast.Name) and
+                  n.items[0].context_expr.func.id == 'rehearsal_phase']
+        self.assertEqual([n.items[0].context_expr.args[0].value for n in phases], coverage['core'])
+        cleanup = next(n for n in phases if n.items[0].context_expr.args[0].value == 'core-worker-cleanup-races')
+        block = ast.Module(body=cleanup.body, type_ignores=[])
+        self.assertEqual(hashlib.sha256(ast.dump(block, include_attributes=False).encode()).hexdigest(),
+                         coverage['integratedCleanupBlockSha256'])
+
     def test_actual_controller_argument_mapping_preserves_focused_manual_and_full_coverage(self):
         module = pathlib.Path(__file__).with_name('rehearsal-child.mjs').as_uri()
         program = '''import assert from 'node:assert/strict';

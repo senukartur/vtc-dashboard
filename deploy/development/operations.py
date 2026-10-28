@@ -268,14 +268,37 @@ def stop_owned_jobs(revision, image_id=None):
     try:
         names = {f'/{PROJECT}-{suffix}': 'heartbeat' if suffix == 'heartbeat' else 'jobs'
                  for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']}
-        inventory = ['docker', 'ps', '-aq', '--filter',
+        inventory = ['docker', 'ps', '-aq', '--no-trunc', '--filter',
                      'name=^/(' + '|'.join(re.escape(name[1:]) for name in names) + ')$']
-        ids = run(inventory, timeout=WORKER_CONTROL_TIMEOUT).decode().split()
-        require(len(ids) <= len(names) and len(set(ids)) == len(ids) and
-                all(re.fullmatch(r'[a-f0-9]{12,64}', identity) for identity in ids),
-                'WORKER_INVENTORY_INVALID')
-        if ids:
-            inspected = json.loads(run(['docker', 'inspect', *ids], timeout=WORKER_CONTROL_TIMEOUT))
+        discovery_deadline = time.monotonic() + 2 * WORKER_CONTROL_TIMEOUT
+        def discover(args):
+            remaining = discovery_deadline - time.monotonic()
+            require(remaining > 0, 'WORKER_DISCOVERY_DEADLINE')
+            return run(args, timeout=min(WORKER_CONTROL_TIMEOUT, remaining))
+        def inventory_ids():
+            values = discover(inventory).decode().split()
+            require(len(values) <= len(names) and len(set(values)) == len(values) and
+                    all(re.fullmatch(r'[a-f0-9]{12,64}', identity) for identity in values),
+                    'WORKER_INVENTORY_INVALID')
+            return values
+        ids = inventory_ids()
+        while ids:
+            try:
+                inspection = discover(['docker', 'inspect', *ids])
+            except RuntimeError as error:
+                if error.args != ('OPERATION_CHILD_FAILED',):
+                    raise
+                survivors = inventory_ids()
+                require(set(survivors).issubset(ids), 'WORKER_INVENTORY_CHANGED')
+                if not survivors or set(survivors) == set(ids):
+                    wait_owned_jobs_absent(inventory)
+                    return
+                # Only a strict subset of the original IDs can be inspected again.
+                # At most three refreshes fit the four-name inventory, and every
+                # discovery call shares the original twenty-second deadline.
+                ids = survivors
+                continue
+            inspected = json.loads(inspection)
             require(len(inspected) == len(ids), 'WORKER_OWNERSHIP_INVALID')
             seen = set()
             for identity, info in zip(ids, inspected):
@@ -288,12 +311,33 @@ def stop_owned_jobs(revision, image_id=None):
                 seen.add(info['Name'])
             # Validate every name/project/service tuple before removing any container.
             # Stale accepted images must also be stoppable before migration/restore.
-            run(['docker', 'rm', '-f', *ids], timeout=20)
-        require(not run(inventory, timeout=WORKER_CONTROL_TIMEOUT).strip(), 'WORKER_STILL_PRESENT')
+            try:
+                run(['docker', 'rm', '-f', *[info['Id'] for info in inspected]], timeout=20)
+            except (RuntimeError, subprocess.TimeoutExpired) as error:
+                if isinstance(error, RuntimeError) and error.args != ('OPERATION_CHILD_FAILED',):
+                    raise
+                # Docker --rm and explicit removal can overlap. A failed client
+                # is not completion: only the bounded absence proof may recover it.
+                pass
+            break
+        wait_owned_jobs_absent(inventory)
     except BaseException:
         maintenance(True)
         recovery_intent()
         raise RuntimeError('WORKER_RECOVERY_REQUIRED') from None
+
+
+def wait_owned_jobs_absent(inventory):
+    """Observe removal without retrying deletion or adopting replacement containers."""
+    deadline = time.monotonic() + WORKER_CONTROL_TIMEOUT
+    while True:
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'WORKER_STILL_PRESENT')
+        if not run(inventory, timeout=min(WORKER_CONTROL_TIMEOUT, remaining)).strip():
+            return
+        remaining = deadline - time.monotonic()
+        require(remaining > 0, 'WORKER_STILL_PRESENT')
+        time.sleep(min(0.2, remaining))
 
 
 def jobs_locked(revision, image_id):
