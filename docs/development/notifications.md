@@ -1,6 +1,6 @@
 # Durable in-app notifications
 
-[VTC-036](https://trello.com/c/Cg1UNpek) implements the six existing browser operations, durable recipient state and bounded notification/reminder work. Delivery is opt-in: `NOTIFICATIONS_ENABLED=false` is the default. Enabling requires Identity, Trips, Qualifications, Events and Trip Decisions (including that module's prerequisites), migration `0016_notifications`, the reviewed grants below and a separate random 32-byte lowercase hexadecimal `NOTIFICATIONS_CURSOR_KEY`. No startup migration or production numeric configuration is inferred. VTC-037 owns the bell/history/preferences UI, visible/offline scheduling and cross-tab toast handling.
+[VTC-036](https://trello.com/c/Cg1UNpek) implements the six existing browser operations, durable recipient state and bounded notification/reminder work. Delivery is opt-in: `NOTIFICATIONS_ENABLED=false` is the default. Enabling requires Identity, Trips, Qualifications, Events and Trip Decisions (including that module's prerequisites), migrations `0016_notifications` and `0017_event_notification_material`, the reviewed grants below and a separate random 32-byte lowercase hexadecimal `NOTIFICATIONS_CURSOR_KEY`. Apply `0017` before starting the current API or worker image, even when notification delivery remains disabled. No startup migration or production numeric configuration is inferred. VTC-037 owns the bell/history/preferences UI, visible/offline scheduling and cross-tab toast handling.
 
 ## Categories, access and preferences
 
