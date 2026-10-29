@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { types } from "node:util";
 
 // The production deployment installs mysql2 as @vtc/db's dependency, not the API's.
 const mysql = createRequire(import.meta.resolve("@vtc/db"))("mysql2/promise");
@@ -19,25 +20,104 @@ const pool = mysql.createPool({
   connectTimeout: 1000,
   timezone: "Z",
 });
-async function query(sql) {
-  const connection = await pool.getConnection();
+const nativeCodes = new Set([
+  "PROTOCOL_SEQUENCE_TIMEOUT",
+  "PROTOCOL_CONNECTION_LOST",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ER_ACCESS_DENIED_ERROR",
+  "ER_DBACCESS_DENIED_ERROR",
+  "ER_BAD_DB_ERROR",
+  "ER_CON_COUNT_ERROR",
+  "ER_TOO_MANY_USER_CONNECTIONS",
+  "ER_NO_SUCH_TABLE",
+  "ER_BAD_FIELD_ERROR",
+  "ER_TABLEACCESS_DENIED_ERROR",
+  "ER_COLUMNACCESS_DENIED_ERROR",
+  "ER_LOCK_WAIT_TIMEOUT",
+  "ER_LOCK_DEADLOCK",
+]);
+function monotonicNow() {
   try {
-    return await connection.query({ sql, timeout: 1000 });
+    const now = performance.now();
+    return Number.isFinite(now) ? now : null;
   } catch {
-    connection.destroy();
-    throw new Error("PROBE_DATABASE_UNAVAILABLE");
+    return null;
+  }
+}
+function heartbeatFailure(phase, error, started) {
+  let nativeCode = "unknown";
+  try {
+    if (types.isNativeError(error) && !types.isProxy(error)) {
+      const code = Object.getOwnPropertyDescriptor(error, "code")?.value;
+      if (typeof code === "string" && nativeCodes.has(code)) nativeCode = code;
+    }
+  } catch {
+    // Accessors, proxies and non-errors provide no trusted native code.
+  }
+  const now = monotonicNow();
+  const elapsed = started === null || now === null ? null : now - started;
+  return {
+    event: "probe.heartbeat_failed",
+    schemaVersion: 1,
+    phase: phase === "acquire" || phase === "query" ? phase : "unknown",
+    nativeCode,
+    elapsedMs:
+      elapsed !== null && elapsed >= 0 && elapsed <= Number.MAX_SAFE_INTEGER
+        ? Math.floor(elapsed)
+        : null,
+    deadlineMs: 1000,
+  };
+}
+async function query(sql, observeFailure) {
+  let connection;
+  let phase = "acquire";
+  let started = monotonicNow();
+  try {
+    connection = await pool.getConnection();
+    phase = "query";
+    started = monotonicNow();
+    return await connection.query({ sql, timeout: 1000 });
+  } catch (error) {
+    if (observeFailure) {
+      try {
+        observeFailure(heartbeatFailure(phase, error, started));
+      } catch {
+        // Observability cannot replace the database failure or block disposal.
+      }
+    }
+    if (connection) {
+      connection.destroy();
+      throw new Error("PROBE_DATABASE_UNAVAILABLE");
+    }
+    throw error;
   } finally {
-    connection.release();
+    connection?.release();
   }
 }
 if (process.argv[2] === "heartbeat") {
+  let failure = heartbeatFailure("unknown", null, null);
   try {
     await query(
       "INSERT INTO heartbeat (singleton, at_utc, sequence) VALUES (1, UTC_TIMESTAMP(3), 1) ON DUPLICATE KEY UPDATE at_utc=UTC_TIMESTAMP(3), sequence=sequence+1",
+      (record) => {
+        failure = record;
+      },
     );
     console.log("Heartbeat: success");
   } catch {
     console.error("Heartbeat: unavailable");
+    try {
+      console.error(JSON.stringify(failure));
+    } catch {
+      // A missing diagnostic does not turn the failed heartbeat into success.
+    }
     process.exitCode = 1;
   } finally {
     await pool.end();

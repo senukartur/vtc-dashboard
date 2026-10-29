@@ -1,0 +1,9 @@
+# Unapplied overlay. The root operator must review this with the application/grants package.
+# API and every independently launched minute worker need the same private feature configuration.
+services:
+  app:
+    env_file:
+      - ./private/domain-features.env
+  probe:
+    env_file:
+      - ./private/domain-features.env

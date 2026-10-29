@@ -59,6 +59,10 @@
     "./trip-decisions-schema": {
       "types": "./dist/schema/trip-decisions/index.d.ts",
       "default": "./dist/schema/trip-decisions/index.js"
+    },
+    "./notifications-schema": {
+      "types": "./dist/schema/notifications/index.d.ts",
+      "default": "./dist/schema/notifications/index.js"
     }
   },
   "files": [

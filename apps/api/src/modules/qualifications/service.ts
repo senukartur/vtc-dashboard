@@ -41,10 +41,10 @@ import { decimal } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { ContributionChange } from "../trips/contributions.js";
 import type { Trips } from "../trips/service.js";
+import { createAssignmentWriter } from "./assignment-writer.js";
 import type { Game } from "./initialization.js";
 import { type Page, pagination } from "./pagination.js";
 import { previewRules, validateDraftRules } from "./preview.js";
-import { createAssignmentWriter } from "./assignment-writer.js";
 
 type S = components["schemas"];
 type Assignment = typeof qualificationAssignments.$inferSelect;
@@ -67,7 +67,7 @@ interface Ports {
   >;
   trips: Pick<Trips, "contributions">;
   catalogs?: Pick<Catalogs, "qualificationReferencesInTransaction">;
-  events?: ReturnType<typeof createOutbox>;
+  events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export function createQualifications(
   unit: UnitOfWork,
@@ -461,6 +461,87 @@ export function createQualifications(
   return {
     config,
     prepareInTransaction: prepare,
+    async notificationAssignmentInTransaction(tx: TxContext, id: string) {
+      const [row] = await c(tx)
+        .select({
+          id: qualificationAssignments.id,
+          userId: qualificationAssignments.userId,
+          game: qualificationAssignments.game,
+          purpose: qualificationAssignments.purpose,
+          endedAt: qualificationAssignments.endedAt,
+          revision: qualificationAssignments.revision,
+          assignedAt: qualificationAssignments.assignedAt,
+          levelId: qualificationAssignments.levelId,
+        })
+        .from(qualificationAssignments)
+        .where(eq(qualificationAssignments.id, applicationId(id)))
+        .for("share");
+      if (!row) throw new Error("NOTIFICATION_ASSIGNMENT_MISSING");
+      let eligible = false;
+      if (row.endedAt === null && row.assignedAt <= at()) {
+        // Notification consumption never creates state or takes writer-only locks. The caller
+        // holds Identity's shared company fence; all qualification/contribution writers take X.
+        const [current] = await c(tx)
+          .select({ assignmentId: qualificationStates.assignmentId })
+          .from(qualificationStates)
+          .where(
+            and(eq(qualificationStates.userId, row.userId), eq(qualificationStates.game, row.game)),
+          )
+          .for("share");
+        if (!current) throw new Error("NOTIFICATION_QUALIFICATION_STATE_MISSING");
+        if (current.assignmentId === row.id) {
+          const [selected] = await c(tx)
+            .select({ code: qualificationLevels.code })
+            .from(qualificationLevels)
+            .where(eq(qualificationLevels.id, row.levelId))
+            .for("share");
+          if (!selected) throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
+          const rule = await ruleAt(tx, row.levelId, at()),
+            requirements = {
+              requiredTrips: rule?.requiredTrips ?? null,
+              requiredDistanceM:
+                rule?.requiredDistanceM == null ? null : decimal(rule.requiredDistanceM),
+            };
+          eligible =
+            selected.code !== "driver_i" &&
+            requirements.requiredTrips !== null &&
+            requirements.requiredDistanceM !== null &&
+            evaluateQualificationProgress(
+              requirements,
+              await ports.trips.contributions.totals(tx, row.id, "share"),
+            ).eligibleForPromotion;
+        }
+      }
+      return {
+        ...row,
+        eligible,
+      };
+    },
+    async notificationPromotionReviewInTransaction(
+      tx: TxContext,
+      id: string,
+      version: number,
+      assignmentId: string,
+    ) {
+      const [row] = await c(tx)
+        .select({
+          reviewRequired: promotionReviews.reviewRequired,
+          version: promotionReviews.version,
+        })
+        .from(promotionReviews)
+        .innerJoin(
+          qualificationPromotions,
+          eq(qualificationPromotions.id, promotionReviews.promotionId),
+        )
+        .where(
+          and(
+            eq(promotionReviews.promotionId, applicationId(id)),
+            eq(qualificationPromotions.sourceAssignmentId, applicationId(assignmentId)),
+          ),
+        )
+        .for("share");
+      return row?.version === version && row.reviewRequired;
+    },
     async authorize(actor: Actor, manage = false) {
       return ports.identity.transaction((tx) =>
         ports.identity.qualificationContextInTransaction(
@@ -651,7 +732,8 @@ export function createQualifications(
               .where(eq(qualificationRules.levelId, levelId))
               .orderBy(desc(qualificationRules.effectiveAt))
               .limit(1)
-              .for("update");
+              // Company/level writer fences serialize publication; prior rule versions are immutable.
+              .for("share");
             if (latest && effectiveAt <= latest.effectiveAt) throw identityError(409);
             for (const rule of rules) {
               if (rule.type === "max_mass") exact(rule.maxKg as string);

@@ -1,0 +1,129 @@
+{
+  "name": "notifications-acceptance",
+  "services": {
+    "api": {
+      "image": "${VTC_IMAGE_ID:?current CI-approved image required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "192m",
+      "pids_limit": 32,
+      "networks": [
+        "database",
+        "window"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ]
+    },
+    "proxy": {
+      "image": "caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "cap_add": [
+        "NET_BIND_SERVICE"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "96m",
+      "pids_limit": 32,
+      "networks": [
+        "window"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ]
+    },
+    "probe": {
+      "image": "${VTC_IMAGE_ID:?current CI-approved image required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "192m",
+      "pids_limit": 32,
+      "networks": [
+        "window"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ]
+    },
+    "fixture": {
+      "image": "${VTC_IMAGE_ID:?current CI-approved image required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "192m",
+      "pids_limit": 32,
+      "networks": [
+        "database"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ]
+    },
+    "migrator": {
+      "image": "${VTC_IMAGE_ID:?current CI-approved image required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "192m",
+      "pids_limit": 32,
+      "networks": [
+        "database"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ]
+    },
+    "worker": {
+      "image": "${VTC_IMAGE_ID:?current CI-approved image required}",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "96m",
+      "pids_limit": 32,
+      "networks": [
+        "database"
+      ],
+      "profiles": [
+        "notifications-acceptance"
+      ],
+      "cpus": 0.25
+    }
+  },
+  "networks": {
+    "database": {
+      "external": true,
+      "name": "${VTC_DATABASE_NETWORK:?}"
+    },
+    "window": {
+      "external": true,
+      "name": "${VTC_NOTIFICATIONS_NETWORK:?}"
+    }
+  },
+  "x-caddyfile": "{\n admin off\n skip_install_trust\n}\nhttps://notifications-acceptance.invalid {\n tls internal\n reverse_proxy {apiIp}:3000\n}\n"
+}

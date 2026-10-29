@@ -12,7 +12,7 @@ type Assignment = typeof qualificationAssignments.$inferSelect;
 // The lifecycle coordinator and ordinary qualification commands share one caller-owned write.
 export function createAssignmentWriter(
   unit: UnitOfWork,
-  outbox = createOutbox(unit),
+  outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
   now = () => new Date().toISOString(),
 ) {
   return async (

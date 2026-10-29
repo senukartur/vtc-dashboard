@@ -63,7 +63,7 @@ export function createReconciliation(
     trips: Trips;
     qualifications: Qualifications;
     manual?: ManualReports;
-    outbox?: ReturnType<typeof createOutbox>;
+    outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
     workflowChanged?: (tx: TxContext, tripId: string) => Promise<void>;
   },
   now = () => new Date(),

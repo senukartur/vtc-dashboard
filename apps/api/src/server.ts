@@ -31,6 +31,7 @@ try {
             config.reconciliation,
             config.tripDecisions,
             config.analytics,
+            config.notifications,
           ),
         }
       : {}),

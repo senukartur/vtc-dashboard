@@ -15,9 +15,11 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
-import { membership } from "../identity/index.js";
 import { catalogFacts } from "../catalogs/index.js";
+import { membership } from "../identity/index.js";
+
 export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+
 const fk = (name: string, column: AnyMySqlColumn, target: AnyMySqlColumn) =>
   foreignKey({ name, columns: [column], foreignColumns: [target] }).onDelete("restrict");
 export const events = mysqlTable(
@@ -26,6 +28,40 @@ export const events = mysqlTable(
     id: idColumn("id").primaryKey(),
     version: int("version", { unsigned: true }).notNull(),
     changeSequence: int("change_sequence", { unsigned: true }).notNull(),
+    notificationPending: boolean("notification_pending").notNull().default(true),
+    notificationMaterial: json("notification_material").$type<{
+      schemaVersion: 1;
+      throughVersion: number;
+      startVersion: number;
+      routeVersion: number;
+      statusVersion: number;
+    }>(),
+    notificationMaterialPending: boolean("notification_material_pending").generatedAlwaysAs(
+      sql`
+      CASE WHEN JSON_TYPE(notification_material)='OBJECT' AND JSON_LENGTH(notification_material)=5
+        AND JSON_TYPE(JSON_EXTRACT(notification_material,'$.schemaVersion')) IN ('INTEGER','DOUBLE','DECIMAL')
+        AND JSON_EXTRACT(notification_material,'$.schemaVersion') BETWEEN 1 AND version
+        AND JSON_TYPE(JSON_EXTRACT(notification_material,'$.throughVersion')) IN ('INTEGER','DOUBLE','DECIMAL')
+        AND JSON_EXTRACT(notification_material,'$.throughVersion') BETWEEN 1 AND version
+        AND JSON_TYPE(JSON_EXTRACT(notification_material,'$.startVersion')) IN ('INTEGER','DOUBLE','DECIMAL')
+        AND JSON_EXTRACT(notification_material,'$.startVersion') BETWEEN 1 AND version
+        AND JSON_TYPE(JSON_EXTRACT(notification_material,'$.routeVersion')) IN ('INTEGER','DOUBLE','DECIMAL')
+        AND JSON_EXTRACT(notification_material,'$.routeVersion') BETWEEN 1 AND version
+        AND JSON_TYPE(JSON_EXTRACT(notification_material,'$.statusVersion')) IN ('INTEGER','DOUBLE','DECIMAL')
+        AND JSON_EXTRACT(notification_material,'$.statusVersion') BETWEEN 1 AND version
+        AND JSON_EXTRACT(notification_material,'$.schemaVersion')=1
+      THEN NOT (CAST(JSON_EXTRACT(notification_material,'$.schemaVersion') AS UNSIGNED)=JSON_EXTRACT(notification_material,'$.schemaVersion')
+        AND CAST(JSON_EXTRACT(notification_material,'$.throughVersion') AS UNSIGNED)=JSON_EXTRACT(notification_material,'$.throughVersion')
+        AND CAST(JSON_EXTRACT(notification_material,'$.startVersion') AS UNSIGNED)=JSON_EXTRACT(notification_material,'$.startVersion')
+        AND CAST(JSON_EXTRACT(notification_material,'$.routeVersion') AS UNSIGNED)=JSON_EXTRACT(notification_material,'$.routeVersion')
+        AND CAST(JSON_EXTRACT(notification_material,'$.statusVersion') AS UNSIGNED)=JSON_EXTRACT(notification_material,'$.statusVersion')
+        AND CAST(JSON_EXTRACT(notification_material,'$.throughVersion') AS UNSIGNED)=version
+        AND CAST(JSON_EXTRACT(notification_material,'$.startVersion') AS UNSIGNED) BETWEEN 1 AND version
+        AND CAST(JSON_EXTRACT(notification_material,'$.routeVersion') AS UNSIGNED) BETWEEN 1 AND version
+        AND CAST(JSON_EXTRACT(notification_material,'$.statusVersion') AS UNSIGNED) BETWEEN 1 AND version)
+      ELSE TRUE END`,
+      { mode: "virtual" },
+    ),
     tripAssessmentPending: boolean("trip_assessment_pending").notNull().default(false),
     tripAssessmentGeneration: int("trip_assessment_generation", { unsigned: true })
       .notNull()
@@ -41,6 +77,8 @@ export const events = mysqlTable(
   (t) => [
     index("event_member_page").on(t.startsAt, t.id),
     index("event_trip_assessment_pending").on(t.tripAssessmentPending, t.id),
+    index("event_notification_pending").on(t.notificationPending, t.id),
+    index("event_notification_material_pending").on(t.notificationMaterialPending, t.id),
     index("event_public_page").on(t.visibility, t.startsAt, t.id),
     check(
       "event_versions_positive",
