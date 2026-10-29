@@ -1,11 +1,70 @@
 import { expect, test } from "vitest";
 import {
+  acceptanceDeadlineRemaining,
   acceptanceDiagnostic,
   acceptanceWorkerScope,
   acceptanceSentinelMatches,
   acceptanceWorkerPhase,
   acceptanceTeardown,
 } from "../../apps/api/src/notifications-acceptance-diagnostics.ts";
+
+test("scenario seven shared deadlines and checkpoints preserve bounded closed observations", () => {
+  const deadline = 1000;
+  expect(acceptanceDeadlineRemaining(deadline, 100)).toBe(900);
+  expect(acceptanceDeadlineRemaining(deadline, 999)).toBe(1);
+  for (const now of [deadline, deadline + 1, Infinity, NaN])
+    expect(() => acceptanceDeadlineRemaining(deadline, now)).toThrow();
+  for (const invalid of [Infinity, -Infinity, NaN])
+    expect(() => acceptanceDeadlineRemaining(invalid, 100)).toThrow();
+  expect(() => acceptanceDeadlineRemaining(Number.MAX_VALUE, -Number.MAX_VALUE)).toThrow();
+  // A read that first became ready after the same deadline may never turn expiry into success.
+  expect(() => {
+    acceptanceDeadlineRemaining(deadline, 999);
+    const ready = true;
+    acceptanceDeadlineRemaining(deadline, 1001);
+    return ready;
+  }).toThrow("ACCEPTANCE_WAIT_EXPIRED");
+  const steps = [
+    "backlog_seed",
+    "backlog_context",
+    "backlog_late_append",
+    "backlog_witness_publish",
+    "backlog_advance",
+    "backlog_late_commit",
+    "backlog_advance_confirm",
+    "backlog_late_effect",
+    "backlog_scan_lap",
+    "backlog_poll_request",
+    "backlog_poll_status",
+    "backlog_poll_cursor",
+    "backlog_poll_limit",
+    "backlog_delivery",
+    "backlog_unique",
+    "backlog_offline",
+  ];
+  const failure = Object.assign(new Error("SYNTHETIC_PRIVATE_MESSAGE"), {
+    code: "ERR_ASSERTION",
+    actual: { cursor: "SYNTHETIC_PRIVATE_CURSOR" },
+    expected: { cookie: "SYNTHETIC_PRIVATE_COOKIE" },
+  });
+  for (const step of steps) {
+    expect(acceptanceDiagnostic(failure, step)).toEqual({
+      category: "assertion",
+      step,
+      nativeErrno: null,
+      sqlOperation: "unknown",
+      sqlTables: [],
+      lockingMode: "unknown",
+      deniedTable: null,
+    });
+    expect(acceptanceWorkerPhase(true, step)).toBeNull();
+  }
+  for (const step of ["backlog_private_cookie", "backlog_" + "SYNTHETIC_PRIVATE_CURSOR"])
+    expect(acceptanceDiagnostic(failure, step).step).toBe("unknown");
+  expect(JSON.stringify(steps.map((step) => acceptanceDiagnostic(failure, step)))).not.toContain(
+    "SYNTHETIC_PRIVATE",
+  );
+});
 
 test("teardown preserves a primary failure and separately classifies its secondary failure", async () => {
   const primary = new Error("private primary scenario detail"),

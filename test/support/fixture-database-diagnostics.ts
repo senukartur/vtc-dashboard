@@ -2,6 +2,7 @@ import type { Connection, RowDataPacket } from "mysql2/promise";
 import { safeIdentityFailure } from "./identity-diagnostics.ts";
 
 export type DatabaseFixtureCase =
+  | "administration_successor"
   | "admissions_flood"
   | "generation_progress"
   | "generation_late"
@@ -13,6 +14,7 @@ export type DatabaseFixtureCase =
 export async function fixtureDatabaseFailure(control: Connection, caseId: DatabaseFixtureCase) {
   if (
     ![
+      "administration_successor",
       "admissions_flood",
       "generation_progress",
       "generation_late",
@@ -58,7 +60,7 @@ export async function fixtureDatabaseFailure(control: Connection, caseId: Databa
           runningJobs: number;
         }
       | undefined;
-    if (caseId !== "admissions_flood") {
+    if (caseId !== "admissions_flood" && caseId !== "administration_successor") {
       const [rows] = await control.query<RowDataPacket[]>({
         sql: "SELECT (SELECT COUNT(*) FROM job_runner_leases WHERE lease_until>UTC_TIMESTAMP(3)) active,(SELECT COALESCE(MAX(GREATEST(0,TIMESTAMPDIFF(MICROSECOND,UTC_TIMESTAMP(3),lease_until) DIV 1000)),0) FROM job_runner_leases) remaining,(SELECT COUNT(*) FROM durable_jobs WHERE state='ready') ready,(SELECT COUNT(*) FROM durable_jobs WHERE state='running') running",
         timeout: 500,

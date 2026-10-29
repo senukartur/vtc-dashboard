@@ -14,6 +14,7 @@ import { createOutbox, type TripEvent } from "./platform/outbox/events.js";
 import type { Actor } from "./modules/identity/service.js";
 import type { components } from "@vtc/contracts";
 import {
+  acceptanceDeadlineRemaining,
   acceptanceDiagnostic,
   acceptanceWorkerScope,
   acceptanceTeardown,
@@ -543,17 +544,21 @@ try {
     async function poll(c: Client): Promise<Message[]> {
       const found: Message[] = [];
       for (let page = 0; page < 100; page++) {
+        if (phase === 7) operationStep = "backlog_poll_request";
         const feed = await request(
           c,
           `/api/v1/notifications?limit=100${c.cursor ? `&cursor=${encodeURIComponent(c.cursor)}` : ""}`,
         );
+        if (phase === 7) operationStep = "backlog_poll_status";
         assert.equal(feed.status, 200);
+        if (phase === 7) operationStep = "backlog_poll_cursor";
         assert.equal(typeof feed.data.nextCursor, "string");
         found.push(...feed.data.items);
         c.cursor = feed.data.nextCursor;
         c.lastServerTime = feed.data.serverTime;
         if (!feed.data.hasMore) return found;
       }
+      if (phase === 7) operationStep = "backlog_poll_limit";
       throw Error("ACCEPTANCE_PAGE_BOUND");
     }
     async function until<T>(
@@ -561,13 +566,23 @@ try {
       ready: (v: T) => boolean,
       seconds = 210,
       interval = 30000,
+      absoluteDeadline?: number,
     ): Promise<T> {
-      const deadline = Date.now() + seconds * 1000;
+      const deadline = absoluteDeadline ?? Date.now() + seconds * 1000;
       while (true) {
+        if (absoluteDeadline !== undefined) acceptanceDeadlineRemaining(deadline);
         const value = await read();
-        if (ready(value)) return value;
+        if (absoluteDeadline !== undefined) acceptanceDeadlineRemaining(deadline);
+        if (ready(value)) {
+          if (absoluteDeadline !== undefined) acceptanceDeadlineRemaining(deadline);
+          return value;
+        }
         assert.ok(Date.now() < deadline, "ACCEPTANCE_WAIT_EXPIRED");
-        await sleep(interval);
+        await sleep(
+          absoluteDeadline === undefined
+            ? interval
+            : Math.min(interval, acceptanceDeadlineRemaining(deadline)),
+        );
       }
     }
     async function one(ordinal: number, work: (samples: number[]) => Promise<void>) {
@@ -1111,8 +1126,10 @@ try {
         );
       });
       await one(7, async (samples) => {
+        operationStep = "backlog_seed";
         const first = await source(owner, "backfill");
         for (let i = 1; i < 110; i++) await source(owner, i % 2 ? "backfill" : "delayed");
+        operationStep = "backlog_context";
         const context = await unit.run((tx) =>
           trips.eventContextInTransaction(tx, first.sourceRecordId),
         );
@@ -1132,26 +1149,52 @@ try {
           },
         });
         const old = createOutbox(unit);
-        for (let i = 0; i < 260; i++) await unit.run((tx) => old.append(tx, envelope()));
+        operationStep = "backlog_seed";
+        for (let i = 0; i < 259; i++) await unit.run((tx) => old.append(tx, envelope()));
         const lateId = "00000000-0000-4000-8000-00000000000c";
+        const witnessId = "ffffffff-ffff-4fff-bfff-fffffffffff0";
+        assert.ok(Buffer.compare(Buffer.from(witnessId), Buffer.from(lateId)) > 0);
+        const [absent] = await rows<{ events: number; jobs: number }>(sql`
+          SELECT (SELECT COUNT(*) FROM outbox_events WHERE id=${Buffer.from(witnessId)}) events,
+            (SELECT COUNT(*) FROM durable_jobs WHERE event_id=${Buffer.from(witnessId)}) jobs
+        `);
+        assert.deepEqual([Number(absent?.events), Number(absent?.jobs)], [0, 0]);
         let sawAdvanced = false;
+        let progressDeadline = 0;
         await beforeNextMinute();
         await unit.run(async (tx) => {
+          operationStep = "backlog_late_append";
           await old.append(tx, envelope(lateId));
+          // Share the existing 480-second catch-up envelope across discovery and the late effect,
+          // replacing the former 20+480 seconds. Native worker/startup limits remain unchanged.
+          progressDeadline = Date.now() + 480000;
+          operationStep = "backlog_witness_publish";
+          acceptanceDeadlineRemaining(progressDeadline);
+          // A separate UnitOfWork connection commits this last legacy envelope while lateId stays
+          // uncommitted. With no intent fastpath, its permanent job proves a fresh sweep, even if
+          // the nongenerational scan cursor has already wrapped back to NULL.
+          await unit.run((witnessTx) => old.append(witnessTx, envelope(witnessId)));
+          acceptanceDeadlineRemaining(progressDeadline);
+          operationStep = "backlog_advance";
           await until(
             async () =>
-              await rows<{ value: string | null }>(
-                sql`SELECT HEX(\`cursor\`) value FROM outbox_routing_scans WHERE consumer='notifications.v1'`,
+              await rows<{ n: number }>(
+                sql`SELECT COUNT(*) n FROM durable_jobs WHERE event_id=${Buffer.from(witnessId)} AND consumer='notifications.v1'`,
               ),
             (value) => {
-              sawAdvanced = !!value[0]?.value;
+              sawAdvanced = Number(value[0]?.n) === 1;
               return sawAdvanced;
             },
-            20,
+            480,
             50,
+            progressDeadline,
           );
+          operationStep = "backlog_late_commit";
         });
+        operationStep = "backlog_advance_confirm";
+        acceptanceDeadlineRemaining(progressDeadline);
         assert.equal(sawAdvanced, true);
+        operationStep = "backlog_late_effect";
         await until(
           async () =>
             await rows<{ n: number }>(
@@ -1159,7 +1202,10 @@ try {
             ),
           (value) => Number(value[0]?.n) === 1,
           480,
+          30000,
+          progressDeadline,
         );
+        operationStep = "backlog_scan_lap";
         await until(
           async () =>
             await rows<{ value: string | null }>(
@@ -1170,15 +1216,19 @@ try {
           1000,
         );
         const seen: Message[] = [];
+        operationStep = "backlog_delivery";
         await until(
           async () => {
             seen.push(...(await poll(clients[1]!)));
+            operationStep = "backlog_delivery";
             return seen;
           },
           (items) => items.filter((i) => i.category === "trip.started").length >= 110,
           480,
         );
+        operationStep = "backlog_unique";
         assert.equal(new Set(seen.map((i) => i.id)).size, seen.length);
+        operationStep = "backlog_offline";
         assert.ok(
           seen.filter((i) => i.category === "trip.started").every((i) => !i.liveToastEligible),
         );

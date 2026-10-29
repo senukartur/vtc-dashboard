@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+
 // Public schema identifiers are diagnostic enums, never SQL input or an authorization allowlist.
 const tables = [
   "_vtc_migrations",
@@ -114,6 +116,22 @@ const steps = new Set([
   "seed_reconciliation_permissions",
   "scenario",
   "scenario_teardown",
+  "backlog_seed",
+  "backlog_context",
+  "backlog_late_append",
+  "backlog_witness_publish",
+  "backlog_advance",
+  "backlog_late_commit",
+  "backlog_advance_confirm",
+  "backlog_late_effect",
+  "backlog_scan_lap",
+  "backlog_poll_request",
+  "backlog_poll_status",
+  "backlog_poll_cursor",
+  "backlog_poll_limit",
+  "backlog_delivery",
+  "backlog_unique",
+  "backlog_offline",
   "source_store",
   "interrupt_lock",
   "interrupt_company",
@@ -298,4 +316,10 @@ export function acceptanceDiagnostic(error: unknown, step: string) {
     lockingMode: sql?.lock ?? "unknown",
     deniedTable,
   };
+}
+export function acceptanceDeadlineRemaining(deadline: number, now = Date.now()): number {
+  assert.ok(Number.isFinite(deadline) && Number.isFinite(now), "ACCEPTANCE_DEADLINE_INVALID");
+  const remaining = deadline - now;
+  assert.ok(Number.isFinite(remaining) && remaining > 0, "ACCEPTANCE_WAIT_EXPIRED");
+  return remaining;
 }
