@@ -1,81 +1,333 @@
 import { randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import type { Page, Request, Response } from "@playwright/test";
 import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
+import {
+  diagnosticLocale,
+  TripReadLedger,
+  type TripReadSnapshot,
+} from "./support/trip-read-diagnostics.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
+function observeTripPage(page: Page) {
+  const ledger = new TripReadLedger();
+  const request = (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && path.startsWith("/api/v1/")) ledger.request(path);
+  };
+  const response = (response: Response) => {
+    const path = new URL(response.url()).pathname;
+    if (response.request().method() === "GET" && path.startsWith("/api/v1/"))
+      ledger.response(path, response.status());
+  };
+  page.on("request", request);
+  page.on("response", response);
+  return {
+    snapshot: () => ledger.snapshot(),
+    stop: () => {
+      page.off("request", request);
+      page.off("response", response);
+    },
+  };
+}
+async function pageLocale(page: Page) {
+  return diagnosticLocale(
+    await page
+      .locator("html")
+      .getAttribute("lang", { timeout: 1000 })
+      .catch(() => null),
+  );
+}
 async function confirm(page: Page, label: string, commandPath?: string) {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  const response = commandPath
-    ? page.waitForResponse(
-        (r) => r.request().method() === "POST" && new URL(r.url()).pathname === commandPath,
-        { timeout: 15000 },
-      )
-    : null;
-  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
-  if (response) expect((await response).status()).toBe(201);
-  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const actions = {
+    "Submit for review": {
+      action: "submit-report",
+      path: /^\/api\/v1\/(?:manual-reports|me\/manual-drafts\/[0-9a-f-]{36}\/submission)$/,
+    },
+    "Revise and resubmit": {
+      action: "revise-report",
+      path: /^\/api\/v1\/manual-reports\/[0-9a-f-]{36}\/revisions$/,
+    },
+    "Reject trip": { action: "reject-trip", path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/decisions$/ },
+    "Accept trip": { action: "accept-trip", path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/decisions$/ },
+    "Propose supported resolution": {
+      action: "propose-resolution",
+      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/resolution-proposals$/,
+    },
+    "Approve proposal": {
+      action: "approve-proposal",
+      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/proposals\/[0-9a-f-]{36}\/decisions$/,
+    },
+    "Request correction": {
+      action: "request-correction",
+      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/correction-requests$/,
+    },
+    "Merge trips": { action: "merge-trips", path: /^\/api\/v1\/reconciliations$/ },
+    "Reverse merge": {
+      action: "reverse-merge",
+      path: /^\/api\/v1\/reconciliations\/[0-9a-f-]{36}\/reversals$/,
+    },
+    "Associate event": {
+      action: "associate-event",
+      path: /^\/api\/v1\/trips\/[0-9a-f-]{36}\/event-association$/,
+    },
+  } as const;
+  const descriptor = Object.hasOwn(actions, label) ? actions[label as keyof typeof actions] : null;
+  let originating: Request | null = null;
+  const observation: {
+    outcome: "pending" | "response" | "request-error";
+    status: number | null;
+    started: number;
+    settled: number | null;
+  } = { outcome: "pending", status: null, started: 0, settled: null };
+  const start = (request: Request) => {
+    if (
+      !originating &&
+      request.method() === "POST" &&
+      descriptor?.path.test(new URL(request.url()).pathname)
+    ) {
+      originating = request;
+      observation.started = Date.now();
+    }
+  };
+  const settled = (response: Response) => {
+    if (response.request() !== originating) return;
+    observation.outcome = "response";
+    const status = response.status();
+    observation.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+    observation.settled = Date.now();
+  };
+  const failed = (request: Request) => {
+    if (request !== originating) return;
+    observation.outcome = "request-error";
+    observation.settled = Date.now();
+  };
+  page.on("request", start);
+  page.on("response", settled);
+  page.on("requestfailed", failed);
+  try {
+    await page.getByRole("button", { name: label, exact: true }).click();
+    const response = commandPath
+      ? page.waitForResponse(
+          (r) => r.request().method() === "POST" && new URL(r.url()).pathname === commandPath,
+          { timeout: 15000 },
+        )
+      : null;
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    if (response) expect((await response).status()).toBe(201);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  } finally {
+    page.off("request", start);
+    page.off("response", settled);
+    page.off("requestfailed", failed);
+    let buttonState: "closed" | "pending" | "confirm-enabled" | "confirm-disabled" | "unknown" =
+      "unknown";
+    try {
+      const dialog = page.getByRole("dialog");
+      if ((await dialog.count()) === 0) buttonState = "closed";
+      else if ((await dialog.getByRole("button", { name: "Loading…", exact: true }).count()) > 0)
+        buttonState = "pending";
+      else {
+        const button = dialog.getByRole("button", { name: "Confirm", exact: true });
+        if ((await button.count()) === 1)
+          buttonState = (await button.isEnabled({ timeout: 1000 }))
+            ? "confirm-enabled"
+            : "confirm-disabled";
+      }
+    } catch {
+      /* A closed page cannot replace the original assertion failure. */
+    }
+    console.log(
+      JSON.stringify({
+        event: "trip_confirmation_browser_command",
+        action: descriptor?.action ?? "unsupported",
+        observed: originating !== null,
+        outcome: observation.outcome,
+        status: observation.status,
+        elapsedMs: originating
+          ? Math.min(180000, Math.max(0, (observation.settled ?? Date.now()) - observation.started))
+          : 0,
+        buttonState,
+      }),
+    );
+  }
 }
 async function fill(
   page: Page,
   fixture: Awaited<ReturnType<typeof tripBrowserFixture>>,
   unresolved = false,
+  initialReads?: TripReadSnapshot,
 ) {
-  await page
-    .getByRole("combobox", { name: "Origin city", exact: true })
-    .selectOption(fixture.ids.fixture_north as string);
-  await page
-    .getByRole("combobox", { name: "Destination city", exact: true })
-    .selectOption(fixture.ids.fixture_south as string);
-  await page
-    .getByRole("combobox", { name: "Trailer type", exact: true })
-    .selectOption(fixture.ids.fixture_trailer as string);
-  if (unresolved) {
-    const cargo = page.getByRole("group", { name: "Cargo", exact: true });
-    await cargo.getByRole("checkbox").check();
-    await cargo.getByLabel("Diagnostic label", { exact: true }).fill("Fictional unmapped cargo");
-  } else
+  const lifecycle = observeTripPage(page),
+    started = Date.now(),
+    initialLocale = await pageLocale(page);
+  let step:
+      | "origin"
+      | "destination"
+      | "trailer"
+      | "cargo"
+      | "mass"
+      | "distance"
+      | "selection"
+      | "file"
+      | "upload"
+      | "ready" = "origin",
+    completed = false,
+    stopUpload = () => {};
+  try {
     await page
-      .getByRole("combobox", { name: "Cargo", exact: true })
-      .selectOption(fixture.ids.fixture_crates as string);
-  await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("18000");
-  await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("123400");
-  await page
-    .getByLabel("Choose completion screenshot", { exact: true })
-    .setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: pngBytes() });
-  const requests: { method: string; category: string }[] = [];
-  const record = (request: import("@playwright/test").Request) => {
-    const p = new URL(request.url()).pathname;
-    if (p.startsWith("/api/v1/"))
-      requests.push({
-        method: request.method(),
-        category:
-          p === "/api/v1/auth/csrf"
-            ? "csrf"
-            : p.startsWith("/api/v1/evidence")
-              ? "evidence"
-              : "other",
-      });
-  };
-  page.on("request", record);
-  await page.getByRole("button", { name: "Upload screenshot", exact: true }).click();
-  await expect(page.getByText("Ready · image/png", { exact: false })).toBeVisible();
-  await page.waitForTimeout(250);
-  page.off("request", record);
-  console.log(
-    JSON.stringify({
-      event: "trip_browser_measurement",
-      action: "real_upload",
-      reads: requests.filter((r) => r.method === "GET").length,
-      writes: requests.filter((r) => r.method === "POST").length,
-      unrelatedReads: requests.filter((r) => r.method === "GET" && r.category === "other").length,
-    }),
-  );
-  expect(requests.filter((r) => r.method === "GET" && r.category === "other")).toHaveLength(0);
+      .getByRole("combobox", { name: "Origin city", exact: true })
+      .selectOption(fixture.ids.fixture_north as string);
+    step = "destination";
+    await page
+      .getByRole("combobox", { name: "Destination city", exact: true })
+      .selectOption(fixture.ids.fixture_south as string);
+    step = "trailer";
+    await page
+      .getByRole("combobox", { name: "Trailer type", exact: true })
+      .selectOption(fixture.ids.fixture_trailer as string);
+    step = "cargo";
+    if (unresolved) {
+      const cargo = page.getByRole("group", { name: "Cargo", exact: true });
+      await cargo.getByRole("checkbox").check();
+      await cargo.getByLabel("Diagnostic label", { exact: true }).fill("Fictional unmapped cargo");
+    } else
+      await page
+        .getByRole("combobox", { name: "Cargo", exact: true })
+        .selectOption(fixture.ids.fixture_crates as string);
+    step = "mass";
+    await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("18000");
+    step = "distance";
+    await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("123400");
+    step = "selection";
+    // Selecting an option starts a separate current-entity read. Settle this
+    // setup before measuring upload, including reads queued by the shared lane.
+    const selections: [string, string | undefined][] = [
+      ["Origin city", fixture.ids.fixture_north],
+      ["Destination city", fixture.ids.fixture_south],
+      ["Trailer type", fixture.ids.fixture_trailer],
+    ];
+    if (!unresolved) selections.push(["Cargo", fixture.ids.fixture_crates]);
+    for (const [label, value] of selections) {
+      const select = page.getByRole("combobox", { name: label, exact: true });
+      await expect(select).toHaveValue(value as string);
+      const field = select.locator("..");
+      await expect(field.locator(".catalog-selection p")).toHaveText(
+        "Selected canonical entity and revision",
+      );
+      await expect(field.getByText("Loading catalog…", { exact: true })).toHaveCount(0);
+      await expect(
+        field.getByText("Historical value could not be read. Its IDs are retained.", {
+          exact: true,
+        }),
+      ).toHaveCount(0);
+    }
+    step = "file";
+    await page
+      .getByLabel("Choose completion screenshot", { exact: true })
+      .setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: pngBytes() });
+    const requests: { method: string; category: string; operation: string }[] = [];
+    const record = (request: import("@playwright/test").Request) => {
+      const p = new URL(request.url()).pathname;
+      if (p.startsWith("/api/v1/"))
+        requests.push({
+          method: request.method(),
+          operation:
+            p === "/api/v1/me"
+              ? "self"
+              : p.startsWith("/api/v1/catalogs/")
+                ? "catalog"
+                : p === "/api/v1/me/manual-drafts" || p.startsWith("/api/v1/me/manual-drafts/")
+                  ? "draft"
+                  : p === "/api/v1/trips" || p.startsWith("/api/v1/trips/")
+                    ? "trip"
+                    : p === "/api/v1/manual-reports" || p.startsWith("/api/v1/manual-reports/")
+                      ? "report"
+                      : p === "/api/v1/me/upload-policy"
+                        ? "upload-policy"
+                        : p === "/api/v1/notifications/history"
+                          ? "notification-history"
+                          : p === "/api/v1/events" || p.startsWith("/api/v1/events/")
+                            ? "event"
+                            : "unclassified",
+          category:
+            p === "/api/v1/auth/csrf"
+              ? "csrf"
+              : p.startsWith("/api/v1/evidence")
+                ? "evidence"
+                : p === "/api/v1/notifications" || p === "/api/v1/me/upcoming-event"
+                  ? "shell"
+                  : "other",
+        });
+    };
+    page.on("request", record);
+    stopUpload = () => page.off("request", record);
+    step = "upload";
+    await page.getByRole("button", { name: "Upload screenshot", exact: true }).click();
+    step = "ready";
+    await expect(page.getByText("Ready · image/png", { exact: false })).toBeVisible();
+    await page.waitForTimeout(250);
+    page.off("request", record);
+    console.log(
+      JSON.stringify({
+        event: "trip_browser_measurement",
+        action: "real_upload",
+        reads: requests.filter((r) => r.method === "GET").length,
+        writes: requests.filter((r) => r.method === "POST").length,
+        unrelatedReads: requests.filter((r) => r.method === "GET" && r.category === "other").length,
+        shellReads: requests.filter((r) => r.method === "GET" && r.category === "shell").length,
+        otherOperations: Object.fromEntries(
+          [
+            "self",
+            "catalog",
+            "draft",
+            "trip",
+            "report",
+            "upload-policy",
+            "notification-history",
+            "event",
+            "unclassified",
+          ].map((operation) => [
+            operation,
+            Math.min(
+              1024,
+              requests.filter(
+                (request) =>
+                  request.method === "GET" &&
+                  request.category === "other" &&
+                  request.operation === operation,
+              ).length,
+            ),
+          ]),
+        ),
+      }),
+    );
+    expect(requests.filter((r) => r.method === "GET" && r.category === "other")).toHaveLength(0);
+    // One serialized feed delta/window and its shared header refresh may overlap upload.
+    expect(
+      requests.filter((r) => r.method === "GET" && r.category === "shell").length,
+    ).toBeLessThanOrEqual(3);
+    completed = true;
+  } finally {
+    stopUpload();
+    lifecycle.stop();
+    console.log(
+      JSON.stringify({
+        event: "trip_browser_fill",
+        step,
+        completed,
+        elapsedMs: Math.min(180000, Math.max(0, Date.now() - started)),
+        initialLocale,
+        locale: await pageLocale(page),
+        initialReads: initialReads ?? new TripReadLedger().snapshot(),
+        reads: lifecycle.snapshot(),
+      }),
+    );
+  }
 }
 async function proposal(staff: Awaited<ReturnType<typeof staffContext>>, tripId: string) {
   const response = await staff.get(`/api/v1/trips/${tripId}/proposals?limit=25`);
@@ -108,10 +360,42 @@ test("real report draft upload unresolved cargo stale review rejection revision 
       viewport: page.viewportSize(),
       serviceWorkers: "block",
     });
-  let phase = "START";
+  let phase:
+    | "START"
+    | "DRAFT"
+    | "UPLOAD_SUBMIT"
+    | "STALE_DECISION"
+    | "RESUBMIT_ACCEPT"
+    | "STAFF_RESOLUTION"
+    | "CORRECTION"
+    | "TELEMETRY_ATTACHMENT"
+    | "DUPLICATE_MERGE"
+    | "RELOAD_REVERSE"
+    | "PRIVACY" = "START";
+  let staffLocalePage: Page | null = null,
+    stopRevise = () => {};
+  const reviseObservation: {
+    observed: boolean;
+    outcome: "pending" | "response" | "request-error";
+    status: number | null;
+    started: number;
+    settled: number | null;
+  } = { observed: false, outcome: "pending", status: null, started: 0, settled: null };
+  const mainReads = observeTripPage(page),
+    mainStarted = Date.now();
+  let attachmentStep:
+    | "not-started"
+    | "source"
+    | "count"
+    | "navigation"
+    | "language"
+    | "fill"
+    | "draft"
+    | "target" = "not-started";
   try {
     await staffContextBrowser.addCookies((await staff.storageState()).cookies);
     const staffPage = await staffContextBrowser.newPage();
+    staffLocalePage = staffPage;
     const login = await write(page.request, "/auth/login", {
       email: fixture.email,
       password: fixture.password,
@@ -132,7 +416,7 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     );
     await resetAccountLimits();
     phase = "UPLOAD_SUBMIT";
-    await fill(page, fixture, true);
+    await fill(page, fixture, true, mainReads.snapshot());
     await expect(page.locator('input[type="date"],input[type="datetime-local"]')).toHaveCount(0);
     await confirm(page, "Submit for review");
     await expect(page).toHaveURL(/\/account\/trips\//);
@@ -153,7 +437,41 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await page
       .getByLabel("Comment (optional)", { exact: true })
       .fill("Fictional edit after staff opened review");
+    const revisePath = `/api/v1/manual-reports/${reportId}/revisions`;
+    let observedRevision: Request | null = null;
+    const revisionRequest = (request: Request) => {
+      if (
+        !reviseObservation.observed &&
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === revisePath
+      ) {
+        observedRevision = request;
+        reviseObservation.observed = true;
+        reviseObservation.started = Date.now();
+      }
+    };
+    const revisionResponse = (response: Response) => {
+      if (response.request() !== observedRevision) return;
+      reviseObservation.outcome = "response";
+      const status = response.status();
+      reviseObservation.status = status >= 100 && status <= 599 ? status : null;
+      reviseObservation.settled = Date.now();
+    };
+    const revisionFailed = (request: Request) => {
+      if (request !== observedRevision) return;
+      reviseObservation.outcome = "request-error";
+      reviseObservation.settled = Date.now();
+    };
+    page.on("request", revisionRequest);
+    page.on("response", revisionResponse);
+    page.on("requestfailed", revisionFailed);
+    stopRevise = () => {
+      page.off("request", revisionRequest);
+      page.off("response", revisionResponse);
+      page.off("requestfailed", revisionFailed);
+    };
     await confirm(page, "Revise and resubmit");
+    stopRevise();
     await staffPage
       .getByRole("dialog")
       .getByRole("button", { name: "Confirm", exact: true })
@@ -244,7 +562,9 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     expect(current.effectiveFacts.plannedDistanceM).toBeNull();
     await resetAccountLimits();
     phase = "TELEMETRY_ATTACHMENT";
+    attachmentStep = "source";
     const telemetry = await fixture.telemetry(undefined, "started");
+    attachmentStep = "count";
     const countCanonical = () =>
       fixture.unit.run(
         async (tx) =>
@@ -257,13 +577,20 @@ test("real report draft upload unresolved cargo stale review rejection revision 
           ).length,
       );
     const beforeAttachment = await countCanonical();
+    attachmentStep = "navigation";
     await page.goto("/account/reports/new");
+    attachmentStep = "language";
     await catalogLanguage(page);
-    await fill(page, fixture);
+    attachmentStep = "fill";
+    await fill(page, fixture, false, mainReads.snapshot());
+    attachmentStep = "draft";
     await page.getByRole("button", { name: "Save draft", exact: true }).click();
     await expect(page).toHaveURL(/\/account\/reports\/drafts\//);
+    attachmentStep = "navigation";
     await page.reload();
+    attachmentStep = "language";
     await catalogLanguage(page);
+    attachmentStep = "target";
     await page.locator("#manual-target").selectOption(telemetry.tripId);
     await expect(
       page.getByRole("button", { name: "Submit for review", exact: true }),
@@ -380,6 +707,36 @@ test("real report draft upload unresolved cargo stale review rejection revision 
   } catch (error) {
     throw new Error(`SYNTHETIC_TRIP_BROWSER_${phase}`, { cause: error });
   } finally {
+    stopRevise();
+    mainReads.stop();
+    console.log(
+      JSON.stringify({
+        event: "trip_revision_browser_command",
+        phase: "stale-decision-revise",
+        observed: reviseObservation.observed,
+        outcome: reviseObservation.outcome,
+        status: reviseObservation.status,
+        elapsedMs: reviseObservation.observed
+          ? Math.min(
+              180000,
+              Math.max(0, (reviseObservation.settled ?? Date.now()) - reviseObservation.started),
+            )
+          : 0,
+      }),
+    );
+    console.log(
+      JSON.stringify({
+        event: "trip_browser_main",
+        phase: "telemetry-attachment",
+        currentPhase: phase,
+        reached: attachmentStep !== "not-started",
+        step: attachmentStep,
+        locale: await pageLocale(page),
+        staffLocale: staffLocalePage ? await pageLocale(staffLocalePage) : "other",
+        elapsedMs: Math.min(180000, Math.max(0, Date.now() - mainStarted)),
+        reads: mainReads.snapshot(),
+      }),
+    );
     await staffContextBrowser.close();
     await staff.dispose();
     await fixture.close();

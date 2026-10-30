@@ -1,3 +1,4 @@
+import { inertNotifications } from "./notifications.ts";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 
@@ -254,6 +255,8 @@ export function makeUpcomingEventFixture() {
 
 export async function mockDashboardRoutes(page: Page, options: { emptyCompany?: boolean } = {}) {
   await page.route("**/api/v1/**", async (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const url = new URL(route.request().url());
     const path = url.pathname;
 

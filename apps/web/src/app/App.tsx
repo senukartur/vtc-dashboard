@@ -22,6 +22,12 @@ import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
 import { ProtectedAccount, SessionProvider } from "./Session.js";
 import { createAppQueryClient } from "./session-cache.js";
+import { NotificationsProvider } from "../features/notifications/controller.js";
+const NotificationsPage = lazy(() =>
+  import("../features/notifications/page.js").then((module) => ({
+    default: module.NotificationsPage,
+  })),
+);
 
 const TripsPage = lazy(() =>
   import("../features/trips/TripsPage.js").then((module) => ({ default: module.TripsPage })),
@@ -253,6 +259,14 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
               }
             />
             <Route
+              path="/account/notifications"
+              element={
+                <ProtectedAccount>
+                  <NotificationsPage />
+                </ProtectedAccount>
+              }
+            />
+            <Route
               path="/account/dashboard"
               element={
                 <ProtectedAccount>
@@ -421,7 +435,9 @@ export function App({ handoff }: { handoff: LinkHandoff }) {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <SessionProvider>
-          <Shell handoff={handoff} />
+          <NotificationsProvider>
+            <Shell handoff={handoff} />
+          </NotificationsProvider>
         </SessionProvider>
       </BrowserRouter>
     </QueryClientProvider>

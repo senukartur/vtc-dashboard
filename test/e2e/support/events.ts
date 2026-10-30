@@ -1,3 +1,4 @@
+import { inertNotifications } from "./notifications.ts";
 import { expect, type Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -91,6 +92,8 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     participantCursors: [] as string[],
   };
   await page.route("**/api/v1/**", async (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const request = route.request(),
       url = new URL(request.url()),
       p = url.pathname.replace("/api/v1", ""),
