@@ -23,6 +23,7 @@ export function browserTripConfig() {
     },
     qualifications: { cursorKey: key("qualifications") },
     events: { cursorKey: key("events") },
+    notifications: { cursorKey: key("notifications") },
     reconciliation: {
       key: key("reconciliation"),
       rule: {

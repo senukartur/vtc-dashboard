@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Request, Response } from "@playwright/test";
 import {
   createQualificationInitialization,
   structuralLevels,
@@ -22,6 +22,7 @@ test("real four configured levels publish and assign within the unchanged shared
   page,
   context,
 }, info) => {
+  const bodyStarted = Date.now();
   const fixture = await tripBrowserFixture(),
     staff = await staffContext();
   const reads: {
@@ -31,8 +32,8 @@ test("real four configured levels publish and assign within the unchanged shared
       minute: number | null;
     }[] = [],
     pending = new Map<object, number>();
-  let phase = "FIXTURE",
-    failure: unknown,
+  let phase: "FIXTURE" | "TARGET" | "PUBLISH" | "ASSIGN" | "READBACK" = "FIXTURE";
+  let failure: unknown,
     authenticated = false,
     persistedAssignment = false;
   const operation = (url: string) => {
@@ -163,6 +164,27 @@ test("real four configured levels publish and assign within the unchanged shared
     );
   } catch (error) {
     failure = error;
+    console.log(
+      JSON.stringify({
+        event: "qualification_normal_body_failure",
+        phase,
+        elapsedMs: Math.min(20000, Math.max(0, Date.now() - bodyStarted)),
+        total: Math.min(1024, reads.length),
+        statusCounts: Object.fromEntries(
+          [200, 401, 403, 409, 429, 503].map((status) => [
+            status,
+            Math.min(1024, reads.filter((row) => row.status === status).length),
+          ]),
+        ),
+        pending: Math.min(1024, reads.filter((row) => row.status === null).length),
+        other: Math.min(
+          1024,
+          reads.filter(
+            (row) => row.status !== null && ![200, 401, 403, 409, 429, 503].includes(row.status),
+          ).length,
+        ),
+      }),
+    );
   } finally {
     try {
       const me = await page.request.get("/api/v1/me"),
@@ -236,6 +258,33 @@ test("real named target rule preview publication assignment accepted contributio
     name = "",
     picker: QualificationMemberPicker | undefined,
     preflight: Awaited<ReturnType<typeof owningMemberPages>> | null = null;
+  let promotionObserved = false,
+    promotionStatus: number | null = null,
+    promotionStarted = 0,
+    promotionOutcome: "not-observed" | "pending" | "response" | "request-error" = "not-observed";
+  const promotionRequest = (request: Request) =>
+    request.method() === "POST" &&
+    new URL(request.url()).pathname === `/api/v1/admin/members/${userId}/promotions`;
+  const onPromotionRequest = (request: Request) => {
+    if (promotionRequest(request)) {
+      promotionObserved = true;
+      promotionStarted = Date.now();
+      promotionOutcome = "pending";
+    }
+  };
+  const onPromotionResponse = (response: Response) => {
+    if (promotionRequest(response.request())) {
+      const status = response.status();
+      promotionStatus = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+      promotionOutcome = "response";
+    }
+  };
+  const onPromotionFailure = (request: Request) => {
+    if (promotionRequest(request)) promotionOutcome = "request-error";
+  };
+  page.on("request", onPromotionRequest);
+  page.on("response", onPromotionResponse);
+  page.on("requestfailed", onPromotionFailure);
   try {
     const identity = fixture.composed.identity,
       q = fixture.composed.qualifications,
@@ -472,6 +521,21 @@ test("real named target rule preview publication assignment accepted contributio
   } catch (error) {
     failure = error;
   } finally {
+    page.off("request", onPromotionRequest);
+    page.off("response", onPromotionResponse);
+    page.off("requestfailed", onPromotionFailure);
+    console.log(
+      JSON.stringify({
+        event: "qualification_promotion_browser_command",
+        phase: "promotion",
+        observed: promotionObserved,
+        outcome: promotionOutcome,
+        status: promotionStatus,
+        elapsedMs: promotionObserved
+          ? Math.min(150000, Math.max(0, Date.now() - promotionStarted))
+          : 0,
+      }),
+    );
     const truth = {
       preflight,
       pages: null as Awaited<ReturnType<typeof owningMemberPages>> | null,

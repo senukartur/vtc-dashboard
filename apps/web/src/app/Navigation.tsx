@@ -35,12 +35,17 @@ export function Navigation({
     { to: "/foundation/member", label: "member" },
   ];
   function links(close?: (event: MouseEvent<HTMLAnchorElement>) => void) {
-    if (!preview && location.pathname.startsWith("/account"))
+    if (!preview && /^\/account(?:\/|$)/i.test(location.pathname))
       return (
         <>
           <NavLink to="/account" end onClick={close}>
             {t("account:account")}
           </NavLink>
+          {session.self?.capabilities.includes("company.read") && (
+            <NavLink to="/account/notifications" onClick={close}>
+              {t("notifications:title")}
+            </NavLink>
+          )}
           {session.self?.capabilities.includes("company.read") && (
             <NavLink to="/account/dashboard" onClick={close}>
               {t("dashboard:title")}

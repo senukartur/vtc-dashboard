@@ -5,6 +5,9 @@ import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
 import { type MobileNavigate, Navigation } from "./Navigation.js";
 import { NearestEvent } from "../features/events/components.js";
 import "../features/events/events.css";
+import { OptionalNotifications } from "../features/notifications/controller.js";
+import { NotificationBell, NotificationToasts } from "../features/notifications/components.js";
+import "../features/notifications/notifications.css";
 
 /** Shared landmarks with public navigation or a presentation-only member sidebar/topbar. */
 export function AppLayout({
@@ -56,6 +59,9 @@ export function AppLayout({
           </Link>
           <p className="member-context">{preview ? t("member") : t("account:account")}</p>
           <Navigation variant={member ? "mobile" : "public"} onMobileNavigate={onMobileNavigate} />
+          <OptionalNotifications>
+            <NotificationBell />
+          </OptionalNotifications>
           <label className="language-picker">
             {t("language")}
             <select
@@ -92,6 +98,9 @@ export function AppLayout({
         </span>
         <a href={fontLicenseUrl}>{t("fontLicense")}</a>
       </footer>
+      <OptionalNotifications>
+        <NotificationToasts />
+      </OptionalNotifications>
     </div>
   );
 }

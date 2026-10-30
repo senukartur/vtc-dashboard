@@ -1,3 +1,4 @@
+import { inertNotifications } from "./support/notifications.ts";
 import type { Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { expect, test } from "./support/fixtures.ts";
@@ -11,6 +12,8 @@ const challenge = {
 const error = (status: number) => ({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
 async function mocks(page: Page) {
   await page.route("**/api/v1/**", (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/v1/auth/csrf")
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });

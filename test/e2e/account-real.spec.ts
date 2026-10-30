@@ -106,6 +106,8 @@ test("real rendered application, invitation, login, wrong verification code, pre
 }) => {
   test.setTimeout(60000);
   let phase = "START";
+  let redemptionObserved = false,
+    redemptionRequests = 0;
   const staff = await staffContext();
   try {
     const email = `${randomUUID()}@example.invalid`,
@@ -125,9 +127,33 @@ test("real rendered application, invitation, login, wrong verification code, pre
     let attempts = 0;
     let original: { key: string | undefined; payload: string | null; receipt: string } | undefined;
     await page.route("**/api/v1/public/invitation-redemptions", async (route) => {
-      const response = await route.fetch({ timeout: 5000 }).catch(() => {
-        throw new Error("ACCOUNT_REDEMPTION_REPLAY_REQUEST_FAILED");
-      });
+      redemptionObserved = true;
+      const ordinal = ++redemptionRequests,
+        started = Date.now();
+      let status: number | null = null;
+      const response = await route
+        .fetch({ timeout: 5000 })
+        .then((response) => {
+          const value = response.status();
+          status = Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
+          return response;
+        })
+        .catch(() => {
+          throw new Error("ACCOUNT_REDEMPTION_REPLAY_REQUEST_FAILED");
+        })
+        .finally(() =>
+          console.log(
+            JSON.stringify({
+              event: "account_browser_redemption",
+              phase: "redemption",
+              observed: true,
+              attempt: ordinal === 1 || ordinal === 2 ? ordinal : "unexpected",
+              outcome: status === null ? "request-error" : "response",
+              status,
+              elapsedMs: Math.min(60000, Math.max(0, Date.now() - started)),
+            }),
+          ),
+        );
       expect(response.status()).toBe(201);
       const request = route.request();
       const receipt = (await response.json()).data.id as string;
@@ -183,6 +209,18 @@ test("real rendered application, invitation, login, wrong verification code, pre
   } catch {
     throw new Error(`ACCOUNT_REAL_${phase}_FAILED`);
   } finally {
+    if (!redemptionObserved)
+      console.log(
+        JSON.stringify({
+          event: "account_browser_redemption",
+          phase: "redemption",
+          observed: false,
+          attempt: "unexpected",
+          outcome: "not-observed",
+          status: null,
+          elapsedMs: 0,
+        }),
+      );
     await staff.dispose();
   }
 });

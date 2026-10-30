@@ -1,3 +1,4 @@
+import { inertNotifications } from "./notifications.ts";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -55,6 +56,8 @@ export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
 }
 export async function mockCatalogs(page: Page, staff = true) {
   await page.route("**/api/v1/**", async (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const url = new URL(route.request().url()),
       path = url.pathname;
     const json = (data: unknown) => route.fulfill({ json: data });
