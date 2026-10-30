@@ -213,8 +213,8 @@ export function NotificationToasts() {
   return (
     <aside className="notification-toasts" aria-label={t("title")}>
       {toasts.map((item) => (
-        <section className="notification-toast" key={item.id} role="status">
-          <p>
+        <section className="notification-toast" key={item.id}>
+          <p role="status">
             <NotificationMessage item={item} />
           </p>
           <NotificationTime value={item.occurredAt} />

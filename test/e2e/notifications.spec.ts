@@ -510,6 +510,39 @@ test("visible 30 second polls resume immediately, serialize delayed refresh and 
     /synthetic-poll|Fictional|eventTitle/,
   );
 });
+test("a delivered toast keeps one stable status message while its visible relative time advances", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date("2026-10-30T12:00:00Z") });
+  const state = await mockNotifications(page);
+  await open(page);
+  await expect(toast(page)).toHaveCount(0);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+  state.items = [
+    notificationFixture({
+      id: nextId,
+      occurredAt: await page.evaluate(() => new Date(Date.now() - 120000).toISOString()),
+    }),
+  ];
+  state.cursor = "synthetic-poll-2";
+  await refresh(page);
+  await expect(toast(page)).toHaveCount(1);
+  const announcement = toast(page).getByRole("status"),
+    message = "Starting in about one hour: Fictional Yukon convoy",
+    relativeTime = toast(page).locator("time > span");
+  await expect(announcement).toHaveCount(1);
+  await expect(announcement).toHaveText(message);
+  await expect(announcement.locator("time")).toHaveCount(0);
+  await expect(relativeTime).toHaveText("2 minutes ago");
+  await page.clock.runFor(60000);
+  await expect(relativeTime).toHaveText("3 minutes ago");
+  await expect(toast(page)).toHaveCount(1);
+  await expect(announcement).toHaveCount(1);
+  await expect(announcement).toHaveText(message);
+  await expect(announcement.locator("time")).toHaveCount(0);
+  expect(state.commands).toHaveLength(0);
+});
+
 test("hidden and offline pause polls; return coalesces immediate refresh without replay", async ({
   page,
 }) => {
