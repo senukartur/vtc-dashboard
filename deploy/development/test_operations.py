@@ -256,6 +256,30 @@ class ChildOutcomeTests(unittest.TestCase):
             self.assertEqual((self.base / ('state/last-failed-child.' + suffix)).stat().st_size, ops.DIAGNOSTIC_BYTES)
         self.assertEqual(json.loads(captured.getvalue())['migrations'], [])
 
+    def test_heartbeat_closed_diagnostic_survives_successful_jobs_and_cleanup_commands(self):
+        diagnostic = {'event': 'probe.heartbeat_failed', 'schemaVersion': 1, 'phase': 'query',
+                      'nativeCode': 'ER_NO_SUCH_TABLE', 'elapsedMs': 7, 'deadlineMs': 1000}
+        captured = io.StringIO()
+        script = ('import sys; print("Heartbeat: unavailable", file=sys.stderr); print(' +
+                  repr(json.dumps(diagnostic)) + ', file=sys.stderr); sys.exit(1)')
+        with self.assertRaisesRegex(RuntimeError, '^OPERATION_CHILD_FAILED$'), contextlib.redirect_stderr(captured):
+            ops.run([sys.executable, '-c', script], timeout=2)
+        record = json.loads(captured.getvalue())
+        self.assertEqual((record['outcome'], record['exitCode']), ('exit', 1))
+        self.assertEqual(record['migrations'], [])
+        paths = [self.base / ('state/last-failed-child.' + suffix) for suffix in ['json', 'stdout', 'stderr']]
+        before = [path.read_bytes() for path in paths]
+        lines = before[2].splitlines()
+        self.assertEqual(lines[0], b'Heartbeat: unavailable')
+        self.assertEqual(json.loads(lines[1]), diagnostic)
+        self.assertNotIn('probe.heartbeat_failed', captured.getvalue())
+        for outcome in ['jobs completed', 'cleanup completed']:
+            self.assertEqual(ops.run([sys.executable, '-c', 'print(' + repr(outcome) + ')'], timeout=2),
+                             (outcome + '\n').encode())
+            self.assertEqual([path.read_bytes() for path in paths], before)
+        self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in paths))
+        self.assertTrue(all(path.stat().st_size <= ops.DIAGNOSTIC_BYTES for path in paths))
+
     def test_malformed_unknown_and_oversized_child_records_are_not_forwarded(self):
         payload = {'event': 'database.migration_failed', 'code': ['private-value'],
                    'nativeCodes': ['ER_LOCK_DEADLOCK'] * 9 + ['ECONNRESET'],

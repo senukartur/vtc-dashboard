@@ -36,913 +36,1201 @@ def rehearsal_phase(name):
         print(json.dumps({'event': 'deployment_rehearsal_phase', 'phase': name, 'state': 'pass', 'startedAt': started_at, 'sinceStartMs': round((time.monotonic() - rehearsal_started) * 1000), 'elapsedMs': round((time.monotonic() - started) * 1000)}), flush=True)
 
 
-rehearsal_started = time.monotonic()
-mode = os.environ.get('REHEARSAL_MODE', 'full')
-assert mode in ['full', 'manual-only']
-base = pathlib.Path('/opt/vtc-development')
-subprocess.run(['python3', '/source/test_rehearsal_diagnostics.py'], check=True, timeout=30)
-subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
-subprocess.run(['python3', '/source/test_activation.py'], check=True, timeout=30)
-subprocess.run(['python3', '/source/test_acceptance_containers.py'], check=True, timeout=30)
-project = os.environ['REHEARSAL_PROJECT']
-revision = os.environ['REHEARSAL_REVISION']
-volume = os.environ['REHEARSAL_VOLUME']
-assert project.startswith('vtc011-') and len(project) == 23
-image_id = json.loads(subprocess.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}'],
-                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout)[0]['Id']
-for path in pathlib.Path('/source').iterdir():
-    if path.is_file():
-        shutil.copyfile(path, base / path.name)
-subprocess.run(['node', str(base / 'setup.mjs'), str(base)], check=True, stdout=subprocess.DEVNULL)
+def source_hashes():
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path('/source').iterdir() if p.is_file()}
 
 
-def verify_sshd():
-    # Parser/configuration inspection only: no daemon, socket or listening port.
-    assert not list(pathlib.Path('/etc/ssh').glob('ssh_host_*'))
-    pathlib.Path('/run/sshd').mkdir(mode=0o755, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix='sshd-', dir=base / 'private') as directory:
-        directory = pathlib.Path(directory)
-        key = directory / 'host-key'
-        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)],
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
-        global_config = (f'HostKey {key}\nPidFile {directory / "sshd.pid"}\nUsePAM no\n'
-                         'PubkeyAuthentication yes\nAuthenticationMethods any\n'
-                         'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\n'
-                         'AllowTcpForwarding yes\nAllowAgentForwarding yes\n'
-                         'X11Forwarding yes\nPermitTTY yes\nPermitTunnel yes\n'
-                         'AcceptEnv LANG\nAcceptEnv LC_*\nSubsystem sftp internal-sftp\n')
-        template = (base / 'sshd.example').read_text()
-        candidate = directory / 'sshd_config'
-
-        def parse(content):
-            candidate.write_text(content)
-            return subprocess.run(['/usr/sbin/sshd', '-t', '-f', str(candidate)],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-
-        def effective(user):
-            result = subprocess.run(['/usr/sbin/sshd', '-T', '-f', str(candidate), '-C',
-                                     f'user={user},host=client.example.invalid,addr=192.0.2.2,laddr=192.0.2.1,lport=22'],
-                                    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            return result.stdout
-
-        restricted = {
-            'pubkeyauthentication': 'yes', 'authenticationmethods': 'publickey',
-            'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
-            'allowtcpforwarding': 'no', 'allowagentforwarding': 'no',
-            'x11forwarding': 'no', 'permittty': 'no', 'permittunnel': 'no',
-            'permituserenvironment': 'no',
-        }
-
-        def require_restricted(output):
-            # Only these known single-valued keys use a mapping; compare all operator bytes.
-            settings = dict(line.split(' ', 1) for line in output.decode().splitlines())
-            for name, value in restricted.items():
-                assert settings[name] == value, name
-
-        assert parse(global_config).returncode == 0
-        operator_before = effective('vtc-operator')
-        operator_lines = operator_before.decode().splitlines()
-        for setting in ['pubkeyauthentication yes', 'authenticationmethods any',
-                        'passwordauthentication yes', 'kbdinteractiveauthentication yes',
-                        'permittty yes', 'allowtcpforwarding yes', 'permittunnel yes']:
-            assert setting in operator_lines
-        assert operator_lines.count('acceptenv LANG') == 1
-        assert operator_lines.count('acceptenv LC_*') == 1
-        assert parse(global_config + template).returncode == 0
-        require_restricted(effective('vtc-deploy'))
-        assert effective('vtc-operator') == operator_before
-        # Each removed Match restriction must independently fail the deployment expectation.
-        for directive, name in {
-            'AuthenticationMethods publickey': 'authenticationmethods',
-            'PasswordAuthentication no': 'passwordauthentication',
-            'KbdInteractiveAuthentication no': 'kbdinteractiveauthentication',
-        }.items():
-            line = f'  {directive}\n'
-            assert template.count(line) == 1
-            assert parse(global_config + template.replace(line, '')).returncode == 0
-            assert effective('vtc-operator') == operator_before
-            try:
-                require_restricted(effective('vtc-deploy'))
-            except AssertionError as failure:
-                assert failure.args == (name,)
-            else:
-                raise AssertionError('SSH_RESTRICTION_REMOVAL_UNDETECTED')
-        # Recreate the original unsupported placement, retaining the same full base.
-        bad_match = template.replace('PermitUserEnvironment no\n', '') + '  PermitUserEnvironment no\n'
-        rejected = parse(global_config + bad_match)
-        assert rejected.returncode != 0
-        assert b'Directive \'PermitUserEnvironment\' is not allowed within a Match block' in rejected.stderr
-        # A global-only directive cannot directly follow the open User condition.
-        rejected = parse(global_config + template + f'PidFile {directory / "later.pid"}\n')
-        assert rejected.returncode != 0 and b'is not allowed within a Match block' in rejected.stderr
-    assert not list((base / 'private').glob('sshd-*'))
+def binding():
+    return {'sourceSha': os.environ['REHEARSAL_SOURCE_SHA'], 'sourceFingerprint': os.environ['REHEARSAL_SOURCE_FINGERPRINT'], 'project': os.environ['REHEARSAL_PROJECT'], 'revision': os.environ['REHEARSAL_REVISION'], 'volume': os.environ['REHEARSAL_VOLUME'], 'controls': source_hashes()}
 
 
-verify_sshd()
-print('OpenSSH template: full-config parser, effective deploy/operator policy and placement rejection passed', flush=True)
-# Fixed layout/expanded-size/type checks run before any infrastructure is started.
-zip_directory = base / '.local/deploy'
-for entries in [ {'../escape': b'x', 'release.json': b'{}'},
-                 {'image.tar': b'x', 'release.json': b'x' * 8193},
-                 {'image.tar': b'x', 'release.json': b'{}', 'extra': b'x'} ]:
-    zip_directory.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_directory / 'release.zip', 'w') as archive:
-        for name, content in entries.items():
-            archive.writestr(name, content)
-    rejected = subprocess.run(['python3', str(base / 'unpack.py')], cwd=base,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    assert rejected.returncode != 0
-    shutil.rmtree(zip_directory)
-(base / 'private/proxy.env').write_text('STAGING_DOMAIN=proxy\nTLS_EMAIL=operator@example.invalid\n')
-caddy = (base / 'Caddyfile').read_text().replace('{$STAGING_DOMAIN} {', '{$STAGING_DOMAIN} {\n  tls internal')
-(base / 'Caddyfile').write_text(caddy)
-# Allocate a fresh private ingress subnet independently of every existing Docker network.
-network_ids = subprocess.run(['docker', 'network', 'ls', '-q'], check=True, stdout=subprocess.PIPE).stdout.decode().split()
-inventory = json.loads(subprocess.run(['docker', 'network', 'inspect', *network_ids], check=True, stdout=subprocess.PIPE).stdout)
-occupied = [ipaddress.ip_network(item['Subnet']) for value in inventory
-            for item in value.get('IPAM', {}).get('Config') or [] if item.get('Subnet')]
-for attempt in range(100):
-    entropy = uuid.uuid4().bytes
-    subnet = ipaddress.IPv4Network(f'10.{entropy[0]}.{entropy[1]}.0/29')
-    if not any(other.version == 4 and subnet.overlaps(other) for other in occupied):
-        break
-else:
-    raise AssertionError('INGRESS_ALLOCATION_UNAVAILABLE')
-ingress_file = base / 'private/ingress.env'
-ingress_file.write_text(f'VTC_INGRESS_SUBNET={subnet}\nVTC_INGRESS_APP_IPV4={subnet.network_address + 2}\nVTC_INGRESS_PROXY_IPV4={subnet.network_address + 3}\n')
-os.chmod(ingress_file, 0o600)
-result = subprocess.run(['docker', 'compose', '--env-file', str(ingress_file), '--profile', '*', '-f', str(base / 'compose.yaml'), 'config', '--format', 'json'],
-                        env=dict(os.environ, VTC_REVISION=revision, VTC_IMAGE_ID=image_id), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
-config = json.loads(result.stdout)
-assert set(config['services']['jobs']['networks']) == {'database', 'mail-egress'}
-assert not config['services']['jobs'].get('ports')
-assert set(config['services']['db']['networks']) == {'database'}
-assert config['networks']['database']['internal']
-assert not config['networks']['mail-egress'].get('internal', False)
-assert set(config['services']['app']['networks']) == {'database', 'ingress'}
-assert set(config['services']['proxy']['networks']) == {'frontend', 'ingress'}
-assert config['networks']['ingress']['internal']
-config['name'] = project
-label = {'vtc011.rehearsal': project}
-for name, value in config['services'].items():
-    value['labels'] = label
-    value.pop('ports', None)
-    if name in ['app', 'probe', 'heartbeat', 'migrate', 'jobs']:
-        value['image'] = '${VTC_IMAGE_ID:?Set the validated immutable image ID}'
-    if name in ['app', 'jobs']:
-        # Keep the shared file live while role-specific DB settings remain synthetic/resolved.
-        value['env_file'] = [str(base / 'private/identity-mail.env')]
-        for key in ['IDENTITY_ENABLED', 'MAIL_MODE', 'ADMISSIONS_ENABLED']:
-            value['environment'].pop(key, None)
-for name, value in config['volumes'].items():
-    value['name'] = f'{project}_{name}'
-    value['labels'] = label
-for name, value in config['networks'].items():
-    value['name'] = f'{project}_{name}'
-    value['labels'] = label
-# One-shot proofs never compete with the serving app's fixed trusted-ingress IP.
-# These clones exist only in this synthetic allocation, with the same role files
-# and resource/security bounds. The codec needs no network or DB environment.
-for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs'), ('trip-decision-seed', 'migrate')]:
-    proof = json.loads(json.dumps(config['services'][source]))
-    proof['profiles'] = ['tools']
-    proof['restart'] = 'no'
-    proof['networks'] = {'database': {}}
-    if name == 'manual-codec':
-        proof.pop('networks')
-        proof['network_mode'] = 'none'
-        proof.pop('env_file', None)
-        proof['environment'] = {'NODE_OPTIONS': '--max-old-space-size=128'}
-    config['services'][name] = proof
-config['volumes']['operator-files'] = {'name': volume, 'external': True}
+def receipt(o, group, value):
+    o.atomic_json(o.BASE / f'state/rehearsal-{group}.json', dict(binding=binding(), completedUtc=int(time.time()), **value))
+
+def rehearsal_database_identity(o, revision, image_id):
+    """Read back only the disposable database created by the acknowledged rehearsal startup."""
+    config = json.loads((o.BASE / 'compose.yaml').read_text())
+    network_name, volume_name = config['networks']['database']['name'], config['volumes']['mysql']['name']
+    identity = o.compose(['ps', '-a', '-q', 'db'], revision=revision, image_id=image_id).decode().strip()
+    o.require(re.fullmatch('[a-f0-9]{64}', identity), 'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    values = json.loads(o.run(['docker', 'inspect', identity], timeout=10))
+    o.require(len(values) == 1, 'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    info = values[0]
+    o.require(info['Id'] == identity and info['State']['Running'] is True and
+              isinstance(info['Image'], str) and re.fullmatch('sha256:[a-f0-9]{64}', info['Image']) and
+              isinstance(info['Created'], str) and bool(info['Created']) and
+              info['Config']['Image'] == config['services']['db']['image'] and
+              info['Config']['Labels'].get('com.docker.compose.project') == o.PROJECT and
+              info['Config']['Labels'].get('com.docker.compose.service') == 'db' and
+              info['Config']['Labels'].get('vtc011.rehearsal') == o.PROJECT,
+              'NOTIFICATIONS_PROOF_DATABASE_IDENTITY_INVALID')
+    mounts = [mount for mount in info['Mounts'] if mount['Destination'] == '/var/lib/mysql']
+    o.require(len(mounts) == 1 and mounts[0]['Type'] == 'volume' and mounts[0]['Name'] == volume_name,
+              'NOTIFICATIONS_PROOF_DATABASE_STORAGE_INVALID')
+    attachment = info['NetworkSettings']['Networks'].get(network_name)
+    o.require(attachment and re.fullmatch('[a-f0-9]{64}', attachment['NetworkID']),
+              'NOTIFICATIONS_PROOF_DATABASE_NETWORK_INVALID')
+    networks = json.loads(o.run(['docker', 'network', 'inspect', attachment['NetworkID']], timeout=10))
+    volumes = json.loads(o.run(['docker', 'volume', 'inspect', volume_name], timeout=10))
+    o.require(len(networks) == 1 and networks[0]['Id'] == attachment['NetworkID'] and
+              networks[0]['Name'] == network_name and networks[0]['Internal'] is True and
+              networks[0]['Labels'].get('vtc011.rehearsal') == o.PROJECT and
+              len(volumes) == 1 and volumes[0]['Name'] == volume_name and
+              isinstance(volumes[0]['CreatedAt'], str) and bool(volumes[0]['CreatedAt']) and
+              volumes[0]['Labels'].get('vtc011.rehearsal') == o.PROJECT,
+              'NOTIFICATIONS_PROOF_DATABASE_ALLOCATION_INVALID')
+    return dict(project=o.PROJECT, revision=revision, applicationImage=image_id, id=identity,
+                image=info['Image'], created=info['Created'], network=attachment['NetworkID'],
+                volume=volume_name, volumeCreated=volumes[0]['CreatedAt'])
 
 
-def mount(target, subpath=None):
-    value = {'type': 'volume', 'source': 'operator-files', 'target': target, 'read_only': True}
-    if subpath:
-        value['volume'] = {'subpath': subpath}
-    return value
-
-
-config['services']['db']['volumes'] = [
-    {'type': 'volume', 'source': 'mysql', 'target': '/var/lib/mysql'},
-    mount('/run/secrets', 'private'), mount('/docker-entrypoint-initdb.d', 'private/bootstrap')]
-config['services']['proxy']['volumes'] = [
-    mount('/etc/caddy'), mount('/maintenance', 'private/maintenance'),
-    {'type': 'volume', 'source': 'tls', 'target': '/data'},
-    {'type': 'volume', 'source': 'proxy-config', 'target': '/config'}]
-(base / 'compose.yaml').write_text(json.dumps(config))
-spec = importlib.util.spec_from_file_location('operations', base / 'operations.py')
-ops = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ops)
-ops.PROJECT = project
-# Restores need the same reviewed file configuration but fresh named volumes/networks.
-original_compose = ops.compose
-
-
-def compose(args, *, revision, image_id=None, project=project, **kwargs):
-    selected_image = image_id or (ops.accepted_image_id(revision) if ops.current() else globals()['image_id'])
-    if project != ops.PROJECT:
-        # Compose's explicit volume names must be allocated independently for each restore.
-        restored = json.loads(json.dumps(config))
-        for name, value in restored['volumes'].items():
-            if not value.get('external'):
-                value['name'] = f'{project}_{name}'
-        for name, value in restored['networks'].items():
-            value['name'] = f'{project}_{name}'
-        file = base / f'{project}.json'
-        file.write_text(json.dumps(restored))
-        return ops.run(['docker', 'compose', '-p', project, '-f', str(file), *args], revision=revision, image_id=selected_image, **kwargs)
-    return original_compose(args, revision=revision, image_id=selected_image, project=project, **kwargs)
-
-
-ops.compose = compose
-
-
-def sql(statement):
-    return compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B'],
-                   revision=revision, data=statement.encode())
-
-
-def expect_failure(callback):
-    try:
-        callback()
-    except Exception:
-        return
-    raise AssertionError('EXPECTED_FAILURE_MISSING')
-
-
-def tick_process():
-    # Fork inherits only the harness's isolated project/Compose allocation overrides.
-    # Exercise the real root dispatcher, nonblocking lock and nonzero failure mapping.
-    sys.argv = ['operations.py', 'tick']
-    try:
-        ops.main()
-    except BaseException:
-        raise SystemExit(1)
-
-
-with rehearsal_phase('initial-database-startup'):
-    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
-with rehearsal_phase('initial-migration'):
-    compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
-ops.jobs_grants_locked(revision)
-# Exercise the known existing-installation SELECT revocation, not only fresh setup.
-sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")
-ops.activation.grants(ops, revision)
-ops.activation.ingress(ops)
-compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision)
-sql('CREATE TABLE vtc.rehearsal_reference (id INT PRIMARY KEY, evidence_sha CHAR(64) NOT NULL) ENGINE=InnoDB;')
-manual_proof_run = uuid.uuid4().hex
-sentinel = b'fictional-evidence-sentinel-vtc011\n'
-checksum = hashlib.sha256(sentinel).hexdigest()
-sql(f"INSERT INTO vtc.rehearsal_reference VALUES (1, '{checksum}');")
-compose(['up', '-d', '--no-deps', 'app', 'probe', 'proxy'], revision=revision)
-ops.ready(revision)
-ops.run(['docker', 'run', '--rm', '--network', 'none', '--user', '1000', '--mount',
-         f'type=volume,source={project}_evidence,target=/app/private-evidence', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', f'vtc-dashboard:{revision}',
-         'node', '-e', "require('node:fs').writeFileSync('/app/private-evidence/sentinel.txt','fictional-evidence-sentinel-vtc011\\n');require('node:fs').writeFileSync('/app/private-evidence/.manual-rehearsal-guard',process.env.MANUAL_REHEARSAL_RUN,{mode:0o600,flag:'wx'})"])
-# Distinct production containers share only the established persistent evidence mount.
-for phase in ['write', 'read', 'remove']:
-    compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
-             'node', 'operations/manual-codec-smoke.mjs', phase], revision=revision)
-    print(f'Manual production codec phase: {phase} PASS (full decode, original bytes, offline notice integrity, uid/root mode)', flush=True)
-runtime_negative = """const mysql=require('mysql2/promise'); const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'}); for(const sql of ['CREATE TABLE forbidden (id INT)','SET GLOBAL max_connections=99','SELECT * FROM mysql.user','SELECT * FROM _vtc_migrations','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','DELETE FROM identity_verifications','UPDATE external_steam_accounts SET steam_id=steam_id','DELETE FROM external_steam_accounts','UPDATE external_steam_changes SET reason=reason','DELETE FROM external_steam_changes','UPDATE event_commands SET result=result','DELETE FROM event_commands','UPDATE event_revisions SET title=title','DELETE FROM event_revisions','UPDATE event_response_revisions SET status=status','DELETE FROM event_response_revisions','UPDATE event_attendance_revisions SET status=status','DELETE FROM event_attendance_revisions','UPDATE event_catalog_pins SET label=label','DELETE FROM event_catalog_pins','UPDATE _vtc_migrations SET state=\\'applying\\'']) {let denied=false;try{await c.query(sql)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
-compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_negative.replace("const mysql=require('mysql2/promise');", "import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');")], revision=revision)
-runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
-compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_admissions_limits], revision=revision)
-print('Admissions restricted runtime: rate-row insert/read and bounded100-row deletion passed with rollback', flush=True)
-ops.maintenance(False)
-ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
-proxy_id = compose(['ps', '-q', 'proxy'], revision=revision).decode().strip()
-for _ in range(30):
-    result = subprocess.run(['docker', 'cp', f'{proxy_id}:/data/caddy/pki/authorities/local/root.crt', str(base / 'test-ca.crt')],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if result.returncode == 0:
-        break
-    time.sleep(1)
-context = ssl.create_default_context(cafile=str(base / 'test-ca.crt'))
-os.environ['SSL_CERT_FILE'] = str(base / 'test-ca.crt')
-token = dict(line.split('=', 1) for line in (base / 'private/operator.env').read_text().splitlines())['OPERATOR_TOKEN']
-
-
-def get(path, bearer=None, expected=200):
-    request = urllib.request.Request(f'https://proxy{path}', headers={'Authorization': f'Bearer {bearer}'} if bearer else {})
-    try:
-        with urllib.request.urlopen(request, context=context, timeout=5) as response:
-            status, body = response.status, response.read(8192)
-    except urllib.error.HTTPError as error:
-        status, body = error.code, error.read(8192)
-    assert status == expected, 'HTTP_STATUS_MISMATCH'
-    return body
-
-
-get('/_operations/release', expected=401)
-get('/_operations/release', 'incorrect', expected=401)
-assert json.loads(get('/_operations/release', token))['revision'] == revision
-# Verify packaged account entry points without claiming hosted identity activation.
-for path in ['/login', '/account', '/password-recovery', '/password-reset?token=NONFUNCTIONAL_FIXTURE', '/invitation?token=NONFUNCTIONAL_FIXTURE']:
-    request = urllib.request.Request(f'https://proxy{path}', headers={'Accept': 'text/html'})
-    with urllib.request.urlopen(request, context=context, timeout=5) as response:
-        shell = response.read(65536).decode('utf-8')
-        assert response.status == 200, 'ACCOUNT_SHELL_STATUS_FAILED'
-        assert response.headers.get('Referrer-Policy') == 'no-referrer', 'ACCOUNT_REFERRER_HEADER_FAILED'
-        assert response.headers.get('X-Robots-Tag') == 'noindex, nofollow', 'ACCOUNT_NOINDEX_HEADER_FAILED'
-        assert response.headers.get('Cache-Control') == 'no-store', 'ACCOUNT_CACHE_HEADER_FAILED'
-    assert 'content="noindex, nofollow"' in shell, 'ACCOUNT_NOINDEX_META_FAILED'
-    assert 'name="referrer" content="no-referrer"' in shell, 'ACCOUNT_REFERRER_META_FAILED'
-    assert shell.index('history.replaceState') < shell.index('type="module"'), 'ACCOUNT_EARLY_INGRESS_FAILED'
-    assert 'NONFUNCTIONAL_FIXTURE' not in shell, 'ACCOUNT_INPUT_REFLECTION_FAILED'
-    import re
-    assets = re.findall(r'(?:src|href)="(/assets/[^" ]+\.(?:js|css))"', shell)
-    assert assets, 'ACCOUNT_ASSET_REFERENCES_MISSING'
-    for asset in assets:
-        get(asset)
-print('Packaged account shells: deep links, assets, referrer, noindex and no-store passed', flush=True)
-for path in ['/evidence/sentinel.txt', '/evidence%2fsentinel.txt', '/private-evidence/sentinel.txt', '/.env', '/uploads/sentinel.txt', '/%65vidence/sentinel.txt']:
-    get(path, expected=404)
-compose(['stop', 'db'], revision=revision)
-get('/_operations/release', token, expected=503)
-compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
-ops.ready(revision)
-get('/_operations/release', token)
-image_id = json.loads(ops.run(["docker", "image", "inspect", f"vtc-dashboard:{revision}"]))[0]["Id"]
-image_archive = base / 'test-image.tar'
-ops.run(['docker', 'save', '--output', str(image_archive), f'vtc-dashboard:{revision}'])
-with ops.lock():
-    ops.release_locked(image_archive, revision, 100, 1, 'auto', image_id)
-assert ops.current()['runId'] == 100
-# Install the same reviewed controls through their real staged/fenced update, retaining
-# this harness's translated mounts and privately resolved synthetic role settings.
-import update_controls
-update_controls.o = ops
-control_source = base / 'private/controls-fixture'
-control_source.mkdir(mode=0o700)
-for name in update_controls.FILES:
-    shutil.copyfile(base / name, control_source / name)
-update_controls.install(control_source)
-assert (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
-assert ops.activation.controls_pending(ops, revision, image_id)
-# The reviewed activation operation validates both roles and re-reads exact narrow grants.
-identity_secret = uuid.uuid4().hex + uuid.uuid4().hex
-activation_input = base / 'private/activation-input.env'
-activation_input.write_text(f'IDENTITY_ENABLED=true\nIDENTITY_SECRET={identity_secret}\nIDENTITY_ORIGIN=https://proxy\nMAIL_MODE=disabled\n')
-os.chmod(activation_input, 0o600)
-valid_activation = activation_input.read_bytes()
-activation_input.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n')
-expect_failure(lambda: ops.activation.config_operation(ops, revision, image_id, 'validate'))
-activation_input.write_bytes(valid_activation)
-sql("UPDATE vtc._vtc_migrations SET state='applying';")
-expect_failure(lambda: ops.activation.config_operation(ops, revision, image_id, 'validate'))
-sql("UPDATE vtc._vtc_migrations SET state='applied';")
-with ops.lock():
-    ops.activation.config_operation(ops, revision, image_id, 'validate')
-    ops.activation.config_operation(ops, revision, image_id, 'apply')
-    ops.activation.config_operation(ops, revision, image_id, 'inspect')
-assert not ops.activation.controls_pending(ops, revision, image_id)
-# Exercise the exact root operator probe using only this rehearsal's synthetic CA.
-with ops.lock():
-    ops.ingress_probe.check(ops, revision, image_id, ca=(base / 'test-ca.crt').read_text())
-with ops.lock():
-    ops.activation.config_operation(ops, revision, image_id, 'rollback')
-assert sql('SELECT COUNT(*) FROM vtc.identity_company;').strip() == b'0'
-print('Identity ingress rehearsal: exact Caddy peer, spoof overwrite, distinct noncolliding durable source slots, 21st denial/global isolation and recreation passed', flush=True)
-if mode == 'full':
-    acceptance_input = base / 'private/acceptance-input.env'
-    acceptance_input.write_text('VTC_ACCEPTANCE_RECIPIENT=synthetic@example.invalid\n')
-    os.chmod(acceptance_input, 0o600)
-    with ops.lock():
-        # No pre-existing derived role name is adoptable, even with the requested run label.
-        for role in ['runtime', 'jobs', 'migrator']:
-            for matching_label in [True, False]:
-                preexisting_run = str(uuid.uuid4())
-                preexisting_suffix = preexisting_run.replace('-', '')[:16]
-                preexisting_name = f'{project}-identity-{preexisting_suffix}-{role}'
-                fixture_id = ops.run(['docker', 'run', '-d', '--name', preexisting_name,
-                                     '--label', f'vtc011.rehearsal={project}', '--label',
-                                     f'vtc.identity-acceptance={preexisting_run if matching_label else uuid.uuid4()}',
-                                     '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
-                                     'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
-                expect_failure(lambda: ops.identity_acceptance.operation(ops, revision, image_id,
-                               'prepare', preexisting_run, local_fixture=True))
-                retained = json.loads(ops.run(['docker', 'inspect', fixture_id]))[0]
-                assert retained['Id'] == fixture_id and retained['State']['Running']
-                assert not (base / 'state/identity-acceptance').exists()
-                assert not (base / f'private/acceptance-{preexisting_run}').exists()
-                assert sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vtc_accept_{preexisting_suffix}';").strip() == b'0'
-                assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User IN ('vtc_ar_{preexisting_suffix}','vtc_aw_{preexisting_suffix}','vtc_am_{preexisting_suffix}');").strip() == b'0'
-                ops.run(['docker', 'rm', '-f', fixture_id], timeout=20)
-        print('Acceptance name preflight: existing runtime/jobs/migrator IDs and running state preserved for same/wrong run labels before allocation', flush=True)
-        activation_run = str(uuid.uuid4())
-        invoke = lambda mode, identity=activation_run: ops.identity_acceptance.operation(ops, revision, image_id, mode, identity, local_fixture=True)
-        invoke('prepare')
-        expect_failure(lambda: invoke('prepare'))
-        expect_failure(lambda: invoke('inspect', str(uuid.uuid4())))
-        expect_failure(lambda: ops.jobs_locked(revision, image_id))
-        runtime_fixture = base / f'private/acceptance-{activation_run}/runtime.env'
-        runtime_fixture_bytes = runtime_fixture.read_bytes()
-        runtime_fixture.write_text('\n'.join(line for line in runtime_fixture_bytes.decode().splitlines()
-                                            if not line.startswith('VTC_ACCEPTANCE_RECIPIENT=')) + '\n')
+def notification_account_cleanup_proof(o, revision, image_id):
+    """Only the rehearsal's positively owned disposable server may host these synthetic accounts."""
+    import notifications_acceptance as n
+    o.require(os.environ.get('REHEARSAL_PROJECT') == o.PROJECT and
+              re.fullmatch('vtc011-[a-f0-9]{16}', o.PROJECT) and
+              os.environ.get('REHEARSAL_REVISION') == revision and
+              os.environ.get('REHEARSAL_VOLUME') == o.PROJECT + '-config',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_REHEARSAL_REQUIRED')
+    o.validate_image(image_id, revision)
+    receipt = n.private_json(o, o.BASE / 'state/notification-proof-database.json')
+    o.require(receipt == rehearsal_database_identity(o, revision, image_id),
+              'NOTIFICATIONS_PROOF_DATABASE_RECEIPT_CHANGED')
+    window = n.Window(o, revision, image_id, str(uuid.uuid4()))
+    o.require(not window.marker.exists(), 'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+    o.require(window.sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='{window.schema}';").strip() == b'0',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+    baseline = window.shared_grants()
+    state = dict(runId=window.run_id, schema=window.schema, accounts=window.accounts,
+                 revision=revision, imageId=image_id, directory=str(window.directory),
+                 controls=n.hashes(o, n.FILES), protected=n.hashes(o, n.PROTECTED), containers={},
+                 ticks=[], scenario=0, phase='preparing', schedule=False,
+                 expiresUtc=int(time.time()) + n.WINDOW_SECONDS, sharedGrantsSha256=baseline,
+                 allocations={'schema': 'removed', 'network': 'removed'})
+    window.save(state)
+    for role, account in window.accounts.items():
+        o.require(window.sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{account}';").strip() == b'0',
+                  'NOTIFICATIONS_OWNERSHIP_PROOF_COLLISION')
+        state['allocations'][role] = 'creating'; window.save(state)
+        window.sql(f"CREATE USER '{account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}' ATTRIBUTE '{{\"vtcNotifications\":\"{window.run_id}\"}}';")
+        state['allocations'][role] = 'created'; window.save(state)
+    original_sql, drops = window.sql, []
+    def traced(statement, **options):
+        if statement.startswith('DROP USER'):
+            drops.append(statement)
+        return original_sql(statement, **options)
+    window.sql = traced
+    runtime = window.accounts['runtime']
+    def refuse():
         try:
-            expect_failure(lambda: invoke('produce'))
-            failed_producer = json.loads((base / 'state/identity-acceptance').read_text())
-            runtime_name = f"{project}-identity-{activation_run.replace('-', '')[:16]}-runtime"
-            assert failed_producer['phase'] == 'prepared'
-            assert failed_producer['containers'][runtime_name]['phase'] == 'removed'
-            assert not ops.run(['docker', 'ps', '-aq', '--filter',
-                               f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
-        finally:
-            runtime_fixture.write_bytes(runtime_fixture_bytes)
-        # The positively owned sentinel/schema/runtime role remains the existing acceptance allocation.
-        # Opt in only this local, fictional fixture to real Events commands under the same grant matrix.
-        runtime_fixture.write_bytes(runtime_fixture_bytes + b'VTC_EVENTS_ACCEPTANCE=synthetic-only\n')
-        invoke('produce')
-        events_result = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-        assert events_result.get('eventsVerified') is True
-        print('Events restricted runtime: create/edit/cancel, own RSVP, attendance, immutable history and exact replay passed with SELECT+INSERT-only receipts/history', flush=True)
-        expect_failure(lambda: invoke('produce'))
-        invoke('inspect')
-        pending = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-        assert pending['state'] == 'queued' and pending['retainedPayload']
-        invoke('worker')
-        invoke('inspect')
-        accepted = json.loads((base / 'state/identity-acceptance-last.json').read_text())
-        assert accepted['state'] == 'simulated' and accepted['purgedPayload'] and accepted['attempts'] == 1
-        invoke('worker')
-        invoke('inspect')
-        assert json.loads((base / 'state/identity-acceptance-last.json').read_text()) == accepted
-        invoke('cleanup')
-        assert not (base / 'state/identity-acceptance').exists()
-        # Fresh pre-existing resources must fail before allocating or mutating anything else.
-        collision_run = str(uuid.uuid4())
-        collision_suffix = collision_run.replace('-', '')[:16]
-        collision_schema = f'vtc_accept_{collision_suffix}'
-        collision_account = f'vtc_ar_{collision_suffix}'
-        sql(f'CREATE DATABASE {collision_schema}; CREATE TABLE {collision_schema}.sentinel (id INT PRIMARY KEY); INSERT INTO {collision_schema}.sentinel VALUES (1);')
-        expect_failure(lambda: invoke('prepare', collision_run))
-        assert not (base / 'state/identity-acceptance').exists()
-        assert sql(f'SELECT id FROM {collision_schema}.sentinel;').strip() == b'1'
-        sql(f'DROP DATABASE {collision_schema};')
-        sql(f"CREATE USER '{collision_account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
-        expect_failure(lambda: invoke('prepare', collision_run))
-        assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{collision_account}';").strip() == b'1'
-        assert not (base / 'state/identity-acceptance').exists()
-        sql(f"DROP USER '{collision_account}'@'%';")
-        # An interrupted prepared window remains bound, can be cleaned and cannot be adopted.
-        invoke('prepare', collision_run)
-        expect_failure(lambda: invoke('produce', str(uuid.uuid4())))
-        collision_container = f'{project}-identity-{collision_suffix}-runtime'
-        owned_collision_id = ops.run(['docker', 'run', '-d', '--name', collision_container,
-                                     '--label', f'vtc011.rehearsal={project}', '--label',
-                                     f'vtc.identity-acceptance={uuid.uuid4()}', '--network', 'none',
-                                     image_id, 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
-        expect_failure(lambda: invoke('produce', collision_run))
-        expect_failure(lambda: invoke('cleanup', collision_run))
-        collision_info = json.loads(ops.run(['docker', 'inspect', owned_collision_id]))[0]
-        assert collision_info['State']['Running'] and (base / 'state/identity-acceptance').exists()
-        # Only this harness created the conflicting fixture; the acceptance wrapper refused it.
-        ops.run(['docker', 'rm', '-f', owned_collision_id], timeout=20)
-        invoke('cleanup', collision_run)
-        # Inject an actual Docker name collision after preflight but immediately before create.
-        # The migrator case specifically exercises failed creation during allocating/finally.
-        for role in ['runtime', 'jobs', 'migrator']:
-            for matching_label in [True, False]:
-                race_run = str(uuid.uuid4())
-                race_suffix = race_run.replace('-', '')[:16]
-                race_name = f'{project}-identity-{race_suffix}-{role}'
-                race_invoke = lambda mode: invoke(mode, race_run)
-                if role != 'migrator':
-                    race_invoke('prepare')
-                    if role == 'jobs':
-                        race_invoke('produce')
-                original_run = ops.run
-                race_ids = []
-                def create_race(args, **kwargs):
-                    if args[:2] == ['docker', 'create'] and '--name' in args and args[args.index('--name') + 1] == race_name:
-                        assert not race_ids
-                        race_ids.append(original_run(['docker', 'run', '-d', '--name', race_name,
-                            '--label', f'vtc011.rehearsal={project}', '--label',
-                            f'vtc.identity-acceptance={race_run if matching_label else uuid.uuid4()}',
-                            '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
-                            'node', '-e', 'setInterval(()=>{},1000)']).decode().strip())
-                    return original_run(args, **kwargs)
-                ops.run = create_race
+            window.cleanup()
+        except RuntimeError as error:
+            o.require(error.args == ('NOTIFICATIONS_ACCOUNT_OWNERSHIP_INVALID',), 'NOTIFICATIONS_OWNERSHIP_PROOF_WRONG_FAILURE')
+        else:
+            raise RuntimeError('NOTIFICATIONS_OWNERSHIP_PROOF_UNSAFE_CLEANUP')
+        o.require(not drops and window.marker.exists() and
+                  original_sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{runtime}' AND Host='%';").strip() == b'1',
+                  'NOTIFICATIONS_OWNERSHIP_PROOF_ACCOUNT_CHANGED')
+    for marker in [None, '', 'fictional-foreign-window', {}]:
+        original_sql(f"ALTER USER '{runtime}'@'%' ATTRIBUTE '{json.dumps({'vtcNotifications': marker})}';")
+        row = original_sql(f"SELECT JSON_OBJECT('metadata',JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')) FROM mysql.user WHERE User='{runtime}' AND Host='%';")
+        o.require(row != b'' and set(json.loads(row)) == {'metadata'}, 'NOTIFICATIONS_OWNERSHIP_PROOF_PRESENCE_LOST')
+        refuse()
+    # The fixture owns both CREATE acknowledgements inside this disposable server. The old Window
+    # receipt must not authorize deleting its same-name replacement without the current marker.
+    original_sql(f"DROP USER '{runtime}'@'%';")
+    original_sql(f"CREATE USER '{runtime}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
+    refuse()
+    original_sql(f"ALTER USER '{runtime}'@'%' ATTRIBUTE '{json.dumps({'vtcNotifications': window.run_id})}';")
+    absent = window.accounts['migrator']
+    original_sql(f"DROP USER '{absent}'@'%';")
+    o.require(original_sql(f"SELECT JSON_OBJECT('metadata',JSON_EXTRACT(User_attributes,'$.metadata.vtcNotifications')) FROM mysql.user WHERE User='{absent}' AND Host='%';") == b'',
+              'NOTIFICATIONS_OWNERSHIP_PROOF_ABSENCE_INVALID')
+    window.cleanup()
+    o.require(len(drops) == 2 and all(absent not in statement for statement in drops) and not window.marker.exists(),
+              'NOTIFICATIONS_OWNERSHIP_PROOF_ABSENT_DROP')
+    print(json.dumps({'event': 'notifications_account_cleanup_proof', 'negativeCases': 5,
+                      'presentWithoutMarkerRetained': True, 'acknowledgedReplacementRetained': True,
+                      'absentDropCount': 0, 'ownedDrops': 2, 'result': 'pass'}), flush=True)
+
+
+def core():
+    with rehearsal_phase('core-control-preflight'):
+        mode = os.environ.get('REHEARSAL_MODE', 'full')
+        assert mode in ['full', 'manual-only']
+        base = pathlib.Path('/opt/vtc-development')
+        subprocess.run(['python3', '/source/test_rehearsal_diagnostics.py'], check=True, timeout=30)
+        subprocess.run(['python3', '/source/test_notifications_acceptance.py'], check=True, timeout=30)
+        subprocess.run(['python3', '/source/test_operations.py'], check=True, timeout=30)
+        subprocess.run(['python3', '/source/test_activation.py'], check=True, timeout=30)
+        subprocess.run(['python3', '/source/test_acceptance_containers.py'], check=True, timeout=30)
+        project = os.environ['REHEARSAL_PROJECT']
+        revision = os.environ['REHEARSAL_REVISION']
+        volume = os.environ['REHEARSAL_VOLUME']
+        assert project.startswith('vtc011-') and len(project) == 23
+        initial_image_id = image_id = json.loads(subprocess.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}'],
+                                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True).stdout)[0]['Id']
+        for path in pathlib.Path('/source').iterdir():
+            if path.is_file():
+                shutil.copyfile(path, base / path.name)
+        subprocess.run(['node', str(base / 'setup.mjs'), str(base)], check=True, stdout=subprocess.DEVNULL)
+
+
+        def verify_sshd():
+            # Parser/configuration inspection only: no daemon, socket or listening port.
+            assert not list(pathlib.Path('/etc/ssh').glob('ssh_host_*'))
+            pathlib.Path('/run/sshd').mkdir(mode=0o755, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix='sshd-', dir=base / 'private') as directory:
+                directory = pathlib.Path(directory)
+                key = directory / 'host-key'
+                subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key)],
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+                global_config = (f'HostKey {key}\nPidFile {directory / "sshd.pid"}\nUsePAM no\n'
+                                 'PubkeyAuthentication yes\nAuthenticationMethods any\n'
+                                 'PasswordAuthentication yes\nKbdInteractiveAuthentication yes\n'
+                                 'AllowTcpForwarding yes\nAllowAgentForwarding yes\n'
+                                 'X11Forwarding yes\nPermitTTY yes\nPermitTunnel yes\n'
+                                 'AcceptEnv LANG\nAcceptEnv LC_*\nSubsystem sftp internal-sftp\n')
+                template = (base / 'sshd.example').read_text()
+                candidate = directory / 'sshd_config'
+
+                def parse(content):
+                    candidate.write_text(content)
+                    return subprocess.run(['/usr/sbin/sshd', '-t', '-f', str(candidate)],
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+
+                def effective(user):
+                    result = subprocess.run(['/usr/sbin/sshd', '-T', '-f', str(candidate), '-C',
+                                             f'user={user},host=client.example.invalid,addr=192.0.2.2,laddr=192.0.2.1,lport=22'],
+                                            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                    return result.stdout
+
+                restricted = {
+                    'pubkeyauthentication': 'yes', 'authenticationmethods': 'publickey',
+                    'passwordauthentication': 'no', 'kbdinteractiveauthentication': 'no',
+                    'allowtcpforwarding': 'no', 'allowagentforwarding': 'no',
+                    'x11forwarding': 'no', 'permittty': 'no', 'permittunnel': 'no',
+                    'permituserenvironment': 'no',
+                }
+
+                def require_restricted(output):
+                    # Only these known single-valued keys use a mapping; compare all operator bytes.
+                    settings = dict(line.split(' ', 1) for line in output.decode().splitlines())
+                    for name, value in restricted.items():
+                        assert settings[name] == value, name
+
+                assert parse(global_config).returncode == 0
+                operator_before = effective('vtc-operator')
+                operator_lines = operator_before.decode().splitlines()
+                for setting in ['pubkeyauthentication yes', 'authenticationmethods any',
+                                'passwordauthentication yes', 'kbdinteractiveauthentication yes',
+                                'permittty yes', 'allowtcpforwarding yes', 'permittunnel yes']:
+                    assert setting in operator_lines
+                assert operator_lines.count('acceptenv LANG') == 1
+                assert operator_lines.count('acceptenv LC_*') == 1
+                assert parse(global_config + template).returncode == 0
+                require_restricted(effective('vtc-deploy'))
+                assert effective('vtc-operator') == operator_before
+                # Each removed Match restriction must independently fail the deployment expectation.
+                for directive, name in {
+                    'AuthenticationMethods publickey': 'authenticationmethods',
+                    'PasswordAuthentication no': 'passwordauthentication',
+                    'KbdInteractiveAuthentication no': 'kbdinteractiveauthentication',
+                }.items():
+                    line = f'  {directive}\n'
+                    assert template.count(line) == 1
+                    assert parse(global_config + template.replace(line, '')).returncode == 0
+                    assert effective('vtc-operator') == operator_before
+                    try:
+                        require_restricted(effective('vtc-deploy'))
+                    except AssertionError as failure:
+                        assert failure.args == (name,)
+                    else:
+                        raise AssertionError('SSH_RESTRICTION_REMOVAL_UNDETECTED')
+                # Recreate the original unsupported placement, retaining the same full base.
+                bad_match = template.replace('PermitUserEnvironment no\n', '') + '  PermitUserEnvironment no\n'
+                rejected = parse(global_config + bad_match)
+                assert rejected.returncode != 0
+                assert b'Directive \'PermitUserEnvironment\' is not allowed within a Match block' in rejected.stderr
+                # A global-only directive cannot directly follow the open User condition.
+                rejected = parse(global_config + template + f'PidFile {directory / "later.pid"}\n')
+                assert rejected.returncode != 0 and b'is not allowed within a Match block' in rejected.stderr
+            assert not list((base / 'private').glob('sshd-*'))
+
+
+        verify_sshd()
+        print('OpenSSH template: full-config parser, effective deploy/operator policy and placement rejection passed', flush=True)
+        # Fixed layout/expanded-size/type checks run before any infrastructure is started.
+        zip_directory = base / '.local/deploy'
+        for entries in [ {'../escape': b'x', 'release.json': b'{}'},
+                         {'image.tar': b'x', 'release.json': b'x' * 8193},
+                         {'image.tar': b'x', 'release.json': b'{}', 'extra': b'x'} ]:
+            zip_directory.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(zip_directory / 'release.zip', 'w') as archive:
+                for name, content in entries.items():
+                    archive.writestr(name, content)
+            rejected = subprocess.run(['python3', str(base / 'unpack.py')], cwd=base,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            assert rejected.returncode != 0
+            shutil.rmtree(zip_directory)
+        (base / 'private/proxy.env').write_text('STAGING_DOMAIN=proxy\nTLS_EMAIL=operator@example.invalid\n')
+        caddy = (base / 'Caddyfile').read_text().replace('{$STAGING_DOMAIN} {', '{$STAGING_DOMAIN} {\n  tls internal')
+        (base / 'Caddyfile').write_text(caddy)
+        # Allocate a fresh private ingress subnet independently of every existing Docker network.
+        network_ids = subprocess.run(['docker', 'network', 'ls', '-q'], check=True, stdout=subprocess.PIPE).stdout.decode().split()
+        inventory = json.loads(subprocess.run(['docker', 'network', 'inspect', *network_ids], check=True, stdout=subprocess.PIPE).stdout)
+        occupied = [ipaddress.ip_network(item['Subnet']) for value in inventory
+                    for item in value.get('IPAM', {}).get('Config') or [] if item.get('Subnet')]
+        for attempt in range(100):
+            entropy = uuid.uuid4().bytes
+            subnet = ipaddress.IPv4Network(f'10.{entropy[0]}.{entropy[1]}.0/29')
+            if not any(other.version == 4 and subnet.overlaps(other) for other in occupied):
+                break
+        else:
+            raise AssertionError('INGRESS_ALLOCATION_UNAVAILABLE')
+        ingress_file = base / 'private/ingress.env'
+        ingress_file.write_text(f'VTC_INGRESS_SUBNET={subnet}\nVTC_INGRESS_APP_IPV4={subnet.network_address + 2}\nVTC_INGRESS_PROXY_IPV4={subnet.network_address + 3}\n')
+        os.chmod(ingress_file, 0o600)
+        result = subprocess.run(['docker', 'compose', '--env-file', str(ingress_file), '--profile', '*', '-f', str(base / 'compose.yaml'), 'config', '--format', 'json'],
+                                env=dict(os.environ, VTC_REVISION=revision, VTC_IMAGE_ID=image_id), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True)
+        config = json.loads(result.stdout)
+        assert set(config['services']['jobs']['networks']) == {'database', 'mail-egress'}
+        assert not config['services']['jobs'].get('ports')
+        assert set(config['services']['db']['networks']) == {'database'}
+        assert config['networks']['database']['internal']
+        assert not config['networks']['mail-egress'].get('internal', False)
+        assert set(config['services']['app']['networks']) == {'database', 'ingress'}
+        assert set(config['services']['proxy']['networks']) == {'frontend', 'ingress'}
+        assert config['networks']['ingress']['internal']
+        config['name'] = project
+        label = {'vtc011.rehearsal': project}
+        for name, value in config['services'].items():
+            value['labels'] = label
+            value.pop('ports', None)
+            if name in ['app', 'probe', 'heartbeat', 'migrate', 'jobs']:
+                value['image'] = '${VTC_IMAGE_ID:?Set the validated immutable image ID}'
+            if name in ['app', 'jobs']:
+                # Keep the shared file live while role-specific DB settings remain synthetic/resolved.
+                value['env_file'] = [str(base / 'private/identity-mail.env')]
+                for key in ['IDENTITY_ENABLED', 'MAIL_MODE', 'ADMISSIONS_ENABLED']:
+                    value['environment'].pop(key, None)
+        for name, value in config['volumes'].items():
+            value['name'] = f'{project}_{name}'
+            value['labels'] = label
+        for name, value in config['networks'].items():
+            value['name'] = f'{project}_{name}'
+            value['labels'] = label
+        # One-shot proofs never compete with the serving app's fixed trusted-ingress IP.
+        # These clones exist only in this synthetic allocation, with the same role files
+        # and resource/security bounds. The codec needs no network or DB environment.
+        for name, source in [('manual-codec', 'app'), ('manual-runtime', 'app'), ('manual-worker', 'jobs'), ('trip-decision-seed', 'migrate')]:
+            proof = json.loads(json.dumps(config['services'][source]))
+            proof['profiles'] = ['tools']
+            proof['restart'] = 'no'
+            proof['networks'] = {'database': {}}
+            if name == 'manual-codec':
+                proof.pop('networks')
+                proof['network_mode'] = 'none'
+                proof.pop('env_file', None)
+                proof['environment'] = {'NODE_OPTIONS': '--max-old-space-size=128'}
+            config['services'][name] = proof
+        config['volumes']['operator-files'] = {'name': volume, 'external': True}
+
+
+        def mount(target, subpath=None):
+            value = {'type': 'volume', 'source': 'operator-files', 'target': target, 'read_only': True}
+            if subpath:
+                value['volume'] = {'subpath': subpath}
+            return value
+
+
+        config['services']['db']['volumes'] = [
+            {'type': 'volume', 'source': 'mysql', 'target': '/var/lib/mysql'},
+            mount('/run/secrets', 'private'), mount('/docker-entrypoint-initdb.d', 'private/bootstrap')]
+        config['services']['proxy']['volumes'] = [
+            mount('/etc/caddy'), mount('/maintenance', 'private/maintenance'),
+            {'type': 'volume', 'source': 'tls', 'target': '/data'},
+            {'type': 'volume', 'source': 'proxy-config', 'target': '/config'}]
+        (base / 'compose.yaml').write_text(json.dumps(config))
+        spec = importlib.util.spec_from_file_location('operations', base / 'operations.py')
+        ops = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ops)
+        sys.modules['operations'] = ops
+        ops.PROJECT = project
+        # Restores need the same reviewed file configuration but fresh named volumes/networks.
+        original_compose = ops.compose
+
+
+        def compose(args, *, revision, image_id=None, project=project, **kwargs):
+            selected_image = image_id or (ops.accepted_image_id(revision) if ops.current() else initial_image_id)
+            if project != ops.PROJECT:
+                # Compose's explicit volume names must be allocated independently for each restore.
+                restored = json.loads(json.dumps(config))
+                for name, value in restored['volumes'].items():
+                    if not value.get('external'):
+                        value['name'] = f'{project}_{name}'
+                for name, value in restored['networks'].items():
+                    value['name'] = f'{project}_{name}'
+                file = base / f'{project}.json'
+                file.write_text(json.dumps(restored))
+                return ops.run(['docker', 'compose', '-p', project, '-f', str(file), *args], revision=revision, image_id=selected_image, **kwargs)
+            return original_compose(args, revision=revision, image_id=selected_image, project=project, **kwargs)
+
+
+        ops.compose = compose
+
+
+        def sql(statement):
+            return compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B'],
+                           revision=revision, data=statement.encode())
+
+
+        def expect_failure(callback):
+            try:
+                callback()
+            except Exception:
+                return
+            raise AssertionError('EXPECTED_FAILURE_MISSING')
+
+
+        def tick_process():
+            # Fork inherits only the harness's isolated project/Compose allocation overrides.
+            # Exercise the real root dispatcher, nonblocking lock and nonzero failure mapping.
+            sys.argv = ['operations.py', 'tick']
+            try:
+                ops.main()
+            except BaseException:
+                raise SystemExit(1)
+
+
+    with rehearsal_phase('initial-database-startup'):
+        assert not compose(['ps', '-a', '-q', 'db'], revision=revision).strip()
+        assert not ops.run(['docker', 'volume', 'ls', '-q', '--filter', f'name=^{project}_mysql$'], timeout=10).strip()
+        assert not ops.run(['docker', 'network', 'ls', '-q', '--filter', f'name=^{project}_database$'], timeout=10).strip()
+        compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=240)
+        ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))
+    with rehearsal_phase('initial-migration'):
+        compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+    with rehearsal_phase('core-production-codec-grants'):
+        notification_account_cleanup_proof(ops, revision, image_id)
+        ops.jobs_grants_locked(revision)
+        # Exercise the known existing-installation SELECT revocation, not only fresh setup.
+        sql("GRANT SELECT ON vtc.* TO 'vtc_runtime'@'%';")
+        ops.activation.grants(ops, revision)
+        ops.activation.ingress(ops)
+        compose(['run', '--rm', '--no-deps', 'heartbeat'], revision=revision)
+        sql('CREATE TABLE vtc.rehearsal_reference (id INT PRIMARY KEY, evidence_sha CHAR(64) NOT NULL) ENGINE=InnoDB;')
+        manual_proof_run = uuid.uuid4().hex
+        sentinel = b'fictional-evidence-sentinel-vtc011\n'
+        checksum = hashlib.sha256(sentinel).hexdigest()
+        sql(f"INSERT INTO vtc.rehearsal_reference VALUES (1, '{checksum}');")
+        compose(['up', '-d', '--no-deps', 'app', 'probe', 'proxy'], revision=revision)
+        ops.ready(revision)
+        ops.run(['docker', 'run', '--rm', '--network', 'none', '--user', '1000', '--mount',
+                 f'type=volume,source={project}_evidence,target=/app/private-evidence', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', f'vtc-dashboard:{revision}',
+                 'node', '-e', "require('node:fs').writeFileSync('/app/private-evidence/sentinel.txt','fictional-evidence-sentinel-vtc011\\n');require('node:fs').writeFileSync('/app/private-evidence/.manual-rehearsal-guard',process.env.MANUAL_REHEARSAL_RUN,{mode:0o600,flag:'wx'})"])
+        # Distinct production containers share only the established persistent evidence mount.
+        for phase in ['write', 'read', 'remove']:
+            compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
+                     'node', 'operations/manual-codec-smoke.mjs', phase], revision=revision)
+            print(f'Manual production codec phase: {phase} PASS (full decode, original bytes, offline notice integrity, uid/root mode)', flush=True)
+        runtime_negative = """const mysql=require('mysql2/promise'); const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'}); for(const sql of ['CREATE TABLE forbidden (id INT)','SET GLOBAL max_connections=99','SELECT * FROM mysql.user','SELECT * FROM _vtc_migrations','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','DELETE FROM identity_verifications','UPDATE external_steam_accounts SET steam_id=steam_id','DELETE FROM external_steam_accounts','UPDATE external_steam_changes SET reason=reason','DELETE FROM external_steam_changes','UPDATE event_commands SET result=result','DELETE FROM event_commands','UPDATE event_revisions SET title=title','DELETE FROM event_revisions','UPDATE event_response_revisions SET status=status','DELETE FROM event_response_revisions','UPDATE event_attendance_revisions SET status=status','DELETE FROM event_attendance_revisions','UPDATE event_catalog_pins SET label=label','DELETE FROM event_catalog_pins','UPDATE _vtc_migrations SET state=\\'applying\\'']) {let denied=false;try{await c.query(sql)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
+        compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_negative.replace("const mysql=require('mysql2/promise');", "import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');")], revision=revision)
+        runtime_admissions_limits = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});try{await c.beginTransaction();await c.query('INSERT INTO admissions_limits(bucket,`window`,count) VALUES ?',[Array.from({length:256},(_,i)=>['staff_read:rehearsal'+i,0,1])]);const [deleted]=await c.execute('DELETE FROM admissions_limits WHERE bucket LIKE ? AND `window`<? LIMIT 100',['staff_read:rehearsal%',1]);const [remaining]=await c.query('SELECT COUNT(*) n FROM admissions_limits WHERE bucket LIKE ?',['staff_read:rehearsal%']);if(deleted.affectedRows!==100||Number(remaining[0].n)!==156)throw Error('ADMISSIONS_RUNTIME_LIMIT_CLEANUP_FAILED');}finally{await c.rollback();await c.end();}"""
+        compose(['exec', '-T', 'app', 'node', '--input-type=module', '-e', runtime_admissions_limits], revision=revision)
+        print('Admissions restricted runtime: rate-row insert/read and bounded100-row deletion passed with rollback', flush=True)
+    with rehearsal_phase('core-identity-ingress-acceptance'):
+        ops.maintenance(False)
+        ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
+        proxy_id = compose(['ps', '-q', 'proxy'], revision=revision).decode().strip()
+        for _ in range(30):
+            result = subprocess.run(['docker', 'cp', f'{proxy_id}:/data/caddy/pki/authorities/local/root.crt', str(base / 'test-ca.crt')],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if result.returncode == 0:
+                break
+            time.sleep(1)
+        context = ssl.create_default_context(cafile=str(base / 'test-ca.crt'))
+        os.environ['SSL_CERT_FILE'] = str(base / 'test-ca.crt')
+        token = dict(line.split('=', 1) for line in (base / 'private/operator.env').read_text().splitlines())['OPERATOR_TOKEN']
+
+
+        def get(path, bearer=None, expected=200):
+            request = urllib.request.Request(f'https://proxy{path}', headers={'Authorization': f'Bearer {bearer}'} if bearer else {})
+            try:
+                with urllib.request.urlopen(request, context=context, timeout=5) as response:
+                    status, body = response.status, response.read(8192)
+            except urllib.error.HTTPError as error:
+                status, body = error.code, error.read(8192)
+            assert status == expected, 'HTTP_STATUS_MISMATCH'
+            return body
+
+
+        get('/_operations/release', expected=401)
+        get('/_operations/release', 'incorrect', expected=401)
+        assert json.loads(get('/_operations/release', token))['revision'] == revision
+        # Verify packaged account entry points without claiming hosted identity activation.
+        for path in ['/login', '/account', '/password-recovery', '/password-reset?token=NONFUNCTIONAL_FIXTURE', '/invitation?token=NONFUNCTIONAL_FIXTURE']:
+            request = urllib.request.Request(f'https://proxy{path}', headers={'Accept': 'text/html'})
+            with urllib.request.urlopen(request, context=context, timeout=5) as response:
+                shell = response.read(65536).decode('utf-8')
+                assert response.status == 200, 'ACCOUNT_SHELL_STATUS_FAILED'
+                assert response.headers.get('Referrer-Policy') == 'no-referrer', 'ACCOUNT_REFERRER_HEADER_FAILED'
+                assert response.headers.get('X-Robots-Tag') == 'noindex, nofollow', 'ACCOUNT_NOINDEX_HEADER_FAILED'
+                assert response.headers.get('Cache-Control') == 'no-store', 'ACCOUNT_CACHE_HEADER_FAILED'
+            assert 'content="noindex, nofollow"' in shell, 'ACCOUNT_NOINDEX_META_FAILED'
+            assert 'name="referrer" content="no-referrer"' in shell, 'ACCOUNT_REFERRER_META_FAILED'
+            assert shell.index('history.replaceState') < shell.index('type="module"'), 'ACCOUNT_EARLY_INGRESS_FAILED'
+            assert 'NONFUNCTIONAL_FIXTURE' not in shell, 'ACCOUNT_INPUT_REFLECTION_FAILED'
+            import re
+            assets = re.findall(r'(?:src|href)="(/assets/[^" ]+\.(?:js|css))"', shell)
+            assert assets, 'ACCOUNT_ASSET_REFERENCES_MISSING'
+            for asset in assets:
+                get(asset)
+        print('Packaged account shells: deep links, assets, referrer, noindex and no-store passed', flush=True)
+        for path in ['/evidence/sentinel.txt', '/evidence%2fsentinel.txt', '/private-evidence/sentinel.txt', '/.env', '/uploads/sentinel.txt', '/%65vidence/sentinel.txt']:
+            get(path, expected=404)
+        compose(['stop', 'db'], revision=revision)
+        get('/_operations/release', token, expected=503)
+        compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
+        ops.ready(revision)
+        get('/_operations/release', token)
+        image_id = json.loads(ops.run(["docker", "image", "inspect", f"vtc-dashboard:{revision}"]))[0]["Id"]
+        image_archive = base / 'test-image.tar'
+        ops.run(['docker', 'save', '--output', str(image_archive), f'vtc-dashboard:{revision}'])
+        with ops.lock():
+            ops.release_locked(image_archive, revision, 100, 1, 'auto', image_id)
+        assert ops.current()['runId'] == 100
+        # Install the same reviewed controls through their real staged/fenced update, retaining
+        # this harness's translated mounts and privately resolved synthetic role settings.
+        import update_controls
+        update_controls.o = ops
+        control_source = base / 'private/controls-fixture'
+        control_source.mkdir(mode=0o700)
+        for name in update_controls.FILES:
+            shutil.copyfile(base / name, control_source / name)
+        update_controls.install(control_source)
+        assert (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
+        assert ops.activation.controls_pending(ops, revision, image_id)
+        # The reviewed activation operation validates both roles and re-reads exact narrow grants.
+        identity_secret = uuid.uuid4().hex + uuid.uuid4().hex
+        activation_input = base / 'private/activation-input.env'
+        activation_input.write_text(f'IDENTITY_ENABLED=true\nIDENTITY_SECRET={identity_secret}\nIDENTITY_ORIGIN=https://proxy\nMAIL_MODE=disabled\n')
+        os.chmod(activation_input, 0o600)
+        valid_activation = activation_input.read_bytes()
+        activation_input.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n')
+        expect_failure(lambda: ops.activation.config_operation(ops, revision, image_id, 'validate'))
+        activation_input.write_bytes(valid_activation)
+        sql("UPDATE vtc._vtc_migrations SET state='applying';")
+        expect_failure(lambda: ops.activation.config_operation(ops, revision, image_id, 'validate'))
+        sql("UPDATE vtc._vtc_migrations SET state='applied';")
+        with ops.lock():
+            ops.activation.config_operation(ops, revision, image_id, 'validate')
+            ops.activation.config_operation(ops, revision, image_id, 'apply')
+            ops.activation.config_operation(ops, revision, image_id, 'inspect')
+        assert not ops.activation.controls_pending(ops, revision, image_id)
+        # Exercise the exact root operator probe using only this rehearsal's synthetic CA.
+        with ops.lock():
+            ops.ingress_probe.check(ops, revision, image_id, ca=(base / 'test-ca.crt').read_text())
+        with ops.lock():
+            ops.activation.config_operation(ops, revision, image_id, 'rollback')
+        assert sql('SELECT COUNT(*) FROM vtc.identity_company;').strip() == b'0'
+        print('Identity ingress rehearsal: exact Caddy peer, spoof overwrite, distinct noncolliding durable source slots, 21st denial/global isolation and recreation passed', flush=True)
+        if mode == 'full':
+            acceptance_input = base / 'private/acceptance-input.env'
+            acceptance_input.write_text('VTC_ACCEPTANCE_RECIPIENT=synthetic@example.invalid\n')
+            os.chmod(acceptance_input, 0o600)
+            with ops.lock():
+                # No pre-existing derived role name is adoptable, even with the requested run label.
+                for role in ['runtime', 'jobs', 'migrator']:
+                    for matching_label in [True, False]:
+                        preexisting_run = str(uuid.uuid4())
+                        preexisting_suffix = preexisting_run.replace('-', '')[:16]
+                        preexisting_name = f'{project}-identity-{preexisting_suffix}-{role}'
+                        fixture_id = ops.run(['docker', 'run', '-d', '--name', preexisting_name,
+                                             '--label', f'vtc011.rehearsal={project}', '--label',
+                                             f'vtc.identity-acceptance={preexisting_run if matching_label else uuid.uuid4()}',
+                                             '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                                             'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
+                        expect_failure(lambda: ops.identity_acceptance.operation(ops, revision, image_id,
+                                       'prepare', preexisting_run, local_fixture=True))
+                        retained = json.loads(ops.run(['docker', 'inspect', fixture_id]))[0]
+                        assert retained['Id'] == fixture_id and retained['State']['Running']
+                        assert not (base / 'state/identity-acceptance').exists()
+                        assert not (base / f'private/acceptance-{preexisting_run}').exists()
+                        assert sql(f"SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='vtc_accept_{preexisting_suffix}';").strip() == b'0'
+                        assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User IN ('vtc_ar_{preexisting_suffix}','vtc_aw_{preexisting_suffix}','vtc_am_{preexisting_suffix}');").strip() == b'0'
+                        ops.run(['docker', 'rm', '-f', fixture_id], timeout=20)
+                print('Acceptance name preflight: existing runtime/jobs/migrator IDs and running state preserved for same/wrong run labels before allocation', flush=True)
+                activation_run = str(uuid.uuid4())
+                invoke = lambda mode, identity=activation_run: ops.identity_acceptance.operation(ops, revision, image_id, mode, identity, local_fixture=True)
+                invoke('prepare')
+                expect_failure(lambda: invoke('prepare'))
+                expect_failure(lambda: invoke('inspect', str(uuid.uuid4())))
+                expect_failure(lambda: ops.jobs_locked(revision, image_id))
+                runtime_fixture = base / f'private/acceptance-{activation_run}/runtime.env'
+                runtime_fixture_bytes = runtime_fixture.read_bytes()
+                runtime_fixture.write_text('\n'.join(line for line in runtime_fixture_bytes.decode().splitlines()
+                                                    if not line.startswith('VTC_ACCEPTANCE_RECIPIENT=')) + '\n')
                 try:
-                    expect_failure(lambda: race_invoke('prepare' if role == 'migrator' else
-                                                      'worker' if role == 'jobs' else 'produce'))
+                    expect_failure(lambda: invoke('produce'))
+                    failed_producer = json.loads((base / 'state/identity-acceptance').read_text())
+                    runtime_name = f"{project}-identity-{activation_run.replace('-', '')[:16]}-runtime"
+                    assert failed_producer['phase'] == 'prepared'
+                    assert failed_producer['containers'][runtime_name]['phase'] == 'removed'
+                    assert not ops.run(['docker', 'ps', '-aq', '--filter',
+                                       f"id={failed_producer['containers'][runtime_name]['id']}"]).strip()
+                finally:
+                    runtime_fixture.write_bytes(runtime_fixture_bytes)
+                # The positively owned sentinel/schema/runtime role remains the existing acceptance allocation.
+                # Opt in only this local, fictional fixture to real Events commands under the same grant matrix.
+                runtime_fixture.write_bytes(runtime_fixture_bytes + b'VTC_EVENTS_ACCEPTANCE=synthetic-only\n')
+                invoke('produce')
+                events_result = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+                assert events_result.get('eventsVerified') is True
+                print('Events restricted runtime: create/edit/cancel, own RSVP, attendance, immutable history and exact replay passed with SELECT+INSERT-only receipts/history', flush=True)
+                expect_failure(lambda: invoke('produce'))
+                invoke('inspect')
+                pending = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+                assert pending['state'] == 'queued' and pending['retainedPayload']
+                invoke('worker')
+                invoke('inspect')
+                accepted = json.loads((base / 'state/identity-acceptance-last.json').read_text())
+                assert accepted['state'] == 'simulated' and accepted['purgedPayload'] and accepted['attempts'] == 1
+                invoke('worker')
+                invoke('inspect')
+                assert json.loads((base / 'state/identity-acceptance-last.json').read_text()) == accepted
+                invoke('cleanup')
+                assert not (base / 'state/identity-acceptance').exists()
+                # Fresh pre-existing resources must fail before allocating or mutating anything else.
+                collision_run = str(uuid.uuid4())
+                collision_suffix = collision_run.replace('-', '')[:16]
+                collision_schema = f'vtc_accept_{collision_suffix}'
+                collision_account = f'vtc_ar_{collision_suffix}'
+                sql(f'CREATE DATABASE {collision_schema}; CREATE TABLE {collision_schema}.sentinel (id INT PRIMARY KEY); INSERT INTO {collision_schema}.sentinel VALUES (1);')
+                expect_failure(lambda: invoke('prepare', collision_run))
+                assert not (base / 'state/identity-acceptance').exists()
+                assert sql(f'SELECT id FROM {collision_schema}.sentinel;').strip() == b'1'
+                sql(f'DROP DATABASE {collision_schema};')
+                sql(f"CREATE USER '{collision_account}'@'%' IDENTIFIED BY '{uuid.uuid4().hex}';")
+                expect_failure(lambda: invoke('prepare', collision_run))
+                assert sql(f"SELECT COUNT(*) FROM mysql.user WHERE User='{collision_account}';").strip() == b'1'
+                assert not (base / 'state/identity-acceptance').exists()
+                sql(f"DROP USER '{collision_account}'@'%';")
+                # An interrupted prepared window remains bound, can be cleaned and cannot be adopted.
+                invoke('prepare', collision_run)
+                expect_failure(lambda: invoke('produce', str(uuid.uuid4())))
+                collision_container = f'{project}-identity-{collision_suffix}-runtime'
+                owned_collision_id = ops.run(['docker', 'run', '-d', '--name', collision_container,
+                                             '--label', f'vtc011.rehearsal={project}', '--label',
+                                             f'vtc.identity-acceptance={uuid.uuid4()}', '--network', 'none',
+                                             image_id, 'node', '-e', 'setInterval(()=>{},1000)']).decode().strip()
+                expect_failure(lambda: invoke('produce', collision_run))
+                expect_failure(lambda: invoke('cleanup', collision_run))
+                collision_info = json.loads(ops.run(['docker', 'inspect', owned_collision_id]))[0]
+                assert collision_info['State']['Running'] and (base / 'state/identity-acceptance').exists()
+                # Only this harness created the conflicting fixture; the acceptance wrapper refused it.
+                ops.run(['docker', 'rm', '-f', owned_collision_id], timeout=20)
+                invoke('cleanup', collision_run)
+                # Inject an actual Docker name collision after preflight but immediately before create.
+                # The migrator case specifically exercises failed creation during allocating/finally.
+                for role in ['runtime', 'jobs', 'migrator']:
+                    for matching_label in [True, False]:
+                        race_run = str(uuid.uuid4())
+                        race_suffix = race_run.replace('-', '')[:16]
+                        race_name = f'{project}-identity-{race_suffix}-{role}'
+                        race_invoke = lambda mode: invoke(mode, race_run)
+                        if role != 'migrator':
+                            race_invoke('prepare')
+                            if role == 'jobs':
+                                race_invoke('produce')
+                        original_run = ops.run
+                        race_ids = []
+                        def create_race(args, **kwargs):
+                            if args[:2] == ['docker', 'create'] and '--name' in args and args[args.index('--name') + 1] == race_name:
+                                assert not race_ids
+                                race_ids.append(original_run(['docker', 'run', '-d', '--name', race_name,
+                                    '--label', f'vtc011.rehearsal={project}', '--label',
+                                    f'vtc.identity-acceptance={race_run if matching_label else uuid.uuid4()}',
+                                    '--network', 'none', '--read-only', '--cap-drop', 'ALL', image_id,
+                                    'node', '-e', 'setInterval(()=>{},1000)']).decode().strip())
+                            return original_run(args, **kwargs)
+                        ops.run = create_race
+                        try:
+                            expect_failure(lambda: race_invoke('prepare' if role == 'migrator' else
+                                                              'worker' if role == 'jobs' else 'produce'))
+                        finally:
+                            ops.run = original_run
+                        assert len(race_ids) == 1
+                        race_state = json.loads((base / 'state/identity-acceptance').read_text())
+                        intent = race_state['containers'][race_name]
+                        assert intent['phase'] == 'creating' and 'id' not in intent
+                        expect_failure(lambda: race_invoke('cleanup'))
+                        retained = json.loads(ops.run(['docker', 'inspect', race_ids[0]]))[0]
+                        assert retained['Id'] == race_ids[0] and retained['State']['Running']
+                        ops.run(['docker', 'rm', '-f', race_ids[0]], timeout=20)
+                        expect_failure(lambda: race_invoke('cleanup'))
+                        # Test-only root investigation: the harness created and removed the foreign
+                        # object, observed create rejection, and verifies no CID receipt/unknown object.
+                        # The operator has no automatic uncertain-creation reconciliation command.
+                        receipt_path = base / race_state['directory'] / intent['receipt']
+                        assert not receipt_path.exists() or receipt_path.read_text().strip() == ''
+                        assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
+                        race_state['containers'].pop(race_name)
+                        ops.atomic_json(base / 'state/identity-acceptance', race_state)
+                        race_invoke('cleanup')
+                print('Acceptance create races: same/wrong-run runtime/jobs/migrator IDs and state preserved, failed migrator create never cleans a collision, uncertain markers retained', flush=True)
+                ops.jobs_locked(revision, image_id)
+            print('Identity durable acceptance rehearsal: restricted native bootstrap/login/challenge, terminated producer, ordinary separate worker, purge, duplicate pass and owned cleanup passed; no provider call', flush=True)
+    with rehearsal_phase('core-restricted-domain-profiles'):
+        # Prepared feature grants are applied ONLY inside this synthetic allocation, then
+        # revoked. This does not change activation-grants.json or hosted control state.
+        sql("CREATE TABLE vtc.synthetic_manual_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL) ENGINE=InnoDB;")
+        sql(f"INSERT INTO vtc.synthetic_manual_guard VALUES (1,'{manual_proof_run}');")
+        for role in ['runtime', 'jobs']:
+            sql(f"GRANT SELECT ON vtc.synthetic_manual_guard TO 'vtc_{role}'@'%';")
+        manual_grants = json.loads((base / 'manual-grants.prepared.json').read_text())
+        for role, tables in manual_grants.items():
+            assert role in ['runtime', 'jobs']
+            for table, permissions in tables.items():
+                assert re.fullmatch('[a-z_]+', table)
+                assert all(p in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'UPDATE(source_record_id)', 'UPDATE(lease_until,updated_at)'] for p in permissions)
+                sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_{role}'@'%';")
+        try:
+            for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
+                print(f'Manual restricted grants phase: {phase} STARTED', flush=True)
+                compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                         'node', 'operations/manual-grants-smoke.mjs', phase], revision=revision)
+                print(f'Manual restricted grants phase: {phase} PASS', flush=True)
+        finally:
+            for role, tables in manual_grants.items():
+                for table, permissions in tables.items():
+                    sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+            for role in ['runtime', 'jobs']:
+                sql(f"REVOKE SELECT ON vtc.synthetic_manual_guard FROM 'vtc_{role}'@'%';")
+            sql("DROP TABLE vtc.synthetic_manual_guard;")
+        compose(['run', '--rm', '--no-deps', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
+                 'node', '--input-type=module', '-e', "import {readFileSync,unlinkSync} from 'node:fs';const p='/app/private-evidence/.manual-rehearsal-guard';if(readFileSync(p,'utf8')!==process.env.MANUAL_REHEARSAL_RUN)throw Error('MANUAL_SYNTHETIC_VOLUME_REQUIRED');unlinkSync(p);"], revision=revision)
+        print('Manual restricted grants: runtime draft/upload/submission/review seam; separate worker shared-lock reservation/expiry, denied exclusive locks and immutable writes passed; hosted activation pending', flush=True)
+        if mode == 'manual-only':
+            print('Focused manual production rehearsal passed; baseline acceptance and remaining regressions NOT RUN', flush=True)
+            # Focused completion deliberately creates no full-core handoff receipt.
+            return
+        # The default FULL rehearsal proves prepared adjudication grants only in this owned schema.
+        # Baseline activation permissions are subtracted so cleanup revokes only this proof's deltas.
+        sql("CREATE TABLE vtc.synthetic_notification_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
+        sql(f"INSERT INTO vtc.synthetic_notification_guard VALUES (1,'{manual_proof_run}',NULL);")
+        for role in ['runtime', 'jobs']:
+            sql(f"GRANT SELECT ON vtc.synthetic_notification_guard TO 'vtc_{role}'@'%';")
+        for service, phase in [('trip-decision-seed', 'seed'), ('manual-runtime', 'disabled')]:
+            print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
+            compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                     f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                     'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+            print(f'Notification restricted grants phase: {phase} PASS', flush=True)
+        sql("CREATE TABLE vtc.synthetic_trip_decision_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
+        sql(f"INSERT INTO vtc.synthetic_trip_decision_guard VALUES (1,'{manual_proof_run}',NULL);")
+        for role in ['runtime', 'jobs']:
+            sql(f"GRANT SELECT ON vtc.synthetic_trip_decision_guard TO 'vtc_{role}'@'%';")
+        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'trip-decision-seed',
+                 'node', 'operations/trip-decisions-grants-smoke.mjs', 'seed'], revision=revision)
+        prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
+        notification_grants = json.loads((base / 'notifications-grants.prepared.json').read_text())
+        baseline = json.loads((base / 'activation-grants.json').read_text())
+        deltas = {}
+        for role in ['runtime', 'jobs']:
+            combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
+            for table, permissions in prepared[role].items():
+                combined.setdefault(table, set()).update(permissions)
+            for table, permissions in notification_grants[role].items():
+                combined.setdefault(table, set()).update(permissions)
+            deltas[role] = {}
+            for table, permissions in combined.items():
+                permissions -= set(baseline[role].get(table, []))
+                if not permissions:
+                    continue
+                assert re.fullmatch('[a-z_]+', table)
+                assert all(re.fullmatch(r'SELECT|INSERT|UPDATE|DELETE|UPDATE\([a-z_,]+\)', p) for p in permissions)
+                deltas[role][table] = sorted(permissions)
+                sql(f"GRANT {','.join(sorted(permissions))} ON vtc.{table} TO 'vtc_{role}'@'%';")
+        try:
+            for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
+                print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
+                compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                         'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
+                print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
+            for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker'), ('manual-runtime', 'read')]:
+                print(f'Notification restricted grants phase: {phase} STARTED', flush=True)
+                previous_grants = None
+                revoked = []
+                try:
+                    if phase == 'worker':
+                        assert mode == 'full' and re.fullmatch(r'vtc011-[a-f0-9]{16}', project)
+                        assert sql('SELECT run_id FROM vtc.synthetic_notification_guard WHERE id=1;').decode().strip() == manual_proof_run
+                        previous_grants = sorted(sql("SHOW GRANTS FOR 'vtc_jobs'@'%';").decode().splitlines())
+                        # Restrict only positively owned optional deltas. The combined production role
+                        # still needs other modules' mutations; Notifications must not rely on them.
+                        for table, permissions in deltas['jobs'].items():
+                            mutations = [p for p in permissions if p != 'SELECT' and p not in notification_grants['jobs'].get(table, [])]
+                            if mutations:
+                                revoked.append((table, mutations))
+                                sql(f"REVOKE {','.join(mutations)} ON vtc.{table} FROM 'vtc_jobs'@'%';")
+                        print('Notification worker profile: optional business mutations revoked; own notification/queue writes and Event pending marker retained', flush=True)
+                    compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
+                             f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                             'node', 'operations/notifications-grants-smoke.mjs', phase], revision=revision)
+                finally:
+                    restore_failed = False
+                    for table, permissions in reversed(revoked):
+                        try:
+                            sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_jobs'@'%';")
+                        except Exception:
+                            restore_failed = True
+                    if previous_grants is not None:
+                        restored = sorted(sql("SHOW GRANTS FOR 'vtc_jobs'@'%';").decode().splitlines())
+                        assert not restore_failed and restored == previous_grants, 'NOTIFICATION_JOBS_GRANT_RESTORE_FAILED'
+                        print('Notification worker profile: exact prior table/column grants restored and read back', flush=True)
+                print(f'Notification restricted grants phase: {phase} PASS', flush=True)
+        finally:
+            for role, tables in deltas.items():
+                for table, permissions in tables.items():
+                    sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
+            for role in ['runtime', 'jobs']:
+                sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
+            sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
+            for role in ['runtime', 'jobs']:
+                sql(f"REVOKE SELECT ON vtc.synthetic_notification_guard FROM 'vtc_{role}'@'%';")
+            sql("DROP TABLE vtc.synthetic_notification_guard;")
+        print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
+    with rehearsal_phase('core-worker-cleanup-races'):
+        # Real Docker objects prove absence after a lost removal reply and after an
+        # auto-removal wins the inventory/inspection race. Only the reply boundary is injected.
+        with ops.lock():
+            for boundary in ['inspect', 'remove']:
+                original_run = ops.run
+                fixture_ids = []
+                for service in (['jobs', 'heartbeat'] if boundary == 'inspect' else ['jobs']):
+                    fixture_ids.append(original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
+                        '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-{service}',
+                        '--label', f'vtc011.rehearsal={project}',
+                        '--label', f'com.docker.compose.project={project}',
+                        '--label', f'com.docker.compose.service={service}', image_id,
+                        'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip())
+                injected = []
+                def removal_race(args, **kwargs):
+                    if not injected and boundary == 'inspect' and args[:2] == ['docker', 'inspect']:
+                        original_run(['docker', 'rm', '-f', fixture_ids[0]], timeout=20)
+                        injected.append(boundary)
+                    result = original_run(args, **kwargs)
+                    if not injected and boundary == 'remove' and args[:3] == ['docker', 'rm', '-f']:
+                        injected.append(boundary)
+                        raise RuntimeError('OPERATION_CHILD_FAILED')
+                    return result
+                ops.run = removal_race
+                try:
+                    ops.stop_owned_jobs(revision, image_id)
                 finally:
                     ops.run = original_run
-                assert len(race_ids) == 1
-                race_state = json.loads((base / 'state/identity-acceptance').read_text())
-                intent = race_state['containers'][race_name]
-                assert intent['phase'] == 'creating' and 'id' not in intent
-                expect_failure(lambda: race_invoke('cleanup'))
-                retained = json.loads(ops.run(['docker', 'inspect', race_ids[0]]))[0]
-                assert retained['Id'] == race_ids[0] and retained['State']['Running']
-                ops.run(['docker', 'rm', '-f', race_ids[0]], timeout=20)
-                expect_failure(lambda: race_invoke('cleanup'))
-                # Test-only root investigation: the harness created and removed the foreign
-                # object, observed create rejection, and verifies no CID receipt/unknown object.
-                # The operator has no automatic uncertain-creation reconciliation command.
-                receipt = base / race_state['directory'] / intent['receipt']
-                assert not receipt.exists() or receipt.read_text().strip() == ''
-                assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{race_name}$']).strip()
-                race_state['containers'].pop(race_name)
-                ops.atomic_json(base / 'state/identity-acceptance', race_state)
-                race_invoke('cleanup')
-        print('Acceptance create races: same/wrong-run runtime/jobs/migrator IDs and state preserved, failed migrator create never cleans a collision, uncertain markers retained', flush=True)
-        ops.jobs_locked(revision, image_id)
-    print('Identity durable acceptance rehearsal: restricted native bootstrap/login/challenge, terminated producer, ordinary separate worker, purge, duplicate pass and owned cleanup passed; no provider call', flush=True)
-# Prepared feature grants are applied ONLY inside this synthetic allocation, then
-# revoked. This does not change activation-grants.json or hosted control state.
-sql("CREATE TABLE vtc.synthetic_manual_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL) ENGINE=InnoDB;")
-sql(f"INSERT INTO vtc.synthetic_manual_guard VALUES (1,'{manual_proof_run}');")
-for role in ['runtime', 'jobs']:
-    sql(f"GRANT SELECT ON vtc.synthetic_manual_guard TO 'vtc_{role}'@'%';")
-manual_grants = json.loads((base / 'manual-grants.prepared.json').read_text())
-for role, tables in manual_grants.items():
-    assert role in ['runtime', 'jobs']
-    for table, permissions in tables.items():
-        assert re.fullmatch('[a-z_]+', table)
-        assert all(p in ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'UPDATE(source_record_id)', 'UPDATE(lease_until,updated_at)'] for p in permissions)
-        sql(f"GRANT {','.join(permissions)} ON vtc.{table} TO 'vtc_{role}'@'%';")
-try:
-    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
-        print(f'Manual restricted grants phase: {phase} STARTED', flush=True)
-        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
-                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
-                 'node', 'operations/manual-grants-smoke.mjs', phase], revision=revision)
-        print(f'Manual restricted grants phase: {phase} PASS', flush=True)
-finally:
-    for role, tables in manual_grants.items():
-        for table, permissions in tables.items():
-            sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
-    for role in ['runtime', 'jobs']:
-        sql(f"REVOKE SELECT ON vtc.synthetic_manual_guard FROM 'vtc_{role}'@'%';")
-    sql("DROP TABLE vtc.synthetic_manual_guard;")
-compose(['run', '--rm', '--no-deps', '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'manual-codec',
-         'node', '--input-type=module', '-e', "import {readFileSync,unlinkSync} from 'node:fs';const p='/app/private-evidence/.manual-rehearsal-guard';if(readFileSync(p,'utf8')!==process.env.MANUAL_REHEARSAL_RUN)throw Error('MANUAL_SYNTHETIC_VOLUME_REQUIRED');unlinkSync(p);"], revision=revision)
-print('Manual restricted grants: runtime draft/upload/submission/review seam; separate worker shared-lock reservation/expiry, denied exclusive locks and immutable writes passed; hosted activation pending', flush=True)
-if mode == 'manual-only':
-    print('Focused manual production rehearsal passed; baseline acceptance and remaining regressions NOT RUN', flush=True)
-    sys.exit(0)
-# The default FULL rehearsal proves prepared adjudication grants only in this owned schema.
-# Baseline activation permissions are subtracted so cleanup revokes only this proof's deltas.
-sql("CREATE TABLE vtc.synthetic_trip_decision_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL, refs JSON) ENGINE=InnoDB;")
-sql(f"INSERT INTO vtc.synthetic_trip_decision_guard VALUES (1,'{manual_proof_run}',NULL);")
-for role in ['runtime', 'jobs']:
-    sql(f"GRANT SELECT ON vtc.synthetic_trip_decision_guard TO 'vtc_{role}'@'%';")
-compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
-         f'MANUAL_REHEARSAL_RUN={manual_proof_run}', 'trip-decision-seed',
-         'node', 'operations/trip-decisions-grants-smoke.mjs', 'seed'], revision=revision)
-prepared = json.loads((base / 'trip-decisions-grants.prepared.json').read_text())
-baseline = json.loads((base / 'activation-grants.json').read_text())
-deltas = {}
-for role in ['runtime', 'jobs']:
-    combined = {table: set(permissions) for table, permissions in manual_grants[role].items()}
-    for table, permissions in prepared[role].items():
-        combined.setdefault(table, set()).update(permissions)
-    deltas[role] = {}
-    for table, permissions in combined.items():
-        permissions -= set(baseline[role].get(table, []))
-        if not permissions:
-            continue
-        assert re.fullmatch('[a-z_]+', table)
-        assert all(re.fullmatch(r'SELECT|INSERT|UPDATE|DELETE|UPDATE\([a-z_,]+\)', p) for p in permissions)
-        deltas[role][table] = sorted(permissions)
-        sql(f"GRANT {','.join(sorted(permissions))} ON vtc.{table} TO 'vtc_{role}'@'%';")
-try:
-    for service, phase in [('manual-runtime', 'produce'), ('manual-worker', 'worker')]:
-        print(f'Trip decision restricted grants phase: {phase} STARTED', flush=True)
-        compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only', '-e',
-                 f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
-                 'node', 'operations/trip-decisions-grants-smoke.mjs', phase], revision=revision)
-        print(f'Trip decision restricted grants phase: {phase} PASS', flush=True)
-finally:
-    for role, tables in deltas.items():
-        for table, permissions in tables.items():
-            sql(f"REVOKE {','.join(permissions)} ON vtc.{table} FROM 'vtc_{role}'@'%';")
-    for role in ['runtime', 'jobs']:
-        sql(f"REVOKE SELECT ON vtc.synthetic_trip_decision_guard FROM 'vtc_{role}'@'%';")
-    sql("DROP TABLE vtc.synthetic_trip_decision_guard;")
-print('Trip decision restricted grants: runtime accept/replay/derived correction, separate worker catch-up/duplicate pass, source/history/DDL denials passed; hosted activation pending', flush=True)
-# Real Docker objects prove absence after a lost removal reply and after an
-# auto-removal wins the inventory/inspection race. Only the reply boundary is injected.
-with ops.lock():
-    for boundary in ['inspect', 'remove']:
-        original_run = ops.run
-        fixture_ids = []
-        for service in (['jobs', 'heartbeat'] if boundary == 'inspect' else ['jobs']):
-            fixture_ids.append(original_run(['docker', 'run', '-d', '--rm', '--network', 'none',
-                '--read-only', '--cap-drop', 'ALL', '--name', f'{project}-{service}',
-                '--label', f'vtc011.rehearsal={project}',
-                '--label', f'com.docker.compose.project={project}',
-                '--label', f'com.docker.compose.service={service}', image_id,
-                'node', '-e', 'setTimeout(()=>{},60000)'], timeout=15).decode().strip())
-        injected = []
-        def removal_race(args, **kwargs):
-            if not injected and boundary == 'inspect' and args[:2] == ['docker', 'inspect']:
-                original_run(['docker', 'rm', '-f', fixture_ids[0]], timeout=20)
-                injected.append(boundary)
-            result = original_run(args, **kwargs)
-            if not injected and boundary == 'remove' and args[:3] == ['docker', 'rm', '-f']:
-                injected.append(boundary)
-                raise RuntimeError('OPERATION_CHILD_FAILED')
-            return result
-        ops.run = removal_race
+                    # The fixture ID, never a rediscovered/replacement name, owns fallback cleanup.
+                    remaining = []
+                    for fixture_id in fixture_ids:
+                        if original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10).strip():
+                            remaining.append(fixture_id)
+                    if remaining:
+                        original_run(['docker', 'rm', '-f', *remaining], timeout=20)
+                assert injected == [boundary]
+                assert not remaining
+                assert not (base / 'state/recovery-required').exists()
+                assert not (base / 'private/maintenance/enabled').exists()
+        print('Worker cleanup race rehearsal: real Docker partial-batch disappearance, validated survivor removal and lost removal reply recovered only after absence proof', flush=True)
+    with rehearsal_phase('core-durable-jobs'):
+        with ops.lock():
+            heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+            ops.tick_locked(revision, image_id)
+            assert int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip()) == heartbeat_before + 1
+        # Compose config has resolved env_file. The heartbeat fixes its schema but reads MYSQL_HOST;
+        # its own container loopback has no MySQL server and cannot reach a host/external endpoint.
+        # Real CLI failures, not replaced operations: keep diagnostics private and restore exact config.
+        for service, setting, expected, unavailable in [
+                ('jobs', 'MYSQL_DATABASE', 'vtc', 'synthetic_unavailable'),
+                ('heartbeat', 'MYSQL_HOST', 'db', '127.0.0.1')]:
+            config_path = base / 'compose.yaml'
+            original = config_path.read_bytes()
+            heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+            started = time.monotonic()
+            try:
+                injected = json.loads(original)
+                assert injected['services'][service]['environment'][setting] == expected
+                injected['services'][service]['environment'][setting] = unavailable
+                config_path.write_text(json.dumps(injected))
+                child = multiprocessing.Process(target=tick_process)
+                child.start()
+                child.join(timeout=330)
+                if child.is_alive():
+                    child.kill()
+                    child.join(timeout=5)
+                    raise AssertionError('TICK_REHEARSAL_DEADLINE')
+                assert child.exitcode == 1
+            finally:
+                config_path.write_bytes(original)
+            tick = json.loads((base / 'state/tick-last.json').read_text())
+            assert tick['status'] == 'failed' and 'completedUtc' not in tick
+            assert tick['steps'][service]['status'] == 'failed'
+            assert tick['steps'][service]['category'] == 'client_failed'
+            other = 'heartbeat' if service == 'jobs' else 'jobs'
+            assert tick['steps'][other]['status'] == 'completed'
+            assert all(step['durationMs'] >= 0 and step['attemptedUtc'] >= tick['attemptedUtc']
+                       for step in tick['steps'].values())
+            heartbeat_after = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
+            assert heartbeat_after == heartbeat_before + (1 if service == 'jobs' else 0)
+            for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']:
+                assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{project}-{suffix}$'], timeout=10).strip()
+            assert not (base / 'state/recovery-required').exists()
+            assert not (base / 'private/maintenance/enabled').exists()
+            print(f'Durable tick rehearsal: {service} failure, nonzero exit, safe failed result, writer routing and absence passed ({int((time.monotonic() - started) * 1000)} ms)', flush=True)
+        with ops.lock():
+            acceptance_run = str(uuid.uuid4())
+            for mode in ['prepare', 'seed', 'seed', 'contend']:
+                ops.jobs_acceptance_locked(revision, image_id, mode, acceptance_run)
+            expect_failure(lambda: ops.jobs_locked(revision, image_id))
+            ops.tick_locked(revision, image_id)
+            assert json.loads((base / 'state/tick-last.json').read_text())['steps']['jobs']['status'] == 'skipped_acceptance_window'
+            time.sleep(1.1)
+            ops.jobs_acceptance_locked(revision, image_id, 'run', acceptance_run)
+            ops.jobs_acceptance_locked(revision, image_id, 'inspect', acceptance_run)
+            rows = sql(f"SELECT COUNT(*),SUM(touches) FROM vtc.synthetic_job_counter WHERE run_id='{acceptance_run}';")
+            assert b'20\t20' in rows
+            ops.jobs_acceptance_locked(revision, image_id, 'cleanup', acceptance_run)
+            assert b'0' in sql('SELECT COUNT(*) FROM vtc.synthetic_job_counter;')
+            ops.tick_locked(revision, image_id)
+        jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});await c.beginTransaction();for(const t of ['identity_company','identity_memberships','identity_users','identity_challenges'])await c.query('SELECT * FROM '+t+' LIMIT 1 FOR SHARE');await c.rollback();for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','DELETE FROM identity_verifications','UPDATE external_steam_accounts SET steam_id=steam_id','DELETE FROM external_steam_accounts','UPDATE external_steam_changes SET reason=reason','DELETE FROM external_steam_changes','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)','SELECT * FROM external_steam_accounts','SELECT * FROM external_steam_proofs','SELECT * FROM external_truckers_cache']){let denied=false;try{await c.query(s)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
+        compose(['run', '--rm', '--no-deps', 'jobs', 'node', '--input-type=module', '-e', jobs_negative], revision=revision)
+        mail_peer = f'{project}-mail-egress-peer'
+        mail_alias = 'mail-egress-fixture.invalid'
         try:
-            ops.stop_owned_jobs(revision, image_id)
+            ops.run(['docker', 'run', '-d', '--name', mail_peer, '--label', f'vtc011.rehearsal={project}',
+                     '--network', f'{project}_mail-egress', '--network-alias', mail_alias,
+                     '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+                     '--memory', '64m', '--pids-limit', '32', image_id, 'node', '-e',
+                     "require('node:net').createServer(s=>s.end('mail-egress-fixture')).listen(8443,'0.0.0.0')"])
+            positive = """const s=require('node:net').connect(8443,'mail-egress-fixture.invalid');s.setTimeout(3000);s.on('data',b=>{if(b.toString()!=='mail-egress-fixture')process.exit(1);s.end()});s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1));"""
+            compose(['run', '--rm', '--no-deps', 'jobs', 'node', '-e', positive], revision=revision)
+            peer = json.loads(ops.run(['docker', 'inspect', mail_peer]))[0]
+            peer_ip = peer['NetworkSettings']['Networks'][f'{project}_mail-egress']['IPAddress']
+            assert re.fullmatch(r'[0-9.]+', peer_ip)
+            negative = """const dns=require('node:dns').promises;const net=require('node:net');(async()=>{try{await dns.lookup('mail-egress-fixture.invalid');process.exit(1)}catch(e){if(!['ENOTFOUND','EAI_AGAIN'].includes(e.code))process.exit(1)}const s=net.connect(8443,process.argv[1]);s.setTimeout(2000);s.on('connect',()=>process.exit(1));s.on('error',()=>{s.destroy()});s.on('timeout',()=>{s.destroy()})})().catch(()=>process.exit(1));"""
+            for isolated_network in ['database', 'frontend']:
+                ops.run(['docker', 'run', '--rm', '--network', f'{project}_{isolated_network}',
+                         '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+                         '--memory', '64m', '--pids-limit', '32', image_id, 'node', '-e', negative, peer_ip], timeout=30)
+            egress = json.loads(ops.run(['docker', 'network', 'inspect', f'{project}_mail-egress']))[0]
+            assert not egress['Internal'] and egress['Driver'] == 'bridge'
+            print('Mail network rehearsal: worker DNS/TCP, dedicated NAT bridge and database/frontend isolation passed; no provider call', flush=True)
         finally:
-            ops.run = original_run
-            # The fixture ID, never a rediscovered/replacement name, owns fallback cleanup.
-            remaining = []
-            for fixture_id in fixture_ids:
-                if original_run(['docker', 'ps', '-aq', '--no-trunc', '--filter', f'id={fixture_id}'], timeout=10).strip():
-                    remaining.append(fixture_id)
-            if remaining:
-                original_run(['docker', 'rm', '-f', *remaining], timeout=20)
-        assert injected == [boundary]
-        assert not remaining
-        assert not (base / 'state/recovery-required').exists()
-        assert not (base / 'private/maintenance/enabled').exists()
-print('Worker cleanup race rehearsal: real Docker partial-batch disappearance, validated survivor removal and lost removal reply recovered only after absence proof', flush=True)
-with ops.lock():
-    heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
-    ops.tick_locked(revision, image_id)
-    assert int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip()) == heartbeat_before + 1
-# Compose config has resolved env_file. The heartbeat fixes its schema but reads MYSQL_HOST;
-# its own container loopback has no MySQL server and cannot reach a host/external endpoint.
-# Real CLI failures, not replaced operations: keep diagnostics private and restore exact config.
-for service, setting, expected, unavailable in [
-        ('jobs', 'MYSQL_DATABASE', 'vtc', 'synthetic_unavailable'),
-        ('heartbeat', 'MYSQL_HOST', 'db', '127.0.0.1')]:
-    config_path = base / 'compose.yaml'
-    original = config_path.read_bytes()
-    heartbeat_before = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
-    started = time.monotonic()
-    try:
-        injected = json.loads(original)
-        assert injected['services'][service]['environment'][setting] == expected
-        injected['services'][service]['environment'][setting] = unavailable
-        config_path.write_text(json.dumps(injected))
-        child = multiprocessing.Process(target=tick_process)
-        child.start()
-        child.join(timeout=330)
-        if child.is_alive():
-            child.kill()
-            child.join(timeout=5)
-            raise AssertionError('TICK_REHEARSAL_DEADLINE')
-        assert child.exitcode == 1
-    finally:
-        config_path.write_bytes(original)
-    tick = json.loads((base / 'state/tick-last.json').read_text())
-    assert tick['status'] == 'failed' and 'completedUtc' not in tick
-    assert tick['steps'][service]['status'] == 'failed'
-    assert tick['steps'][service]['category'] == 'client_failed'
-    other = 'heartbeat' if service == 'jobs' else 'jobs'
-    assert tick['steps'][other]['status'] == 'completed'
-    assert all(step['durationMs'] >= 0 and step['attemptedUtc'] >= tick['attemptedUtc']
-               for step in tick['steps'].values())
-    heartbeat_after = int(sql('SELECT sequence FROM vtc_operations.heartbeat;').decode().strip())
-    assert heartbeat_after == heartbeat_before + (1 if service == 'jobs' else 0)
-    for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']:
-        assert not ops.run(['docker', 'ps', '-aq', '--filter', f'name=^/{project}-{suffix}$'], timeout=10).strip()
-    assert not (base / 'state/recovery-required').exists()
-    assert not (base / 'private/maintenance/enabled').exists()
-    print(f'Durable tick rehearsal: {service} failure, nonzero exit, safe failed result, writer routing and absence passed ({int((time.monotonic() - started) * 1000)} ms)', flush=True)
-with ops.lock():
-    acceptance_run = str(uuid.uuid4())
-    for mode in ['prepare', 'seed', 'seed', 'contend']:
-        ops.jobs_acceptance_locked(revision, image_id, mode, acceptance_run)
-    expect_failure(lambda: ops.jobs_locked(revision, image_id))
-    ops.tick_locked(revision, image_id)
-    assert json.loads((base / 'state/tick-last.json').read_text())['steps']['jobs']['status'] == 'skipped_acceptance_window'
-    time.sleep(1.1)
-    ops.jobs_acceptance_locked(revision, image_id, 'run', acceptance_run)
-    ops.jobs_acceptance_locked(revision, image_id, 'inspect', acceptance_run)
-    rows = sql(f"SELECT COUNT(*),SUM(touches) FROM vtc.synthetic_job_counter WHERE run_id='{acceptance_run}';")
-    assert b'20\t20' in rows
-    ops.jobs_acceptance_locked(revision, image_id, 'cleanup', acceptance_run)
-    assert b'0' in sql('SELECT COUNT(*) FROM vtc.synthetic_job_counter;')
-    ops.tick_locked(revision, image_id)
-jobs_negative = """import {createRequire} from 'node:module';const mysql=createRequire(import.meta.resolve('@vtc/db'))('mysql2/promise');const c=await mysql.createConnection({host:process.env.MYSQL_HOST,user:process.env.MYSQL_USER,password:process.env.MYSQL_PASSWORD,database:'vtc'});await c.beginTransaction();for(const t of ['identity_company','identity_memberships','identity_users','identity_challenges'])await c.query('SELECT * FROM '+t+' LIMIT 1 FOR SHARE');await c.rollback();for(const s of ['CREATE TABLE forbidden_jobs (id INT)','UPDATE outbox_events SET schema_version=99','DELETE FROM outbox_events','UPDATE identity_users SET email_verified=1','UPDATE audit_entries SET reason=reason','DELETE FROM audit_entries','DELETE FROM identity_verifications','UPDATE external_steam_accounts SET steam_id=steam_id','DELETE FROM external_steam_accounts','UPDATE external_steam_changes SET reason=reason','DELETE FROM external_steam_changes','UPDATE _vtc_migrations SET state=\\'applying\\'','UPDATE job_effect_receipts SET committed_at=UTC_TIMESTAMP(3)','SELECT * FROM external_steam_accounts','SELECT * FROM external_steam_proofs','SELECT * FROM external_truckers_cache']){let denied=false;try{await c.query(s)}catch(e){if(![1044,1142,1143,1227].includes(e.errno))process.exit(1);denied=true}if(!denied)process.exit(1)}await c.end();"""
-compose(['run', '--rm', '--no-deps', 'jobs', 'node', '--input-type=module', '-e', jobs_negative], revision=revision)
-mail_peer = f'{project}-mail-egress-peer'
-mail_alias = 'mail-egress-fixture.invalid'
-try:
-    ops.run(['docker', 'run', '-d', '--name', mail_peer, '--label', f'vtc011.rehearsal={project}',
-             '--network', f'{project}_mail-egress', '--network-alias', mail_alias,
-             '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-             '--memory', '64m', '--pids-limit', '32', image_id, 'node', '-e',
-             "require('node:net').createServer(s=>s.end('mail-egress-fixture')).listen(8443,'0.0.0.0')"])
-    positive = """const s=require('node:net').connect(8443,'mail-egress-fixture.invalid');s.setTimeout(3000);s.on('data',b=>{if(b.toString()!=='mail-egress-fixture')process.exit(1);s.end()});s.on('error',()=>process.exit(1));s.on('timeout',()=>process.exit(1));"""
-    compose(['run', '--rm', '--no-deps', 'jobs', 'node', '-e', positive], revision=revision)
-    peer = json.loads(ops.run(['docker', 'inspect', mail_peer]))[0]
-    peer_ip = peer['NetworkSettings']['Networks'][f'{project}_mail-egress']['IPAddress']
-    assert re.fullmatch(r'[0-9.]+', peer_ip)
-    negative = """const dns=require('node:dns').promises;const net=require('node:net');(async()=>{try{await dns.lookup('mail-egress-fixture.invalid');process.exit(1)}catch(e){if(!['ENOTFOUND','EAI_AGAIN'].includes(e.code))process.exit(1)}const s=net.connect(8443,process.argv[1]);s.setTimeout(2000);s.on('connect',()=>process.exit(1));s.on('error',()=>{s.destroy()});s.on('timeout',()=>{s.destroy()})})().catch(()=>process.exit(1));"""
-    for isolated_network in ['database', 'frontend']:
-        ops.run(['docker', 'run', '--rm', '--network', f'{project}_{isolated_network}',
-                 '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
-                 '--memory', '64m', '--pids-limit', '32', image_id, 'node', '-e', negative, peer_ip], timeout=30)
-    egress = json.loads(ops.run(['docker', 'network', 'inspect', f'{project}_mail-egress']))[0]
-    assert not egress['Internal'] and egress['Driver'] == 'bridge'
-    print('Mail network rehearsal: worker DNS/TCP, dedicated NAT bridge and database/frontend isolation passed; no provider call', flush=True)
-finally:
-    ops.run(['docker', 'rm', '-f', mail_peer], timeout=20)
-sql("REVOKE UPDATE ON vtc.mail_deliveries FROM 'vtc_jobs'@'%';")
-paused_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
-assert b'\"mailCleanup\":\"configuration_pending\"' in paused_cleanup
-with ops.lock():
-    ops.jobs_grants_locked(revision)
-completed_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
-assert b'\"mailCleanup\":\"completed\"' in completed_cleanup
-print('Durable jobs rehearsal: empty pass, duplicate seed, consumers, retry/chaining, shared identity reads, cleanup grant notice and denied writes passed', flush=True)
-with rehearsal_phase('tail-seed-release-guards'):
-    with ops.lock():
-        ops.seed_synthetic_locked(revision)
-    expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))
-    expect_failure(lambda: ops.release_locked(image_archive, revision, 101, 1, 'auto', 'sha256:' + '0' * 64))
-    assert ops.current()['runId'] == 100
-with rehearsal_phase('tail-concurrent-releases'):
-    # Two actual release operations acquire the same lock and retain ordering/promotion.
-    def deploy_release(run_id, queue):
+            ops.run(['docker', 'rm', '-f', mail_peer], timeout=20)
+        sql("REVOKE UPDATE ON vtc.mail_deliveries FROM 'vtc_jobs'@'%';")
+        paused_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
+        assert b'\"mailCleanup\":\"configuration_pending\"' in paused_cleanup
         with ops.lock():
-            queue.put(run_id)
-            ops.release_locked(image_archive, revision, run_id, 1, 'auto', image_id)
-    release_queue = multiprocessing.Queue()
-    first_release = multiprocessing.Process(target=deploy_release, args=(101, release_queue))
-    second_release = multiprocessing.Process(target=deploy_release, args=(102, release_queue))
-    first_release.start()
-    assert release_queue.get(timeout=10) == 101
-    second_release.start()
-    assert release_queue.get(timeout=120) == 102
-    first_release.join(timeout=120); second_release.join(timeout=120)
-    assert first_release.exitcode == 0 and second_release.exitcode == 0 and ops.current()['runId'] == 102
-with rehearsal_phase('tail-healthy-rebuild'):
-    # A healthy same-SHA rebuild can be accepted while retaining its predecessor by ID.
-    rebuilt_context = io.BytesIO()
-    rebuilt_dockerfile = f'FROM vtc-dashboard:{revision}\nLABEL vtc011.variant=healthy-rebuild\n'.encode()
-    with tarfile.open(fileobj=rebuilt_context, mode='w') as archive:
-        entry = tarfile.TarInfo('Dockerfile'); entry.size = len(rebuilt_dockerfile)
-        archive.addfile(entry, io.BytesIO(rebuilt_dockerfile))
-    rebuilt_tag = f'{project}:rebuilt'
-    ops.run(['docker', 'build', '-t', rebuilt_tag, '-'], data=rebuilt_context.getvalue(), timeout=180)
-    rebuilt_id = json.loads(ops.run(['docker', 'image', 'inspect', rebuilt_tag]))[0]['Id']
-    assert rebuilt_id != image_id
-    ops.run(['docker', 'tag', rebuilt_id, f'vtc-dashboard:{revision}'])
-    rebuilt_archive = base / 'rebuilt-image.tar'
-    ops.run(['docker', 'save', '--output', str(rebuilt_archive), f'vtc-dashboard:{revision}'])
-    with ops.lock():
-        ops.release_locked(rebuilt_archive, revision, 103, 1, 'auto', rebuilt_id)
-    assert ops.current()['imageId'] == rebuilt_id and ops.current()['runId'] == 103
-    assert json.loads((base / 'state/previous.json').read_text())['imageId'] == image_id
-    assert json.loads((base / 'state/exports' / ops.current()['backup'] / 'manifest.json').read_text())['imageId'] == image_id
-    image_id = rebuilt_id
-    image_archive = rebuilt_archive
-with rehearsal_phase('tail-unhealthy-artifact'):
-    # A rebuilt artifact for the SAME source SHA has a different immutable image and
-    # actually returns HTTP 503. Loading it deliberately overwrites the revision tag.
-    unhealthy_tag = f'{project}:unhealthy'
-    unhealthy_script = b"""import {createServer} from 'node:http';
-import {writeFileSync} from 'node:fs';
-createServer((request,response)=>{
-  if(request.url==='/health/ready') {
-    writeFileSync('/app/private-evidence/unhealthy-http-observed.txt','HTTP_503_OBSERVED\\n');
-    response.writeHead(503).end('SYNTHETIC_UNAVAILABLE');
-  } else response.writeHead(200).end('SYNTHETIC_LIVE');
-}).listen(3000,'0.0.0.0');
-"""
-    dockerfile = (f'FROM vtc-dashboard:{revision}\nCOPY --chown=node:node unhealthy.mjs /app/operations/unhealthy.mjs\n'
-                  f'LABEL vtc011.rehearsal={project}\nCMD ["node","operations/unhealthy.mjs"]\n').encode()
-    context_tar = io.BytesIO()
-    with tarfile.open(fileobj=context_tar, mode='w') as archive:
-        for name, content in [('Dockerfile', dockerfile), ('unhealthy.mjs', unhealthy_script)]:
-            entry = tarfile.TarInfo(name); entry.size = len(content); archive.addfile(entry, io.BytesIO(content))
-    ops.run(['docker', 'build', '-t', unhealthy_tag, '-'], data=context_tar.getvalue(), timeout=180)
-    unhealthy_id = json.loads(ops.run(['docker', 'image', 'inspect', unhealthy_tag]))[0]['Id']
-    assert unhealthy_id != image_id
-    ops.run(['docker', 'tag', unhealthy_id, f'vtc-dashboard:{revision}'])
-    unhealthy_archive = base / 'unhealthy-image.tar'
-    ops.run(['docker', 'save', '--output', str(unhealthy_archive), f'vtc-dashboard:{revision}'])
-with rehearsal_phase('tail-unhealthy-release'):
-    accepted_metadata = (base / 'state/current.json').read_bytes()
-    accepted_previous = (base / 'state/previous.json').read_bytes()
-    # Only the attempt count changes in this test; every attempt still performs the
-    # production HTTP request. Production retains its 30-attempt bound.
-    production_attempts = ops.READINESS_ATTEMPTS
-    ops.READINESS_ATTEMPTS = 5
-    with ops.lock():
-        expect_failure(lambda: ops.release_locked(unhealthy_archive, revision, 104, 1, 'auto', unhealthy_id))
-    ops.READINESS_ATTEMPTS = production_attempts
-    assert (base / 'state/current.json').read_bytes() == accepted_metadata
-    assert (base / 'state/previous.json').read_bytes() == accepted_previous
-    assert ops.current()['runId'] == 103 and ops.current()['imageId'] == image_id
-    assert not (base / 'private/maintenance/enabled').exists() and not (base / 'state/recovery-required').exists()
-    assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == unhealthy_id
-    for service in ['app', 'probe']:
-        container = compose(['ps', '-q', service], revision=revision).decode().strip()
-        assert json.loads(ops.run(['docker', 'inspect', container]))[0]['Image'] == image_id
-    assert json.loads(get('/_operations/readiness', token))['revision'] == revision
-    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-    evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
-    compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
-with rehearsal_phase('tail-export'):
-    ops.fenced(revision)
-    with ops.lock():
-        export_id = ops.export_locked(revision)
-    directory, manifest = ops.validate_export(export_id)
-    assert manifest['evidenceFiles']['sentinel.txt']['sha256'] == checksum
-    assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
-    assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
-    assert manifest['files']['database.sql']['bytes'] > 0
-with rehearsal_phase('tail-encrypted-copy'):
-    # Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
-    # This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
-    copy_directory = base / 'private/copy-fixture'
-    copy_directory.mkdir(mode=0o700)
-    export_tar = copy_directory / 'export.tar'
-    with tarfile.open(export_tar, 'w') as archive:
-        for name in ['database.sql', 'evidence.tar', 'manifest.json']:
-            archive.add(directory / name, arcname=name)
-    key = base / 'private/recovery-test.key'
-    encrypted = copy_directory / 'export.encrypted'
-    decrypted = copy_directory / 'recovered.tar'
-    for args, data in [(['key', str(key)], None), (['seal', str(encrypted), str(key)], export_tar.read_bytes()),
-                       (['open', str(encrypted), str(key), str(decrypted)], None)]:
-        subprocess.run(['node', str(base / 'recovery-copy.mjs'), *args], input=data, check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    recovered_id = uuid.uuid4().hex
-    recovered_directory = base / 'state/exports' / recovered_id
-    recovered_directory.mkdir(mode=0o700)
-    with tarfile.open(decrypted, 'r:') as archive:
-        assert set(archive.getnames()) == {'database.sql', 'evidence.tar', 'manifest.json'}
-        for entry in archive.getmembers():
-            assert entry.isfile()
-            (recovered_directory / entry.name).write_bytes(archive.extractfile(entry).read())
-with rehearsal_phase('tail-restore'):
-    with ops.lock():
-        restored_project = ops.restore_locked(recovered_id)
-with rehearsal_phase('tail-restored-references'):
-    # Restore helper stops destination after verifying ledger/files. Restart only that isolated DB for references.
-    ops.fenced(revision)
-    compose(['stop', 'db'], revision=revision)
-    compose(['up', '-d', '--wait', 'db'], revision=revision, project=restored_project, timeout=120)
-    restored_sql = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B', '-e',
-                            'SELECT evidence_sha FROM vtc.rehearsal_reference WHERE id=1; SELECT state FROM vtc._vtc_migrations; SELECT sequence FROM vtc_operations.heartbeat;'], revision=revision, project=restored_project)
-    assert checksum.encode() in restored_sql and b'applied' in restored_sql and b'1' in restored_sql
-    compose(['stop', 'db'], revision=revision, project=restored_project)
-    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
-with rehearsal_phase('tail-corrupt-export'):
-    # Damage detection must precede database/volume actions and must not mutate the active sentinel.
-    original = (directory / 'database.sql').read_bytes()
-    (directory / 'database.sql').write_bytes(original + b'corrupt')
-    expect_failure(lambda: ops.restore_locked(export_id))
-    (directory / 'database.sql').write_bytes(original)
-    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-    compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe'], revision=revision)
-    ops.ready(revision)
-    assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
-with rehearsal_phase('tail-dirty-migration'):
-    sql("UPDATE vtc._vtc_migrations SET state='applying';")
-    with ops.lock():
-        expect_failure(lambda: ops.release_locked(image_archive, revision, 105, 1, 'auto', image_id))
-    assert ops.current()['runId'] == 103 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
-    compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)  # Synthetic root-only inspection, writers remain fenced.
-    assert b'applying' in sql('SELECT state FROM vtc._vtc_migrations;')
-    expect_failure(lambda: compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision))
-with rehearsal_phase('tail-operation-lock'):
-    # Real cross-process serialization of the same flock used by every release/export/cron command.
-    def hold(queue):
+            ops.jobs_grants_locked(revision)
+        completed_cleanup = compose(['run', '--rm', '--no-deps', 'jobs', 'node', 'dist/jobs.js', 'run'], revision=revision)
+        assert b'\"mailCleanup\":\"completed\"' in completed_cleanup
+        print('Durable jobs rehearsal: empty pass, duplicate seed, consumers, retry/chaining, shared identity reads, cleanup grant notice and denied writes passed', flush=True)
+
+    receipt(ops, 'core', {'imageId': image_id, 'checksum': checksum, 'archive': str(image_archive), 'currentSha256': ops.digest(base / 'state/current.json'), 'composeSha256': ops.digest(base / 'compose.yaml')})
+    print('Synthetic deployment core passed; same-allocation recovery is required', flush=True)
+
+
+def handoff_context():
+    base = pathlib.Path('/opt/vtc-development')
+    import operations as ops
+    project, revision, volume = os.environ['REHEARSAL_PROJECT'], os.environ['REHEARSAL_REVISION'], os.environ['REHEARSAL_VOLUME']
+    ops.PROJECT = project
+    state = json.loads((base / 'state/rehearsal-core.json').read_text())
+    assert state['binding'] == binding() and 0 <= time.time() - state['completedUtc'] < 7200
+    assert state['currentSha256'] == ops.digest(base / 'state/current.json')
+    assert state['composeSha256'] == ops.digest(base / 'compose.yaml')
+    initial_image_id = image_id = state['imageId']
+    ops.validate_image(image_id, revision)
+    assert ops.current()['imageId'] == image_id and ops.current()['runId'] == 100
+    checksum, image_archive = state['checksum'], pathlib.Path(state['archive'])
+    assert image_archive == base / 'test-image.tar' and image_archive.is_file()
+    config = json.loads((base / 'compose.yaml').read_text())
+    original_compose = ops.compose
+    # Each group is a fresh Root process/container; restore core's scoped transport prerequisites.
+    ops.run(['docker', 'network', 'connect', f'{project}_frontend', os.environ['HOSTNAME']])
+    os.environ['SSL_CERT_FILE'] = str(base / 'test-ca.crt')
+    context = ssl.create_default_context(cafile=str(base / 'test-ca.crt'))
+    token = dict(line.split('=', 1) for line in (base / 'private/operator.env').read_text().splitlines())['OPERATOR_TOKEN']
+    def compose(args, *, revision, image_id=None, project=project, **kwargs):
+        selected_image = image_id or (ops.accepted_image_id(revision) if ops.current() else initial_image_id)
+        if project != ops.PROJECT:
+            # Compose's explicit volume names must be allocated independently for each restore.
+            restored = json.loads(json.dumps(config))
+            for name, value in restored['volumes'].items():
+                if not value.get('external'):
+                    value['name'] = f'{project}_{name}'
+            for name, value in restored['networks'].items():
+                value['name'] = f'{project}_{name}'
+            file = base / f'{project}.json'
+            file.write_text(json.dumps(restored))
+            return ops.run(['docker', 'compose', '-p', project, '-f', str(file), *args], revision=revision, image_id=selected_image, **kwargs)
+        return original_compose(args, revision=revision, image_id=selected_image, project=project, **kwargs)
+
+
+    ops.compose = compose
+
+
+    def sql(statement):
+        return compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B'],
+                       revision=revision, data=statement.encode())
+
+
+    def expect_failure(callback):
+        try:
+            callback()
+        except Exception:
+            return
+        raise AssertionError('EXPECTED_FAILURE_MISSING')
+
+
+    def tick_process():
+        # Fork inherits only the harness's isolated project/Compose allocation overrides.
+        # Exercise the real root dispatcher, nonblocking lock and nonzero failure mapping.
+        sys.argv = ['operations.py', 'tick']
+        try:
+            ops.main()
+        except BaseException:
+            raise SystemExit(1)
+
+
+    def get(path, bearer=None, expected=200):
+        request = urllib.request.Request(f'https://proxy{path}', headers={'Authorization': f'Bearer {bearer}'} if bearer else {})
+        try:
+            with urllib.request.urlopen(request, context=context, timeout=5) as response:
+                status, body = response.status, response.read(8192)
+        except urllib.error.HTTPError as error:
+            status, body = error.code, error.read(8192)
+        assert status == expected, 'HTTP_STATUS_MISMATCH'
+        return body
+
+    return base, ops, project, revision, volume, image_id, checksum, image_archive, config, compose, sql, expect_failure, get, token
+
+
+def recovery():
+    base, ops, project, revision, volume, image_id, checksum, image_archive, config, compose, sql, expect_failure, get, token = handoff_context()
+    assert not (base / 'state/rehearsal-recovery.json').exists()
+    if os.environ.get('REHEARSAL_REQUIRE_WINDOW') == 'true':
+        window = json.loads((base / 'state/rehearsal-window.json').read_text())
+        assert window['binding'] == binding() and window['coreSha256'] == ops.digest(base / 'state/rehearsal-core.json')
+    with rehearsal_phase('tail-seed-release-guards'):
         with ops.lock():
-            queue.put(time.monotonic())
-            time.sleep(0.5)
-    queue = multiprocessing.Queue()
-    first = multiprocessing.Process(target=hold, args=(queue,))
-    second = multiprocessing.Process(target=hold, args=(queue,))
-    first.start()
-    a = queue.get(timeout=5)
-    second.start()
-    b = queue.get(timeout=5)
-    first.join(); second.join()
-    assert b - a >= 0.45
-with rehearsal_phase('tail-archive-fences'):
-    for name in ['../escape', '/absolute', 'nested/../../escape']:
-        archive = base / 'unsafe.tar'
+            ops.seed_synthetic_locked(revision)
+        expect_failure(lambda: ops.release_locked(image_archive, revision, 99, 1, 'auto', image_id))
+        expect_failure(lambda: ops.release_locked(image_archive, revision, 101, 1, 'auto', 'sha256:' + '0' * 64))
+        assert ops.current()['runId'] == 100
+    with rehearsal_phase('tail-concurrent-releases'):
+        # Two actual release operations acquire the same lock and retain ordering/promotion.
+        def deploy_release(run_id, queue):
+            with ops.lock():
+                queue.put(run_id)
+                ops.release_locked(image_archive, revision, run_id, 1, 'auto', image_id)
+        release_queue = multiprocessing.Queue()
+        first_release = multiprocessing.Process(target=deploy_release, args=(101, release_queue))
+        second_release = multiprocessing.Process(target=deploy_release, args=(102, release_queue))
+        first_release.start()
+        assert release_queue.get(timeout=10) == 101
+        second_release.start()
+        assert release_queue.get(timeout=120) == 102
+        first_release.join(timeout=120); second_release.join(timeout=120)
+        assert first_release.exitcode == 0 and second_release.exitcode == 0 and ops.current()['runId'] == 102
+    with rehearsal_phase('tail-healthy-rebuild'):
+        # A healthy same-SHA rebuild can be accepted while retaining its predecessor by ID.
+        rebuilt_context = io.BytesIO()
+        rebuilt_dockerfile = f'FROM vtc-dashboard:{revision}\nLABEL vtc011.variant=healthy-rebuild\n'.encode()
+        with tarfile.open(fileobj=rebuilt_context, mode='w') as archive:
+            entry = tarfile.TarInfo('Dockerfile'); entry.size = len(rebuilt_dockerfile)
+            archive.addfile(entry, io.BytesIO(rebuilt_dockerfile))
+        rebuilt_tag = f'{project}:rebuilt'
+        ops.run(['docker', 'build', '-t', rebuilt_tag, '-'], data=rebuilt_context.getvalue(), timeout=180)
+        rebuilt_id = json.loads(ops.run(['docker', 'image', 'inspect', rebuilt_tag]))[0]['Id']
+        assert rebuilt_id != image_id
+        ops.run(['docker', 'tag', rebuilt_id, f'vtc-dashboard:{revision}'])
+        rebuilt_archive = base / 'rebuilt-image.tar'
+        ops.run(['docker', 'save', '--output', str(rebuilt_archive), f'vtc-dashboard:{revision}'])
+        with ops.lock():
+            ops.release_locked(rebuilt_archive, revision, 103, 1, 'auto', rebuilt_id)
+        assert ops.current()['imageId'] == rebuilt_id and ops.current()['runId'] == 103
+        assert json.loads((base / 'state/previous.json').read_text())['imageId'] == image_id
+        assert json.loads((base / 'state/exports' / ops.current()['backup'] / 'manifest.json').read_text())['imageId'] == image_id
+        image_id = rebuilt_id
+        image_archive = rebuilt_archive
+    with rehearsal_phase('tail-unhealthy-artifact'):
+        # A rebuilt artifact for the SAME source SHA has a different immutable image and
+        # actually returns HTTP 503. Loading it deliberately overwrites the revision tag.
+        unhealthy_tag = f'{project}:unhealthy'
+        unhealthy_script = b"""import {createServer} from 'node:http';
+    import {writeFileSync} from 'node:fs';
+    createServer((request,response)=>{
+      if(request.url==='/health/ready') {
+        writeFileSync('/app/private-evidence/unhealthy-http-observed.txt','HTTP_503_OBSERVED\\n');
+        response.writeHead(503).end('SYNTHETIC_UNAVAILABLE');
+      } else response.writeHead(200).end('SYNTHETIC_LIVE');
+    }).listen(3000,'0.0.0.0');
+    """
+        dockerfile = (f'FROM vtc-dashboard:{revision}\nCOPY --chown=node:node unhealthy.mjs /app/operations/unhealthy.mjs\n'
+                      f'LABEL vtc011.rehearsal={project}\nCMD ["node","operations/unhealthy.mjs"]\n').encode()
+        context_tar = io.BytesIO()
+        with tarfile.open(fileobj=context_tar, mode='w') as archive:
+            for name, content in [('Dockerfile', dockerfile), ('unhealthy.mjs', unhealthy_script)]:
+                entry = tarfile.TarInfo(name); entry.size = len(content); archive.addfile(entry, io.BytesIO(content))
+        ops.run(['docker', 'build', '-t', unhealthy_tag, '-'], data=context_tar.getvalue(), timeout=180)
+        unhealthy_id = json.loads(ops.run(['docker', 'image', 'inspect', unhealthy_tag]))[0]['Id']
+        assert unhealthy_id != image_id
+        ops.run(['docker', 'tag', unhealthy_id, f'vtc-dashboard:{revision}'])
+        unhealthy_archive = base / 'unhealthy-image.tar'
+        ops.run(['docker', 'save', '--output', str(unhealthy_archive), f'vtc-dashboard:{revision}'])
+    with rehearsal_phase('tail-unhealthy-release'):
+        accepted_metadata = (base / 'state/current.json').read_bytes()
+        accepted_previous = (base / 'state/previous.json').read_bytes()
+        # Only the attempt count changes in this test; every attempt still performs the
+        # production HTTP request. Production retains its 30-attempt bound.
+        production_attempts = ops.READINESS_ATTEMPTS
+        ops.READINESS_ATTEMPTS = 5
+        with ops.lock():
+            expect_failure(lambda: ops.release_locked(unhealthy_archive, revision, 104, 1, 'auto', unhealthy_id))
+        ops.READINESS_ATTEMPTS = production_attempts
+        assert (base / 'state/current.json').read_bytes() == accepted_metadata
+        assert (base / 'state/previous.json').read_bytes() == accepted_previous
+        assert ops.current()['runId'] == 103 and ops.current()['imageId'] == image_id
+        assert not (base / 'private/maintenance/enabled').exists() and not (base / 'state/recovery-required').exists()
+        assert json.loads(ops.run(['docker', 'image', 'inspect', f'vtc-dashboard:{revision}']))[0]['Id'] == unhealthy_id
+        for service in ['app', 'probe']:
+            container = compose(['ps', '-q', service], revision=revision).decode().strip()
+            assert json.loads(ops.run(['docker', 'inspect', container]))[0]['Image'] == image_id
+        assert json.loads(get('/_operations/readiness', token))['revision'] == revision
+        assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+        evidence_check = "const f=require('node:fs');if(f.readFileSync('/app/private-evidence/sentinel.txt','utf8')!=='fictional-evidence-sentinel-vtc011\\n'||f.readFileSync('/app/private-evidence/unhealthy-http-observed.txt','utf8')!=='HTTP_503_OBSERVED\\n')process.exit(1)"
+        compose(['exec', '-T', 'app', 'node', '-e', evidence_check], revision=revision)
+    with rehearsal_phase('tail-export'):
+        ops.fenced(revision)
+        with ops.lock():
+            export_id = ops.export_locked(revision)
+        directory, manifest = ops.validate_export(export_id)
+        assert manifest['evidenceFiles']['sentinel.txt']['sha256'] == checksum
+        assert manifest['evidenceFiles']['vtc011-sentinel.txt']['sha256'] == manifest['syntheticReference']
+        assert manifest['imageId'] == image_id  # The revision tag still points at the rejected image.
+        assert manifest['files']['database.sql']['bytes'] > 0
+    with rehearsal_phase('tail-encrypted-copy'):
+        # Authenticate a full SQL/files/manifest copy before restoring from its recovered bytes.
+        # This local fixture proves the pipeline; actual off-VM storage/access remains hosted acceptance.
+        copy_directory = base / 'private/copy-fixture'
+        copy_directory.mkdir(mode=0o700)
+        export_tar = copy_directory / 'export.tar'
+        with tarfile.open(export_tar, 'w') as archive:
+            for name in ['database.sql', 'evidence.tar', 'manifest.json']:
+                archive.add(directory / name, arcname=name)
+        key = base / 'private/recovery-test.key'
+        encrypted = copy_directory / 'export.encrypted'
+        decrypted = copy_directory / 'recovered.tar'
+        for args, data in [(['key', str(key)], None), (['seal', str(encrypted), str(key)], export_tar.read_bytes()),
+                           (['open', str(encrypted), str(key), str(decrypted)], None)]:
+            subprocess.run(['node', str(base / 'recovery-copy.mjs'), *args], input=data, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        recovered_id = uuid.uuid4().hex
+        recovered_directory = base / 'state/exports' / recovered_id
+        recovered_directory.mkdir(mode=0o700)
+        with tarfile.open(decrypted, 'r:') as archive:
+            assert set(archive.getnames()) == {'database.sql', 'evidence.tar', 'manifest.json'}
+            for entry in archive.getmembers():
+                assert entry.isfile()
+                (recovered_directory / entry.name).write_bytes(archive.extractfile(entry).read())
+    with rehearsal_phase('tail-restore'):
+        with ops.lock():
+            restored_project = ops.restore_locked(recovered_id)
+    with rehearsal_phase('tail-restored-references'):
+        # Restore helper stops destination after verifying ledger/files. Restart only that isolated DB for references.
+        ops.fenced(revision)
+        compose(['stop', 'db'], revision=revision)
+        compose(['up', '-d', '--wait', 'db'], revision=revision, project=restored_project, timeout=120)
+        restored_sql = compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf', '-N', '-B', '-e',
+                                'SELECT evidence_sha FROM vtc.rehearsal_reference WHERE id=1; SELECT state FROM vtc._vtc_migrations; SELECT sequence FROM vtc_operations.heartbeat;'], revision=revision, project=restored_project)
+        assert checksum.encode() in restored_sql and b'applied' in restored_sql and b'1' in restored_sql
+        compose(['stop', 'db'], revision=revision, project=restored_project)
+        compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)
+    with rehearsal_phase('tail-corrupt-export'):
+        # Damage detection must precede database/volume actions and must not mutate the active sentinel.
+        original = (directory / 'database.sql').read_bytes()
+        (directory / 'database.sql').write_bytes(original + b'corrupt')
+        expect_failure(lambda: ops.restore_locked(export_id))
+        (directory / 'database.sql').write_bytes(original)
+        assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+        compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe'], revision=revision)
+        ops.ready(revision)
+        assert checksum.encode() in sql('SELECT evidence_sha FROM vtc.rehearsal_reference;')
+    with rehearsal_phase('tail-dirty-migration'):
+        sql("UPDATE vtc._vtc_migrations SET state='applying';")
+        with ops.lock():
+            expect_failure(lambda: ops.release_locked(image_archive, revision, 105, 1, 'auto', image_id))
+        assert ops.current()['runId'] == 103 and (base / 'state/recovery-required').exists() and (base / 'private/maintenance/enabled').exists()
+        compose(['up', '-d', '--wait', 'db'], revision=revision, timeout=120)  # Synthetic root-only inspection, writers remain fenced.
+        assert b'applying' in sql('SELECT state FROM vtc._vtc_migrations;')
+        expect_failure(lambda: compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision))
+    with rehearsal_phase('tail-operation-lock'):
+        # Real cross-process serialization of the same flock used by every release/export/cron command.
+        def hold(queue):
+            with ops.lock():
+                queue.put(time.monotonic())
+                time.sleep(0.5)
+        queue = multiprocessing.Queue()
+        first = multiprocessing.Process(target=hold, args=(queue,))
+        second = multiprocessing.Process(target=hold, args=(queue,))
+        first.start()
+        a = queue.get(timeout=5)
+        second.start()
+        b = queue.get(timeout=5)
+        first.join(); second.join()
+        assert b - a >= 0.45
+    with rehearsal_phase('tail-archive-fences'):
+        for name in ['../escape', '/absolute', 'nested/../../escape']:
+            archive = base / 'unsafe.tar'
+            with tarfile.open(archive, 'w') as output:
+                entry = tarfile.TarInfo(name); entry.size = 1; output.addfile(entry, io.BytesIO(b'x'))
+            expect_failure(lambda: ops.archive_safe(archive))
         with tarfile.open(archive, 'w') as output:
-            entry = tarfile.TarInfo(name); entry.size = 1; output.addfile(entry, io.BytesIO(b'x'))
+            entry = tarfile.TarInfo('link'); entry.type = tarfile.SYMTYPE; entry.linkname = '/outside'; output.addfile(entry)
         expect_failure(lambda: ops.archive_safe(archive))
-    with tarfile.open(archive, 'w') as output:
-        entry = tarfile.TarInfo('link'); entry.type = tarfile.SYMTYPE; entry.linkname = '/outside'; output.addfile(entry)
-    expect_failure(lambda: ops.archive_safe(archive))
-    for command in ['sh', 'release $(id)', 'release ;id', 'release ' + 'a' * 40 + ' x 2 1 1 auto', 'export']:
-        os.environ['SSH_ORIGINAL_COMMAND'] = command
-        expect_failure(ops.receive)
-with rehearsal_phase('tail-receive-fences'):
-    # Exercise bounded stdin failure without ever reaching Docker load or active state.
-    for data, length, checksum in [(b'x', 2, hashlib.sha256(b'x').hexdigest()), (b'xx', 1, hashlib.sha256(b'x').hexdigest()), (b'x', 1, '0' * 64)]:
-        result = subprocess.run(['python3', str(base / 'operations.py'), 'receive'], input=data,
-                                env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 106 1 auto'),
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-        assert result.returncode == 1 and ops.current()['runId'] == 103
-print('Synthetic deployment rehearsal passed')
+        for command in ['sh', 'release $(id)', 'release ;id', 'release ' + 'a' * 40 + ' x 2 1 1 auto', 'export']:
+            os.environ['SSH_ORIGINAL_COMMAND'] = command
+            expect_failure(ops.receive)
+    with rehearsal_phase('tail-receive-fences'):
+        # Exercise bounded stdin failure without ever reaching Docker load or active state.
+        for data, length, checksum in [(b'x', 2, hashlib.sha256(b'x').hexdigest()), (b'xx', 1, hashlib.sha256(b'x').hexdigest()), (b'x', 1, '0' * 64)]:
+            result = subprocess.run(['python3', str(base / 'operations.py'), 'receive'], input=data,
+                                    env=dict(os.environ, SSH_ORIGINAL_COMMAND=f'release {revision} {checksum} {length} {image_id} 106 1 auto'),
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            assert result.returncode == 1 and ops.current()['runId'] == 103
+    receipt(ops, 'recovery', {'coreSha256': ops.digest(base / 'state/rehearsal-core.json')})
+    print('Synthetic deployment recovery passed', flush=True)
+
+rehearsal_started = time.monotonic()
+group = os.environ.get('REHEARSAL_GROUP', '')
+assert group in ['core', 'recovery', 'window']
+if group == 'core':
+    core()
+elif group == 'recovery':
+    recovery()
+else:
+    import notifications_acceptance
+    context = handoff_context()
+    # Local, positively allocated predecessor fixtures only; never a live-business hash invariant.
+    reference_query = ('SELECT COUNT(*) FROM vtc.identity_memberships; SELECT COUNT(*) FROM vtc.trips; '
+                       'SELECT COUNT(*) FROM vtc.events; SELECT COUNT(*) FROM vtc.manual_reports; '
+                       'SELECT COUNT(*) FROM vtc.admissions_applications;')
+    predecessor_counts = context[10](reference_query)
+    assert any(int(value) > 0 for value in predecessor_counts.decode().splitlines()), 'REHEARSAL_PREDECESSOR_FIXTURES_MISSING'
+    notifications_acceptance.rehearse(context[1])
+    assert context[10](reference_query) == predecessor_counts, 'REHEARSAL_SHARED_FIXTURE_COUNTS_CHANGED'
+    receipt(context[1], 'window', {'coreSha256': context[1].digest(context[0] / 'state/rehearsal-core.json')})

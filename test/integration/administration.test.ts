@@ -30,6 +30,8 @@ import {
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
+import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
+import { safeIdentityFailure } from "../support/identity-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -465,8 +467,32 @@ test("timezone settings remain partial without qualification setup and update re
 });
 
 test("bound succession HTTP accepts only challenge/code and preserves singleton leadership under concurrent confirmation", async () => {
-  const successor = await member(["driver", "dispatcher"]),
-    deliveries: PrivateChallenge[] = [];
+  const setupStarted = performance.now();
+  let successor: Awaited<ReturnType<typeof member>>;
+  try {
+    successor = await member(["driver", "dispatcher"]);
+  } catch (error) {
+    try {
+      console.log(
+        JSON.stringify({
+          event: "administration_fixture",
+          caseId: "administration_successor",
+          step: "member_setup",
+          durationMs: Math.round(performance.now() - setupStarted),
+          ...safeIdentityFailure(error),
+        }),
+      );
+    } catch {
+      // Failed diagnostics must not replace the original uncertain transaction outcome.
+    }
+    try {
+      await fixtureDatabaseFailure(control, "administration_successor");
+    } catch {
+      // Even observation/output failures preserve the identical original exception.
+    }
+    throw error;
+  }
+  const deliveries: PrivateChallenge[] = [];
   await unit.run((tx) =>
     unit.client(tx).update(user).set({ emailVerified: true }).where(eq(user.id, director.userId)),
   );

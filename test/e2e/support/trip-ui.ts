@@ -1,3 +1,4 @@
+import { inertNotifications } from "./notifications.ts";
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -17,6 +18,8 @@ export const example = (name: string) =>
 export async function mockTrips(page: Page) {
   await mockCatalogs(page);
   await page.route("**/api/v1/**", async (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const url = new URL(route.request().url()),
       path = url.pathname;
     if (path === "/api/v1/me") {

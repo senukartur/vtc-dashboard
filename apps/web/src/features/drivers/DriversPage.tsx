@@ -127,7 +127,7 @@ export function DriversPage() {
                       )}
                     </td>
                     <td>
-                      <Button asChild variant="outline" className="text-xs py-1 px-3">
+                      <Button asChild variant="outline" size="xs">
                         <Link to={`/account/drivers/${member.id}`}>
                           {t("directory.viewProfile")}
                         </Link>

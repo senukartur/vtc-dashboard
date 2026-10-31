@@ -18,13 +18,18 @@ import {
   lte,
   notExists,
   outboxEvents,
+  outboxRouting,
+  outboxRoutingScans,
   runnerLeases,
   sql,
 } from "@vtc/db/platform-schema";
+import { gt, inArray, notInArray } from "drizzle-orm";
 import {
   type AccessEvent,
   accessEvent,
   closed,
+  type DomainEvent,
+  decodeStoredEvent,
   duplicateKey,
   fingerprint,
 } from "../outbox/events.js";
@@ -36,6 +41,7 @@ export const bounds = Object.freeze({
   hardMs: 50000,
   maxJobs: 100,
   routeBatch: 25,
+  routeScanBatch: 250,
   maxAttempts: 5,
   transactionAttempts: 3,
   externalCompletionHeadroomMs: 6000,
@@ -94,6 +100,13 @@ export interface Subscription {
   kind: string;
   eventType: "member.access_changed";
   reference(event: AccessEvent): unknown;
+}
+export interface PendingSubscription {
+  consumer: string;
+  kind: string;
+  eventTypes: readonly DomainEvent["type"][];
+  reference(event: DomainEvent): unknown;
+  invalidReference(eventId: string): unknown;
 }
 export class RetryableJobError extends Error {}
 export class ExternalAmbiguityError extends Error {}
@@ -192,7 +205,7 @@ function effect(value: string): Buffer {
 export function createQueue(
   unit: UnitOfWork,
   handlers: readonly Handler[] = [],
-  subscriptions: readonly Subscription[] = [],
+  subscriptions: readonly (Subscription | PendingSubscription)[] = [],
   claimScope?: { kind: string; consumer: string; runId: string },
   pausedKinds: readonly string[] = [],
 ) {
@@ -222,7 +235,7 @@ export function createQueue(
     if (
       !h ||
       h.consumer !== s.consumer ||
-      s.eventType !== "member.access_changed" ||
+      (!("eventTypes" in s) && s.eventType !== "member.access_changed") ||
       consumers.has(s.consumer)
     )
       throw new Error("INVALID_SUBSCRIPTION");
@@ -436,6 +449,139 @@ export function createQueue(
       let count = 0;
       // Anti-join over durable identities has no timestamp watermark, so late commits remain eligible.
       for (const s of subscriptions) {
+        if ("eventTypes" in s) {
+          // A repeating primary-ID sweep repairs old/rollback producers. Passing a position never
+          // acknowledges its history permanently: every completed lap restarts from the beginning.
+          await run(async (tx) => {
+            const c = unit.client(tx),
+              consumer = name(s.consumer);
+            await c
+              .insert(outboxRoutingScans)
+              .values({ consumer, cursor: null })
+              .onDuplicateKeyUpdate({ set: { consumer } });
+            const [scan] = await c
+              .select()
+              .from(outboxRoutingScans)
+              .where(eq(outboxRoutingScans.consumer, consumer))
+              .for("update");
+            if (!scan) throw new Error("OUTBOX_ROUTING_SCAN_MISSING");
+            const rows = await c
+              .select({
+                id: outboxEvents.id,
+                type: outboxEvents.type,
+                recordedAt: outboxEvents.recordedAt,
+              })
+              .from(outboxEvents)
+              .where(scan.cursor ? gt(outboxEvents.id, scan.cursor) : undefined)
+              .orderBy(asc(outboxEvents.id))
+              .limit(bounds.routeScanBatch);
+            const eligible = rows.filter((e) =>
+              s.eventTypes.some((type) => type === e.type.toString()),
+            );
+            // The outbox read opened an RR snapshot. Use current job identities here so another
+            // router's later commit cannot be missed and recreated as stale pending work.
+            const routed = eligible.length
+              ? await c
+                  .select({ eventId: jobs.eventId })
+                  .from(jobs)
+                  .where(
+                    and(
+                      eq(jobs.consumer, consumer),
+                      inArray(
+                        jobs.eventId,
+                        eligible.map((e) => e.id),
+                      ),
+                    ),
+                  )
+                  .for("share")
+              : [];
+            const known = new Set(routed.map((e) => e.eventId));
+            for (const e of eligible)
+              if (!known.has(e.id)) {
+                try {
+                  await c.insert(outboxRouting).values({
+                    eventId: e.id,
+                    consumer,
+                    eventType: e.type,
+                    recordedAt: e.recordedAt,
+                  });
+                } catch (error) {
+                  if (!duplicateKey(error)) throw error;
+                }
+              }
+            await c
+              .update(outboxRoutingScans)
+              .set({
+                cursor: rows.length === bounds.routeScanBatch ? (rows.at(-1)?.id ?? null) : null,
+              })
+              .where(eq(outboxRoutingScans.consumer, consumer));
+          });
+          count += await run(async (tx) => {
+            const c = unit.client(tx);
+            const pending = await c
+              .select()
+              .from(outboxRouting)
+              .where(eq(outboxRouting.consumer, name(s.consumer)))
+              .orderBy(asc(outboxRouting.recordedAt), asc(outboxRouting.eventId))
+              .limit(bounds.routeBatch)
+              .for("update", { skipLocked: true });
+            // Lock only mutable intents exclusively; immutable evidence needs SELECT/FOR SHARE.
+            const events = pending.length
+              ? await c
+                  .select()
+                  .from(outboxEvents)
+                  .where(
+                    inArray(
+                      outboxEvents.id,
+                      pending.map((r) => r.eventId),
+                    ),
+                  )
+                  .orderBy(asc(outboxEvents.id))
+                  .for("share")
+              : [];
+            const byId = new Map(events.map((e) => [e.id, e]));
+            let inserted = 0;
+            for (const intent of pending) {
+              const e = byId.get(intent.eventId);
+              if (!e) throw new Error("ROUTING_EVENT_MISSING");
+              const [prior] = await c
+                .select({ id: jobs.id })
+                .from(jobs)
+                .where(and(eq(jobs.eventId, e.id), eq(jobs.consumer, name(s.consumer))))
+                .for("share");
+              let reference: unknown;
+              try {
+                const envelope = decodeStoredEvent(e);
+                if (!s.eventTypes.includes(envelope.type))
+                  throw new Error("ROUTING_EVENT_TYPE_CONFLICT");
+                reference = s.reference(envelope);
+              } catch {
+                reference = s.invalidReference(e.id);
+              }
+              await enqueue(tx, {
+                kind: s.kind,
+                schemaVersion: 1,
+                consumer: s.consumer,
+                effectKey: e.id,
+                eventId: e.id,
+                reference,
+                availableAt: e.recordedAt,
+                maxAttempts: bounds.maxAttempts,
+              });
+              if (!prior) inserted++;
+              await c
+                .delete(outboxRouting)
+                .where(
+                  and(
+                    eq(outboxRouting.eventId, e.id),
+                    eq(outboxRouting.consumer, name(s.consumer)),
+                  ),
+                );
+            }
+            return inserted;
+          });
+          continue;
+        }
         count += await run(async (tx) => {
           const c = unit.client(tx);
           const events = await c
@@ -727,6 +873,17 @@ export function createQueue(
         const events = await c
           .select({ count: sql<number>`CAST(COUNT(*) AS UNSIGNED)` })
           .from(outboxEvents);
+        const boundTypes = [
+          ...new Set(
+            subscriptions.flatMap((s) => ("eventTypes" in s ? [...s.eventTypes] : [s.eventType])),
+          ),
+        ];
+        const [unbound] = await c
+          .select({ count: sql<number>`CAST(COUNT(*) AS UNSIGNED)` })
+          .from(outboxEvents)
+          .where(
+            boundTypes.length ? notInArray(outboxEvents.type, boundTypes.map(name)) : undefined,
+          );
         const failures = await c
           .select({
             id: jobs.id,
@@ -742,7 +899,7 @@ export function createQueue(
         return {
           counts,
           retainedEvents: Number(events[0]?.count ?? 0),
-          unboundEvents: subscriptions.length === 0 ? Number(events[0]?.count ?? 0) : 0,
+          unboundEvents: Number(unbound?.count ?? 0),
           boundConsumers: subscriptions.length,
           failures: failures.map((f) => ({ ...f, kind: f.kind.toString() })),
         };

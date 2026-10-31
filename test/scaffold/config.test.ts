@@ -11,6 +11,49 @@ const fixture = {
   MYSQL_DATABASE: "fixture_database",
   MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
 };
+test("notifications remain off by default and require the complete workflow plus a distinct key", () => {
+  assert.equal(readConfig(fixture).notifications, undefined);
+  const input = {
+    ...fixture,
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    TRIPS_ENABLED: "true",
+    TRIPS_CURSOR_KEY: "1".repeat(64),
+    QUALIFICATIONS_ENABLED: "true",
+    QUALIFICATIONS_CURSOR_KEY: "2".repeat(64),
+    CATALOGS_ENABLED: "true",
+    CATALOGS_SYNTHETIC: "true",
+    CATALOGS_CURSOR_KEY: "3".repeat(64),
+    CATALOGS_MAX_FILE_BYTES: "1048576",
+    CATALOGS_ARTIFACT_TTL_MS: "86400000",
+    CATALOGS_POLICY_REVISION: "1",
+    MANUAL_REPORTS_ENABLED: "true",
+    MANUAL_REPORTS_KEY: "4".repeat(64),
+    MANUAL_MAX_FILES_PER_REPORT: "5",
+    MANUAL_POLICY_REVISION: "1",
+    MANUAL_ORPHAN_GRACE_MS: "60000",
+    EVENTS_ENABLED: "true",
+    EVENTS_CURSOR_KEY: "5".repeat(64),
+    RECONCILIATION_ENABLED: "true",
+    RECONCILIATION_KEY: "6".repeat(64),
+    TRIP_DECISIONS_ENABLED: "true",
+    TRIP_DECISIONS_KEY: "7".repeat(64),
+    NOTIFICATIONS_ENABLED: "true",
+    NOTIFICATIONS_CURSOR_KEY: "8".repeat(64),
+  };
+  assert.deepEqual(readConfig(input).notifications, { cursorKey: "8".repeat(64) });
+  for (const changes of [
+    { NOTIFICATIONS_ENABLED: "yes" },
+    { NOTIFICATIONS_CURSOR_KEY: "" },
+    { NOTIFICATIONS_CURSOR_KEY: "7".repeat(64) },
+    { NOTIFICATIONS_CURSOR_KEY: "5".repeat(64) },
+    { TRIP_DECISIONS_ENABLED: "false" },
+    { EVENTS_ENABLED: "false" },
+    { QUALIFICATIONS_ENABLED: "false" },
+  ])
+    assert.throws(() => readConfig({ ...input, ...changes }));
+});
 
 test("telemetry activation requires all prerequisites, separate key and uint32-safe validated limits", () => {
   assert.equal(readConfig(fixture).telemetry, undefined);

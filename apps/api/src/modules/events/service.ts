@@ -14,31 +14,101 @@ import {
   and,
   asc,
   eq,
+  eventAttendanceRevisions,
+  eventAttendances,
+  eventCatalogPins,
+  eventCommands,
+  eventResponseRevisions,
+  eventResponses,
+  eventRevisions,
+  events,
   gt,
   gte,
   inArray,
   lt,
+  lte,
   or,
   sql,
-  events,
-  eventRevisions,
-  eventCatalogPins,
-  eventResponses,
-  eventResponseRevisions,
-  eventAttendances,
-  eventAttendanceRevisions,
-  eventCommands,
 } from "@vtc/db/events-schema";
+import type { SQLWrapper } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
-import { closed, createOutbox, type CompanyEvent } from "../../platform/outbox/events.js";
+import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
 import { type Page, pagination } from "./pagination.js";
+
 type S = components["schemas"];
-type Event = typeof events.$inferSelect;
+type Event = Omit<typeof events.$inferSelect, "notificationMaterialPending">;
 type Revision = typeof eventRevisions.$inferSelect;
+type NotificationMaterial = Pick<Revision, "status" | "startsAt" | "route" | "meetingLocation">;
+type MaterialState = NonNullable<Event["notificationMaterial"]>;
+function materialState(raw: unknown, version: number): MaterialState | null {
+  if (raw === null) return null;
+  try {
+    const value = closed(raw, [
+      "schemaVersion",
+      "throughVersion",
+      "startVersion",
+      "routeVersion",
+      "statusVersion",
+    ]);
+    if (value.schemaVersion !== 1) throw new Error();
+    for (const key of ["throughVersion", "startVersion", "routeVersion", "statusVersion"] as const)
+      if (
+        !Number.isInteger(value[key]) ||
+        (value[key] as number) < 1 ||
+        (value[key] as number) > version
+      )
+        throw new Error();
+    const state = value as MaterialState;
+    if (
+      [state.startVersion, state.routeVersion, state.statusVersion].some(
+        (v) => v > state.throughVersion,
+      )
+    )
+      throw new Error();
+    return state;
+  } catch {
+    throw new Error("EVENT_NOTIFICATION_MATERIAL_INVALID");
+  }
+}
+function advanceMaterial(
+  state: MaterialState,
+  prior: NotificationMaterial,
+  next: NotificationMaterial & { version: number },
+) {
+  if (next.version !== state.throughVersion + 1 || prior.status !== "scheduled")
+    throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+  const statusChanged = prior.status !== next.status;
+  return {
+    schemaVersion: 1 as const,
+    throughVersion: next.version,
+    startVersion:
+      statusChanged || prior.startsAt !== next.startsAt ? next.version : state.startVersion,
+    routeVersion:
+      statusChanged || prior.route !== next.route || prior.meetingLocation !== next.meetingLocation
+        ? next.version
+        : state.routeVersion,
+    statusVersion: statusChanged ? next.version : state.statusVersion,
+  };
+}
+function materialChangeCurrent(
+  category: string,
+  originalVersion: number,
+  current: Revision | { status: Revision["status"]; version: number },
+  state: MaterialState | null,
+) {
+  if (!state || state.throughVersion !== current.version) return false;
+  if (category === "event.cancelled")
+    return current.status === "cancelled" && state.statusVersion === originalVersion;
+  if (current.status !== "scheduled") return false;
+  return category === "event.start_changed"
+    ? state.startVersion === originalVersion
+    : category === "event.route_changed" && state.routeVersion === originalVersion;
+}
 type ResponseRevision = typeof eventResponseRevisions.$inferSelect;
 type AttendanceRevision = typeof eventAttendanceRevisions.$inferSelect;
 type Route = typeof eventCommands.$inferSelect.route;
@@ -59,8 +129,9 @@ interface Ports {
     "eventContextInTransaction" | "eventRosterInTransaction" | "memberSummariesInTransaction"
   >;
   catalogs?: Pick<Catalogs, "eventReferencesInTransaction">;
-  outbox?: ReturnType<typeof createOutbox>;
+  outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
+  notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
 }
 export function createEvents(
   unit: UnitOfWork,
@@ -162,12 +233,17 @@ export function createEvents(
     }
     return { ...raw, meetingAt, startsAt, endsAt, prescribedMassKg: mass };
   }
-  async function lock(tx: TxContext, id: string, publicOnly = false) {
+  async function lock(
+    tx: TxContext,
+    id: string,
+    publicOnly = false,
+    mode: "update" | "share" = "update",
+  ) {
     const [row] = await c(tx)
       .select()
       .from(events)
       .where(eq(events.id, applicationId(id)))
-      .for("update");
+      .for(mode);
     if (!row || (publicOnly && row.visibility !== "public")) throw identityError(404);
     return row;
   }
@@ -179,6 +255,88 @@ export function createEvents(
       .for("share");
     if (!row) throw new Error("EVENT_REVISION_MISSING");
     return row;
+  }
+  async function notificationMaterial(tx: TxContext, change: CompanyEvent, prepare: boolean) {
+    if (change.type !== "event.changed") throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+    const e = await lock(tx, change.data.eventId, false, prepare ? "update" : "share"),
+      original = await revision(tx, change.data.eventRevisionId);
+    if (
+      change.aggregate.id !== e.id ||
+      original.eventId !== e.id ||
+      original.id !== change.data.revisionId ||
+      original.version !== change.aggregate.version ||
+      original.sequence !== change.data.changeSequence
+    )
+      throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+    if (prepare) return repairMaterial(tx, e);
+    const state = materialState(e.notificationMaterial, e.version);
+    return {
+      complete: state?.throughVersion === e.version,
+      throughVersion: state?.throughVersion ?? 0,
+      currentVersion: e.version,
+      scanned: 0,
+    };
+  }
+  async function repairMaterial(tx: TxContext, e: Event) {
+    let state = materialState(e.notificationMaterial, e.version),
+      scanned = 0;
+    if (state?.throughVersion !== e.version) {
+      let prior: Revision | undefined;
+      if (state) {
+        [prior] = await c(tx)
+          .select()
+          .from(eventRevisions)
+          .where(
+            and(eq(eventRevisions.eventId, e.id), eq(eventRevisions.version, state.throughVersion)),
+          )
+          .for("share");
+        if (!prior) throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+      }
+      const rows = await c(tx)
+        .select()
+        .from(eventRevisions)
+        .where(
+          and(
+            eq(eventRevisions.eventId, e.id),
+            gt(eventRevisions.version, state?.throughVersion ?? 0),
+            lte(eventRevisions.version, e.version),
+          ),
+        )
+        .orderBy(asc(eventRevisions.version))
+        .limit(25)
+        .for("share");
+      if (!rows.length) throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+      for (const row of rows) {
+        if (
+          row.version !== (state?.throughVersion ?? 0) + 1 ||
+          (!state
+            ? row.category !== "created" || row.status !== "scheduled"
+            : row.status === "cancelled"
+              ? row.category !== "cancelled"
+              : row.category !== "updated")
+        )
+          throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+        state =
+          state && prior
+            ? advanceMaterial(state, prior, row)
+            : {
+                schemaVersion: 1,
+                throughVersion: 1,
+                startVersion: 1,
+                routeVersion: 1,
+                statusVersion: 1,
+              };
+        prior = row;
+        scanned++;
+      }
+      await c(tx).update(events).set({ notificationMaterial: state }).where(eq(events.id, e.id));
+    }
+    return {
+      complete: state?.throughVersion === e.version,
+      throughVersion: state?.throughVersion ?? 0,
+      currentVersion: e.version,
+      scanned,
+    };
   }
   async function pins(tx: TxContext, r: S["EventInput"]): Promise<Omit<Pin, "revisionId">[]> {
     const selections = [
@@ -222,12 +380,17 @@ export function createEvents(
       destination: references.find((p) => p.field === "destination")?.label ?? null,
     };
   }
-  async function response(tx: TxContext, eventId: string, memberId: string) {
+  async function response(
+    tx: TxContext,
+    eventId: string,
+    memberId: string,
+    mode: "update" | "share" = "update",
+  ) {
     const [row] = await c(tx)
       .select()
       .from(eventResponses)
       .where(and(eq(eventResponses.eventId, eventId), eq(eventResponses.memberId, memberId)))
-      .for("update");
+      .for(mode);
     if (!row) return null;
     const [r] = await c(tx)
       .select()
@@ -371,6 +534,7 @@ export function createEvents(
     version: number,
     category: CompanyEvent["data"]["category"],
     memberId: string | null,
+    invalidateReminder = true,
   ) {
     const eventId = newId();
     await audit.append(tx, {
@@ -411,6 +575,15 @@ export function createEvents(
         category,
       },
     });
+    if (type !== "event.attendance_changed") {
+      await c(tx).update(events).set({ notificationPending: true }).where(eq(events.id, event.id));
+      if (invalidateReminder)
+        await ports.notificationChanged?.(
+          tx,
+          event.id,
+          type === "event.response_changed" ? memberId : null,
+        );
+    }
     if (type !== "event.response_changed") {
       await c(tx)
         .update(events)
@@ -446,6 +619,22 @@ export function createEvents(
           : await pins(tx, value);
     const version = category === "created" ? 1 : e.version + 1,
       sequence = category === "created" ? 1 : e.changeSequence + 1;
+    let notificationMaterial =
+      category === "created"
+        ? {
+            schemaVersion: 1 as const,
+            throughVersion: 1,
+            startVersion: 1,
+            routeVersion: 1,
+            statusVersion: 1,
+          }
+        : materialState(e.notificationMaterial, e.version);
+    if (category !== "created" && notificationMaterial?.throughVersion === e.version)
+      notificationMaterial = advanceMaterial(
+        notificationMaterial,
+        await revision(tx, e.currentRevisionId as string),
+        { ...value, version, status: category === "cancelled" ? "cancelled" : "scheduled" },
+      );
     await c(tx)
       .insert(eventRevisions)
       .values({
@@ -480,6 +669,7 @@ export function createEvents(
       version,
       changeSequence: sequence,
       currentRevisionId: id,
+      notificationMaterial,
       game: value.game,
       visibility: value.visibility,
       status: category === "cancelled" ? ("cancelled" as const) : ("scheduled" as const),
@@ -491,13 +681,24 @@ export function createEvents(
         version,
         changeSequence: sequence,
         currentRevisionId: id,
+        notificationMaterial,
         game: next.game,
         visibility: next.visibility,
         status: next.status,
         startsAt: next.startsAt,
       })
       .where(eq(events.id, e.id));
-    await emit(tx, actor, next, "event.changed", id, version, category, null);
+    await emit(
+      tx,
+      actor,
+      next,
+      "event.changed",
+      id,
+      version,
+      category,
+      null,
+      e.startsAt !== next.startsAt || e.status !== next.status,
+    );
     return { eventId: e.id, revisionId: id, version };
   }
   async function revisionInput(tx: TxContext, r: Revision): Promise<S["EventInput"]> {
@@ -596,6 +797,25 @@ export function createEvents(
   }
 
   return {
+    // Correlation inputs are trusted query columns. The caller authorizes the current actor
+    // on the same transaction; Events alone owns this eligibility/table implementation.
+    notificationReminderCondition(fields: {
+      eventId: SQLWrapper;
+      memberId: SQLWrapper;
+      revisionId: SQLWrapper;
+      responseRevisionId: SQLWrapper;
+      now: string;
+    }) {
+      return sql`EXISTS (SELECT 1 FROM ${events} JOIN ${eventResponses}
+        ON ${eventResponses.eventId}=${events.id} AND ${eventResponses.memberId}=${fields.memberId}
+        JOIN ${eventRevisions} ON ${eventRevisions.id}=${fields.revisionId}
+          AND ${eventRevisions.eventId}=${events.id}
+        WHERE ${events.id}=${fields.eventId} AND ${eventRevisions.startsAt}=${events.startsAt}
+          AND ${eventRevisions.status}='scheduled'
+          AND ${eventResponses.currentRevisionId}=${fields.responseRevisionId}
+          AND ${eventResponses.status}='participating' AND ${events.status}='scheduled'
+          AND ${events.startsAt}>${utcDateTime(fields.now)})`;
+    },
     authorize: (actor: Actor, manage = false) =>
       run(async (tx) => {
         await authorize(tx, actor, manage ? "events.manage" : "company.read");
@@ -611,6 +831,8 @@ export function createEvents(
             version: 1,
             changeSequence: 1,
             tripAssessmentPending: false,
+            notificationPending: true,
+            notificationMaterial: null,
             tripAssessmentGeneration: 0,
             attendanceVersion: 1,
             currentRevisionId: null,
@@ -1057,7 +1279,240 @@ export function createEvents(
         };
       });
     },
+    async repairNotificationScheduleInTransaction(tx: TxContext, change: CompanyEvent) {
+      if (change.type !== "event.changed" && change.type !== "event.response_changed")
+        throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      // Own the mutable marker before taking shared immutable-history locks.
+      const e = await lock(tx, change.data.eventId),
+        r = await revision(tx, change.data.eventRevisionId);
+      let valid = r.eventId === e.id && change.data.changeSequence <= e.changeSequence;
+      if (change.type === "event.changed") {
+        valid &&=
+          change.aggregate.id === e.id &&
+          r.id === change.data.revisionId &&
+          r.version === change.aggregate.version &&
+          r.sequence === change.data.changeSequence;
+      } else {
+        const [responseRevision] = await c(tx)
+          .select({
+            eventId: eventResponseRevisions.eventId,
+            responseId: eventResponseRevisions.responseId,
+            memberId: eventResponseRevisions.memberId,
+            version: eventResponseRevisions.version,
+            sequence: eventResponseRevisions.sequence,
+          })
+          .from(eventResponseRevisions)
+          .where(eq(eventResponseRevisions.id, change.data.revisionId))
+          .for("share");
+        valid &&=
+          responseRevision !== undefined &&
+          responseRevision.eventId === e.id &&
+          responseRevision.responseId === change.aggregate.id &&
+          responseRevision.memberId === change.data.memberId &&
+          responseRevision.version === change.aggregate.version &&
+          responseRevision.sequence === change.data.changeSequence &&
+          r.sequence < responseRevision.sequence;
+      }
+      if (!valid) throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      await c(tx).update(events).set({ notificationPending: true }).where(eq(events.id, e.id));
+    },
     // Safe future-consumer seam: immutable change order reconstructs RSVP recipients at that change.
+    notificationMaterialInTransaction: (tx: TxContext, change: CompanyEvent) =>
+      notificationMaterial(tx, change, false),
+    prepareNotificationMaterialInTransaction: (tx: TxContext, change: CompanyEvent) =>
+      notificationMaterial(tx, change, true),
+    async repairPendingNotificationMaterialInTransaction(tx: TxContext) {
+      // One indexed Event and at most 25 forward definitions; this phase never locks recipients.
+      const [e] = await c(tx)
+        .select()
+        .from(events)
+        .where(eq(events.notificationMaterialPending, true))
+        .orderBy(asc(events.id))
+        .limit(1)
+        .for("update", { skipLocked: true });
+      return e ? { eventId: e.id, ...(await repairMaterial(tx, e)) } : null;
+    },
+    async notificationChangeInTransaction(tx: TxContext, change: CompanyEvent) {
+      const e = await lock(tx, change.data.eventId, false, "share");
+      const r = await revision(tx, change.data.eventRevisionId);
+      if (
+        r.eventId !== e.id ||
+        (change.type === "event.changed" &&
+          (r.id !== change.data.revisionId ||
+            r.version !== change.aggregate.version ||
+            r.sequence !== change.data.changeSequence))
+      )
+        throw new Error("NOTIFICATION_EVENT_REFERENCE_CONFLICT");
+      const [prior] =
+        r.version > 1
+          ? await c(tx)
+              .select()
+              .from(eventRevisions)
+              .where(
+                and(eq(eventRevisions.eventId, e.id), eq(eventRevisions.version, r.version - 1)),
+              )
+              .for("share")
+          : [];
+      const changed =
+        r.status === "cancelled"
+          ? "event.cancelled"
+          : prior && prior.startsAt !== r.startsAt
+            ? "event.start_changed"
+            : prior && (prior.route !== r.route || prior.meetingLocation !== r.meetingLocation)
+              ? "event.route_changed"
+              : null;
+      const current =
+        e.currentRevisionId === r.id ? r : await revision(tx, e.currentRevisionId as string);
+      return {
+        eventId: e.id,
+        revisionId: r.id,
+        version: r.version,
+        effective:
+          changed !== null &&
+          materialChangeCurrent(
+            changed,
+            r.version,
+            current,
+            materialState(e.notificationMaterial, e.version),
+          ),
+        category: changed,
+        title: current.title,
+        game: current.game,
+        startsAt: r.startsAt,
+      };
+    },
+    async notificationChangeProjectionsInTransaction(
+      tx: TxContext,
+      requests: { eventId: string; version: number; category: string }[],
+    ) {
+      // This is the existing HTTP page bound, not a new event or company policy.
+      if (requests.length > 100) throw new Error("NOTIFICATION_PROJECTION_BOUND_EXCEEDED");
+      if (!requests.length)
+        return new Map<string, { title: string; game: "ets2" | "ats"; effective: boolean }>();
+      const current = alias(eventRevisions, "notification_current_definition");
+      const rows = await c(tx)
+        .select({
+          eventId: events.id,
+          material: events.notificationMaterial,
+          version: eventRevisions.version,
+          status: current.status,
+          currentVersion: current.version,
+          startsAt: current.startsAt,
+          route: current.route,
+          meetingLocation: current.meetingLocation,
+          title: current.title,
+          game: current.game,
+        })
+        .from(events)
+        .innerJoin(eventRevisions, eq(eventRevisions.eventId, events.id))
+        .innerJoin(current, eq(current.id, events.currentRevisionId))
+        .where(
+          or(
+            ...requests.map((request) =>
+              and(
+                eq(events.id, applicationId(request.eventId)),
+                eq(eventRevisions.version, request.version),
+              ),
+            ),
+          ),
+        )
+        .orderBy(asc(events.id), asc(eventRevisions.version))
+        .for("share");
+      const definitions = new Map(rows.map((row) => [`${row.eventId}:${row.version}`, row]));
+      return new Map(
+        requests.flatMap((request) => {
+          const row = definitions.get(`${request.eventId}:${request.version}`);
+          if (!row) return [];
+          return [
+            [
+              `${request.eventId}:${request.version}:${request.category}`,
+              {
+                title: row.title,
+                game: row.game,
+                effective: materialChangeCurrent(
+                  request.category,
+                  request.version,
+                  { status: row.status, version: row.currentVersion },
+                  materialState(row.material, row.currentVersion),
+                ),
+              },
+            ] as const,
+          ];
+        }),
+      );
+    },
+    async notificationScheduleInTransaction(
+      tx: TxContext,
+      id: string,
+      after: string | null = null,
+      limit = 25,
+    ) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 25)
+        throw new Error("NOTIFICATION_REMINDER_BOUND_EXCEEDED");
+      const e = await lock(tx, id, false, "share"),
+        r = await revision(tx, e.currentRevisionId as string);
+      const members = await c(tx)
+        .select({
+          id: eventResponses.memberId,
+          responseRevisionId: eventResponses.currentRevisionId,
+        })
+        .from(eventResponses)
+        .where(
+          and(
+            eq(eventResponses.eventId, id),
+            eq(eventResponses.status, "participating"),
+            after ? gt(eventResponses.memberId, applicationId(after)) : undefined,
+          ),
+        )
+        .orderBy(asc(eventResponses.memberId))
+        .limit(limit)
+        .for("share");
+      return {
+        eventId: e.id,
+        revisionId: r.id,
+        generation: e.changeSequence,
+        startsAt: r.startsAt,
+        status: r.status,
+        title: r.title,
+        game: r.game,
+        members,
+      };
+    },
+    async reminderEligibleInTransaction(
+      tx: TxContext,
+      eventId: string,
+      memberId: string,
+      revisionId: string,
+      responseRevisionId: string,
+    ) {
+      const e = await lock(tx, eventId, false, "share");
+      const r = await response(tx, eventId, memberId, "share"),
+        original = await revision(tx, revisionId);
+      return (
+        e.status === "scheduled" &&
+        original.eventId === e.id &&
+        original.status === "scheduled" &&
+        original.startsAt === e.startsAt &&
+        at() < e.startsAt &&
+        r?.row.status === "participating" &&
+        r.row.currentRevisionId === responseRevisionId
+      );
+    },
+    async pendingNotificationsInTransaction(tx: TxContext) {
+      return c(tx)
+        .select({ id: events.id })
+        .from(events)
+        .where(eq(events.notificationPending, true))
+        .orderBy(asc(events.id))
+        .limit(25)
+        .for("update", { skipLocked: true });
+    },
+    async acknowledgeNotificationsInTransaction(tx: TxContext, id: string, generation: number) {
+      await c(tx)
+        .update(events)
+        .set({ notificationPending: false })
+        .where(and(eq(events.id, id), eq(events.changeSequence, generation)));
+    },
     async recipientsInTransaction(
       tx: TxContext,
       eventId: string,

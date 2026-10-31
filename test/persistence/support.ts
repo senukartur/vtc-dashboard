@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 97 tables including the ledger and 16 migrations.
+// Fresh full-schema preparation now covers 102 tables including the ledger and 18 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -88,6 +88,11 @@ export async function reset(connection: Connection) {
     );
   // Fixed fixture-owned tables only; no arbitrary identifiers, schema drops or FK disabling.
   const tables = [
+    "notification_commands",
+    "notifications",
+    "notification_recipients",
+    "outbox_routing",
+    "outbox_routing_scans",
     "trip_decision_commands",
     "trip_proposal_reviews",
     "trip_proposals",
@@ -230,7 +235,7 @@ export async function eventsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -266,6 +271,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_QUALIFICATION_PREFIX_REQUIRED");
   if (count === 12 && entries[11]?.tag !== "0011_tearful_infant_terrible")
     throw new Error("PUBLISHED_EVENTS_PREFIX_REQUIRED");
+  if (count === 17 && entries[16]?.tag !== "0016_notifications")
+    throw new Error("PUBLISHED_NOTIFICATION_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -348,4 +355,12 @@ export async function decisionsPriorFolder(): Promise<string> {
 
 export async function analyticsPriorFolder(): Promise<string> {
   return publishedPrefixFolder(15);
+}
+
+export async function notificationsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(16);
+}
+
+export async function notificationMaterialPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(17);
 }

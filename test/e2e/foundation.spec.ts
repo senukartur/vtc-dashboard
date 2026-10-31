@@ -17,7 +17,7 @@ async function noOverflow(page: Page) {
 async function contrast(
   locator: Locator,
   pseudo?: string,
-  property: "color" | "borderTopColor" = "color",
+  property: "color" | "borderTopColor" | "borderBottomColor" = "color",
   outside = false,
 ) {
   return locator.evaluate(
@@ -648,6 +648,24 @@ test("dark public and member shells retain readable controls, bundled font/licen
   await outline.hover();
   expect(await contrast(outline, undefined, "borderTopColor")).toBeGreaterThanOrEqual(3);
   expect(await contrast(outline, undefined, "borderTopColor", true)).toBeGreaterThanOrEqual(3);
+  const period = page.getByRole("group", { name: "Период примера", exact: true });
+  const segments = await period.getByRole("button").all();
+  expect(segments).toHaveLength(3);
+  await expect(period.locator('[aria-pressed="true"]')).toHaveCount(1);
+  for (const segment of segments) expect(await contrast(segment)).toBeGreaterThanOrEqual(4.5);
+  expect(await contrast(period, undefined, "borderTopColor")).toBeGreaterThanOrEqual(3);
+  expect(await contrast(period, undefined, "borderTopColor", true)).toBeGreaterThanOrEqual(3);
+  const tabs = await page
+    .getByRole("tablist", { name: "Разделы примера", exact: true })
+    .getByRole("tab")
+    .all();
+  expect(tabs).toHaveLength(2);
+  for (const tab of tabs) expect(await contrast(tab)).toBeGreaterThanOrEqual(4.5);
+  const activeTab = page.getByRole("tab", { name: "Обзор", exact: true, selected: true });
+  expect(await contrast(activeTab, undefined, "borderBottomColor")).toBeGreaterThanOrEqual(3);
+  expect(
+    await contrast(page.getByRole("button", { name: "Открыть строку примера", exact: true })),
+  ).toBeGreaterThanOrEqual(4.5);
   await capture(page, info, "enabled-control-contrast");
   await note.fill("Синтетическая проверка контраста");
   await submit.click();
@@ -667,6 +685,122 @@ test("dark public and member shells retain readable controls, bundled font/licen
   await previewLink.hover();
   expect(await contrast(previewLink)).toBeGreaterThanOrEqual(4.5);
 });
+
+test("compact control sizes follow pointer type", async ({ page }, info) => {
+  await page.goto("/foundation");
+  await page.evaluate(() => document.fonts.ready);
+  const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  expect(coarse).toBe(info.project.name === "mobile-chromium");
+  const expectHeight = async (locator: Locator, fine: [number, number]) => {
+    await expect(locator).toBeVisible();
+    const value = (await locator.boundingBox())?.height ?? 0;
+    if (coarse) expect(value).toBeGreaterThanOrEqual(40);
+    else {
+      expect(value).toBeGreaterThanOrEqual(fine[0] - 0.5);
+      expect(value).toBeLessThanOrEqual(fine[1] + 0.5);
+    }
+  };
+  await expectHeight(page.getByRole("button", { name: "Об этом примере", exact: true }), [30, 30]);
+  await expectHeight(page.getByRole("button", { name: "Сохранить пример", exact: true }), [30, 30]);
+  await expectHeight(page.getByRole("textbox", { name: "Текст примера", exact: true }), [32, 32]);
+  await expectHeight(
+    page.getByRole("combobox", { name: "Состояние примера", exact: true }),
+    [32, 32],
+  );
+  const segments = await page
+    .getByRole("group", { name: "Период примера", exact: true })
+    .getByRole("button")
+    .all();
+  expect(segments).toHaveLength(3);
+  for (const xs of [
+    page.getByRole("button", { name: "Открыть строку примера", exact: true }),
+    page.getByRole("combobox", { name: "Компактный фильтр", exact: true }),
+    page.getByRole("textbox", { name: "Компактный поиск", exact: true }),
+    ...segments,
+  ])
+    await expectHeight(xs, [24, 24]);
+  const tabs = await page
+    .getByRole("tablist", { name: "Разделы примера", exact: true })
+    .getByRole("tab")
+    .all();
+  expect(tabs).toHaveLength(2);
+  for (const tab of tabs) await expectHeight(tab, [32, 34]);
+  const typography = await page.evaluate(() => {
+    const style = (selector: string) => {
+      const element = document.querySelector(selector);
+      if (!element) throw new Error(`MISSING_${selector}`);
+      return getComputedStyle(element);
+    };
+    return {
+      body: style("body").fontSize,
+      h1: style("h1").fontSize,
+      h1Weight: style("h1").fontWeight,
+      th: style(".table th").fontSize,
+      badge: style("[data-slot=badge]").fontSize,
+    };
+  });
+  expect(typography).toEqual({
+    body: "13px",
+    h1: "18px",
+    h1Weight: "600",
+    th: "12px",
+    badge: "11px",
+  });
+  await noOverflow(page);
+  await capture(page, info, `compact-controls-${coarse ? "coarse" : "fine"}`);
+});
+
+for (const locale of ["ru", "en"]) {
+  test(`segmented control and tabs keyboard semantics ${locale}`, async ({ page }, info) => {
+    await page.goto("/foundation");
+    await page.getByRole("combobox", { name: "Язык", exact: true }).selectOption(locale);
+    const ru = locale === "ru";
+    const group = page.getByRole("group", {
+      name: ru ? "Период примера" : "Example period",
+      exact: true,
+    });
+    const pressed = group.locator('[aria-pressed="true"]');
+    await expect(pressed).toHaveCount(1);
+    await expect(pressed).toHaveText(ru ? "Месяц" : "Month");
+    await group.getByRole("button", { name: ru ? "Неделя" : "Week", exact: true }).click();
+    await expect(pressed).toHaveCount(1);
+    await expect(pressed).toHaveText(ru ? "Неделя" : "Week");
+    const year = group.getByRole("button", { name: ru ? "Год" : "Year", exact: true });
+    await year.focus();
+    await page.keyboard.press("Space");
+    await expect(year).toHaveAttribute("aria-pressed", "true");
+    await expect(pressed).toHaveCount(1);
+    const tablist = page.getByRole("tablist", {
+      name: ru ? "Разделы примера" : "Example sections",
+      exact: true,
+    });
+    const overview = tablist.getByRole("tab", { name: ru ? "Обзор" : "Overview", exact: true });
+    const log = tablist.getByRole("tab", { name: ru ? "Журнал" : "Log", exact: true });
+    await expect(overview).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel")).toHaveCount(1);
+    await overview.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(log).toBeFocused();
+    await expect(log).toHaveAttribute("aria-selected", "true");
+    await expect(overview).toHaveAttribute("aria-selected", "false");
+    const logPanel = page.getByRole("tabpanel", { name: ru ? "Журнал" : "Log", exact: true });
+    await expect(logPanel).toHaveText(
+      ru ? "Панель журнала с вымышленной историей." : "Log panel with fictional history content.",
+    );
+    await page.keyboard.press("Home");
+    await expect(overview).toBeFocused();
+    await expect(overview).toHaveAttribute("aria-selected", "true");
+    await expect(
+      page.getByRole("tabpanel", { name: ru ? "Обзор" : "Overview", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("End");
+    await expect(log).toBeFocused();
+    await expect(log).toHaveAttribute("aria-selected", "true");
+    await page.keyboard.press("Tab");
+    await expect(logPanel).toBeFocused();
+    await capture(page, info, `segmented-tabs-${locale}`);
+  });
+}
 
 test("controlled font-download failure keeps the Cyrillic interface usable with the system fallback", async ({
   page,

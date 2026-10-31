@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import {
   Dialog,
@@ -14,27 +13,12 @@ import { Button, Card } from "../../shared/ui/primitives.js";
 import type { useWorkspaceCommand } from "./transport.js";
 import "./administration.css";
 
+// Section links live in the shell sidebar and user menu, not repeated per page.
 export function WorkspaceHeading({ title }: { title: string }) {
-  const { t } = useTranslation("administration"),
-    session = useSession();
   return (
     <header className="page-heading stack">
       <p className="eyebrow">Yukon Union</p>
       <h1>{title}</h1>
-      <nav className="admin-navigation" aria-label={t("navigation")}>
-        {[
-          ["applications.manage", "/account/admin/applications", "applications"],
-          ["members.manage", "/account/admin/members", "members"],
-          ["company.configure", "/account/admin/settings", "settings"],
-          ["company.read", "/account/connections", "connections"],
-        ]
-          .filter(([cap]) => cap && session.self?.capabilities.includes(cap))
-          .map(([, path, label]) => (
-            <NavLink key={path} to={path ?? "/account"}>
-              {t(label ?? "connections")}
-            </NavLink>
-          ))}
-      </nav>
     </header>
   );
 }

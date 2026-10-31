@@ -14,18 +14,19 @@ import { registerEventRoutes } from "./modules/events/http.js";
 import type { Events } from "./modules/events/service.js";
 import { registerExternalIdentityRoutes } from "./modules/external-identities/http.js";
 import type { ExternalIdentities } from "./modules/external-identities/service.js";
-import { registerIdentityRoutes } from "./modules/identity/http.js";
 import { registerAdministrationRoutes } from "./modules/identity/admin-http.js";
-import type { Administration } from "./use-cases/administration.js";
+import { registerIdentityRoutes } from "./modules/identity/http.js";
 import type { Identity } from "./modules/identity/service.js";
 import { registerManualRoutes } from "./modules/manual-reports/http.js";
 import type { ManualReports } from "./modules/manual-reports/service.js";
 import { registerMessagingRoutes } from "./modules/messaging/http.js";
 import type { Messaging } from "./modules/messaging/service.js";
-import { registerReconciliationRoutes } from "./modules/reconciliation/http.js";
-import type { Reconciliation } from "./modules/reconciliation/service.js";
+import { registerNotificationRoutes } from "./modules/notifications/http.js";
+import type { Notifications } from "./modules/notifications/service.js";
 import { registerQualificationRoutes } from "./modules/qualifications/http.js";
 import type { Qualifications } from "./modules/qualifications/service.js";
+import { registerReconciliationRoutes } from "./modules/reconciliation/http.js";
+import type { Reconciliation } from "./modules/reconciliation/service.js";
 import { registerTelemetryRoutes } from "./modules/telemetry/http.js";
 import type { TelemetryService } from "./modules/telemetry/service.js";
 import { registerTripDecisionRoutes } from "./modules/trip-decisions/http.js";
@@ -34,6 +35,7 @@ import { registerTripRoutes } from "./modules/trips/http.js";
 import type { Trips } from "./modules/trips/service.js";
 import { ingressTrust } from "./platform/http/ingress.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
+import type { Administration } from "./use-cases/administration.js";
 
 const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
@@ -69,6 +71,7 @@ export interface AppOptions {
   reconciliation?: Reconciliation;
   tripDecisions?: TripDecisions;
   analytics?: AnalyticsService;
+  notifications?: Notifications;
   checkReadiness: () => Promise<boolean>;
   closeDatabase?: () => Promise<void>;
   webRoot?: string;
@@ -212,6 +215,8 @@ export async function createApp(options: AppOptions) {
     );
   if (options.identity && options.analytics)
     await registerAnalyticsRoutes(app, options.identity, options.analytics);
+  if (options.identity && options.notifications)
+    await registerNotificationRoutes(app, options.identity, options.notifications);
   if (options.webRoot) {
     const webRoot = options.webRoot;
     await access(join(webRoot, "index.html"));

@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { Browser, BrowserContextOptions, Page, TestInfo } from "@playwright/test";
+import type {
+  Browser,
+  BrowserContextOptions,
+  Page,
+  Request,
+  Response,
+  TestInfo,
+} from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import type { RowDataPacket } from "mysql2/promise";
 import { testConnection } from "../persistence/support.ts";
@@ -66,7 +73,47 @@ async function scenario(browser: Browser, page: Page, info: TestInfo, name: stri
     headerStarts: 0,
     catalogStarts: 0,
   };
+  const edit: {
+    observed: boolean;
+    outcome: "not-observed" | "pending" | "response" | "request-error";
+    status: number | null;
+    started: number;
+    page: Page | null;
+  } = { observed: false, outcome: "not-observed", status: null, started: 0, page: null };
+  const editStops: (() => void)[] = [];
   function observe(p: Page) {
+    if (name === "reschedule_cancel") {
+      const definition = (request: Request) =>
+        request.method() === "PATCH" &&
+        /^\/api\/v1\/admin\/events\/[0-9a-f-]{36}$/.test(new URL(request.url()).pathname);
+      const start = (request: Request) => {
+        if (definition(request)) {
+          edit.observed = true;
+          edit.outcome = "pending";
+          edit.status = null;
+          edit.started = Date.now();
+          edit.page = p;
+        }
+      };
+      const response = (response: Response) => {
+        if (definition(response.request())) {
+          const status = response.status();
+          edit.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
+          edit.outcome = "response";
+        }
+      };
+      const failure = (request: Request) => {
+        if (definition(request)) edit.outcome = "request-error";
+      };
+      p.on("request", start);
+      p.on("response", response);
+      p.on("requestfailed", failure);
+      editStops.push(() => {
+        p.off("request", start);
+        p.off("response", response);
+        p.off("requestfailed", failure);
+      });
+    }
     p.on("request", (r) => {
       const path = new URL(r.url()).pathname;
       if (r.method() === "GET" && path.startsWith("/api/v1/")) {
@@ -152,6 +199,24 @@ async function scenario(browser: Browser, page: Page, info: TestInfo, name: stri
     actor,
     counts,
     close: async () => {
+      for (const stop of editStops) stop();
+      if (name === "reschedule_cancel") {
+        const locale = await (edit.page ?? page)
+          .locator("html")
+          .getAttribute("lang", { timeout: 1000 })
+          .catch(() => null);
+        console.log(
+          JSON.stringify({
+            event: "event_definition_browser_command",
+            phase: "definition-edit",
+            observed: edit.observed,
+            outcome: edit.outcome,
+            status: edit.status,
+            locale: locale === "en" || locale === "ru" ? locale : "other",
+            elapsedMs: edit.observed ? Math.min(60000, Math.max(0, Date.now() - edit.started)) : 0,
+          }),
+        );
+      }
       console.log(
         JSON.stringify({
           event: "event_browser_read_budget",

@@ -129,7 +129,8 @@ export function EventCard({
     </Card>
   );
 }
-export function NearestEvent() {
+/** `chip` is a plain element for use inside another landmark such as the workspace banner; its states are self-describing. */
+export function NearestEvent({ variant = "landmark" }: { variant?: "landmark" | "chip" }) {
   const query = useUpcomingEvent(),
     { t, i18n } = useTranslation("events"),
     timezone = useEventTimezone();
@@ -153,28 +154,31 @@ export function NearestEvent() {
     }
   }, [started, stamp, query.refetch]);
   if (!session.self?.capabilities.includes("company.read")) return null;
-  return (
+  const content = query.isPending ? (
+    <span role="status">{t("loading")}</span>
+  ) : query.isError ? (
+    <span>{t("unavailable")}</span>
+  ) : started ? (
+    query.isFetching ? (
+      <span role="status">{t("loading")}</span>
+    ) : (
+      <Link to="/account/events">{t("checkUpcoming")}</Link>
+    )
+  ) : event ? (
+    <Link to={`/account/events/${event.id}`}>
+      <strong>
+        {t("nearest")}: {event.title}
+      </strong>
+      <span>{eventTime(event.startsAt, i18n.resolvedLanguage ?? "en", timezone)}</span>
+    </Link>
+  ) : (
+    <span>{t("noUpcoming")}</span>
+  );
+  return variant === "chip" ? (
+    <div className="event-nearest">{content}</div>
+  ) : (
     <aside className="event-nearest" aria-label={t("nearest")}>
-      {query.isPending ? (
-        <span role="status">{t("loading")}</span>
-      ) : query.isError ? (
-        <span>{t("unavailable")}</span>
-      ) : started ? (
-        query.isFetching ? (
-          <span role="status">{t("loading")}</span>
-        ) : (
-          <Link to="/account/events">{t("checkUpcoming")}</Link>
-        )
-      ) : event ? (
-        <Link to={`/account/events/${event.id}`}>
-          <strong>
-            {t("nearest")}: {event.title}
-          </strong>
-          <span>{eventTime(event.startsAt, i18n.resolvedLanguage ?? "en", timezone)}</span>
-        </Link>
-      ) : (
-        <span>{t("noUpcoming")}</span>
-      )}
+      {content}
     </aside>
   );
 }

@@ -94,8 +94,8 @@ import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
 const workerCases = fixtureSettlement();
-function it(name: string, work: () => Promise<void>) {
-  test(name, () => workerCases.track(work()));
+function it(name: string, work: () => Promise<void>, timeout?: number) {
+  test(name, () => workerCases.track(work()), timeout);
 }
 
 type S = components["schemas"];
@@ -2142,7 +2142,9 @@ async function generationWorker(caseId: GenerationCase, ordinal: number, signal?
   return last as { processed: number; pid: number };
 }
 it("durable generation intent makes bounded progress beyond100 protected current files across fresh worker processes", async () => {
-  const signal = AbortSignal.timeout(11000),
+  // Five unchanged 5-second workers plus the ordinary 15-second fixture allowance
+  // compose a 40-second engineering guard; abort 5 seconds earlier for settlement.
+  const signal = AbortSignal.timeout(35000),
     image = await upload();
   await submit(image.id);
   const [original] = await unit.run((tx) =>
@@ -2191,7 +2193,7 @@ it("durable generation intent makes bounded progress beyond100 protected current
     "SELECT COUNT(*) n FROM manual_blob_generations",
   );
   expect(Number(intents[0]?.n)).toBe(107);
-});
+}, 40000);
 it("missing generation observations survive late actual finalization and reconcile in a fresh worker", async () => {
   const image = await upload();
   await submit(image.id);

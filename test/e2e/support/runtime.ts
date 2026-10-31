@@ -44,6 +44,8 @@ const compose = (target: typeof unit, worker = false) =>
     trips.events,
     trips.reconciliation,
     trips.decisions,
+    undefined,
+    trips.notifications,
   );
 const composition = compose(unit);
 const externalIdentities = createExternalIdentities(unit, composition.identity, {
@@ -57,13 +59,18 @@ const externalIdentities = createExternalIdentities(unit, composition.identity, 
 // API and worker each retain the normal five-slot pool, like the two production
 // processes. Together with readiness (five), this harness bounds them to 15 slots.
 const workerUnit = createUnitOfWork(config.database);
-const queue = compose(workerUnit, true).jobsQueue,
+const worker = compose(workerUnit, true),
+  queue = worker.jobsQueue,
   stop = new AbortController();
 let pass: Promise<unknown> | undefined;
 // This bounded synthetic worker is allocation-guarded and never shipped in the API.
 const timer = setInterval(() => {
   if (!pass && !stop.signal.aborted) {
-    pass = runPass(queue, stop.signal)
+    pass = Promise.resolve()
+      .then(async () => {
+        await worker.notifications?.maintenance();
+        return runPass(queue, stop.signal);
+      })
       .catch(() => {
         process.exitCode = 1;
       })

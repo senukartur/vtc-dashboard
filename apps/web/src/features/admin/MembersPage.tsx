@@ -441,6 +441,7 @@ function Members() {
                     <td>
                       <Button
                         variant="ghost"
+                        size="xs"
                         aria-pressed={selected === row.profile.member.id}
                         onClick={() => setSelected(row.profile.member.id)}
                       >

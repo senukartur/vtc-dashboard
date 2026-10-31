@@ -66,15 +66,15 @@
 }
 .trip-page summary {
   cursor: pointer;
-  min-height: 44px;
-  padding-block: 12px;
+  min-height: var(--target-min);
+  padding-block: 6px;
   font-weight: 600;
 }
 .trip-check {
   display: flex;
   gap: 12px;
   align-items: center;
-  min-height: 44px;
+  min-height: var(--target-min);
 }
 .trip-check input {
   width: 20px;

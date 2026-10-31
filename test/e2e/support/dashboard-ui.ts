@@ -1,3 +1,4 @@
+import { inertNotifications } from "./notifications.ts";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -283,6 +284,8 @@ export async function mockDashboardRoutes(
   } = {},
 ) {
   await page.route("**/api/v1/**", async (route) => {
+    const notification = inertNotifications(route);
+    if (notification) return notification;
     const url = new URL(route.request().url());
     const path = url.pathname;
 

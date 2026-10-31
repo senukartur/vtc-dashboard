@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AccountFailure,
   attemptFor,
@@ -12,6 +12,8 @@ import {
 export function useCommand() {
   const attempt = useRef<Attempt | null>(null);
   const controller = useRef<AbortController | null>(null);
+  // A cancelled request settles silently: its owner (e.g. an ended session) no longer exists.
+  const cancelled = useRef<AbortController | null>(null);
   const active = useRef(true);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<AccountFailure | null>(null);
@@ -47,11 +49,11 @@ export function useCommand() {
     const timer = window.setTimeout(() => current.abort(), 15000);
     try {
       const result = await command(attempt.current, current.signal);
-      if (!active.current) return undefined;
+      if (!active.current || cancelled.current === current) return undefined;
       attempt.current = null;
       return result;
     } catch (error) {
-      if (active.current) {
+      if (active.current && cancelled.current !== current) {
         const safe = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
         lastFailure.current = safe;
         setFailure(safe);
@@ -64,16 +66,30 @@ export function useCommand() {
       return undefined;
     } finally {
       window.clearTimeout(timer);
-      controller.current = null;
-      if (active.current) setPending(false);
+      if (controller.current === current) controller.current = null;
+      if (active.current && !controller.current) setPending(false);
     }
   }
+  // Stable identity so long-lived owners can cancel from effect cleanup.
+  const cancel = useCallback(() => {
+    const current = controller.current;
+    if (current) {
+      cancelled.current = current;
+      controller.current = null;
+      current.abort();
+    }
+    attempt.current = null;
+    lastFailure.current = null;
+    setFailure(null);
+    setPending(false);
+  }, []);
   return {
     run,
     pending,
     failure,
     lastFailure: () => lastFailure.current,
     seconds,
+    cancel,
     reset: () => {
       attempt.current = null;
       setFailure(null);

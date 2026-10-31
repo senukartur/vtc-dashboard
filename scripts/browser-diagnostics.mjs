@@ -1,6 +1,8 @@
 export const browserFiles = {
   "test/e2e/dashboard.spec.ts": "dashboard",
   "test/e2e/events.spec.ts": "events",
+  "test/e2e/notifications.spec.ts": "notifications",
+  "test/e2e/notifications-real.spec.ts": "notifications-real",
   "test/e2e/events-real.spec.ts": "events-real",
   "test/e2e/administration-real.spec.ts": "administration-real",
   "test/e2e/qualifications-editor.spec.ts": "qualifications-editor",
@@ -15,6 +17,7 @@ export const browserFiles = {
   "test/e2e/catalogs-real.spec.ts": "catalogs-real",
   "test/e2e/admissions.spec.ts": "admissions",
   "test/e2e/foundation.spec.ts": "foundation",
+  "test/e2e/navigation.spec.ts": "navigation",
   "test/e2e/identity.spec.ts": "identity",
   "test/e2e/external-identities.spec.ts": "external-identities",
   "test/e2e/landing.spec.ts": "landing",

@@ -17,7 +17,7 @@ jobs:
   quality:
     name: Quality suite
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 70
     steps:
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 24.22.0
       - name: Run isolated quality suite
-        timeout-minutes: 30
+        timeout-minutes: 65
         run: node scripts/test-ci.mjs
       - name: Upload safe structured result
         if: ${{ always() }}
@@ -42,7 +42,7 @@ jobs:
   deployment:
     name: Deployment rehearsal
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

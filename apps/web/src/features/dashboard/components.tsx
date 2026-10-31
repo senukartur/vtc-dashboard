@@ -394,7 +394,6 @@ export function MetricDefinitionsCard() {
           variant="ghost"
           onClick={() => setIsOpen(!isOpen)}
           aria-expanded={isOpen}
-          className="text-xs"
         >
           {isOpen ? t("definitions.toggleClose") : t("definitions.toggleOpen")}
         </Button>

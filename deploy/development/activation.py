@@ -13,7 +13,8 @@ SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_M
                'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY'}
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
-                 'identity_acceptance.py', 'ingress_probe.py', 'receive.sh'}
+                 'identity_acceptance.py', 'ingress_probe.py', 'receive.sh', 'notifications_acceptance.py',
+                 'notifications.acceptance.compose.yaml', 'notifications-acceptance-grants.json'}
 
 
 def private_copy(source, destination):
@@ -74,6 +75,29 @@ def private_values(o, path, keys):
     return values
 
 
+def host_routes(o, text=None):
+    """Read IPv4 host routes without exposing inventory; the default route is not an overlap."""
+    text = pathlib.Path('/proc/net/route').read_text() if text is None else text
+    o.require(isinstance(text, str), 'HOST_ROUTE_INVENTORY_INVALID')
+    lines = text.splitlines()
+    o.require(lines and lines[0].split()[:2] == ['Iface', 'Destination'], 'HOST_ROUTE_INVENTORY_INVALID')
+    routes = []
+    for line in lines[1:]:
+        fields = line.split()
+        if not fields:
+            continue
+        o.require(len(fields) >= 8 and all(re.fullmatch(r'[a-fA-F0-9]{8}', fields[n]) for n in [1, 7]),
+                  'HOST_ROUTE_INVENTORY_INVALID')
+        destination, mask = (socket.inet_ntoa(struct.pack('<I', int(fields[n], 16))) for n in [1, 7])
+        try:
+            route = ipaddress.IPv4Network(f'{destination}/{mask}', strict=False)
+        except ValueError:
+            raise RuntimeError('HOST_ROUTE_INVENTORY_INVALID') from None
+        if route.prefixlen:
+            routes.append(route)
+    return routes
+
+
 def ingress(o):
     values = private_values(o, o.BASE / 'private/ingress.env', INGRESS_KEYS)
     o.require(set(values) == INGRESS_KEYS, 'INGRESS_CONFIGURATION_REQUIRED')
@@ -105,12 +129,8 @@ def ingress(o):
                       'INGRESS_NETWORK_OVERLAP')
             allowed_route = True
     # Linux route inventory includes VPN/LAN/Docker routes. Default routes are not overlaps.
-    for line in pathlib.Path('/proc/net/route').read_text().splitlines()[1:]:
-        fields = line.split()
-        destination, mask = (socket.inet_ntoa(struct.pack('<I', int(fields[n], 16)))
-                             for n in [1, 7])
-        other = ipaddress.IPv4Network(f'{destination}/{mask}', strict=False)
-        if other.prefixlen and subnet.overlaps(other):
+    for other in host_routes(o):
+        if subnet.overlaps(other):
             o.require(allowed_route and other == subnet, 'INGRESS_HOST_ROUTE_OVERLAP')
     return values
 
@@ -234,7 +254,8 @@ def config_operation(o, revision, image_id, mode):
             candidate = previous
     o.require(not (o.BASE / 'state/identity-acceptance').exists() and
               not (o.BASE / 'state/jobs-acceptance').exists() and
-              not (o.BASE / 'state/ingress-check.json').exists(), 'ACCEPTANCE_WINDOW')
+              not (o.BASE / 'state/ingress-check.json').exists() and
+              not (o.BASE / 'state/notifications-acceptance').exists(), 'ACCEPTANCE_WINDOW')
     if mode == 'inspect':
         check_privileges(o, privileges(o, revision), complete=True)
         validate(o, revision, image_id, shared)

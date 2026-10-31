@@ -19,6 +19,7 @@ import uuid
 import urllib.request
 import activation
 import identity_acceptance
+import notifications_acceptance
 import ingress_probe
 
 BASE = pathlib.Path('/opt/vtc-development')
@@ -342,6 +343,7 @@ def wait_owned_jobs_absent(inventory):
 def jobs_locked(revision, image_id):
     require(not (BASE / 'state/jobs-acceptance').exists(), 'ACCEPTANCE_WINDOW')
     require(not (BASE / 'state/identity-acceptance').exists(), 'ACCEPTANCE_WINDOW')
+    require(not (BASE / 'state/notifications-acceptance').exists(), 'ACCEPTANCE_WINDOW')
     require(not (BASE / 'state/ingress-check.json').exists(), 'ACCEPTANCE_WINDOW')
     validate_image(image_id, revision, timeout=WORKER_CONTROL_TIMEOUT)
     stop_owned_jobs(revision, image_id)
@@ -407,6 +409,8 @@ def tick_locked(revision, image_id):
             value['steps']['jobs']['status'] = 'skipped_safety_fence'
         elif not may_continue:
             value['steps']['jobs']['status'] = 'skipped_control_failure'
+        elif (BASE / 'state/notifications-acceptance').exists():
+            attempt('jobs', lambda: notifications_acceptance.tick(sys.modules[__name__], revision, image_id))
         elif any((BASE / f'state/{name}').exists() for name in ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']):
             value['steps']['jobs']['status'] = 'skipped_acceptance_window'
         else:
@@ -640,7 +644,7 @@ def restore_locked(identity):
 
 def release_locked(path, revision, run_id, attempt, mode, expected_image_id):
     require(not any((BASE / f'state/{name}').exists() for name in
-                    ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
+                    ['jobs-acceptance', 'identity-acceptance', 'notifications-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
     for name in ['activation-intent.json', 'controls-update.json']:
         control = BASE / 'state' / name
         require(not control.exists() or json.loads(control.read_text()).get('pending') is not True,
@@ -791,7 +795,7 @@ def main():
     if operation == ['receive']:
         receive()
         return
-    require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'activation', 'identity-acceptance', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
+    require(operation and operation[0] in ['tick', 'heartbeat', 'jobs', 'jobs-config', 'jobs-grants', 'jobs-acceptance', 'activation', 'identity-acceptance', 'notifications-acceptance', 'export', 'restore', 'seed-synthetic'], 'OPERATION_REJECTED')
     with lock(wait_seconds=0 if operation[0] in ['tick', 'heartbeat', 'jobs'] else 600):
         active = current()
         require(active is not None, 'RELEASE_REQUIRED')
@@ -800,6 +804,8 @@ def main():
                 operation in [['activation', 'recover'], ['activation', 'rollback']] or
                 (operation in [['activation', 'validate'], ['activation', 'apply']] and
                  activation.controls_pending(sys.modules[__name__], revision, active['imageId'])), 'RECOVERY_REQUIRED')
+        require(not (BASE / 'state/notifications-acceptance').exists() or operation[0] in
+                ['notifications-acceptance', 'tick', 'heartbeat'], 'ACCEPTANCE_WINDOW')
         require(not (BASE / 'state/identity-acceptance').exists() or operation[0] in
                 ['identity-acceptance', 'tick', 'jobs', 'heartbeat'], 'ACCEPTANCE_WINDOW')
         require(not (BASE / 'state/ingress-check.json').exists() or operation[0] in
@@ -825,6 +831,9 @@ def main():
             else:
                 activation.config_operation(sys.modules[__name__], revision, active['imageId'], operation[1])
             print('Activation: success')
+        elif len(operation) == 3 and operation[0] == 'notifications-acceptance':
+            notifications_acceptance.operation(sys.modules[__name__], revision, active['imageId'], operation[1], operation[2])
+            print('Notifications acceptance: success')
         elif len(operation) == 3 and operation[0] == 'identity-acceptance':
             identity_acceptance.operation(sys.modules[__name__], revision, active['imageId'], operation[1], operation[2])
             print('Identity acceptance: success')

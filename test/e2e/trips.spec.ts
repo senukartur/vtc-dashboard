@@ -231,7 +231,10 @@ test("controlled private refresh403 removes every privileged section without a r
   expect(calls).toBe(deniedCalls);
   revoked = true;
   await page.getByRole("button", { name: "Refresh", exact: true }).first().click();
-  await expect(page.getByRole("link", { name: "Sign in", exact: true })).toBeVisible();
+  // The anonymous workspace sidebar also offers Sign in; the recovery card owns this one.
+  await expect(
+    page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Fictional private retained comment", { exact: true })).toHaveCount(
     0,
   );

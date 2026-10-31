@@ -44,6 +44,8 @@ export async function tripBrowserFixture() {
     cfg.events,
     cfg.reconciliation,
     cfg.decisions,
+    undefined,
+    cfg.notifications,
   );
   const identity = composed.identity,
     now = new Date().toISOString();

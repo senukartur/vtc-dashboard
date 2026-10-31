@@ -3,6 +3,7 @@ import type { Connection } from "mysql2/promise";
 import { expect, test, vi } from "vitest";
 import { observeDatabaseOperation } from "../../packages/db/dist/core/operation-context.js";
 import { deferred } from "../support/concurrency.ts";
+import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
 import { identityDiagnostics, safeIdentityFailure } from "../support/identity-diagnostics.ts";
 import {
   generationProcessLine,
@@ -16,6 +17,91 @@ import {
   safeScopedTransactionRecord,
   scopedTransactionLine,
 } from "../support/manual-generation-diagnostics.ts";
+
+test("successor failure observations admit only the registered scope and omit queue/private fields", async () => {
+  const lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  const query = vi
+    .fn()
+    .mockResolvedValueOnce([[{ total: "3" }], []])
+    .mockResolvedValueOnce([
+      [
+        { Variable_name: "Connections", Value: "14" },
+        { Variable_name: "SYNTHETIC_PRIVATE_NAME", Value: "SYNTHETIC_PRIVATE_VALUE" },
+      ],
+      [],
+    ]);
+  try {
+    await fixtureDatabaseFailure({ query } as unknown as Connection, "administration_successor");
+    expect(query).toHaveBeenCalledTimes(2);
+    for (const [options] of query.mock.calls) expect(options.timeout).toBe(500);
+    const record = JSON.parse(lines[0]!);
+    expect(record).toEqual({
+      event: "fixture_database_failure",
+      caseId: "administration_successor",
+      durationMs: expect.any(Number),
+      ownedUserConnections: 3,
+      serverGlobal: { Connections: 14 },
+    });
+    expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+    expect(Number.isSafeInteger(record.durationMs) && record.durationMs >= 0).toBe(true);
+  } finally {
+    output.mockRestore();
+  }
+});
+
+test("successor observation failures remain unavailable and do not invent numeric zero", async () => {
+  const lines: string[] = [];
+  const output = vi.spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+  const query = vi.fn().mockRejectedValue(
+    Object.assign(new Error("SYNTHETIC_PRIVATE_SQL_AND_CREDENTIAL"), {
+      code: "PROTOCOL_SEQUENCE_TIMEOUT",
+    }),
+  );
+  try {
+    await fixtureDatabaseFailure({ query } as unknown as Connection, "administration_successor");
+    expect(query).toHaveBeenCalledTimes(1);
+    const record = JSON.parse(lines[0]!);
+    expect(record.state).toBe("unavailable");
+    expect(record.codes).toEqual(["PROTOCOL_SEQUENCE_TIMEOUT"]);
+    expect(record).not.toHaveProperty("ownedUserConnections");
+    expect(record).not.toHaveProperty("serverGlobal");
+    expect(record).not.toHaveProperty("queue");
+    expect(lines.join("\n")).not.toContain("SYNTHETIC_PRIVATE");
+  } finally {
+    output.mockRestore();
+  }
+});
+
+test("actual successor observer rejects an unknown scope before queries or output", async () => {
+  const query = vi.fn();
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    await expect(
+      fixtureDatabaseFailure({ query } as unknown as Connection, "private_scope" as never),
+    ).rejects.toThrow("INVALID_DATABASE_FIXTURE_SCOPE");
+    expect(query).not.toHaveBeenCalled();
+    expect(output).not.toHaveBeenCalled();
+  } finally {
+    output.mockRestore();
+  }
+});
+
+test("actual successor observer output errors remain throwable for the primary-preserving caller", async () => {
+  const outputFailure = new Error("SYNTHETIC_PRIVATE_OUTPUT_FAILURE");
+  const output = vi.spyOn(console, "log").mockImplementation(() => {
+    throw outputFailure;
+  });
+  const query = vi.fn().mockRejectedValue(new Error("SYNTHETIC_PRIVATE_DATABASE_FAILURE"));
+  try {
+    await expect(
+      fixtureDatabaseFailure({ query } as unknown as Connection, "administration_successor"),
+    ).rejects.toBe(outputFailure);
+    expect(query).toHaveBeenCalledTimes(1);
+  } finally {
+    output.mockRestore();
+  }
+});
 
 test("identity fixture diagnostics retain only allowlisted failure facts through bounded cyclic causes", () => {
   const inner = Object.assign(new Error("SYNTHETIC_PRIVATE_SQL_AND_INPUT"), {

@@ -64,6 +64,28 @@ export const durableJobs = mysqlTable(
   ],
 );
 
+// Enabled producers insert derived routing work with the immutable event. Pausing retains it;
+// the wrapping scan repairs disabled/old producers. Removal acknowledges a permanent job identity.
+export const outboxRouting = mysqlTable(
+  "outbox_routing",
+  {
+    eventId: idColumn("event_id")
+      .notNull()
+      .references(() => outboxEvents.id, { onDelete: "cascade" }),
+    consumer: opaqueColumn("consumer", { length: 64 }).notNull(),
+    eventType: opaqueColumn("event_type", { length: 64 }).notNull(),
+    recordedAt: utcColumn("recorded_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.consumer] }),
+    index("outbox_routing_pending").on(t.consumer, t.recordedAt, t.eventId),
+  ],
+);
+export const outboxRoutingScans = mysqlTable("outbox_routing_scans", {
+  consumer: opaqueColumn("consumer", { length: 64 }).primaryKey(),
+  cursor: idColumn("cursor"),
+});
+
 export const effectReceipts = mysqlTable(
   "job_effect_receipts",
   {

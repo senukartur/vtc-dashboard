@@ -818,3 +818,13 @@ export function createAdmissions(
   };
 }
 export type Admissions = ReturnType<typeof createAdmissions>;
+export async function notificationAdmissionState(unit: UnitOfWork, tx: TxContext, id: string) {
+  const [row] = await unit
+    .client(tx)
+    .select({ version: applications.version, status: applications.status })
+    .from(applications)
+    .where(eq(applications.id, applicationId(id)))
+    .for("share");
+  if (!row) throw new Error("NOTIFICATION_APPLICATION_MISSING");
+  return row;
+}

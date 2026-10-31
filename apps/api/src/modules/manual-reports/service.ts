@@ -122,7 +122,13 @@ type Receipt =
 export function createManualReports(
   unit: UnitOfWork,
   config: ManualConfig,
-  ports: { identity: Identity; catalogs: Catalogs; trips: Trips; blobs?: PrivateBlobs },
+  ports: {
+    identity: Identity;
+    catalogs: Catalogs;
+    trips: Trips;
+    blobs?: PrivateBlobs;
+    outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
+  },
   now = () => new Date(),
 ) {
   validateManualConfig(config);
@@ -158,7 +164,7 @@ export function createManualReports(
       }
     },
     audit = createAudit(unit),
-    outbox = createOutbox(unit);
+    outbox = ports.outbox ?? createOutbox(unit);
   async function emit(
     tx: TxContext,
     type: ManualEvent["type"],
@@ -1060,6 +1066,40 @@ export function createManualReports(
   }
   return {
     config,
+    async notificationReviewInTransaction(
+      tx: TxContext,
+      kind: "manual.report_submitted" | "manual.correction_requested",
+      aggregateId: string,
+      resourceId: string,
+      tripId: string,
+    ) {
+      if (kind === "manual.correction_requested") {
+        const [row] = await c(tx)
+          .select({
+            tripId: manualCorrectionRequests.tripId,
+            status: manualCorrectionRequests.status,
+          })
+          .from(manualCorrectionRequests)
+          .where(eq(manualCorrectionRequests.id, applicationId(resourceId)))
+          .for("share");
+        if (!row || row.tripId !== tripId || aggregateId !== tripId)
+          throw new Error("NOTIFICATION_MANUAL_REFERENCE_CONFLICT");
+        return row.status === "pending";
+      }
+      const [row] = await c(tx)
+        .select({
+          tripId: manualReports.tripId,
+          revisionId: manualReports.currentRevisionId,
+          reportId: manualReports.id,
+        })
+        .from(manualReports)
+        .innerJoin(manualRevisions, eq(manualRevisions.reportId, manualReports.id))
+        .where(eq(manualRevisions.id, applicationId(resourceId)))
+        .for("share");
+      if (!row || row.tripId !== tripId || row.reportId !== aggregateId)
+        throw new Error("NOTIFICATION_MANUAL_REFERENCE_CONFLICT");
+      return row.revisionId === resourceId;
+    },
     handler,
     generationHandler,
     async initialize(webRoot?: string) {

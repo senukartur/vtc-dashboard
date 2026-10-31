@@ -14,15 +14,12 @@ import {
   write,
 } from "./support/account.ts";
 import { expect, test } from "./support/fixtures.ts";
+import { openUserMenu, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeEach(resetAccountLimits);
 async function english(page: Page) {
-  await page
-    .getByRole("banner")
-    .getByRole("combobox", { name: /^(Language|Язык)$/ })
-    .selectOption("en");
-  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await switchLanguage(page, "en");
 }
 async function replacePendingEmail(page: Page) {
   const confirmation = page.getByRole("form", {
@@ -83,8 +80,17 @@ async function login(page: Page, email: string, password: string) {
   const authenticated = await response;
   expect(authenticated.status()).toBe(200);
   const self = (await authenticated.json()).data as components["schemas"]["Self"];
+  // Sign-in without a protected return location lands on Overview; Account is in the user menu.
+  await expect(page).toHaveURL(/\/account\/dashboard$/);
+  const menu = await openUserMenu(page);
+  await menu
+    .getByRole("menuitem", { name: /^(Account and security|Аккаунт и безопасность)$/ })
+    .click();
   await expect(
-    page.getByRole("heading", { name: /^(Account|Аккаунт)$/, exact: true }),
+    page.getByRole("heading", {
+      name: /^(Account and security|Аккаунт и безопасность)$/,
+      exact: true,
+    }),
   ).toBeVisible();
   await english(page);
   return self;
@@ -106,6 +112,8 @@ test("real rendered application, invitation, login, wrong verification code, pre
 }) => {
   test.setTimeout(60000);
   let phase = "START";
+  let redemptionObserved = false,
+    redemptionRequests = 0;
   const staff = await staffContext();
   try {
     const email = `${randomUUID()}@example.invalid`,
@@ -125,9 +133,33 @@ test("real rendered application, invitation, login, wrong verification code, pre
     let attempts = 0;
     let original: { key: string | undefined; payload: string | null; receipt: string } | undefined;
     await page.route("**/api/v1/public/invitation-redemptions", async (route) => {
-      const response = await route.fetch({ timeout: 5000 }).catch(() => {
-        throw new Error("ACCOUNT_REDEMPTION_REPLAY_REQUEST_FAILED");
-      });
+      redemptionObserved = true;
+      const ordinal = ++redemptionRequests,
+        started = Date.now();
+      let status: number | null = null;
+      const response = await route
+        .fetch({ timeout: 5000 })
+        .then((response) => {
+          const value = response.status();
+          status = Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
+          return response;
+        })
+        .catch(() => {
+          throw new Error("ACCOUNT_REDEMPTION_REPLAY_REQUEST_FAILED");
+        })
+        .finally(() =>
+          console.log(
+            JSON.stringify({
+              event: "account_browser_redemption",
+              phase: "redemption",
+              observed: true,
+              attempt: ordinal === 1 || ordinal === 2 ? ordinal : "unexpected",
+              outcome: status === null ? "request-error" : "response",
+              status,
+              elapsedMs: Math.min(60000, Math.max(0, Date.now() - started)),
+            }),
+          ),
+        );
       expect(response.status()).toBe(201);
       const request = route.request();
       const receipt = (await response.json()).data.id as string;
@@ -175,7 +207,7 @@ test("real rendered application, invitation, login, wrong verification code, pre
       "Europe/Warsaw",
     );
     phase = "LOGOUT";
-    await page.getByRole("button", { name: "Выйти", exact: true }).click();
+    await signOutFromMenu(page);
     await expect(
       page.getByRole("heading", { name: "Войдите, чтобы открыть аккаунт", exact: true }),
     ).toBeVisible();
@@ -183,6 +215,18 @@ test("real rendered application, invitation, login, wrong verification code, pre
   } catch {
     throw new Error(`ACCOUNT_REAL_${phase}_FAILED`);
   } finally {
+    if (!redemptionObserved)
+      console.log(
+        JSON.stringify({
+          event: "account_browser_redemption",
+          phase: "redemption",
+          observed: false,
+          attempt: "unexpected",
+          outcome: "not-observed",
+          status: null,
+          elapsedMs: 0,
+        }),
+      );
     await staff.dispose();
   }
 });
@@ -217,6 +261,12 @@ test("real expired invitation, deactivated session/inactive login and neutral re
     const etag = current.headers().etag ?? "";
     await deactivateFixtureMember(staff, self.member.id, Number(etag.slice(2, -1)));
     await page.reload();
+    // Reach the terminal state before switching language so no unmounting user menu is targeted.
+    await expect(
+      page.getByRole("heading", {
+        name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+      }),
+    ).toBeVisible();
     await english(page);
     await expect(
       page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
@@ -316,7 +366,9 @@ test("real recoverable two-proof email replacement reloads both stages, replaces
     await form.getByLabel("Email code", { exact: true }).fill(current.code);
     await form.getByRole("button", { name: "Confirm this email code", exact: true }).click();
     await expect(form.getByRole("alert")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Account and security", exact: true }),
+    ).toBeVisible();
     phase = "FINAL_PROOF";
     await form.getByLabel("Email code", { exact: true }).fill(proof.code);
     await form.getByRole("button", { name: "Retry this action", exact: true }).click();

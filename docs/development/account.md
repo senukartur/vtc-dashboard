@@ -4,7 +4,7 @@
 
 ## Routes and one-time links
 
-`/login`, `/password-recovery`, `/password-reset` and `/invitation` are public account entry points. `/account` requires a checked `/me`; its preferences, verification, password, email and connections sections have fragment anchors. Unimplemented destinations remain unavailable and are filtered by current capabilities. Trainee and Driver have equivalent member navigation; additive staff capabilities come from the server. Synthetic `/foundation` navigation remains separate.
+`/login`, `/password-recovery`, `/password-reset` and `/invitation` are public account entry points. Every `/account/*` route requires a checked `/me`. `/account` is the Account and security page; its preferences, verification, password and email sections have fragment anchors. Signing in lands on `/account/dashboard`, or returns to the protected same-app `/account` location (path, search and hash) whose Sign in link was used; any other or malformed return state falls back to the dashboard. Unimplemented destinations remain unavailable and the role-grouped sidebar is filtered by current capabilities. Trainee and Driver have equivalent member navigation; additive staff capabilities come from the server. Synthetic `/foundation` navigation remains separate.
 
 Initial HTML sets `referrer=no-referrer` before resource references. Its synchronous script captures the reserved reset/invitation token into a non-enumerable memory handoff, replaces the current history URL with the canonical path, and discards all query/fragment data before React or resources run. Case and trailing-slash variants match the router. The API also sets `Referrer-Policy: no-referrer`. `main.tsx` consumes/deletes the global handoff before rendering. The mounted route copies it and clears the root handoff after mounting, including development StrictMode. Success clears the route token; disposal abandons feature memory. Reload/back cannot recover the scrubbed proof: reopen the original private link when needed.
 
@@ -18,11 +18,11 @@ Private queries include the access generation; logout, identity switching, confi
 
 Writes use generated DTOs, strict runtime response validation, same-origin credentials, no-store, freshly requested current CSRF, explicit expected statuses, and no automatic retry. Bodyless writes omit JSON body/content type. Declared commands send UUID idempotency keys; preferences additionally send `/me`'s strong ETag as `If-Match`. Passwords, codes and tokens are absent from TanStack mutation variables/history, query keys, browser storage and errors. Attempts live only in feature memory, expire after ten minutes, and retain an immutable payload/key for explicit unchanged uncertain retries. Changed input starts another attempt. This lifetime is a client memory bound, not server proof-expiry policy. Client command deadlines are 15 seconds; timeout does not prove rollback.
 
-Sign-out hides private account content while unresolved. Only a committed logout response, or an independently confirmed invalid session, establishes anonymous state. An uncertain result offers retry and a session check. Server authorization remains authoritative.
+Sign-out starts from the shell user menu and hides private content while unresolved: main shows the sign-out status, the bell and user menu are hidden, and the banner language select stays available. A new access generation abandons the pending attempt, so an old logout cannot end a later identity's session. Only a committed logout response, or an independently confirmed invalid session, establishes anonymous state. An uncertain result offers retry and a session check. Server authorization remains authoritative.
 
 ## Preferences and protected changes
 
-Saved language and IANA display timezone come from `/me`. Interface-language switching preserves recoverable inputs; confirmed persisted preference changes update the language. A stale preference 409 exposes explicit refresh-for-review, reloads authoritative values, and requires review/reapplication. Personal timezone never changes company reporting periods; an unset company timezone does not prevent preferences.
+Saved language and IANA display timezone come from `/me`. Interface-language switching (the user-menu language choice changes only the current interface and is not saved) preserves recoverable inputs; confirmed persisted preference changes update the language. A stale preference 409 exposes explicit refresh-for-review, reloads authoritative values, and requires review/reapplication. Personal timezone never changes company reporting periods; an unset company timezone does not prevent preferences.
 
 Verification requests show queued feedback, not a sent/delivered claim. The current email must be verified before password/email change. Password changes require the code sent to that verified channel and the existing 12–128-character technical password policy; login preserves its wider wire bounds. Completion ends all sessions and requires sign-in.
 
@@ -30,7 +30,7 @@ Email replacement follows both proof stages. Confirming the current-channel code
 
 Email request, confirmation and explicit refresh share a local interaction fence through the authoritative pending read. Both forms remain unavailable while a replacement command or its follow-up read is unresolved. An uncertain request also refreshes pending state before another proof can be submitted. A changed challenge ID clears the previous code; a recoverable wrong proof for the same ID preserves input for explicit retry. Read failures retain recovery controls without treating cached challenge data as current authority.
 
-Connections distinguish a confirmed local session, authoritative `steamVerified`, and outstanding `missingSetup`. Steam linking/TruckersMP and telemetry-token controls are unavailable pending their owning modules. No provider endpoint is fabricated.
+Connection status lives on `/account/connections`, reached from the user menu; the account page no longer repeats it. No provider endpoint is fabricated.
 
 ## Verification and limits
 
@@ -39,4 +39,4 @@ Connections distinguish a confirmed local session, authoritative `steamVerified`
 Run `node scripts/test-local.mjs unit` and `node scripts/test-local.mjs e2e` in pinned Docker for development feedback. Delivery independently verifies the exact committed candidate with `node scripts/test-ci.mjs` and the packaged `node deploy/development/test.mjs` rehearsal, including account deep links/assets/early ingress/noindex/no-store/referrer policy. Actual results, rendered review, independent security review and CI belong to the delivery report/PR; these instructions claim none of them. Local queued mail is not real inbox delivery. Hosted activation, VTC-039 hardening, later modules and production acceptance retain separate gates.
 
 
-VTC-038 links the account connection section and responsive navigation to the real [administration and connections workspace](administration.md), including personal telemetry one-show/revoke recovery and Steam/TruckersMP status. Existing account challenge and protected email-change semantics remain unchanged.
+VTC-038 links the account connection section and responsive navigation to the real [administration and connections workspace](administration.md), including personal telemetry one-show/revoke recovery and Steam/TruckersMP status; since VTC-044 the user menu and responsive navigation provide that link. Existing account challenge and protected email-change semantics remain unchanged.

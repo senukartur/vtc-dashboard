@@ -173,7 +173,7 @@ export function createContributionRegister(unit: UnitOfWork) {
         ),
       ];
     },
-    async totals(tx: TxContext, assignmentId: string) {
+    async totals(tx: TxContext, assignmentId: string, mode: "update" | "share" = "update") {
       // All writers hold the same member/qualification lock. Locking reads avoid stale RR snapshots.
       const rows = await c(tx)
         .select({ distance: tripContributions.actualDistanceM })
@@ -184,7 +184,7 @@ export function createContributionRegister(unit: UnitOfWork) {
             eq(tripContributions.credited, true),
           ),
         )
-        .for("update");
+        .for(mode);
       let total = 0n;
       for (const row of rows) {
         if (row.distance === null) throw new Error("CREDIT_DISTANCE_MISSING");

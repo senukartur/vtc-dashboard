@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { loginDestination } from "../../app/navigation-model.js";
 import { useSession } from "../../app/Session.js";
 import { Card } from "../../shared/ui/primitives.js";
 import { Form, emailValid, newPasswordValid, type AccountField } from "./Form.js";
@@ -11,6 +12,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
   const { t, i18n } = useTranslation("account");
   const session = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const request = useCommand();
   const token = useRef(handoff?.token ?? null);
   useEffect(() => {
@@ -91,7 +93,7 @@ export function AuthPage({ kind, handoff }: { kind: AuthKind; handoff?: LinkHand
             token.current = null;
             if (kind === "login") {
               session.changed();
-              navigate("/account", { replace: true });
+              navigate(loginDestination(location.state), { replace: true });
             } else {
               if (kind === "reset") session.end();
               setSuccess(true);

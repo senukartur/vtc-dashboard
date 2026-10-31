@@ -1,7 +1,3 @@
-import {
-  type ReconciliationConfig,
-  validateReconciliationConfig,
-} from "../../modules/reconciliation/matcher.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
@@ -13,9 +9,17 @@ import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type ManualConfig, validateManualConfig } from "../../modules/manual-reports/service.js";
 import { type MessagingConfig, validateMessagingConfig } from "../../modules/messaging/service.js";
 import {
+  type NotificationsConfig,
+  validateNotificationsConfig,
+} from "../../modules/notifications/service.js";
+import {
   type QualificationsConfig,
   validateQualificationsConfig,
 } from "../../modules/qualifications/service.js";
+import {
+  type ReconciliationConfig,
+  validateReconciliationConfig,
+} from "../../modules/reconciliation/matcher.js";
 import { type TelemetryConfig, validateTelemetryConfig } from "../../modules/telemetry/service.js";
 import {
   type TripDecisionsConfig,
@@ -435,7 +439,42 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       );
     }
   }
+  let notifications: NotificationsConfig | undefined;
+  if (![undefined, "true", "false"].includes(input.NOTIFICATIONS_ENABLED))
+    throw new Error("Invalid environment fields: NOTIFICATIONS_ENABLED");
+  if (input.NOTIFICATIONS_ENABLED === "true") {
+    try {
+      if (!identity || !trips || !qualifications || !events || !tripDecisions) throw new Error();
+      notifications = { cursorKey: input.NOTIFICATIONS_CURSOR_KEY ?? "" };
+      validateNotificationsConfig(notifications);
+      if (
+        [
+          identity.secret,
+          mail?.key,
+          catalogs?.cursorKey,
+          trips.cursorKey,
+          qualifications.cursorKey,
+          telemetry?.cursorKey,
+          manualReports?.key,
+          events.cursorKey,
+          reconciliation?.key,
+          tripDecisions.key,
+          analytics?.cursorKey,
+        ].includes(notifications.cursorKey) ||
+        (admissions &&
+          Buffer.from(notifications.cursorKey, "hex").equals(
+            Buffer.from(admissions.key, "base64url"),
+          ))
+      )
+        throw new Error();
+    } catch {
+      throw new Error(
+        "Invalid environment fields: NOTIFICATIONS_ENABLED, NOTIFICATIONS_CURSOR_KEY, IDENTITY_ENABLED, TRIPS_ENABLED, QUALIFICATIONS_ENABLED, EVENTS_ENABLED, TRIP_DECISIONS_ENABLED",
+      );
+    }
+  }
   return {
+    notifications,
     analytics,
     tripDecisions,
     reconciliation,

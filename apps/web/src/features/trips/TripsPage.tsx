@@ -66,16 +66,6 @@ export function TripsPage({ review = false }: { review?: boolean }) {
               <Link to="/account/reports">{t("drafts")}</Link>
             </Button>
           )}
-          {staff && (
-            <>
-              <Button asChild variant="outline">
-                <Link to="/account/review">{t("review")}</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/account/review/reconciliation">{t("reconciliation")}</Link>
-              </Button>
-            </>
-          )}
         </div>
       </header>
       {!review && (
