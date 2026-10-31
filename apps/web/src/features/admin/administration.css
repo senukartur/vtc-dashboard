@@ -22,8 +22,7 @@
 .admin-tabs a[aria-current] {
   background: var(--surface-active);
   color: var(--foreground);
-  outline: 1px solid var(--border);
-  /* Non-colour cue: focus blue keeps >= 3:1 against the active and page surfaces. */
+  /* No outline override, so the global :focus-visible ring still shows. Non-colour cue: focus blue keeps >= 3:1 against the active and page surfaces. */
   box-shadow: inset 0 -2px 0 var(--focus);
 }
 .admin-workbench {
