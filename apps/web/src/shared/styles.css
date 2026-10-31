@@ -1455,6 +1455,21 @@ textarea {
     display: none;
   }
 }
+/* The workspace sets viewport-fit=cover at every width, so fixed chrome keeps clear of the insets
+   (env() resolves to 0 without cover or a notch). The phone bar lift below 768px overrides bottom. */
+.workspace-shell .skip-link {
+  top: max(8px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+}
+.workspace-shell .notification-toasts {
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+@media (max-width: 600px) {
+  .workspace-shell .notification-toasts {
+    bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+}
 /* Phone bottom bar and More sheet; the bar exists only below 768px. */
 .bottom-nav {
   display: none;
@@ -1559,7 +1574,12 @@ textarea {
   }
   /* Compact phone topbar: logo, page title and notifications in one row, chip row below. */
   .workspace-shell .header-wordmark {
+    display: inline-flex;
     flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--target-min);
+    min-height: var(--target-min);
   }
   .workspace-shell .header-wordmark .wordmark-full {
     position: absolute;
@@ -1674,6 +1694,17 @@ textarea {
     overflow-wrap: anywhere;
     text-align: center;
   }
+  /* New report is the accent tile; its label keeps the idle colour unless it is current. */
+  .bottom-nav-accent {
+    gap: 1px;
+  }
+  .bottom-nav-accent .bottom-nav-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #ffffff;
+  }
   .bottom-nav-item[aria-current] {
     color: var(--focus);
     font-weight: 600;
@@ -1681,19 +1712,11 @@ textarea {
   .bottom-nav-item[aria-current] .bottom-nav-icon {
     background: var(--accent-soft);
   }
-  /* New report is the accent tile; its label keeps the idle colour unless it is current. */
-  .bottom-nav-accent {
-    gap: 1px;
-  }
-  .bottom-nav-accent .bottom-nav-icon,
+  /* Same specificity as the current pill above and later, so the current accent tile keeps the
+     accent fill and white icon and only gains a focus-coloured ring. */
   .bottom-nav-accent[aria-current] .bottom-nav-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
     background: var(--accent);
     color: #ffffff;
-  }
-  .bottom-nav-accent[aria-current] .bottom-nav-icon {
     box-shadow: 0 0 0 2px var(--focus);
   }
 }

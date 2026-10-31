@@ -580,7 +580,8 @@ test("phone bottom bar reaches main sections in one tap and keeps content clear"
   await expect(menuButton(page)).toHaveCount(0);
   await expect(userMenuTrigger(page)).toHaveCount(0);
   const banner = page.getByRole("banner");
-  await expect(banner.getByRole("link", { name: "Yukon Union", exact: true })).toBeVisible();
+  const wordmark = banner.getByRole("link", { name: "Yukon Union", exact: true });
+  await expect(wordmark).toBeVisible();
   await expect(
     banner.getByRole("navigation", { name: "Breadcrumb" }).locator('[aria-current="page"]'),
   ).toHaveText("My trips");
@@ -588,7 +589,7 @@ test("phone bottom bar reaches main sections in one tap and keeps content clear"
   await expect(banner.locator(".event-nearest")).toBeVisible();
   const height = await page.evaluate(() => innerHeight);
   expect(Math.abs((await rect(bar)).bottom - height)).toBeLessThanOrEqual(1);
-  for (const control of [...(await links.all()), moreButton(page)]) {
+  for (const control of [...(await links.all()), moreButton(page), wordmark]) {
     const box = await control.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
