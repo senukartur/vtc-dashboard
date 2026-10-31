@@ -17,6 +17,7 @@ export const browserFiles = {
   "test/e2e/catalogs-real.spec.ts": "catalogs-real",
   "test/e2e/admissions.spec.ts": "admissions",
   "test/e2e/foundation.spec.ts": "foundation",
+  "test/e2e/navigation.spec.ts": "navigation",
   "test/e2e/identity.spec.ts": "identity",
   "test/e2e/external-identities.spec.ts": "external-identities",
   "test/e2e/landing.spec.ts": "landing",

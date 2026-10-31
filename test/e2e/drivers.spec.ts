@@ -1,5 +1,5 @@
-import type { Page } from "@playwright/test";
 import { expect, test } from "./support/fixtures.ts";
+import { switchLanguage } from "./support/locale.ts";
 import {
   formerMemberId,
   levelIdAts,
@@ -7,14 +7,6 @@ import {
   member1Id,
   mockDashboardRoutes,
 } from "./support/dashboard-ui.ts";
-
-async function switchLanguage(page: Page, locale: "ru" | "en") {
-  await page
-    .getByRole("banner")
-    .getByRole("combobox", { name: /^(Language|Язык)$/ })
-    .selectOption(locale);
-  await expect(page.locator("html")).toHaveAttribute("lang", locale);
-}
 
 test.describe("Driver Directory and Profiles E2E", () => {
   test("loads driver directory with search, roles, and status indicators", async ({ page }) => {
@@ -164,7 +156,8 @@ test.describe("Driver Directory and Profiles E2E", () => {
 
     // Navigate to profile in Russian via SPA link
     await page.getByRole("link", { name: "AlphaDriver" }).click();
-    await expect(page.getByText("Профиль водителя")).toBeVisible();
+    // The breadcrumb repeats the page title, so assert the page content itself.
+    await expect(page.getByRole("main").getByText("Профиль водителя")).toBeVisible();
     await expect(page.getByText("Личная статистика")).toBeVisible();
     await expect(page.getByText("Пройденное расстояние", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Квалификации", exact: true })).toBeVisible();
@@ -174,7 +167,7 @@ test.describe("Driver Directory and Profiles E2E", () => {
 
     // Switch back to English
     await switchLanguage(page, "en");
-    await expect(page.getByText("Driver Profile")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Driver Profile")).toBeVisible();
     await expect(page.getByText("Personal Statistics")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Confirmed Trips History", exact: true }),

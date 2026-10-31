@@ -1,14 +1,6 @@
-import type { Page } from "@playwright/test";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { expect, test } from "./support/fixtures.ts";
-
-async function switchLanguage(page: Page, locale: "ru" | "en") {
-  await page
-    .getByRole("banner")
-    .getByRole("combobox", { name: /^(Language|Язык)$/ })
-    .selectOption(locale);
-  await expect(page.locator("html")).toHaveAttribute("lang", locale);
-}
+import { switchLanguage } from "./support/locale.ts";
 
 test.describe("Company Dashboard E2E", () => {
   test("loads company dashboard with overview KPIs, distance chart, and widgets", async ({

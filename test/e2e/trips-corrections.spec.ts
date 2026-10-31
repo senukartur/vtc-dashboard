@@ -139,6 +139,8 @@ for (const scenario of ["null_to_A", "A_to_B", "A_to_clear", "A_refreshed"] as c
     });
     await page.goto(`/account/reports/drafts/${id}`);
     await catalogLanguage(page);
+    // The language switch now waits for the authenticated shell; let reads it re-keyed settle.
+    await expect(page.getByRole("status").filter({ hasText: /^Loading…$/ })).toHaveCount(0);
     if (scenario === "A_refreshed") {
       currentVersion = 2;
       await page.getByRole("button", { name: "Reload telemetry targets", exact: true }).click();

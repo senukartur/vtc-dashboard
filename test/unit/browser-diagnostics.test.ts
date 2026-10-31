@@ -272,6 +272,7 @@ test("catalog browser failures retain only allowlisted file identifiers", () => 
     "events",
     "events-real",
     "dashboard",
+    "navigation",
   ]) {
     expect(safeBrowserFailure({ ...valid, file })).toEqual({ ...valid, file });
   }
