@@ -1,8 +1,11 @@
-import { newId } from "@vtc/db";
-import { describe, expect, it } from "vitest";
+import { newId, type UnitOfWork } from "@vtc/db";
+import { describe, expect, it, vi } from "vitest";
+import { createApp } from "../../apps/api/src/app.ts";
+import { registerAnalyticsRoutes } from "../../apps/api/src/modules/analytics/http.ts";
 import { pagination } from "../../apps/api/src/modules/analytics/pagination.ts";
 import {
   addDistances,
+  createAnalytics,
   currentReportingMonth,
   decimal,
   generateBuckets,
@@ -11,7 +14,7 @@ import {
   timezoneOrNull,
   validateAnalyticsConfig,
 } from "../../apps/api/src/modules/analytics/service.ts";
-import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
+import type { Actor, Identity } from "../../apps/api/src/modules/identity/service.ts";
 
 describe("Analytics Unit Tests", () => {
   const validKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -331,6 +334,48 @@ describe("Analytics Unit Tests", () => {
       expect(publicGames(0, 1)).toEqual(["ats"]);
       expect(publicGames(null, null)).toEqual([]);
       expect(publicGames(0, 0)).toEqual([]);
+    });
+  });
+
+  describe("public company statistics database failures (VTC-052)", () => {
+    const failing = (error: unknown) => {
+      const uow = { run: async () => Promise.reject(error) } as unknown as UnitOfWork;
+      const identity = { rateLimit: async () => {} } as unknown as Identity;
+      return { identity, service: createAnalytics(uow, identity, { cursorKey: validKey }) };
+    };
+    const outcome = (error: unknown) =>
+      failing(error)
+        .service.getPublicCompanyStats()
+        .catch((e) => e);
+
+    it("maps connection and transaction-control failures to 503", async () => {
+      expect(await outcome({ code: "ECONNREFUSED" })).toMatchObject({ statusCode: 503 });
+      expect(await outcome({ code: "EHOSTUNREACH" })).toMatchObject({ statusCode: 503 });
+      expect(
+        await outcome(new Error("WRAPPED", { cause: new Error("TRANSACTION_CONTROL_TIMEOUT") })),
+      ).toMatchObject({ statusCode: 503 });
+    });
+
+    it("rethrows other database errors unchanged", async () => {
+      const error = { code: "ER_PARSE_ERROR" };
+      expect(await outcome(error)).toBe(error);
+    });
+
+    it("returns a retryable no-store 503 without cookies over HTTP", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const { identity, service } = failing({ code: "ECONNREFUSED" });
+      const app = await createApp({ checkReadiness: async () => true });
+      await registerAnalyticsRoutes(app, identity, service);
+      try {
+        const res = await app.inject("/api/v1/public/company-stats");
+        expect(res.statusCode).toBe(503);
+        expect(res.headers["retry-after"]).toBe("1");
+        expect(res.headers["cache-control"]).toBe("no-store");
+        expect(res.headers["set-cookie"]).toBeUndefined();
+        expect(res.json().error).toMatchObject({ code: "SERVICE_UNAVAILABLE", retryable: true });
+      } finally {
+        await app.close();
+      }
     });
   });
 });

@@ -449,6 +449,7 @@ test("I6: the month aggregate range-scans trip_analytics_reporting", async () =>
   await unit.run((tx) => unit.client(tx).insert(trips).values(filler));
   await control.query("ANALYZE TABLE trips");
   // Mirrors the service statement (getPublicCompanyStats) for the November 2026 Moscow window.
+  // Keep in sync with the Drizzle aggregate in apps/api/src/modules/analytics/service.ts.
   const [plan] = await control.query<RowDataPacket[]>(
     "EXPLAIN SELECT count(*), coalesce(sum(truncate(actual_distance_m, 1)), 0), max(game = ?), max(game = ?) FROM trips WHERE decision = ? AND alias_of IS NULL AND reporting_at >= ? AND reporting_at < ?",
     ["ets2", "ats", "accepted", "2026-10-31 21:00:00.000", "2026-11-30 21:00:00.000"],

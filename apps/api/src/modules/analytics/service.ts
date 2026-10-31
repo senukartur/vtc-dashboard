@@ -204,6 +204,9 @@ function databaseUnavailable(error: unknown): boolean {
           "ECONNRESET",
           "EPIPE",
           "PROTOCOL_CONNECTION_LOST",
+          "EAI_AGAIN",
+          "ENETUNREACH",
+          "EHOSTUNREACH",
           "ETIMEDOUT",
           "PROTOCOL_SEQUENCE_TIMEOUT",
           "ER_CON_COUNT_ERROR",
@@ -551,6 +554,7 @@ export function createAnalytics(
             };
           const period = currentReportingMonth(instant, timeZone);
           // Per-trip truncation to tenths matches VTC-032 addDistances() company totals exactly.
+          // Keep in sync with the EXPLAIN mirror in test/integration/public-company-stats.test.ts (I6).
           const [row] = await uow
             .client(tx)
             .select({
