@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import { pagination } from "../../apps/api/src/modules/analytics/pagination.ts";
 import {
   addDistances,
+  currentReportingMonth,
+  decimal,
   generateBuckets,
   parseTimezoneDate,
+  publicGames,
+  timezoneOrNull,
   validateAnalyticsConfig,
 } from "../../apps/api/src/modules/analytics/service.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
@@ -245,6 +249,88 @@ describe("Analytics Unit Tests", () => {
 
     it("rejects malformed cursor", () => {
       expect(() => page(actor, scope, { limit: 1, cursor: "not-a-valid-cursor" })).toThrow();
+    });
+  });
+
+  describe("public company statistics helpers (VTC-052)", () => {
+    it("selects the Moscow reporting month up to the last millisecond before local midnight", () => {
+      expect(currentReportingMonth(new Date("2026-10-31T20:59:59.999Z"), "Europe/Moscow")).toEqual({
+        month: "2026-10",
+        fromDate: "2026-10-01",
+        toDateExclusive: "2026-11-01",
+        startIso: "2026-09-30T21:00:00.000Z",
+        endIso: "2026-10-31T21:00:00.000Z",
+      });
+    });
+
+    it("switches to the next Moscow month exactly at local midnight", () => {
+      expect(currentReportingMonth(new Date("2026-10-31T21:00:00.000Z"), "Europe/Moscow")).toEqual({
+        month: "2026-11",
+        fromDate: "2026-11-01",
+        toDateExclusive: "2026-12-01",
+        startIso: "2026-10-31T21:00:00.000Z",
+        endIso: "2026-11-30T21:00:00.000Z",
+      });
+    });
+
+    it("rolls the year over for January", () => {
+      expect(currentReportingMonth(new Date("2026-12-31T21:00:00.000Z"), "Europe/Moscow")).toEqual({
+        month: "2027-01",
+        fromDate: "2027-01-01",
+        toDateExclusive: "2027-02-01",
+        startIso: "2026-12-31T21:00:00.000Z",
+        endIso: "2027-01-31T21:00:00.000Z",
+      });
+    });
+
+    it("uses the actual offset at each month boundary across a DST change", () => {
+      expect(
+        currentReportingMonth(new Date("2026-03-15T12:00:00.000Z"), "America/New_York"),
+      ).toEqual({
+        month: "2026-03",
+        fromDate: "2026-03-01",
+        toDateExclusive: "2026-04-01",
+        startIso: "2026-03-01T05:00:00.000Z",
+        endIso: "2026-04-01T04:00:00.000Z",
+      });
+    });
+
+    it("supports UTC", () => {
+      expect(currentReportingMonth(new Date("2026-02-28T23:59:59.999Z"), "UTC")).toEqual({
+        month: "2026-02",
+        fromDate: "2026-02-01",
+        toDateExclusive: "2026-03-01",
+        startIso: "2026-02-01T00:00:00.000Z",
+        endIso: "2026-03-01T00:00:00.000Z",
+      });
+    });
+
+    it("prefers the stored timezone, falls back to configuration and never throws", () => {
+      expect(timezoneOrNull("Europe/Moscow", "UTC")).toBe("Europe/Moscow");
+      expect(timezoneOrNull(null, "UTC")).toBe("UTC");
+      expect(timezoneOrNull(undefined, undefined)).toBeNull();
+      expect(timezoneOrNull(null, undefined)).toBeNull();
+      expect(timezoneOrNull("", undefined)).toBeNull();
+      expect(timezoneOrNull("Invalid/Timezone", undefined)).toBeNull();
+      // An invalid stored value is not silently replaced by the fallback.
+      expect(timezoneOrNull("Invalid/Timezone", "UTC")).toBeNull();
+    });
+
+    it("canonicalizes MySQL decimal strings without float conversion", () => {
+      expect(decimal("0.000000000000000000")).toBe("0");
+      expect(decimal("0.0")).toBe("0");
+      expect(decimal(null)).toBe("0");
+      expect(decimal("505600.250000000000000000")).toBe("505600.25");
+      expect(decimal("100000.5")).toBe("100000.5");
+      expect(decimal("12345678901234567890.1")).toBe("12345678901234567890.1");
+    });
+
+    it("lists games with accepted trips in fixed ets2, ats order", () => {
+      expect(publicGames(1, 1)).toEqual(["ets2", "ats"]);
+      expect(publicGames("1", "0")).toEqual(["ets2"]);
+      expect(publicGames(0, 1)).toEqual(["ats"]);
+      expect(publicGames(null, null)).toEqual([]);
+      expect(publicGames(0, 0)).toEqual([]);
     });
   });
 });
