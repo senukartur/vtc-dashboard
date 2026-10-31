@@ -12,6 +12,7 @@ import {
 } from "../../shared/formatting.js";
 import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
+import { useQualificationQuery } from "../qualifications/queries.js";
 import type { DTO } from "./transport.js";
 
 type AnalyticsData = DTO["Analytics"];
@@ -250,15 +251,33 @@ export function MyQualificationWidget({
 }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
+  const ets2Levels = useQualificationQuery(
+    "/qualification-levels?game=ets2&limit=25",
+    "EnvelopeListQualificationLevel",
+  );
+  const atsLevels = useQualificationQuery(
+    "/qualification-levels?game=ats&limit=25",
+    "EnvelopeListQualificationLevel",
+  );
 
-  const renderProgress = (progress: ProgressData | undefined) => {
+  const renderProgress = (progress: ProgressData | undefined, levels: typeof ets2Levels) => {
     if (!progress?.assignment) {
       return <span className="text-sm muted">{t("myQualification.noQualification")}</span>;
     }
+    const level = levels.data?.data.data.items.find(
+      (item) => item.id === progress.assignment.levelId && item.game === progress.assignment.game,
+    );
     return (
       <div className="qualification-details space-y-1">
         <div className="flex items-center gap-2">
-          <Badge>{progress.assignment.levelId}</Badge>
+          <Badge>
+            {level?.name ??
+              t(
+                levels.isPending
+                  ? "myQualification.levelLoading"
+                  : "myQualification.levelUnavailable",
+              )}
+          </Badge>
           {progress.eligibleForConfirmation && (
             <Badge className="bg-emerald-950 text-emerald-300">
               {t("myQualification.eligible")}
@@ -283,20 +302,22 @@ export function MyQualificationWidget({
   };
 
   return (
-    <Card className="qualification-widget">
+    <Card className="qualification-widget" aria-labelledby="my-qualification-heading">
       <div className="section-heading">
-        <h2 className="text-lg font-semibold">{t("myQualification.title")}</h2>
+        <h2 id="my-qualification-heading" className="text-lg font-semibold">
+          {t("myQualification.title")}
+        </h2>
       </div>
 
       <div className="space-y-4">
         <div className="qualification-game-row">
           <span className="font-medium">ETS2</span>
-          {renderProgress(ets2Progress)}
+          {renderProgress(ets2Progress, ets2Levels)}
         </div>
 
         <div className="qualification-game-row">
           <span className="font-medium">ATS</span>
-          {renderProgress(atsProgress)}
+          {renderProgress(atsProgress, atsLevels)}
         </div>
       </div>
 

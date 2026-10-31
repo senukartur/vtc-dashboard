@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Roaring grizzly bear logo</title>
+  <circle cx="256" cy="256" r="244" fill="#0B1120"/>
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#2563EB" stroke-width="10"/>
+  <g transform="translate(-24,-30)" stroke-linejoin="round" stroke-linecap="round">
+    <!-- silhouette with light outline -->
+    <path d="M140,165 C132,120 176,94 205,125 C250,110 300,120 330,145 L410,168 C440,166 458,186 450,204 L430,222 L410,360
+             C380,392 330,405 300,400 L315,435 L280,425 L278,462 L245,440 L228,472 L205,442 L180,465 L170,432 L140,445 L145,410 L115,405 L125,370
+             C100,320 105,230 140,165 Z"
+          fill="#1E3A8A" stroke="#60A5FA" stroke-width="14"/>
+    <!-- head top facet -->
+    <path d="M140,165 C132,120 176,94 205,125 C250,110 300,120 330,145 L410,168 L392,192 L330,186 L280,196 L220,215 L160,245 L110,262 C108,220 118,190 140,165 Z" fill="#2563EB"/>
+    <!-- snout highlight -->
+    <path d="M322,148 L410,168 L392,186 L330,174 Z" fill="#60A5FA"/>
+    <!-- cheek facet -->
+    <path d="M160,245 L280,196 L330,205 L300,265 L262,315 L190,310 Z" fill="#3B82F6"/>
+    <!-- lower jaw facet -->
+    <path d="M300,265 L405,345 L410,360 C380,392 330,405 300,400 L270,345 Z" fill="#2563EB"/>
+    <path d="M330,330 L404,352 C380,382 350,392 330,392 Z" fill="#60A5FA" opacity="0.5"/>
+    <!-- fur tips -->
+    <path d="M205,442 L222,396 L245,440 Z M245,440 L262,400 L280,425 Z M170,432 L182,392 L205,442 Z" fill="#2563EB"/>
+    <!-- ear inner -->
+    <path d="M166,130 C174,112 196,114 202,130 L180,146 Z" fill="#0B1120"/>
+    <!-- open mouth -->
+    <path d="M430,222 C385,232 340,248 300,265 C335,295 370,325 405,345 C400,300 410,255 430,222 Z" fill="#0B1120"/>
+    <path d="M330,288 C365,302 392,322 402,340 C372,334 348,314 330,288 Z" fill="#1E40AF"/>
+    <!-- teeth -->
+    <path d="M422,226 L408,264 L400,231 Z" fill="#E0F2FE"/>
+    <path d="M378,239 L369,263 L362,242 Z" fill="#E0F2FE"/>
+    <path d="M346,251 L340,269 L334,254 Z" fill="#E0F2FE"/>
+    <path d="M400,341 L392,304 L382,333 Z" fill="#E0F2FE"/>
+    <path d="M360,317 L356,298 L347,311 Z" fill="#E0F2FE"/>
+    <!-- nose -->
+    <path d="M410,166 C436,164 456,182 450,200 C442,210 426,208 408,190 Z" fill="#0B1120"/>
+    <!-- snarl wrinkles -->
+    <path d="M350,168 L364,186 M372,174 L384,190" fill="none" stroke="#0B1120" stroke-width="6"/>
+    <!-- angry brow and eye -->
+    <path d="M266,166 L326,146 L333,157 L277,176 Z" fill="#0B1120"/>
+    <path d="M285,180 L322,165 L316,182 C304,187 294,186 285,180 Z" fill="#E0F2FE"/>
+  </g>
+</svg>

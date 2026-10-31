@@ -24,6 +24,7 @@
     "db:check": "pnpm --filter @vtc/api db:check",
     "db:generate": "pnpm --filter @vtc/db generate && biome format --write packages/db/migrations/meta",
     "db:migrate": "pnpm build:packages && pnpm --filter @vtc/db migrate",
+    "db:seed": "pnpm build:packages && node --env-file-if-exists=.env --import tsx scripts/demo/cli.ts",
     "db:test": "pnpm build:packages && node --import tsx scripts/test-lanes.ts persistence",
     "db:recovery": "pnpm build:packages && node --import tsx scripts/test-lanes.ts recovery",
     "smoke:local": "node scripts/smoke-local.mjs",
