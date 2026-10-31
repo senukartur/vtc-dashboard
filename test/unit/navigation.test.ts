@@ -1,9 +1,13 @@
 import { expect, test } from "vitest";
 import { capabilities, type Role } from "../../apps/api/src/modules/identity/permissions.ts";
 import {
+  accountLinks,
+  bottomBarItems,
   canReport,
+  currentMarker,
   loginDestination,
   matchRouteMeta,
+  moreGroups,
   navGroups,
   navItem,
   paths,
@@ -162,9 +166,167 @@ test("every navigation label used by the model exists in Russian and English", (
     "userMenu",
     "myProfile",
     "publicSite",
+    "sections",
+    "more",
+    "moreDescription",
   ])
     keys.add(`nav.${key}`);
+  for (const roles of everyRole)
+    for (const entry of bottomBarItems(capabilities(roles))) {
+      keys.add(entry.labelKey);
+      if (entry.nameKey) keys.add(entry.nameKey);
+    }
+  for (const entry of accountLinks({ capabilities: ["company.read"], memberId: "x" }))
+    keys.add(entry.labelKey);
   for (const key of keys)
     for (const locale of [core.en, core.ru]) expect(typeof lookup(locale, key), key).toBe("string");
   expect(Object.keys(core.ru.nav.items)).toEqual(Object.keys(core.en.nav.items));
+  expect(Object.keys(core.ru.nav.bar)).toEqual(Object.keys(core.en.nav.bar));
+});
+
+const everyRole: Role[][] = [
+  [],
+  ["trainee"],
+  ["driver"],
+  ["dispatcher"],
+  ["driver", "dispatcher"],
+  ["deputy_director"],
+  ["director"],
+];
+const bar = (roles: Role[]) => bottomBarItems(capabilities(roles)).map((entry) => entry.id);
+const more = (roles: Role[]) =>
+  Object.fromEntries(
+    moreGroups(capabilities(roles)).map((group) => [group.id, group.items.map((item) => item.id)]),
+  );
+
+test("phone bottom bar keeps four sections with a role-dependent third slot", () => {
+  const reporter = ["overview", "myTrips", "newReport", "events"];
+  const reviewer = ["overview", "myTrips", "dispatch", "events"];
+  expect(bar(["trainee"])).toEqual(reporter);
+  expect(bar(["driver"])).toEqual(reporter);
+  expect(bar(["driver", "dispatcher"])).toEqual(reporter);
+  expect(bar(["dispatcher"])).toEqual(reviewer);
+  expect(bar(["deputy_director"])).toEqual(reviewer);
+  expect(bar(["director"])).toEqual(reviewer);
+  // Role-less members keep company.read only: the bar shrinks to three sections plus More.
+  expect(bar([])).toEqual(["overview", "myTrips", "events"]);
+  expect(bottomBarItems([])).toEqual([]);
+  expect(bottomBarItems(["unknown.capability"])).toEqual([]);
+  const items = bottomBarItems(capabilities(["trainee"]));
+  expect(items.find((entry) => entry.id === "newReport")).toMatchObject({
+    route: "newReport",
+    accent: true,
+    nameKey: "nav.newReport",
+  });
+  expect(items.filter((entry) => entry.accent).map((entry) => entry.id)).toEqual(["newReport"]);
+  expect(bottomBarItems(capabilities(["dispatcher"])).find((e) => e.id === "dispatch")).toEqual({
+    id: "dispatch",
+    route: "review",
+    labelKey: "nav.bar.dispatch",
+  });
+});
+
+test("More sheet groups hold exactly the visible sections that the bar leaves out", () => {
+  const company = ["drivers", "qualifications"];
+  expect(more(["trainee"])).toEqual({ personal: ["drafts"], company });
+  expect(more(["driver"])).toEqual(more(["trainee"]));
+  expect(more(["dispatcher"])).toEqual({ company, review: ["reconciliation"] });
+  expect(more(["driver", "dispatcher"])).toEqual({
+    personal: ["drafts"],
+    company,
+    review: ["dispatch", "reconciliation"],
+  });
+  const leadership = {
+    company,
+    review: ["reconciliation"],
+    management: ["applications", "members", "catalogs", "settings"],
+  };
+  expect(more(["deputy_director"])).toEqual(leadership);
+  expect(more(["director"])).toEqual(leadership);
+  expect(more([])).toEqual({ company });
+  for (const roles of everyRole) {
+    const inBar = bar(roles).filter((id) => id !== "newReport");
+    const inSheet = moreGroups(capabilities(roles)).flatMap((g) => g.items.map((i) => i.id));
+    const visible = visibleGroups(capabilities(roles)).flatMap((g) => g.items.map((i) => i.id));
+    expect(
+      inSheet.filter((id) => (inBar as string[]).includes(id)),
+      roles.join("+"),
+    ).toEqual([]);
+    expect(new Set([...inBar, ...inSheet]), roles.join("+")).toEqual(new Set(visible));
+  }
+});
+
+test("current markers distinguish a section page from its detail routes", () => {
+  const marker = (entry: Parameters<typeof currentMarker>[0], pathname: string) =>
+    currentMarker(entry, matchRouteMeta(pathname));
+  const report = { id: "newReport", route: "newReport" } as const;
+  const dispatch = { id: "dispatch", route: "review" } as const;
+  const events = { id: "events", route: "events" } as const;
+  const drafts = navItem("drafts") ?? report;
+  const uuid = "41000000-0000-4000-8000-000000000017";
+  expect(marker(report, "/account/reports/new")).toBe("page");
+  expect(marker(report, `/account/reports/drafts/${uuid}`)).toBeUndefined();
+  expect(marker(report, "/account/reports")).toBeUndefined();
+  expect(marker(drafts, "/account/reports/new")).toBe("true");
+  expect(marker(dispatch, "/account/review")).toBe("page");
+  expect(marker(dispatch, `/account/review/${uuid}`)).toBe("true");
+  expect(marker(dispatch, "/account/review/reconciliation")).toBeUndefined();
+  expect(marker(events, `/account/events/${uuid}`)).toBe("true");
+  expect(marker(events, "/account/events/new")).toBe("true");
+  expect(marker(events, "/account/events")).toBe("page");
+  expect(marker(events, "/account")).toBeUndefined();
+  expect(marker(events, "/")).toBeUndefined();
+});
+
+test("account links are shared by the user menu and the More sheet", () => {
+  const memberId = "41000000-0000-4000-8000-000000000017";
+  expect(accountLinks({ capabilities: capabilities(["trainee"]), memberId })).toEqual([
+    { id: "profile", to: `/account/drivers/${memberId}`, labelKey: "nav.myProfile" },
+    { id: "security", to: "/account", labelKey: "nav.account.security" },
+    { id: "connections", to: "/account/connections", labelKey: "nav.account.connections" },
+  ]);
+  expect(accountLinks({ capabilities: [], memberId })).toEqual([
+    { id: "security", to: "/account", labelKey: "nav.account.security" },
+  ]);
+  expect(accountLinks({ capabilities: ["company.read"], memberId: "a/b" })[0]?.to).toBe(
+    "/account/drivers/a%2Fb",
+  );
+});
+
+test("bar accessible names contain their visible labels in Russian and English", () => {
+  const lookup = (tree: unknown, key: string) =>
+    String(
+      key
+        .split(".")
+        .reduce<unknown>(
+          (node, part) => (node as Record<string, unknown> | undefined)?.[part],
+          tree,
+        ),
+    );
+  const entries = new Map(
+    everyRole.flatMap((roles) => bottomBarItems(capabilities(roles))).map((e) => [e.id, e]),
+  );
+  expect([...entries.keys()].sort()).toEqual(
+    ["dispatch", "events", "myTrips", "newReport", "overview"].sort(),
+  );
+  for (const locale of [core.en, core.ru])
+    for (const entry of entries.values()) {
+      const label = lookup(locale, entry.labelKey);
+      const name = lookup(locale, entry.nameKey ?? entry.labelKey);
+      expect(name.toLocaleLowerCase(), entry.id).toContain(label.toLocaleLowerCase());
+    }
+  expect(core.en.nav.bar).toEqual({
+    overview: "Overview",
+    myTrips: "Trips",
+    newReport: "Report",
+    events: "Events",
+    dispatch: "Review",
+  });
+  expect(core.ru.nav.bar).toEqual({
+    overview: "Обзор",
+    myTrips: "Рейсы",
+    newReport: "Отчёт",
+    events: "События",
+    dispatch: "Проверка",
+  });
 });

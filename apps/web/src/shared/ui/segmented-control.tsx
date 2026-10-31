@@ -3,7 +3,8 @@
 import { cn } from "../cn.js";
 import type { ControlSize } from "./variants.js";
 
-export type SegmentedOption<T extends string> = { value: T; label: string };
+/** `lang` marks an option written in another language, such as a language name. */
+export type SegmentedOption<T extends string> = { value: T; label: string; lang?: string };
 
 type GroupName = { "aria-label": string } | { "aria-labelledby": string };
 
@@ -33,6 +34,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           className="segmented-item"
           aria-pressed={option.value === value}
+          lang={option.lang}
           onClick={() => onValueChange(option.value)}
         >
           {option.label}

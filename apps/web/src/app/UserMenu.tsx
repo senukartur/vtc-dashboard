@@ -5,12 +5,13 @@ import { Link } from "react-router-dom";
 import { useSignOut } from "../features/account/sign-out.js";
 import { publicPath } from "../features/landing/content.js";
 import { NavIcon } from "./nav-icons.js";
-import { paths, primaryRole } from "./navigation-model.js";
+import { accountLinks, primaryRole } from "./navigation-model.js";
 import { useSession } from "./Session.js";
 
 /**
  * Personal destinations, display language and sign-out. Rendered in the sidebar footer above
  * 1050px and in the topbar below it; CSS hides the other instance so only one is exposed.
+ * Phones with the bottom bar hide both and reach the same items in the More sheet.
  */
 export function UserMenu({ placement }: { placement: "sidebar" | "topbar" }) {
   const { t, i18n } = useTranslation("core");
@@ -70,20 +71,12 @@ export function UserMenu({ placement }: { placement: "sidebar" | "topbar" }) {
               <span className="user-name">{self.member.nickname}</span>
               <span className="user-email">{self.email}</span>
             </DropdownMenu.Label>
-            {self.capabilities.includes("company.read") && (
-              <DropdownMenu.Item asChild className={item} onSelect={routed}>
-                <Link to={`/account/drivers/${encodeURIComponent(self.member.id)}`}>
-                  {t("nav.myProfile")}
-                </Link>
-              </DropdownMenu.Item>
-            )}
-            <DropdownMenu.Item asChild className={item} onSelect={routed}>
-              <Link to={paths.account}>{t("nav.account.security")}</Link>
-            </DropdownMenu.Item>
-            {self.capabilities.includes("company.read") && (
-              <DropdownMenu.Item asChild className={item} onSelect={routed}>
-                <Link to={paths.connections}>{t("nav.account.connections")}</Link>
-              </DropdownMenu.Item>
+            {accountLinks({ capabilities: self.capabilities, memberId: self.member.id }).map(
+              (entry) => (
+                <DropdownMenu.Item key={entry.id} asChild className={item} onSelect={routed}>
+                  <Link to={entry.to}>{t(entry.labelKey)}</Link>
+                </DropdownMenu.Item>
+              ),
             )}
             <DropdownMenu.Separator className="user-menu-separator" />
             <DropdownMenu.Label className="user-menu-heading">{t("language")}</DropdownMenu.Label>
