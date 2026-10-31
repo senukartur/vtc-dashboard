@@ -1,3 +1,4 @@
+// Button variant shape adapted from shadcn/ui d2fba50; see third_party/shadcn-ui/LICENSE.
 // Size variants emit semantic classes; metrics live in shared/styles.css custom properties.
 // The base class carries the default `sm` metrics, so raw `.button` links and native selects
 // stay compact without opting in.
