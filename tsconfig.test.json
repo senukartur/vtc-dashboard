@@ -9,6 +9,7 @@
     "test/**/*.ts",
     "scripts/test-lanes.ts",
     "scripts/catalogs/**/*.ts",
+    "scripts/demo/**/*.ts",
     "vitest.config.ts",
     "playwright.config.ts",
     "apps/api/src/**/*.ts"
