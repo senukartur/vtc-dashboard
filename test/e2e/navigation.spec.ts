@@ -422,6 +422,15 @@ test("sign-out from the user menu ends the session or keeps private content hidd
   await expect(userMenuTrigger(page)).toHaveCount(0);
   await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
   await expect(page.locator(".account-address")).toHaveCount(0);
+  // With the user menu hidden, the banner select keeps the language switchable.
+  await expect(
+    page.getByRole("banner").getByRole("combobox", { name: "Language", exact: true }),
+  ).toBeVisible();
+  await switchLanguage(page, "ru");
+  await expect(
+    page.getByRole("button", { name: "Проверить сессию и вернуться", exact: true }),
+  ).toBeVisible();
+  await switchLanguage(page, "en");
   await page.getByRole("button", { name: "Check session before returning", exact: true }).click();
   await expect(userMenuTrigger(page)).toBeVisible();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Account and security");

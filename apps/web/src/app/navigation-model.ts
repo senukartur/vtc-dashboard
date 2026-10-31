@@ -169,6 +169,8 @@ export function loginDestination(state: unknown): string {
     typeof hash !== "string" ||
     !accountPath.test(pathname) ||
     pathname.includes("//") ||
+    // Dot segments would resolve outside the protected workspace (e.g. /account/../login).
+    /(^|\/)\.{1,2}(\/|$)/.test(pathname) ||
     !(search === "" || /^\?[^#]*$/.test(search)) ||
     !(hash === "" || hash.startsWith("#"))
   )

@@ -46,8 +46,9 @@ export function AppLayout({
   const live = member && !preview;
   const signingOut = live && signOut.active;
   const userMenu = live && session.state === "authenticated" && !signingOut;
-  // Live workspace pages switch language through the user menu once a session exists.
-  const languageSelect = !live || session.state === "anonymous" || session.state === "unavailable";
+  // Live workspace pages switch language through the user menu whenever it is shown; otherwise
+  // (anonymous, unavailable or signing out) the select stays, except while the session is checked.
+  const languageSelect = !live || (!userMenu && session.state !== "checking");
   const languagePicker = languageSelect && (
     <label className="language-picker">
       {t("language")}
@@ -131,7 +132,7 @@ export function AppLayout({
             <>
               <Breadcrumb />
               <div className="topbar-actions">
-                {session.state === "authenticated" && <NearestEvent />}
+                {session.state === "authenticated" && <NearestEvent variant="chip" />}
                 {bell}
                 {userMenu && <UserMenu placement="topbar" />}
                 <Navigation variant="mobile" onMobileNavigate={onMobileNavigate} />
