@@ -463,7 +463,10 @@ test("controlled publication refresh rebases paged rule history without refetchi
   const card = page
     .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
     .locator("..");
-  await card.getByText("Rule version history", { exact: true }).click();
+  const history = card.getByText("Rule version history", { exact: true });
+  const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+  expect((await history.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(coarse ? 40 : 30);
+  await history.click();
   await card.locator("details").getByRole("button", { name: "Next page", exact: true }).click();
   await expect(card.getByText("Effective now", { exact: true })).toBeVisible();
   expect(state.ruleRequests).toContain("1:synthetic-rule-next");

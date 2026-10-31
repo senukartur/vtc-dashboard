@@ -55,6 +55,7 @@
 .qualification-workspace summary {
   cursor: pointer;
   padding-block: 6px;
+  min-height: var(--target-min);
 }
 .qualification-workspace .input {
   width: 100%;
