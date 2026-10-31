@@ -88,11 +88,22 @@ The [development deployment runbook](operations/development.md) covers reviewed 
 | `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |
 | `pnpm db:generate` | Sole migration integrator generates/reviews Drizzle SQL/journal and formats metadata |
 | `pnpm db:migrate` | Build packages and run explicit dedicated, locked migrations; never reset/seed |
+| `pnpm db:seed` | Explicit local demo company, drivers, trips, qualifications and convoys; see below |
 | `pnpm db:test` / `pnpm db:recovery` | Destructive synthetic-only real MySQL checks / separate partial-DDL rehearsal; require the [documented guards](development/persistence.md#explicit-synthetic-verification) |
 | `pnpm smoke:local` | Actual local HTTP/module/readiness probe; defaults to the Vite origin |
 | `pnpm build` / `pnpm start` | Portable production build / same-origin start |
 
 For a production server on another loopback port, set `SMOKE_BASE_URL` for the smoke command. `SMOKE_EXPECT_READY=false` deliberately tests the unavailable-database path; success in that mode is never database proof. Do not run mutating tests or send real mail/webhooks with production identities.
+
+### Local dashboard demo data
+
+After `pnpm dev:setup`, start MySQL with `docker compose up -d db`, apply `pnpm db:migrate`, then run `pnpm db:seed` on the host. The seed reads the private root `.env` and accepts only `NODE_ENV=development`, local MySQL (`127.0.0.1`, `localhost`, `::1`, or Compose `db`) and database `vtc_dev` or `vtc_demo`. It refuses a company not created by this fixture before writing any data. It never resets tables, applies migrations, sends mail or contacts game services.
+
+The fixture contains eight visibly named demo members (one former member), ETS2/ATS accepted trips for the previous and current calendar months, two pending reviews, a rejected trip, an open trip, per-game qualification progress, original RU/EN route/cargo labels and two upcoming member convoys. Distances, thresholds and timezone (`Europe/Moscow`) are synthetic development choices. Each seed is transactional; reruns retain existing records, add missing dated trips and replace expired convoy fixtures without duplicating credit. No runtime/startup command invokes it.
+
+The generated director login is saved only in ignored `.local/demo/login.json`; keep this file between runs. No usable password is committed or printed. If it is lost, the seed does not reset existing credentials; use the account recovery workflow. Other demo accounts use the same locally generated password and their fictional `demo.driver.N@example.invalid` addresses (`N=1..7`; the former account cannot sign in).
+
+To display these records through the real API, enable `IDENTITY_ENABLED`, `TRIPS_ENABLED`, `CATALOGS_ENABLED`, `CATALOGS_SYNTHETIC`, `QUALIFICATIONS_ENABLED`, `EVENTS_ENABLED` and `ANALYTICS_ENABLED` in your private `.env`. Generate separate random 32-byte hex keys for their `*_CURSOR_KEY` fields and `IDENTITY_SECRET`. Replace the catalog placeholders with these local-demo values: `CATALOGS_MAX_FILE_BYTES=1048576`, `CATALOGS_ARTIFACT_TTL_MS=86400000` and `CATALOGS_POLICY_REVISION=1`. Set `ANALYTICS_REPORTING_TIMEZONE=Europe/Moscow`. Restart the app after environment changes, sign in at `/login`, then open `/account/dashboard`. Leave unrelated integrations disabled.
 
 Generated browser files are committed so frontend/backend owners consume one reviewed baseline. Edit `docs/contracts/dashboard/openapi.json` through a coordinated contract PR, then regenerate. Generated types and JSON Schema 2020-12 stay separate from the frozen telemetry contract. The API uses explicit Ajv 2020 compilers, rejects undeclared fields where the schema closes the object and fails closed on invalid response DTOs. This is structural enforcement, not a replacement for session/permission/domain checks in later cards.
 
