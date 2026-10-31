@@ -5,19 +5,32 @@ import { useSignOut } from "../features/account/sign-out.js";
 import { publicPath } from "../features/landing/content.js";
 import { Button } from "../shared/ui/primitives.js";
 import { NavIcon } from "./nav-icons.js";
-import { canReport, matchRouteMeta, navItem, paths, visibleGroups } from "./navigation-model.js";
+import {
+  canReport,
+  currentMarker,
+  matchRouteMeta,
+  moreGroups,
+  navItem,
+  paths,
+  visibleGroups,
+} from "./navigation-model.js";
 import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>) => void;
 
-/** Role-grouped workspace links shared by the desktop sidebar and the tablet/phone dialog. */
+/**
+ * Role-grouped workspace links shared by the desktop sidebar and the tablet navigation dialog.
+ * The `sheet` variant is the phone More sheet: sections already in the bottom bar are left out.
+ */
 export function MemberNavLinks({
   onNavigate,
   collapsed = false,
+  variant = "sidebar",
 }: {
   onNavigate?: Navigate | undefined;
   collapsed?: boolean;
+  variant?: "sidebar" | "sheet";
 }) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
@@ -52,9 +65,10 @@ export function MemberNavLinks({
   const capabilities = session.self.capabilities;
   const current = matchRouteMeta(location.pathname);
   const report = t("nav.newReport");
+  const sheet = variant === "sheet";
   return (
     <>
-      {canReport(capabilities) && (
+      {!sheet && canReport(capabilities) && (
         <Button asChild className="nav-new-report">
           <Link to={paths.newReport} onClick={onNavigate} title={tip(report)}>
             <NavIcon name="plus" />
@@ -63,14 +77,16 @@ export function MemberNavLinks({
         </Button>
       )}
       <nav className="sidebar-navigation member-navigation" aria-label={t("nav.primary")}>
-        {visibleGroups(capabilities).map((group) => {
+        {(sheet ? moreGroups(capabilities) : visibleGroups(capabilities)).map((group) => {
           const titleId = `${prefix}-${group.id}`;
           return (
             <div key={group.id} className="nav-group">
               <p
                 id={titleId}
                 className={
-                  group.id === "personal" ? "nav-group-title visually-hidden" : "nav-group-title"
+                  group.id === "personal" && !sheet
+                    ? "nav-group-title visually-hidden"
+                    : "nav-group-title"
                 }
               >
                 {t(`nav.groups.${group.id}`)}
@@ -78,7 +94,6 @@ export function MemberNavLinks({
               <ul className="nav-list" aria-labelledby={titleId}>
                 {group.items.map((entry) => {
                   const label = t(`nav.items.${entry.id}`);
-                  const owned = current?.item === entry.id;
                   return (
                     <li key={entry.id}>
                       <Link
@@ -86,9 +101,7 @@ export function MemberNavLinks({
                         onClick={onNavigate}
                         title={tip(label)}
                         // A detail page is inside the section but is not the section page itself.
-                        aria-current={
-                          owned ? (current?.id === entry.route ? "page" : "true") : undefined
-                        }
+                        aria-current={currentMarker(entry, current)}
                       >
                         <NavIcon name={entry.id} />
                         <span className="nav-label">{label}</span>

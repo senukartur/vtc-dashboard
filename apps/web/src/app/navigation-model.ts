@@ -149,6 +149,99 @@ export function canReport(capabilities: readonly string[]) {
   return capabilities.includes("trips.submit_own");
 }
 
+export type BarItemId = "overview" | "myTrips" | "newReport" | "dispatch" | "events";
+export interface BarItem {
+  id: BarItemId;
+  route: RouteId;
+  /** Short visible label. */
+  labelKey: string;
+  /** Fuller accessible name; it always contains the visible label (WCAG 2.5.3). */
+  nameKey?: string;
+  accent?: boolean;
+}
+const barItem = (
+  id: "overview" | "myTrips" | "dispatch" | "events",
+  nameKey?: string,
+): BarItem => ({
+  id,
+  route: navItem(id)?.route ?? "dashboard",
+  labelKey: `nav.bar.${id}`,
+  ...(nameKey ? { nameKey } : {}),
+});
+/**
+ * Phone bottom bar sections in order. The third slot is New report for members who submit
+ * their own trips, otherwise Dispatch for reviewers, otherwise it is omitted. Presentation only.
+ */
+export function bottomBarItems(capabilities: readonly string[]): BarItem[] {
+  const allowed = (id: NavItemId) => {
+    const entry = navItem(id);
+    return entry !== undefined && capabilities.includes(entry.capability);
+  };
+  const third: BarItem | null = canReport(capabilities)
+    ? {
+        id: "newReport",
+        route: "newReport",
+        labelKey: "nav.bar.newReport",
+        nameKey: "nav.newReport",
+        accent: true,
+      }
+    : allowed("dispatch")
+      ? barItem("dispatch")
+      : null;
+  return [
+    ...(allowed("overview") ? [barItem("overview")] : []),
+    ...(allowed("myTrips") ? [barItem("myTrips", "nav.items.myTrips")] : []),
+    ...(third ? [third] : []),
+    ...(allowed("events") ? [barItem("events")] : []),
+  ];
+}
+/** Groups for the phone More sheet: the visible groups without sections already in the bar. */
+export function moreGroups(capabilities: readonly string[]): NavGroup[] {
+  const inBar = new Set<string>(bottomBarItems(capabilities).map((entry) => entry.id));
+  return visibleGroups(capabilities)
+    .map((group) => ({ ...group, items: group.items.filter((entry) => !inBar.has(entry.id)) }))
+    .filter((group) => group.items.length > 0);
+}
+/**
+ * `aria-current` for a navigation entry: "page" on the entry's own route, "true" on a detail
+ * route the entry owns (for example a driver profile under Drivers), otherwise none.
+ */
+export function currentMarker(
+  entry: { id: string; route: RouteId },
+  meta: (RouteMeta & { id: RouteId }) | null,
+): "page" | "true" | undefined {
+  if (!meta) return undefined;
+  if (meta.id === entry.route) return "page";
+  return meta.item === entry.id ? "true" : undefined;
+}
+
+export type AccountLinkId = "profile" | "security" | "connections";
+/** Personal destinations shared by the user menu and the phone More sheet. */
+export function accountLinks({
+  capabilities,
+  memberId,
+}: {
+  capabilities: readonly string[];
+  memberId: string;
+}): { id: AccountLinkId; to: string; labelKey: string }[] {
+  const company = capabilities.includes("company.read");
+  return [
+    ...(company
+      ? [
+          {
+            id: "profile" as const,
+            to: `/account/drivers/${encodeURIComponent(memberId)}`,
+            labelKey: "nav.myProfile",
+          },
+        ]
+      : []),
+    { id: "security" as const, to: paths.account, labelKey: "nav.account.security" },
+    ...(company
+      ? [{ id: "connections" as const, to: paths.connections, labelKey: "nav.account.connections" }]
+      : []),
+  ];
+}
+
 const rolePrecedence = ["director", "deputy_director", "dispatcher", "driver", "trainee"] as const;
 export type PrimaryRole = (typeof rolePrecedence)[number];
 export function primaryRole(roles: readonly string[]): PrimaryRole | null {

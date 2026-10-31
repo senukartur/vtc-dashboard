@@ -1,7 +1,7 @@
 import type { NavItemId } from "./navigation-model.js";
 
 // Project-authored line icons; decorative only, the adjacent label names every control.
-const shapes: Record<NavItemId | "plus" | "collapse" | "expand" | "check", string> = {
+const shapes: Record<NavItemId | "plus" | "collapse" | "expand" | "check" | "more", string> = {
   overview: "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
   myTrips:
     "M3 16V7h11v9M14 10h4l3 3v3h-7M7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4M17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
@@ -21,13 +21,14 @@ const shapes: Record<NavItemId | "plus" | "collapse" | "expand" | "check", strin
   collapse: "M15 6l-6 6 6 6",
   expand: "M9 6l6 6-6 6",
   check: "M5 12l5 5 9-10",
+  more: "M4.5 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0M10.5 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0M16.5 12a1.5 1.5 0 1 0 3 0 1.5 1.5 0 1 0-3 0",
 };
-export function NavIcon({ name }: { name: keyof typeof shapes }) {
+export function NavIcon({ name, size = 16 }: { name: keyof typeof shapes; size?: number }) {
   return (
     <svg
       className="nav-icon"
-      width="16"
-      height="16"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

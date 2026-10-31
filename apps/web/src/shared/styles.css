@@ -124,6 +124,8 @@
   --field-h-sm: 32px;
   --field-h-xs: 24px;
   --target-min: 30px;
+  /* Phone bottom bar height without the bottom safe-area inset. */
+  --bottom-nav-h: 56px;
 }
 * {
   box-sizing: border-box;
@@ -245,7 +247,9 @@ figure {
 /* Shell navigation rows only; breadcrumbs and in-page navs keep their own link styles. */
 .sidebar-navigation a,
 .desktop-navigation a,
-.dialog-navigation a {
+.dialog-navigation a,
+.more-links a,
+.more-links button {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -258,7 +262,9 @@ figure {
 }
 .sidebar-navigation a:hover,
 .desktop-navigation a:hover,
-.dialog-navigation a:hover {
+.dialog-navigation a:hover,
+.more-links a:hover,
+.more-links button:hover {
   background: var(--surface-hover);
   color: var(--foreground);
 }
@@ -1495,8 +1501,17 @@ textarea {
   }
 }
 @media (max-width: 1050px) {
+  /* Inline padding follows the safe-area insets once viewport-fit=cover is set (0 elsewhere). */
+  .workspace-shell {
+    --shell-inline-start: max(24px, env(safe-area-inset-left));
+    --shell-inline-end: max(24px, env(safe-area-inset-right));
+    padding-left: var(--shell-inline-start);
+    padding-right: var(--shell-inline-end);
+  }
   .workspace-shell .site-header {
-    padding: 8px 24px;
+    margin-left: calc(-1 * var(--shell-inline-start));
+    margin-right: calc(-1 * var(--shell-inline-end));
+    padding: 8px var(--shell-inline-end) 8px var(--shell-inline-start);
   }
   .workspace-shell .mobile-navigation {
     margin-left: 0;
@@ -1512,9 +1527,103 @@ textarea {
     display: none;
   }
 }
-@media (max-width: 760px) {
+/* The workspace sets viewport-fit=cover at every width, so fixed chrome keeps clear of the insets
+   (env() resolves to 0 without cover or a notch). The phone bar lift below 768px overrides bottom. */
+.workspace-shell .skip-link {
+  top: max(8px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+}
+.workspace-shell .notification-toasts {
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+}
+@media (max-width: 600px) {
+  .workspace-shell .notification-toasts {
+    bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+}
+/* Phone bottom bar and More sheet; the bar exists only below 768px. */
+.bottom-nav {
+  display: none;
+}
+.dialog-content.more-sheet {
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  transform: none;
+  width: 100%;
+  max-height: calc(100dvh - 24px);
+  gap: 12px;
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.more-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-content .more-sheet-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.more-sheet-close {
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--focus);
+  font-size: 13px;
+  font-weight: 600;
+}
+.more-sheet-close:hover {
+  background: var(--surface-hover);
+}
+.more-account {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.more-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 4px;
+}
+.more-links {
+  display: grid;
+  gap: 2px;
+}
+.more-links button {
+  width: 100%;
+  background: transparent;
+  font-size: inherit;
+  text-align: left;
+}
+.more-language {
+  display: grid;
+  gap: 6px;
+}
+.more-language .nav-group-title {
+  margin: 4px 0 0;
+}
+.more-language .segmented {
+  margin: 0 10px;
+}
+@media (max-width: 767.98px) {
+  .workspace-shell {
+    --shell-inline-start: max(16px, env(safe-area-inset-left));
+    --shell-inline-end: max(16px, env(safe-area-inset-right));
+  }
   .workspace-shell .site-header {
-    padding: 8px 16px;
+    justify-content: space-between;
   }
   /* Breadcrumb and nearest-event chip take their own rows under the control row. */
   .workspace-shell .topbar-actions {
@@ -1531,6 +1640,156 @@ textarea {
   }
   .workspace-shell .site-header .language-picker {
     order: 4;
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  /* Compact phone topbar: logo, page title and notifications in one row, chip row below. */
+  .workspace-shell .header-wordmark {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--target-min);
+    min-height: var(--target-min);
+  }
+  .workspace-shell .header-wordmark .wordmark-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .workspace-shell .header-wordmark .wordmark-short {
+    display: inline;
+  }
+  .has-bottom-bar .user-menu-topbar,
+  .has-bottom-bar .mobile-navigation {
+    display: none;
+  }
+  .has-bottom-bar .site-header .breadcrumb {
+    order: 0;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  /* The group stays in the accessibility tree; the visible title starts at the section. */
+  .has-bottom-bar .breadcrumb li:first-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .has-bottom-bar .breadcrumb li:nth-child(2)::before {
+    content: none;
+  }
+  .has-bottom-bar .breadcrumb [aria-current="page"] {
+    color: var(--foreground);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  /* Content, focus scrolling and toasts stay clear of the fixed bar and the home indicator. */
+  .workspace-shell.has-bottom-bar {
+    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 12px);
+  }
+  :root:has(.has-bottom-bar) {
+    scroll-padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
+  }
+  .has-bottom-bar .notification-toasts {
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + 8px);
+  }
+  .bottom-nav {
+    display: block;
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    padding: 3px max(8px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+    background: var(--chrome);
+    border-top: 1px solid var(--border);
+  }
+  .bottom-nav ul {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    height: 48px;
+    min-width: 0;
+    padding: 0 2px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-decoration: none;
+  }
+  .bottom-nav-item:hover {
+    color: var(--foreground);
+  }
+  .bottom-nav-item:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+  }
+  .bottom-nav-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 26px;
+    border-radius: 13px;
+  }
+  .bottom-nav-label {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+  /* New report is the accent tile; its label keeps the idle colour unless it is current. */
+  .bottom-nav-accent {
+    gap: 1px;
+  }
+  .bottom-nav-accent .bottom-nav-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #ffffff;
+  }
+  .bottom-nav-item[aria-current] {
+    color: var(--focus);
+    font-weight: 600;
+  }
+  .bottom-nav-item[aria-current] .bottom-nav-icon {
+    background: var(--accent-soft);
+  }
+  /* Same specificity as the current pill above and later, so the current accent tile keeps the
+     accent fill and white icon and only gains a focus-coloured ring. */
+  .bottom-nav-accent[aria-current] .bottom-nav-icon {
+    background: var(--accent);
+    color: #ffffff;
+    box-shadow: 0 0 0 2px var(--focus);
   }
 }
 /* Touch input keeps every interactive control at least 40px tall and avoids zoom-on-focus. */

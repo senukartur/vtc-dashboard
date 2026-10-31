@@ -14,7 +14,7 @@ import {
   write,
 } from "./support/account.ts";
 import { expect, test } from "./support/fixtures.ts";
-import { openUserMenu, signOutFromMenu, switchLanguage } from "./support/locale.ts";
+import { chooseAccountItem, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 test.beforeEach(resetAccountLimits);
@@ -80,12 +80,10 @@ async function login(page: Page, email: string, password: string) {
   const authenticated = await response;
   expect(authenticated.status()).toBe(200);
   const self = (await authenticated.json()).data as components["schemas"]["Self"];
-  // Sign-in without a protected return location lands on Overview; Account is in the user menu.
+  // Sign-in without a protected return location lands on Overview; Account is in the user menu
+  // (the More sheet on phones).
   await expect(page).toHaveURL(/\/account\/dashboard$/);
-  const menu = await openUserMenu(page);
-  await menu
-    .getByRole("menuitem", { name: /^(Account and security|Аккаунт и безопасность)$/ })
-    .click();
+  await chooseAccountItem(page, /^(Account and security|Аккаунт и безопасность)$/);
   await expect(
     page.getByRole("heading", {
       name: /^(Account and security|Аккаунт и безопасность)$/,

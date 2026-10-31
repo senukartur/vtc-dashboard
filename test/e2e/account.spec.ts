@@ -2,7 +2,7 @@ import { inertNotifications } from "./support/notifications.ts";
 import type { Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { expect, test } from "./support/fixtures.ts";
-import { signOutFromMenu, switchLanguage } from "./support/locale.ts";
+import { openMoreSheet, phone, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 2 }, meta };
@@ -601,13 +601,20 @@ test("controlled current capabilities expose role-grouped workspace navigation e
     await expect(
       page.getByRole("heading", { name: "Account and security", exact: true }),
     ).toBeVisible();
-    const menu = page.getByRole("button", { name: "Open navigation" });
-    if (await menu.isVisible()) await menu.click();
+    const report = page
+      .getByRole("link", { name: "New report", exact: true })
+      .filter({ visible: true });
+    // Phones show New report in the bottom bar and the other sections in the More sheet.
+    if (phone(page)) {
+      await expect(report).toBeVisible();
+      await openMoreSheet(page);
+    } else {
+      const menu = page.getByRole("button", { name: "Open navigation" });
+      if (await menu.isVisible()) await menu.click();
+    }
     const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
     await expect(navigation.getByRole("link", { name: "Drafts", exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("link", { name: "New report", exact: true }).filter({ visible: true }),
-    ).toBeVisible();
+    if (!phone(page)) await expect(report).toBeVisible();
     await expect(page.getByText(/Leadership transfer/)).toHaveCount(0);
     await expect(navigation.getByRole("link", { name: "Dispatch", exact: true })).toHaveCount(
       self.data.capabilities.includes("trips.review") ? 1 : 0,

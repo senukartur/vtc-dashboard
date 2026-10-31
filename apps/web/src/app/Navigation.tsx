@@ -16,6 +16,18 @@ import { landingPath } from "./navigation-model.js";
 import { useSession } from "./Session.js";
 
 export type MobileNavigate = (href: string, trigger: HTMLButtonElement | null) => void;
+/** An unmodified primary click that the router handles in this tab; only these record focus intent. */
+export function isPlainSelfClick(event: MouseEvent<HTMLAnchorElement>) {
+  return (
+    !event.defaultPrevented &&
+    event.button === 0 &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    (!event.currentTarget.target || event.currentTarget.target === "_self")
+  );
+}
 export function Navigation({
   variant = "public",
   onMobileNavigate,
@@ -60,16 +72,7 @@ export function Navigation({
     ));
   }
   function close(event: MouseEvent<HTMLAnchorElement>) {
-    if (
-      !event.defaultPrevented &&
-      event.button === 0 &&
-      !event.ctrlKey &&
-      !event.metaKey &&
-      !event.shiftKey &&
-      !event.altKey &&
-      (!event.currentTarget.target || event.currentTarget.target === "_self")
-    )
-      onMobileNavigate?.(event.currentTarget.href, trigger.current);
+    if (isPlainSelfClick(event)) onMobileNavigate?.(event.currentTarget.href, trigger.current);
     setOpen(false);
   }
   return (

@@ -30,7 +30,7 @@ Email replacement follows both proof stages. Confirming the current-channel code
 
 Email request, confirmation and explicit refresh share a local interaction fence through the authoritative pending read. Both forms remain unavailable while a replacement command or its follow-up read is unresolved. An uncertain request also refreshes pending state before another proof can be submitted. A changed challenge ID clears the previous code; a recoverable wrong proof for the same ID preserves input for explicit retry. Read failures retain recovery controls without treating cached challenge data as current authority.
 
-Connection status lives on `/account/connections`, reached from the user menu; the account page no longer repeats it. No provider endpoint is fabricated.
+Connection status lives on `/account/connections`, reached from the user menu (the More sheet of the bottom bar on phones); the account page no longer repeats it. No provider endpoint is fabricated.
 
 ## Verification and limits
 
@@ -39,4 +39,4 @@ Connection status lives on `/account/connections`, reached from the user menu; t
 Run `node scripts/test-local.mjs unit` and `node scripts/test-local.mjs e2e` in pinned Docker for development feedback. Delivery independently verifies the exact committed candidate with `node scripts/test-ci.mjs` and the packaged `node deploy/development/test.mjs` rehearsal, including account deep links/assets/early ingress/noindex/no-store/referrer policy. Actual results, rendered review, independent security review and CI belong to the delivery report/PR; these instructions claim none of them. Local queued mail is not real inbox delivery. Hosted activation, VTC-039 hardening, later modules and production acceptance retain separate gates.
 
 
-VTC-038 links the account connection section and responsive navigation to the real [administration and connections workspace](administration.md), including personal telemetry one-show/revoke recovery and Steam/TruckersMP status; since VTC-044 the user menu and responsive navigation provide that link. Existing account challenge and protected email-change semantics remain unchanged.
+VTC-038 links the account connection section and responsive navigation to the real [administration and connections workspace](administration.md), including personal telemetry one-show/revoke recovery and Steam/TruckersMP status; since VTC-044 the user menu and responsive navigation provide that link, and since VTC-045 phones reach it from the More sheet. Existing account challenge and protected email-change semantics remain unchanged.
