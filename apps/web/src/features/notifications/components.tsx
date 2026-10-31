@@ -110,6 +110,7 @@ export function NotificationRow({
           {!compact && !item.readAt && (
             <Button
               variant="ghost"
+              size="xs"
               disabled={context.blocked || command.pending || command.seconds > 0}
               onClick={() =>
                 void command.run(
@@ -227,7 +228,7 @@ export function NotificationToasts() {
                 {t("open")}
               </Link>
             )}
-            <Button variant="ghost" onClick={() => dismiss(item.id)}>
+            <Button variant="ghost" size="xs" onClick={() => dismiss(item.id)}>
               {t("dismiss")}
             </Button>
           </div>
