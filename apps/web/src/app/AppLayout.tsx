@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
+import fontLicenseUrl from "../../../../third_party/m-plus-rounded-1c/OFL.txt?url";
 import { SignOutStatus, useSignOut } from "../features/account/sign-out.js";
 import { type MobileNavigate, Navigation } from "./Navigation.js";
 import { Breadcrumb, MemberSidebar } from "./MemberNavigation.js";
