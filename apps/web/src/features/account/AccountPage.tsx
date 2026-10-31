@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatUtc } from "../../shared/formatting.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
@@ -378,56 +378,18 @@ function EmailChange({ verified }: { verified: boolean }) {
 export function AccountPage() {
   const session = useSession();
   const { t } = useTranslation("account");
-  const logout = useCommand();
-  const [leaving, setLeaving] = useState(false);
-  const lifetime = useRef<AbortController | null>(null);
-  useEffect(() => {
-    const controller = new AbortController();
-    lifetime.current = controller;
-    return () => controller.abort();
-  }, []);
   const self = session.self;
   if (!self) return null;
-  async function signOut() {
-    const current = lifetime.current;
-    if (!current || current.signal.aborted) return;
-    setLeaving(true);
-    const result = await logout.run("logout", undefined);
-    if (current.signal.aborted) return;
-    if (result) session.end();
-    else await session.confirmSessionLoss(current.signal);
-  }
-  if (leaving)
-    return (
-      <Card className="auth-card stack">
-        <h1>{t("logout")}</h1>
-        <p role="status">{t(logout.pending ? "working" : "logoutUncertain")}</p>
-        <Form id="logout" fields={[]} {...logout} action="logout" submit={signOut} />
-        <Button
-          variant="outline"
-          disabled={logout.pending}
-          onClick={async () => {
-            await session.refresh();
-            setLeaving(false);
-          }}
-        >
-          {t("checkSession")}
-        </Button>
-      </Card>
-    );
   return (
     <div className="account-page stack">
       <header className="page-heading">
         <p className="eyebrow">Yukon Union</p>
-        <h1>{t("account")}</h1>
+        <h1>{t("accountSecurity")}</h1>
         <p>{self.member.nickname}</p>
         <p className="muted account-address">{self.email}</p>
-        <Button variant="outline" onClick={() => void signOut()}>
-          {t("logout")}
-        </Button>
       </header>
       <nav className="account-sections" aria-label={t("accountSections")}>
-        {["preferences", "verification", "password", "email", "connections"].map((section) => (
+        {["preferences", "verification", "password", "email"].map((section) => (
           <a key={section} href={`#${section}`}>
             {t(
               section === "password"
@@ -444,16 +406,6 @@ export function AccountPage() {
         <Verification verified={self.emailVerified} />
         <PasswordChange verified={self.emailVerified} />
         <EmailChange verified={self.emailVerified} />
-        <Card id="connections" className="stack">
-          <h2>{t("connections")}</h2>
-          <p>{t("sessionConfirmed")}</p>
-          <p>{t(self.steamVerified ? "steamVerified" : "steamMissing")}</p>
-          <p>{t(self.missingSetup.length ? "setupIncomplete" : "setupComplete")}</p>
-          <Button asChild variant="outline">
-            <Link to="/account/connections">{t("connections")}</Link>
-          </Button>
-          <Link to="/status">{t("applicationConnection")}</Link>
-        </Card>
       </div>
     </div>
   );

@@ -170,24 +170,35 @@ figure {
   gap: 8px;
   margin-left: auto;
 }
-nav a {
+/* Shell navigation rows only; breadcrumbs and in-page navs keep their own link styles. */
+.sidebar-navigation a,
+.desktop-navigation a,
+.dialog-navigation a {
   display: flex;
   align-items: center;
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 10px;
+  gap: 8px;
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   text-decoration: none;
   color: var(--secondary);
 }
-nav a[aria-current="page"] {
+.sidebar-navigation a:hover,
+.desktop-navigation a:hover,
+.dialog-navigation a:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.sidebar-navigation a[aria-current="page"],
+.sidebar-navigation a[aria-current="true"],
+.desktop-navigation a[aria-current="page"],
+.dialog-navigation a[aria-current="page"],
+.dialog-navigation a[aria-current="true"] {
   color: var(--focus);
   background: var(--accent-soft);
   border-color: var(--selection-border);
   font-weight: 650;
-}
-nav a:hover {
-  background: var(--inset);
 }
 .language-picker {
   display: flex;
@@ -764,8 +775,9 @@ input[type="checkbox"] {
   .desktop-navigation {
     gap: 0;
   }
-  nav a {
-    padding: 8px;
+  .desktop-navigation a,
+  .dialog-navigation a {
+    padding: 4px 8px;
     font-size: 0.875rem;
   }
   .foundation-grid {
@@ -1126,6 +1138,328 @@ textarea {
 .auth-card .input,
 .account-page .input {
   font-size: 16px;
+}
+/* Live workspace shell: role-grouped sidebar, optional icon rail, breadcrumb topbar and user menu. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.workspace-shell .member-sidebar {
+  gap: 12px;
+  padding: 16px 12px;
+  overflow-y: auto;
+}
+.sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wordmark-short {
+  display: none;
+}
+.sidebar-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--target-min);
+  height: var(--target-min);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--secondary);
+}
+.sidebar-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.nav-new-report {
+  width: 100%;
+  gap: 8px;
+}
+.member-navigation {
+  display: grid;
+  gap: 4px;
+}
+.nav-group {
+  display: grid;
+  gap: 2px;
+}
+.nav-group .nav-group-title {
+  margin: 8px 0 2px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.nav-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nav-icon {
+  flex: none;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.workspace-shell .site-header {
+  min-height: 56px;
+  padding: 8px 24px;
+  gap: 12px;
+}
+.breadcrumb {
+  min-width: 0;
+}
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+.breadcrumb li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.breadcrumb li + li::before {
+  content: "/" / "";
+}
+.breadcrumb a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  color: var(--secondary);
+  text-decoration: none;
+}
+.breadcrumb a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.breadcrumb [aria-current="page"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+}
+.topbar-actions .notification-bell,
+.topbar-actions .language-picker {
+  margin-left: 0;
+}
+.user-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+.user-menu-trigger:hover,
+.user-menu-trigger[data-state="open"] {
+  background: var(--surface-hover);
+}
+.user-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.user-identity {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.user-role {
+  color: var(--muted);
+  font-size: 11px;
+}
+.user-menu-topbar {
+  display: none;
+}
+.user-menu-content {
+  z-index: 60;
+  min-width: 15rem;
+  max-width: min(20rem, calc(100vw - 24px));
+  padding: 6px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px #0008;
+}
+.user-menu-label {
+  display: grid;
+  gap: 2px;
+  padding: 6px 10px 8px;
+}
+.user-email {
+  color: var(--secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.user-menu-heading {
+  padding: 6px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+}
+.user-menu-item:hover,
+.user-menu-item[data-highlighted] {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.user-menu-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.user-menu-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.user-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+@media (min-width: 1051px) {
+  .workspace-shell.sidebar-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+  /* The rail keeps labels for assistive tech; links also carry a title tooltip. */
+  .sidebar-collapsed .member-sidebar .nav-label,
+  .sidebar-collapsed .member-sidebar .nav-group-title,
+  .sidebar-collapsed .member-sidebar .user-identity,
+  .sidebar-collapsed .member-sidebar .wordmark-full {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .sidebar-collapsed .member-sidebar {
+    padding: 12px 7px;
+  }
+  .sidebar-collapsed .sidebar-top {
+    flex-direction: column;
+  }
+  .sidebar-collapsed .wordmark-short {
+    display: inline;
+  }
+  .sidebar-collapsed .member-sidebar .sidebar-navigation a,
+  .sidebar-collapsed .member-sidebar .nav-new-report,
+  .sidebar-collapsed .member-sidebar .user-menu-trigger {
+    justify-content: center;
+    padding: 4px;
+  }
+  .sidebar-collapsed .member-sidebar .nav-group + .nav-group {
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+}
+@media (max-width: 1050px) {
+  .workspace-shell .site-header {
+    padding: 8px 24px;
+  }
+  .workspace-shell .mobile-navigation {
+    margin-left: 0;
+  }
+  .user-menu-topbar {
+    display: block;
+  }
+  .user-menu-topbar .user-menu-trigger {
+    width: auto;
+    padding: 1px;
+  }
+  .user-menu-topbar .user-identity {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .workspace-shell .site-header {
+    padding: 8px 16px;
+  }
+  /* Breadcrumb and nearest-event chip take their own rows under the control row. */
+  .workspace-shell .topbar-actions {
+    display: contents;
+  }
+  .workspace-shell .site-header .breadcrumb {
+    order: 2;
+    flex-basis: 100%;
+  }
+  .workspace-shell .site-header .event-nearest {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .workspace-shell .site-header .language-picker {
+    order: 4;
+  }
 }
 /* Touch input keeps every interactive control at least 40px tall and avoids zoom-on-focus. */
 @media (pointer: coarse) {

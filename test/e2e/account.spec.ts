@@ -2,6 +2,7 @@ import { inertNotifications } from "./support/notifications.ts";
 import type { Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { expect, test } from "./support/fixtures.ts";
+import { signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 2 }, meta };
@@ -23,13 +24,7 @@ async function mocks(page: Page) {
     return route.fulfill(error(503));
   });
 }
-async function language(page: Page, locale: "ru" | "en") {
-  await page
-    .getByRole("banner")
-    .getByRole("combobox", { name: /^(Language|Язык)$/ })
-    .selectOption(locale);
-  await expect(page.locator("html")).toHaveAttribute("lang", locale);
-}
+const language = switchLanguage;
 async function capture(page: Page, info: TestInfo, name: string) {
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -257,6 +252,12 @@ test("authenticated pending-email read401 evicts the account instead of retainin
   );
   await page.route("**/api/v1/me/email-change", (route) => route.fulfill(error(401)));
   await page.goto("/account");
+  // Reach the terminal state first: the brief authenticated shell's user menu is about to unmount.
+  await expect(
+    page.getByRole("heading", {
+      name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+    }),
+  ).toBeVisible();
   await language(page, "en");
   await expect(
     page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
@@ -292,7 +293,9 @@ test("challenge replacement clears old confirmation fields while wrong-code retr
   );
   await page.route("**/api/v1/me/credential-changes", (route) => route.fulfill(error(401)));
   await page.goto("/account");
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Account and security", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Request verification code", exact: true }).click();
   let form = page.getByRole("form", { name: "Confirm email verification", exact: true });
   await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_OLD_CODE");
@@ -411,7 +414,9 @@ for (const readFailure of [false, true]) {
     });
     try {
       await page.goto("/account");
-      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Account and security", exact: true }),
+      ).toBeVisible();
       const request = page.getByRole("form", { name: "Request email change", exact: true });
       const confirm = page.getByRole("form", {
         name: "Confirm email replacement stage",
@@ -471,7 +476,9 @@ for (const readFailure of [false, true]) {
       await confirm.getByRole("button", { name: "Confirm this email code", exact: true }).click();
       await expect(confirm.getByRole("alert")).toBeVisible();
       await expect(code).toHaveValue("NONFUNCTIONAL_WRONG_CODE");
-      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Account and security", exact: true }),
+      ).toBeVisible();
       phase = "NEW_STAGE";
       await code.fill("NONFUNCTIONAL_NEW_CODE");
       await confirm.getByRole("button", { name: "Retry this action", exact: true }).click();
@@ -525,7 +532,9 @@ test("controlled account preferences conflict requires refresh/review, wrong cod
     return route.fulfill({ json: { data: self.data.preferences, meta } });
   });
   await page.goto("/account");
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Account and security", exact: true }),
+  ).toBeVisible();
   await capture(page, info, "en-account");
   await language(page, "ru");
   await capture(page, info, "ru-account");
@@ -547,7 +556,9 @@ test("controlled account preferences conflict requires refresh/review, wrong cod
   await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_WRONG_CODE");
   await form.getByRole("button", { name: "Confirm code", exact: true }).click();
   await expect(form.getByRole("alert")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Account and security", exact: true }),
+  ).toBeVisible();
   status = 503;
   await page.goto("/account");
   await language(page, "en");
@@ -562,10 +573,11 @@ test("controlled account preferences conflict requires refresh/review, wrong cod
   ).toBeVisible();
   await expect(page.getByText("member@example.invalid", { exact: true })).toHaveCount(0);
 });
-test("controlled current capabilities expose integrated trip navigation equally for trainee/driver and staff destinations without deputy succession", async ({
+test("controlled current capabilities expose role-grouped workspace navigation equally for trainee/driver and staff destinations without deputy succession", async ({
   page,
 }) => {
   await mocks(page);
+  const destinations: Record<string, (string | null)[]> = {};
   for (const roles of [
     ["trainee"],
     ["driver"],
@@ -586,20 +598,29 @@ test("controlled current capabilities expose integrated trip navigation equally 
       route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
     );
     await page.goto("/account");
-    await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Account and security", exact: true }),
+    ).toBeVisible();
     const menu = page.getByRole("button", { name: "Open navigation" });
     if (await menu.isVisible()) await menu.click();
+    const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
+    await expect(navigation.getByRole("link", { name: "Drafts", exact: true })).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Saved drafts", exact: true }).filter({ visible: true }),
+      page.getByRole("link", { name: "New report", exact: true }).filter({ visible: true }),
     ).toBeVisible();
-    await expect(page.getByText("Leadership transfer · Unavailable", { exact: true })).toHaveCount(
-      0,
+    await expect(page.getByText(/Leadership transfer/)).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: "Dispatch", exact: true })).toHaveCount(
+      self.data.capabilities.includes("trips.review") ? 1 : 0,
     );
-    await expect(
-      page.getByRole("link", { name: "Review workspace", exact: true }).filter({ visible: true }),
-    ).toHaveCount(self.data.capabilities.includes("trips.review") ? 1 : 0);
+    await expect(navigation.getByRole("link", { name: "Applications", exact: true })).toHaveCount(
+      self.data.capabilities.includes("applications.manage") ? 1 : 0,
+    );
+    destinations[roles.join("+")] = await navigation
+      .getByRole("link")
+      .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
     if (await page.getByRole("dialog").isVisible()) await page.keyboard.press("Escape");
   }
+  expect(destinations.trainee).toEqual(destinations.driver);
 });
 test("confirmed anonymous sessions can recover a new shared-cookie session on focus without restoring old identity data or looping", async ({
   page,
@@ -623,8 +644,12 @@ test("confirmed anonymous sessions can recover a new shared-cookie session on fo
   expect(reads).toBe(1);
   status = 200;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
-  await expect(page.getByText("Fictional Recovered Member", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Account and security", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText("Fictional Recovered Member", { exact: true }),
+  ).toBeVisible();
   status = 401;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(
@@ -634,7 +659,9 @@ test("confirmed anonymous sessions can recover a new shared-cookie session on fo
   const before = reads;
   status = 200;
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Account and security", exact: true }),
+  ).toBeVisible();
   expect(reads).toBe(before + 1);
 });
 for (const held of ["probe", "command"] as const) {
@@ -696,14 +723,18 @@ for (const held of ["probe", "command"] as const) {
     });
     try {
       await page.goto("/account");
-      await expect(page.getByText("Fictional Member A", { exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Sign out", exact: true }).click();
+      await expect(
+        page.getByRole("main").getByText("Fictional Member A", { exact: true }),
+      ).toBeVisible();
+      await signOutFromMenu(page);
       await began;
       expect(probes).toBe(held === "probe" ? 1 : 0);
       const beforeSwitch = reads;
       current = second;
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-      await expect(page.getByText("Fictional Member B", { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByText("Fictional Member B", { exact: true }),
+      ).toBeVisible();
       const timezone = page.getByLabel("Display timezone", { exact: true });
       await timezone.fill("Europe/Warsaw");
       release();
@@ -714,8 +745,12 @@ for (const held of ["probe", "command"] as const) {
             requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
           ),
       );
-      await expect(page.getByText("Fictional Member B", { exact: true })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
+      await expect(
+        page.getByRole("main").getByText("Fictional Member B", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Account and security", exact: true }),
+      ).toBeVisible();
       await expect(timezone).toHaveValue("Europe/Warsaw");
       await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
       // Focus discovers B, then the new access generation confirms B. Disposed A owns no read.
@@ -779,8 +814,10 @@ test("late private reads from A cannot appear after rendered logout and B login 
   try {
     await page.goto("/account");
     await began;
-    await expect(page.getByText("Fictional Member A", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(
+      page.getByRole("main").getByText("Fictional Member A", { exact: true }),
+    ).toBeVisible();
+    await signOutFromMenu(page);
     await expect(
       page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
     ).toBeVisible();
@@ -788,7 +825,14 @@ test("late private reads from A cannot appear after rendered logout and B login 
     await page.getByLabel("Email", { exact: true }).fill("member-b@example.invalid");
     await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByText("Fictional Member B", { exact: true })).toBeVisible();
+    // The main sign-in link records the protected page it came from, so B returns to Account.
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(
+      page.getByRole("heading", { name: "Account and security", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText("Fictional Member B", { exact: true }),
+    ).toBeVisible();
     release();
     await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
     await expect(page.getByText(/private-a@example.invalid/)).toHaveCount(0);

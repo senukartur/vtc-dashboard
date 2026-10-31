@@ -166,6 +166,7 @@ export function useSession() {
 export function ProtectedAccount({ children }: { children: ReactNode }) {
   const session = useSession();
   const { t } = useTranslation("account");
+  const { pathname, search, hash } = useLocation();
   if (session.state !== "authenticated")
     return (
       <Card className="auth-card stack">
@@ -180,7 +181,10 @@ export function ProtectedAccount({ children }: { children: ReactNode }) {
         </h1>
         {session.state === "anonymous" ? (
           <Button asChild>
-            <Link to="/login">{t("login")}</Link>
+            {/* Sign-in returns here; AuthPage validates the location before using it. */}
+            <Link to="/login" state={{ from: { pathname, search, hash } }}>
+              {t("login")}
+            </Link>
           </Button>
         ) : session.state === "unavailable" ? (
           <>

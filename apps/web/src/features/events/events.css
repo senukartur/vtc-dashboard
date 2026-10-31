@@ -72,17 +72,35 @@
   max-height: 85dvh;
   overflow-y: auto;
 }
+/* Topbar chip: the nearest event keeps its absolute, timezone-explicit start time. */
 .event-nearest {
-  padding: 0.55rem 1rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 26rem;
+  min-height: var(--target-min);
+  padding: 2px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--secondary);
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 .event-nearest a {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-  justify-content: space-between;
+  gap: 0 8px;
+  color: var(--secondary);
+  text-decoration: none;
+}
+.event-nearest a:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.event-nearest strong {
+  color: var(--foreground);
+  font-weight: 600;
 }
 .app-shell.event-member-shell {
   grid-template-rows: auto 1fr auto;

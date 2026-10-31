@@ -8,7 +8,7 @@ export const accountTranslations = {
       administration: "Administration",
       leadership: "Leadership transfer",
     },
-    account: "Account",
+    accountSecurity: "Account and security",
     accountSections: "Account sections",
     login: "Sign in",
     recovery: "Request password recovery",
@@ -33,7 +33,6 @@ export const accountTranslations = {
     verification: "Email verification",
     passwordChange: "Change password",
     emailChange: "Change email",
-    connections: "Connections and setup",
     loginHelp:
       "Use the email and password for your Yukon Union account. Invitations create accounts; public registration is unavailable.",
     recoveryHelp:
@@ -68,7 +67,6 @@ export const accountTranslations = {
     sessionUnavailable: "Session check unavailable",
     sessionUnavailableHelp:
       "Your access could not be checked. Reconnect and try again; this does not confirm that you have been signed out.",
-    sessionConfirmed: "Your account session is confirmed by the application.",
     timezoneHelp:
       "Use an IANA timezone, for example Europe/Warsaw or UTC. This changes display times only; company reporting periods stay the same.",
     preferenceConflict:
@@ -104,14 +102,9 @@ export const accountTranslations = {
     logoutUncertain:
       "Sign-out could not be confirmed. Private account details are hidden. Retry sign-out or check the session.",
     checkSession: "Check session before returning",
-    steamVerified: "Steam ownership is verified.",
-    steamMissing: "Steam ownership still needs verification.",
-    setupIncomplete: "Some account setup is still required.",
-    setupComplete: "The account has no outstanding setup reported by the application.",
     futureConnections:
       "Steam linking, TruckersMP status and personal telemetry tokens will be available in their separate modules.",
     connectionUnavailable: "Connection controls unavailable",
-    applicationConnection: "Check application connection",
     errors: {
       invalid: "The submitted values could not be accepted. Review them and try again.",
       unauthorized:
@@ -134,7 +127,7 @@ export const accountTranslations = {
       administration: "Управление",
       leadership: "Передача руководства",
     },
-    account: "Аккаунт",
+    accountSecurity: "Аккаунт и безопасность",
     accountSections: "Разделы аккаунта",
     login: "Войти",
     recovery: "Запросить восстановление пароля",
@@ -159,7 +152,6 @@ export const accountTranslations = {
     verification: "Подтверждение почты",
     passwordChange: "Смена пароля",
     emailChange: "Смена почты",
-    connections: "Подключения и настройка",
     loginHelp:
       "Используйте почту и пароль аккаунта Yukon Union. Аккаунты создаются по приглашению; открытой регистрации нет.",
     recoveryHelp:
@@ -195,7 +187,6 @@ export const accountTranslations = {
     sessionUnavailable: "Не удалось проверить сессию",
     sessionUnavailableHelp:
       "Доступ не удалось проверить. Восстановите подключение и повторите попытку. Это не подтверждает выход из аккаунта.",
-    sessionConfirmed: "Сессия аккаунта подтверждена приложением.",
     timezoneHelp:
       "Укажите пояс IANA, например Europe/Warsaw или UTC. Меняется только отображение времени, а не отчётные периоды компании.",
     preferenceConflict:
@@ -231,14 +222,9 @@ export const accountTranslations = {
     logoutUncertain:
       "Выход не удалось подтвердить. Данные аккаунта скрыты. Повторите выход или проверьте сессию.",
     checkSession: "Проверить сессию и вернуться",
-    steamVerified: "Владение Steam подтверждено.",
-    steamMissing: "Владение Steam ещё нужно подтвердить.",
-    setupIncomplete: "Часть настройки аккаунта ещё требуется.",
-    setupComplete: "Приложение не сообщает о незавершённой настройке аккаунта.",
     futureConnections:
       "Привязка Steam, статус TruckersMP и личные токены телеметрии появятся в отдельных модулях.",
     connectionUnavailable: "Управление подключениями недоступно",
-    applicationConnection: "Проверить подключение приложения",
     errors: {
       invalid: "Значения не приняты. Проверьте их и повторите попытку.",
       unauthorized:

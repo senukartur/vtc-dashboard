@@ -1,4 +1,5 @@
 import { inertNotifications } from "./notifications.ts";
+import { switchLanguage } from "./locale.ts";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -49,10 +50,7 @@ export const envelope = (data: unknown) => ({
 export const list = (items: unknown[], nextCursor: string | null = null) =>
   envelope({ items, nextCursor });
 export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
-  await page
-    .getByRole("banner")
-    .getByRole("combobox", { name: /^(Language|Язык)$/ })
-    .selectOption(locale);
+  await switchLanguage(page, locale);
 }
 export async function mockCatalogs(page: Page, staff = true) {
   await page.route("**/api/v1/**", async (route) => {
