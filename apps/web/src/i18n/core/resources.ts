@@ -38,6 +38,16 @@ export const core = {
       userMenu: "Account menu",
       myProfile: "My driver profile",
       publicSite: "Public site",
+      sections: "Main sections",
+      more: "More",
+      moreDescription: "Other sections and your account",
+      bar: {
+        overview: "Overview",
+        myTrips: "Trips",
+        newReport: "Report",
+        events: "Events",
+        dispatch: "Review",
+      },
       groups: {
         personal: "My work",
         company: "Company",
@@ -115,6 +125,16 @@ export const core = {
       userMenu: "Меню аккаунта",
       myProfile: "Мой профиль водителя",
       publicSite: "Публичный сайт",
+      sections: "Основные разделы",
+      more: "Ещё",
+      moreDescription: "Другие разделы и ваш аккаунт",
+      bar: {
+        overview: "Обзор",
+        myTrips: "Рейсы",
+        newReport: "Отчёт",
+        events: "События",
+        dispatch: "Проверка",
+      },
       groups: {
         personal: "Моя работа",
         company: "Компания",
