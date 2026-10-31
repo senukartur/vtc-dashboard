@@ -252,6 +252,12 @@ test("authenticated pending-email read401 evicts the account instead of retainin
   );
   await page.route("**/api/v1/me/email-change", (route) => route.fulfill(error(401)));
   await page.goto("/account");
+  // Reach the terminal state first: the brief authenticated shell's user menu is about to unmount.
+  await expect(
+    page.getByRole("heading", {
+      name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+    }),
+  ).toBeVisible();
   await language(page, "en");
   await expect(
     page.getByRole("heading", { name: "Sign in to open your account", exact: true }),

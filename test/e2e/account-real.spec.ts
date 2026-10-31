@@ -261,6 +261,12 @@ test("real expired invitation, deactivated session/inactive login and neutral re
     const etag = current.headers().etag ?? "";
     await deactivateFixtureMember(staff, self.member.id, Number(etag.slice(2, -1)));
     await page.reload();
+    // Reach the terminal state before switching language so no unmounting user menu is targeted.
+    await expect(
+      page.getByRole("heading", {
+        name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+      }),
+    ).toBeVisible();
     await english(page);
     await expect(
       page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
