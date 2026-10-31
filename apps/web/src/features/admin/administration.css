@@ -1,7 +1,6 @@
 .administration-page {
   min-width: 0;
 }
-.admin-navigation,
 .admin-tabs,
 .admin-actions,
 .button-row {
@@ -10,18 +9,25 @@
   gap: 0.6rem;
   align-items: center;
 }
-.admin-navigation a,
 .admin-tabs a {
   display: inline-flex;
   min-height: var(--target-min);
   align-items: center;
   padding: 0.4rem 0.7rem;
   border-radius: 0.5rem;
+  border: 1px solid transparent;
+  color: var(--secondary);
+  text-decoration: none;
 }
-.admin-navigation a[aria-current],
+.admin-tabs a:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
 .admin-tabs a[aria-current] {
   background: var(--surface-active);
   color: var(--foreground);
+  border-color: var(--selection-border);
+  font-weight: 650;
   /* No outline override, so the global :focus-visible ring still shows. Non-colour cue: focus blue keeps >= 3:1 against the active and page surfaces. */
   box-shadow: inset 0 -2px 0 var(--focus);
 }

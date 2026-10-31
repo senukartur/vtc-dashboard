@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, type ReactElement, Suspense, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   BrowserRouter,
@@ -13,11 +13,13 @@ import {
 import { AccountPage } from "../features/account/AccountPage.js";
 import { AuthPage } from "../features/account/AuthPage.js";
 import type { LinkHandoff } from "../features/account/link.js";
+import { SignOutProvider } from "../features/account/sign-out.js";
 import { CatalogsPage } from "../features/catalogs/CatalogsPage.js";
 import { publicContent } from "../features/landing/content.js";
 import { LandingPage } from "../features/landing/LandingPage.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { AppLayout } from "./AppLayout.js";
+import { matchRouteMeta, paths, type RouteId } from "./navigation-model.js";
 import { ReadinessPage } from "./ReadinessPage.js";
 import { RouteErrorBoundary } from "./RouteErrorBoundary.js";
 import { ProtectedAccount, SessionProvider } from "./Session.js";
@@ -101,6 +103,32 @@ const EventDetailPage = lazy(() =>
   import("../features/events/EventDetailPage.js").then((m) => ({ default: m.EventDetailPage })),
 );
 const memberPath = "/foundation/member";
+// Keyed by the navigation model so every workspace pattern has exactly one element.
+const accountRoutes: Record<RouteId, ReactElement> = {
+  account: <AccountPage />,
+  connections: <ConnectionsPage />,
+  notifications: <NotificationsPage />,
+  dashboard: <DashboardPage />,
+  trips: <TripsPage />,
+  trip: <TripDetailPage />,
+  reports: <ReportsPage />,
+  newReport: <ManualReportPage kind="new" />,
+  draft: <ManualReportPage kind="draft" />,
+  revise: <ManualReportPage kind="report" />,
+  events: <EventsPage />,
+  newEvent: <CreateEventPage />,
+  event: <EventDetailPage />,
+  drivers: <DriversPage />,
+  driver: <DriverProfilePage />,
+  qualifications: <QualificationsPage />,
+  review: <TripsPage review />,
+  reconciliation: <ReconciliationPage />,
+  reviewTrip: <TripDetailPage review />,
+  applications: <ApplicationsPage />,
+  members: <MembersPage />,
+  catalogs: <CatalogsPage />,
+  settings: <SettingsPage />,
+};
 const FoundationPage = lazy(() =>
   import("../features/foundation/FoundationPage.js").then((module) => ({
     default: module.FoundationPage,
@@ -149,7 +177,12 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
     if (i18n.resolvedLanguage !== locale) void i18n.changeLanguage(locale);
     document.documentElement.lang = locale;
     const publicPage = ["/", "/en"].includes(location.pathname) && !location.search;
-    document.title = publicPage ? publicContent[locale].title : "Yukon Union";
+    const workspace = matchRouteMeta(location.pathname);
+    document.title = publicPage
+      ? publicContent[locale].title
+      : workspace
+        ? `${t(workspace.titleKey)} · Yukon Union`
+        : "Yukon Union";
     document
       .querySelector('meta[name="robots"]')
       ?.setAttribute("content", publicPage ? "index, follow" : "noindex, nofollow");
@@ -163,7 +196,7 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
       "content",
       publicPage ? publicContent[locale].description : "Yukon Union",
     );
-  }, [i18n, i18n.resolvedLanguage, location.pathname, location.search]);
+  }, [i18n, i18n.resolvedLanguage, location.pathname, location.search, t]);
   if (memberMatch && location.pathname !== memberPath)
     return (
       <Navigate
@@ -201,30 +234,6 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
             <Route path="/status" element={<ReadinessPage />} />
             <Route path="/events" element={<EventsPage publicView />} />
             <Route path="/events/:eventId" element={<EventDetailPage publicView />} />
-            <Route
-              path="/account/events"
-              element={
-                <ProtectedAccount>
-                  <EventsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/events/new"
-              element={
-                <ProtectedAccount>
-                  <CreateEventPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/events/:eventId"
-              element={
-                <ProtectedAccount>
-                  <EventDetailPage />
-                </ProtectedAccount>
-              }
-            />
             <Route path="/login" element={<AuthPage key="login" kind="login" />} />
             <Route
               path="/password-recovery"
@@ -250,166 +259,13 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
                 />
               }
             />
-            <Route
-              path="/account"
-              element={
-                <ProtectedAccount>
-                  <AccountPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/notifications"
-              element={
-                <ProtectedAccount>
-                  <NotificationsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/dashboard"
-              element={
-                <ProtectedAccount>
-                  <DashboardPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/drivers"
-              element={
-                <ProtectedAccount>
-                  <DriversPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/drivers/:memberId"
-              element={
-                <ProtectedAccount>
-                  <DriverProfilePage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/catalogs"
-              element={
-                <ProtectedAccount>
-                  <CatalogsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/qualifications"
-              element={
-                <ProtectedAccount>
-                  <QualificationsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/trips"
-              element={
-                <ProtectedAccount>
-                  <TripsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/trips/:tripId"
-              element={
-                <ProtectedAccount>
-                  <TripDetailPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/reports"
-              element={
-                <ProtectedAccount>
-                  <ReportsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/reports/new"
-              element={
-                <ProtectedAccount>
-                  <ManualReportPage kind="new" />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/reports/drafts/:draftId"
-              element={
-                <ProtectedAccount>
-                  <ManualReportPage kind="draft" />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/reports/:reportId/edit"
-              element={
-                <ProtectedAccount>
-                  <ManualReportPage kind="report" />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/review"
-              element={
-                <ProtectedAccount>
-                  <TripsPage review />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/review/reconciliation"
-              element={
-                <ProtectedAccount>
-                  <ReconciliationPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/review/:tripId"
-              element={
-                <ProtectedAccount>
-                  <TripDetailPage review />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/admin/applications"
-              element={
-                <ProtectedAccount>
-                  <ApplicationsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/admin/members"
-              element={
-                <ProtectedAccount>
-                  <MembersPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/admin/settings"
-              element={
-                <ProtectedAccount>
-                  <SettingsPage />
-                </ProtectedAccount>
-              }
-            />
-            <Route
-              path="/account/connections"
-              element={
-                <ProtectedAccount>
-                  <ConnectionsPage />
-                </ProtectedAccount>
-              }
-            />
+            {(Object.keys(paths) as RouteId[]).map((id) => (
+              <Route
+                key={id}
+                path={paths[id]}
+                element={<ProtectedAccount>{accountRoutes[id]}</ProtectedAccount>}
+              />
+            ))}
             <Route path="/foundation" element={<FoundationPage key="public" />} />
             <Route path={memberPath} element={<FoundationPage key="member" member />} />
             <Route
@@ -435,9 +291,11 @@ export function App({ handoff }: { handoff: LinkHandoff }) {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <SessionProvider>
-          <NotificationsProvider>
-            <Shell handoff={handoff} />
-          </NotificationsProvider>
+          <SignOutProvider>
+            <NotificationsProvider>
+              <Shell handoff={handoff} />
+            </NotificationsProvider>
+          </SignOutProvider>
         </SessionProvider>
       </BrowserRouter>
     </QueryClientProvider>
