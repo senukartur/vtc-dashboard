@@ -9,6 +9,8 @@ import { pagination } from "./pagination.js";
 type Analytics = components["schemas"]["Analytics"];
 type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
 type ListLeaderboardEntry = components["schemas"]["ListLeaderboardEntry"];
+export type CompanyStatsPublic = components["schemas"]["CompanyStatsPublic"];
+type PublicGame = "ets2" | "ats";
 
 export interface AnalyticsConfig {
   enabled?: boolean | undefined;
@@ -142,6 +144,82 @@ export function formatDateInTimezone(
   return formatted;
 }
 
+/** Valid IANA reporting timezone (stored company value first, then configured fallback) or null. */
+export function timezoneOrNull(
+  stored: string | null | undefined,
+  fallback: string | undefined,
+): string | null {
+  const tz = stored ?? fallback;
+  if (!tz || tz.length > 128) return null;
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+  } catch {
+    return null;
+  }
+  return tz;
+}
+
+export interface ReportingMonth {
+  month: string;
+  fromDate: string;
+  toDateExclusive: string;
+  startIso: string;
+  endIso: string;
+}
+
+/** Half-open calendar month containing `now` in the reporting timezone, with its UTC bounds. */
+export function currentReportingMonth(now: Date, timeZone: string): ReportingMonth {
+  const fromDate = formatDateInTimezone(now, timeZone, "month");
+  const year = Number(fromDate.slice(0, 4));
+  const month = Number(fromDate.slice(5, 7));
+  const nextYear = month === 12 ? year + 1 : year;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const toDateExclusive = `${String(nextYear).padStart(4, "0")}-${String(nextMonth).padStart(2, "0")}-01`;
+  return {
+    month: fromDate.slice(0, 7),
+    fromDate,
+    toDateExclusive,
+    startIso: parseTimezoneDate(fromDate, timeZone).toISOString(),
+    endIso: parseTimezoneDate(toDateExclusive, timeZone).toISOString(),
+  };
+}
+
+/** Games with at least one accepted trip, in the fixed public order. */
+export function publicGames(ets2: unknown, ats: unknown): PublicGame[] {
+  const games: PublicGame[] = [];
+  if (Number(ets2) === 1) games.push("ets2");
+  if (Number(ats) === 1) games.push("ats");
+  return games;
+}
+
+function databaseUnavailable(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
+    if (
+      ("code" in current &&
+        [
+          "ER_LOCK_WAIT_TIMEOUT",
+          "ER_LOCK_DEADLOCK",
+          "ECONNREFUSED",
+          "ECONNRESET",
+          "EPIPE",
+          "PROTOCOL_CONNECTION_LOST",
+          "ETIMEDOUT",
+          "PROTOCOL_SEQUENCE_TIMEOUT",
+          "ER_CON_COUNT_ERROR",
+          "ER_TOO_MANY_USER_CONNECTIONS",
+        ].includes(String(current.code))) ||
+      (current instanceof Error &&
+        ["No connections available.", "Pool is closed.", "TRANSACTION_CONTROL_TIMEOUT"].includes(
+          current.message,
+        ))
+    )
+      return true;
+    current = "cause" in current ? current.cause : null;
+  }
+  return false;
+}
+
 export function generateBuckets(
   fromDate: string,
   toDateExclusive: string,
@@ -195,19 +273,19 @@ export function generateBuckets(
   return buckets;
 }
 
-export function createAnalytics(uow: UnitOfWork, identity: Identity, config: AnalyticsConfig) {
+export function createAnalytics(
+  uow: UnitOfWork,
+  identity: Identity,
+  config: AnalyticsConfig,
+  now: () => Date = () => new Date(),
+) {
   validateAnalyticsConfig(config);
   const page = pagination(config.cursorKey);
 
   async function resolveTimezone(tx: TxContext): Promise<string> {
     const [cRow] = await uow.client(tx).select().from(company).limit(1);
-    const tz = cRow?.reportingTimezone ?? config.reportingTimezone;
+    const tz = timezoneOrNull(cRow?.reportingTimezone, config.reportingTimezone);
     if (!tz) throw identityError(409, "SETUP_REQUIRED");
-    try {
-      Intl.DateTimeFormat(undefined, { timeZone: tz });
-    } catch {
-      throw identityError(409, "SETUP_REQUIRED");
-    }
     return tz;
   }
 
@@ -448,6 +526,67 @@ export function createAnalytics(uow: UnitOfWork, identity: Identity, config: Ana
           projectionPending,
         };
       });
+    },
+
+    // Anonymous landing summary (VTC-052): non-locking consistent reads, closed aggregate DTO.
+    async getPublicCompanyStats(): Promise<CompanyStatsPublic> {
+      const instant = now();
+      try {
+        return await uow.run(async (tx) => {
+          const [cRow] = await uow
+            .client(tx)
+            .select({ reportingTimezone: company.reportingTimezone })
+            .from(company)
+            .where(eq(company.singleton, 1))
+            .limit(1);
+          if (!cRow) throw identityError(409, "SETUP_REQUIRED");
+          const activeMembers = await identity.activeMemberCountInTransaction(tx);
+          const computedAt = instant.toISOString();
+          const timeZone = timezoneOrNull(cRow.reportingTimezone, config.reportingTimezone);
+          if (!timeZone)
+            return {
+              computedAt,
+              activeMembers,
+              currentMonth: { status: "unavailable", reason: "company_reporting_timezone" },
+            };
+          const period = currentReportingMonth(instant, timeZone);
+          // Per-trip truncation to tenths matches VTC-032 addDistances() company totals exactly.
+          const [row] = await uow
+            .client(tx)
+            .select({
+              acceptedTrips: sql<number | string>`count(*)`,
+              actualDistanceM: sql<string>`coalesce(sum(truncate(${trips.actualDistanceM}, 1)), 0)`,
+              ets2: sql<number | string | null>`max(${trips.game} = ${"ets2"})`,
+              ats: sql<number | string | null>`max(${trips.game} = ${"ats"})`,
+            })
+            .from(trips)
+            .where(
+              and(
+                eq(trips.decision, "accepted"),
+                isNull(trips.aliasOf),
+                gte(trips.reportingAt, period.startIso),
+                lt(trips.reportingAt, period.endIso),
+              ),
+            );
+          return {
+            computedAt,
+            activeMembers,
+            currentMonth: {
+              status: "available",
+              month: period.month,
+              reportingTimezone: timeZone,
+              fromDate: period.fromDate,
+              toDateExclusive: period.toDateExclusive,
+              acceptedTrips: Number(row?.acceptedTrips ?? 0),
+              actualDistanceM: decimal(row?.actualDistanceM),
+              games: publicGames(row?.ets2, row?.ats),
+            },
+          };
+        });
+      } catch (error) {
+        if (databaseUnavailable(error)) throw identityError(503);
+        throw error;
+      }
     },
 
     async getLeaderboard(actor: Actor, query: LeaderboardQuery): Promise<ListLeaderboardEntry> {

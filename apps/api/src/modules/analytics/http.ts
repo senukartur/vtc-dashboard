@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { publicSummaryCache } from "../../platform/http/cache.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { AnalyticsQuery, AnalyticsService, LeaderboardQuery } from "./service.js";
 
@@ -36,6 +37,10 @@ const leaderboardQuery = {
   additionalProperties: false,
 };
 
+const publicStatsPath = "/api/v1/public/company-stats";
+
+const emptyQuery = { type: "object", properties: {}, additionalProperties: false };
+
 const memberParams = {
   type: "object",
   properties: {
@@ -67,6 +72,11 @@ export async function registerAnalyticsRoutes(
 
   app.addHook("onRequest", async (r) => {
     const url = r.routeOptions.url;
+    if (url === publicStatsPath) {
+      // Anonymous aggregate: shared public read budget only; never authenticate or touch cookies.
+      await identity.rateLimit("read", r.ip);
+      return;
+    }
     if (!url || !owned(url)) return;
     await identity.rateLimit("read", r.ip);
     const current = await actor(r);
@@ -74,6 +84,21 @@ export async function registerAnalyticsRoutes(
       throw identityError(403);
     }
   });
+
+  app.get(
+    publicStatsPath,
+    {
+      schema: {
+        querystring: emptyQuery,
+        response: { 200: ref("EnvelopeCompanyStatsPublic") },
+      },
+    },
+    async (r, reply) => {
+      const data = await service.getPublicCompanyStats();
+      reply.header("Cache-Control", publicSummaryCache);
+      return envelope(data, r);
+    },
+  );
 
   app.get<{ Querystring: AnalyticsQuery }>(
     "/api/v1/analytics/company",
