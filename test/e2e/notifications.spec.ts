@@ -718,10 +718,10 @@ for (const locale of ["en", "ru"] as const)
     ).toBeVisible();
     await expect(page.locator("main script")).toHaveCount(0);
     await expect(page.locator(`a[href="/account/qualifications?game=ets2"]`)).toBeVisible();
-    // Compact targets: 40px under a coarse pointer, otherwise the WCAG 2.2 2.5.8 24px minimum.
+    // Compact targets: 40px under a coarse pointer, otherwise the 30px --target-min.
     const targetFloor = (await page.evaluate(() => matchMedia("(pointer: coarse)").matches))
       ? 40
-      : 24;
+      : 30;
     const bell = page.getByRole("button", {
       name: locale === "en" ? /Open notifications/ : /Открыть уведомления/,
     });
