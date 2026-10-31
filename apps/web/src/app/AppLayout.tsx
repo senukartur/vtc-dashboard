@@ -1,8 +1,9 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import fontLicenseUrl from "../../../../third_party/onest/OFL.txt?url";
 import { SignOutStatus, useSignOut } from "../features/account/sign-out.js";
+import { BottomNavigation } from "./BottomNavigation.js";
 import { type MobileNavigate, Navigation } from "./Navigation.js";
 import { Breadcrumb, MemberSidebar } from "./MemberNavigation.js";
 import { sidebarStorageKey } from "./navigation-model.js";
@@ -24,7 +25,7 @@ function storedCollapse() {
 
 /**
  * Shared landmarks: public horizontal navigation, the synthetic member preview, or the live
- * workspace with role-grouped sidebar, breadcrumb topbar and user menu.
+ * workspace with role-grouped sidebar, breadcrumb topbar and user menu (bottom bar on phones).
  */
 export function AppLayout({
   member,
@@ -46,6 +47,17 @@ export function AppLayout({
   const live = member && !preview;
   const signingOut = live && signOut.active;
   const userMenu = live && session.state === "authenticated" && !signingOut;
+  // Phones replace the topbar user menu and navigation dialog with the bottom bar (CSS < 768px).
+  const bar = userMenu;
+  useEffect(() => {
+    // Workspace pages extend under display cutouts; safe-area insets keep content and the bar clear.
+    if (!live) return;
+    const viewport = document.querySelector('meta[name="viewport"]');
+    const original = viewport?.getAttribute("content");
+    if (!viewport || original == null || original.includes("viewport-fit")) return;
+    viewport.setAttribute("content", `${original}, viewport-fit=cover`);
+    return () => viewport.setAttribute("content", original);
+  }, [live]);
   // Live workspace pages switch language through the user menu whenever it is shown; otherwise
   // (anonymous, unavailable or signing out) the select stays, except while the session is checked.
   const languageSelect = !live || (!userMenu && session.state !== "checking");
@@ -82,7 +94,7 @@ export function AppLayout({
     <div
       className={
         live
-          ? `app-shell member-shell event-member-shell workspace-shell${collapsed ? " sidebar-collapsed" : ""}`
+          ? `app-shell member-shell event-member-shell workspace-shell${collapsed ? " sidebar-collapsed" : ""}${bar ? " has-bottom-bar" : ""}`
           : member
             ? "app-shell member-shell"
             : "app-shell public-shell"
@@ -126,7 +138,16 @@ export function AppLayout({
                   : home
             }
           >
-            Yukon Union
+            {live ? (
+              <>
+                <span className="wordmark-full">Yukon Union</span>
+                <span className="wordmark-short" aria-hidden="true">
+                  YU
+                </span>
+              </>
+            ) : (
+              "Yukon Union"
+            )}
           </Link>
           {live ? (
             <>
@@ -152,6 +173,7 @@ export function AppLayout({
           )}
         </header>
       </div>
+      {bar && <BottomNavigation onMobileNavigate={onMobileNavigate} />}
       <main id="main-content" tabIndex={-1}>
         {signingOut ? <SignOutStatus /> : children}
       </main>
