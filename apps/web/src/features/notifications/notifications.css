@@ -84,7 +84,7 @@
 .notification-popover > a {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
+  min-height: var(--target-min);
   padding: 0.25rem 0.5rem;
 }
 .notification-toolbar {
@@ -112,7 +112,7 @@
 .notification-preference {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  min-height: var(--target-min);
   gap: 0.75rem;
 }
 .notifications-page fieldset {

@@ -362,7 +362,7 @@ export function DriverProfilePage() {
                     <td>{formatQuantity(trip.actualDistanceM, "km", locale)}</td>
                     <td>{trip.cargo ? trip.cargo.label : "—"}</td>
                     <td>
-                      <Button asChild variant="outline" className="text-xs py-1 px-3">
+                      <Button asChild variant="outline" size="xs">
                         <Link to={`/account/trips/${trip.id}`}>{t("profile.viewTrip")}</Link>
                       </Button>
                     </td>

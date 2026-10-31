@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card, Label, Table } from "../../shared/ui/primitives.js";
+import { ControlsExample } from "./ControlsExample.js";
 import { LocalForm } from "./LocalForm.js";
 import { createFoundationMocks, type FoundationMocks, fixtureId } from "./mocks.js";
 
@@ -235,6 +236,7 @@ export function FoundationPage({
               </p>
             </Card>
           )}
+          <ControlsExample />
         </div>
         <aside className="stack supporting-column" aria-label={t("formTitle")}>
           <LocalForm />
