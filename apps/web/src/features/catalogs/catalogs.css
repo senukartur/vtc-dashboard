@@ -14,7 +14,6 @@
 .catalog-page .input {
   width: 100%;
   min-width: 0;
-  min-height: 44px;
 }
 .catalog-page input[type="file"] {
   height: auto;
@@ -65,8 +64,8 @@
 }
 .catalog-page summary {
   cursor: pointer;
-  padding-block: 0.75rem;
-  min-height: 44px;
+  padding-block: 6px;
+  min-height: var(--target-min);
 }
 .catalog-page .button {
   white-space: normal;

@@ -13,14 +13,14 @@
 .admin-navigation a,
 .admin-tabs a {
   display: inline-flex;
-  min-height: 44px;
+  min-height: var(--target-min);
   align-items: center;
   padding: 0.4rem 0.7rem;
   border-radius: 0.5rem;
 }
 .admin-navigation a[aria-current],
 .admin-tabs a[aria-current] {
-  background: var(--muted);
+  background: var(--surface-active);
   color: var(--foreground);
   outline: 1px solid var(--border);
 }
@@ -39,7 +39,8 @@
 }
 .admin-list button {
   width: 100%;
-  min-height: 56px;
+  min-height: var(--target-min);
+  padding-block: 6px;
   text-align: left;
   justify-content: flex-start;
   white-space: normal;
@@ -69,7 +70,7 @@
 .admin-role-list label {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  min-height: var(--target-min);
   gap: 0.5rem;
 }
 .admin-role-list input {
