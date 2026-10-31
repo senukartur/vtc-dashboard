@@ -1,4 +1,4 @@
-import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
+import { levelIdAts, levelIdEts2, mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { switchLanguage } from "./support/locale.ts";
 
@@ -69,6 +69,41 @@ test.describe("Company Dashboard E2E", () => {
     await lastMonthButton.click();
     await expect(lastMonthButton).toHaveAttribute("aria-pressed", "true");
   });
+
+  test("shows the assigned qualification names for each game instead of UUIDs", async ({
+    page,
+  }) => {
+    await mockDashboardRoutes(page);
+    await page.goto("/account/dashboard");
+    const widget = page.getByRole("region", { name: "My Qualification", exact: true });
+    await expect(widget.getByText("European Driver II", { exact: true })).toBeVisible();
+    await expect(widget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
+    await expect(widget).not.toContainText(levelIdEts2);
+    await expect(widget).not.toContainText(levelIdAts);
+    await switchLanguage(page, "ru");
+    const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
+    await expect(russianWidget.getByText("European Driver II", { exact: true })).toBeVisible();
+    await expect(russianWidget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
+  });
+
+  for (const qualificationLevels of ["unavailable", "missing"] as const) {
+    test(`keeps qualification progress when level names are ${qualificationLevels}`, async ({
+      page,
+    }) => {
+      await mockDashboardRoutes(page, { qualificationLevels });
+      await page.goto("/account/dashboard");
+      const widget = page.getByRole("region", { name: "My Qualification", exact: true });
+      await expect(widget.getByText("Level name unavailable", { exact: true })).toHaveCount(2);
+      await expect(widget).not.toContainText(levelIdEts2);
+      await expect(widget).not.toContainText(levelIdAts);
+      await expect(widget).toContainText("15 / 20");
+      await switchLanguage(page, "ru");
+      const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
+      await expect(
+        russianWidget.getByText("Название уровня недоступно", { exact: true }),
+      ).toHaveCount(2);
+    });
+  }
 
   test("expands and collapses metric calculation definitions", async ({ page }) => {
     await mockDashboardRoutes(page);

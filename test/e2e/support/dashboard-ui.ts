@@ -1,5 +1,6 @@
 import { inertNotifications } from "./notifications.ts";
 import type { Page } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 
 export const member1Id = "41000000-0000-4000-8000-000000000001";
@@ -176,6 +177,28 @@ export function makeProgressFixture(game: "ets2" | "ats") {
   };
 }
 
+export function makeQualificationLevelsFixture(game: "ets2" | "ats") {
+  return {
+    data: {
+      items: [
+        {
+          id: game === "ets2" ? levelIdEts2 : levelIdAts,
+          game,
+          code: game === "ets2" ? "driver_ii" : "driver_iii",
+          name: game === "ets2" ? "European Driver II" : "Pacific Driver III",
+          version: 1,
+          ruleVersionId: null,
+          configured: false,
+          requiredTrips: null,
+          requiredDistanceM: null,
+        },
+      ],
+      nextCursor: null,
+    },
+    meta,
+  } satisfies components["schemas"]["EnvelopeListQualificationLevel"];
+}
+
 export function makeTripSummaryListFixture(ownerId: string = member1Id) {
   return {
     data: {
@@ -253,7 +276,13 @@ export function makeUpcomingEventFixture() {
   };
 }
 
-export async function mockDashboardRoutes(page: Page, options: { emptyCompany?: boolean } = {}) {
+export async function mockDashboardRoutes(
+  page: Page,
+  options: {
+    emptyCompany?: boolean;
+    qualificationLevels?: "unavailable" | "missing";
+  } = {},
+) {
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
@@ -292,6 +321,14 @@ export async function mockDashboardRoutes(page: Page, options: { emptyCompany?: 
     if (path === "/api/v1/me/qualification-progress") {
       const game = (url.searchParams.get("game") ?? "ets2") as "ets2" | "ats";
       return route.fulfill({ json: makeProgressFixture(game) });
+    }
+    if (path === "/api/v1/qualification-levels") {
+      if (options.qualificationLevels === "unavailable")
+        return route.fulfill({ status: 503, json: { error: { code: "UNAVAILABLE" } } });
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
+      const fixture = makeQualificationLevelsFixture(game);
+      if (options.qualificationLevels === "missing") fixture.data.items = [];
+      return route.fulfill({ json: fixture });
     }
     if (path === "/api/v1/members") {
       return route.fulfill({ json: makeMembersListFixture() });
