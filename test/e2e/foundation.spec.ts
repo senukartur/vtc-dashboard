@@ -808,11 +808,17 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
       (element) => element.getClientRects().length > 0,
     );
     visible?.setAttribute("data-font-probe", "wordmark");
-    const probe = document.createElement("span");
-    probe.className = "numeric";
-    probe.setAttribute("data-font-probe", "numeric");
-    probe.textContent = "0123456789";
-    document.querySelector("main")?.append(probe);
+    for (const [name, weight] of [
+      ["numeric", ""],
+      ["numeric-bold", "700"],
+    ] as const) {
+      const probe = document.createElement("span");
+      probe.className = "numeric";
+      probe.style.fontWeight = weight;
+      probe.setAttribute("data-font-probe", name);
+      probe.textContent = "0123456789";
+      document.querySelector("main")?.append(probe);
+    }
     await Promise.all(
       [400, 500, 700].map((weight) =>
         document.fonts.load(`${weight} 14px "M PLUS Rounded 1c"`, "Yukon 0123456789"),
@@ -835,23 +841,32 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
   expect(await faces(".table th")).toEqual(["RoundedMplus1c-Medium"]);
   expect(await faces("main .lead")).toEqual(["RoundedMplus1c-Regular"]);
   expect(await faces("[data-font-probe=numeric]")).toEqual(["RoundedMplus1c-Regular"]);
+  expect(await faces("[data-font-probe=numeric-bold]")).toEqual(["RoundedMplus1c-Bold"]);
   const result = await page.evaluate(() => {
-    const probe = document.querySelector<HTMLElement>("[data-font-probe=numeric]");
-    if (!probe) throw new Error("MISSING_PROBE");
-    const widths = ["1111111111", "0000000000", "8888888888"].map((digits) => {
-      probe.textContent = digits;
-      return probe.getBoundingClientRect().width;
+    const spreads = ["numeric", "numeric-bold"].map((name) => {
+      const probe = document.querySelector<HTMLElement>(`[data-font-probe=${name}]`);
+      if (!probe) throw new Error("MISSING_PROBE");
+      const widths = ["1111111111", "0000000000", "8888888888"].map((digits) => {
+        probe.textContent = digits;
+        return probe.getBoundingClientRect().width;
+      });
+      return {
+        numeric: getComputedStyle(probe).fontVariantNumeric,
+        spread: Math.max(...widths) - Math.min(...widths),
+      };
     });
     return {
       synthesis: getComputedStyle(document.querySelector("main h1") ?? document.body)
         .fontSynthesisWeight,
-      numeric: getComputedStyle(probe).fontVariantNumeric,
-      spread: Math.max(...widths) - Math.min(...widths),
+      spreads,
     };
   });
   expect(result.synthesis).toBe("none");
-  expect(result.numeric).toBe("tabular-nums");
-  expect(result.spread).toBeLessThan(0.5);
+  expect(result.spreads).toHaveLength(2);
+  for (const { numeric, spread } of result.spreads) {
+    expect(numeric).toBe("tabular-nums");
+    expect(spread).toBeLessThan(0.5);
+  }
 });
 
 for (const locale of ["ru", "en"]) {
