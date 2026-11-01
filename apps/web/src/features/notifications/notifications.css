@@ -110,6 +110,7 @@
 
 /* Popup (portaled to body, so it is not scoped under the page). */
 .notification-popover {
+  position: relative;
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -149,14 +150,20 @@
   color: var(--secondary);
   font-size: var(--font-small);
 }
+/* Only an empty status region: drop the padding but keep the live region in the tree. */
 .notification-popover .notification-state:not(:has(> :not([role="status"]:empty))) {
-  display: none;
+  padding: 0;
 }
 .notification-popover .notification-state p {
   margin: 0;
 }
 .notification-popover .notification-state p[role="status"]:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .notification-popover > .notification-failure {
   padding: 8px 12px 0;
@@ -272,7 +279,7 @@
   gap: 12px;
   align-items: start;
 }
-.notifications-page fieldset {
+.notifications-preference-form fieldset {
   border: 0;
   padding: 0;
   margin: 0;

@@ -827,10 +827,19 @@ for (const locale of ["en", "ru"] as const)
     // continues with the next page control; Shift+Tab before the first row returns to the bell.
     await page.keyboard.press("Tab");
     await expect(dialog).toHaveCount(0);
-    await expect(bell).not.toBeFocused();
-    expect(await page.evaluate(() => document.activeElement?.matches("a, button, select"))).toBe(
-      true,
-    );
+    // Desktop continues into the page (the user menu sits in the sidebar before the topbar),
+    // tablets reach the topbar user menu and phones the first bottom-bar link.
+    const width = page.viewportSize()?.width ?? 0;
+    await expect(
+      width >= 1051
+        ? page.getByRole("main").getByRole("button", { name: text.readAll, exact: true })
+        : phone(page)
+          ? page
+              .getByRole("navigation", { name: /^(Main sections|Основные разделы)$/ })
+              .getByRole("link")
+              .first()
+          : userMenuTrigger(page),
+    ).toBeFocused();
     await bell.focus();
     await page.keyboard.press("Enter");
     await expect(rows.nth(0)).toBeFocused();
@@ -899,7 +908,10 @@ test("popup and page share one read-through attempt and its uncertain identity",
   await bellButton(page).click();
   const dialog = popup(page);
   await dialog.getByRole("button", { name: popupText.en.readAll, exact: true }).click();
-  await expect(dialog.getByRole("alert")).toContainText("unavailable");
+  await expect(dialog.locator(".notification-failure")).toContainText("unavailable");
+  // The page header announces the shared failure; the popup copy is visual only here.
+  await expect(page.getByRole("alert")).toHaveCount(1);
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("unavailable");
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   state.items.push(notificationFixture({ id: nextId, liveToastEligible: false }));
@@ -1111,6 +1123,19 @@ test("bell popup and account surfaces dismiss each other with one bell instance"
     await expect(page.getByRole("menu")).toBeVisible();
   }
   await expect(popup(page)).toHaveCount(0);
+  // Reverse: pressing the bell while the menu or sheet is open dismisses it. The modal menu or
+  // sheet blocks outside pointer events, so the raw press first dismisses and a second opens.
+  // Radix hides the rest of the page from the accessibility tree while the menu is open.
+  const box = await page.locator(".notification-bell").boundingBox();
+  await page.mouse.click(
+    (box?.x ?? 0) + (box?.width ?? 0) / 2,
+    (box?.y ?? 0) + (box?.height ?? 0) / 2,
+  );
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "More", exact: true })).toHaveCount(0);
+  if ((await popup(page).count()) === 0) await bellButton(page).click();
+  await expect(popup(page)).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
   await page.keyboard.press("Escape");
   await bellButton(page).click();
   await expect(popup(page)).toBeVisible();

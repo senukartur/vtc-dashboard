@@ -1,6 +1,6 @@
 import { Popover } from "radix-ui";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useSession } from "../../app/Session.js";
 import { Badge, Button } from "../../shared/ui/primitives.js";
@@ -20,14 +20,17 @@ export function NotificationFailure({
   error,
   seconds = 0,
   preference = false,
+  announce = true,
 }: {
   error: unknown;
   seconds?: number;
   preference?: boolean;
+  /** False when the same failure is already announced elsewhere on screen. */
+  announce?: boolean;
 }) {
   const { t } = useTranslation("notifications");
   return error ? (
-    <div role="alert" className="notification-failure">
+    <div role={announce ? "alert" : undefined} className="notification-failure">
       <p>
         {t(
           error instanceof AccountFailure
@@ -96,7 +99,9 @@ function tabbables(root: ParentNode) {
 /** The control that follows `trigger` in page order, outside the portaled popup. */
 function nextAfter(trigger: HTMLElement, popup: HTMLElement) {
   const candidates = tabbables(document).filter((element) => !popup.contains(element));
-  return candidates[candidates.indexOf(trigger) + 1] ?? null;
+  const index = candidates.indexOf(trigger);
+  // A trigger outside the computed order must not fall back to the first page control.
+  return index < 0 ? null : (candidates[index + 1] ?? null);
 }
 function subscribeOnline(change: () => void) {
   window.addEventListener("online", change);
@@ -302,6 +307,8 @@ export function NotificationBell() {
     online = useOnline(),
     now = useMinuteNow(),
     titleId = useId(),
+    // The notifications page header announces the same shared read-through failure.
+    onPage = /^\/account\/notifications\/?$/i.test(useLocation().pathname),
     [open, setOpen] = useState(false),
     // Path at the moment a row or "All notifications" link was chosen; the shell focuses main.
     routedFrom = useRef<string | null>(null),
@@ -416,7 +423,11 @@ export function NotificationBell() {
                 ))}
             </ul>
           )}
-          <NotificationFailure error={readThrough.error} seconds={readThrough.seconds} />
+          <NotificationFailure
+            error={readThrough.error}
+            seconds={readThrough.seconds}
+            announce={!onPage}
+          />
           <div className="notification-popover-footer">
             <Button
               variant="ghost"
