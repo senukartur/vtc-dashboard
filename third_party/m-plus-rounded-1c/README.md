@@ -28,7 +28,7 @@ fontTools `pyftsubset` 4.67.0 with brotli 1.2.1, installed with `pip install --o
 `SRC` holds the three input files and `OUT` receives the subsets:
 
 ```sh
-CORE='U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0301,U+0304,U+0308,U+0329,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2000-2013,U+2016-2024,U+2027-202F,U+2032-203A,U+203D-2046,U+204A-2052,U+2054-206F,U+20AC,U+20BD,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD'
+CORE='U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0301,U+0304,U+0308,U+0329,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2000-2014,U+2016-2024,U+2027-202F,U+2032-203A,U+203D-2046,U+204A-2052,U+2054-206F,U+20AC,U+20BD,U+2116,U+2122,U+2190-2193,U+2197,U+2205,U+2212,U+2215,U+25C7,U+2713,U+FEFF,U+FFFD'
 EXT='U+0100-0130,U+0132-0151,U+0154-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0460-048F,U+0492-04AF,U+04B2-052F,U+1C80-1C8A,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+20A0-20A7,U+20AA-20AB,U+20AD-20AE,U+20B1-20BC,U+20BE-20C0,U+2113,U+2C60-2C7F,U+2DE0-2DFF,U+A640-A69F,U+A720-A7FF,U+FE2E-FE2F'
 for pair in 400:Regular 500:Medium 700:Bold; do
   w=${pair%%:*}; s=${pair#*:}
@@ -39,15 +39,15 @@ for pair in 400:Regular 500:Medium 700:Bold; do
 done
 ```
 
-The `core` range covers Basic Latin, Latin-1, basic Cyrillic U+0400–045F (including all Russian letters) and common punctuation, arrows and currency signs; `ext` covers the remaining Latin Extended and Cyrillic Extended ranges. The CSS `unicode-range` of each face lists the same ranges, so browsers download an `ext` file only for text that needs it. Codepoints outside U+0020–007E in Unicode categories P* or S* whose advance is at least 900 units (full-width CJK-style forms) are excluded and render in the system fallback: U+2014–2015, U+2025–2026, U+2030–2031, U+203B–203C, U+2047–2049, U+2053, U+2116, U+2190, U+2192, U+2197, U+20A8–20A9 and U+20AF–20B0. The source fonts have no `tnum`, `pnum` or `lnum` features, so that option is a no-op; their digits already share one advance per weight. Default hinting is kept. Two runs in fresh directories produced identical bytes.
+The `core` range covers Basic Latin, Latin-1, basic Cyrillic U+0400–045F (including all Russian letters) and common punctuation, arrows and currency signs; `ext` covers the remaining Latin Extended and Cyrillic Extended ranges. The CSS `unicode-range` of each face lists the same ranges, so browsers download an `ext` file only for text that needs it. Codepoints outside U+0020–007E in Unicode categories P* or S* whose advance is at least 900 units (full-width CJK-style forms) are excluded and render in the system fallback: U+2015, U+2025–2026, U+2030–2031, U+203B–203C, U+2047–2049, U+2053, U+20A8–20A9 and U+20AF–20B0. Symbols the web app renders are kept in `core` when the source fonts contain them, even when wide: — U+2014, № U+2116, ← U+2190, ↑ U+2191, → U+2192, ↓ U+2193, ↗ U+2197, ∅ U+2205, ◇ U+25C7 and ✓ U+2713, besides « » · × • – already in the ranges above. The horizontal ellipsis … U+2026 is intentionally left to the fallback because its source glyph is a full-width form with vertically centred dots (y 290–430 in Regular), which reads as ⋯ in Latin and Cyrillic text. ▤ U+25A4, ◷ U+25F7 and 🔒 U+1F512 are not in the source fonts and render in the fallback; so do ₽ U+20BD and U+202F, which the `core` range lists but the source fonts lack. A unit test checks that every non-ASCII character in the web sources is mapped by the subsets or is one of these fallback characters. The source fonts have no `tnum`, `pnum` or `lnum` features, so that option is a no-op; their digits already share one advance per weight. Default hinting is kept. Two runs in fresh directories produced identical bytes.
 
 ## Output
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `m-plus-rounded-1c-400-core.woff2` | 23948 | `1292cab67d45a4e2de4dd21f5c55f65f18825f1895270f2466bcdeb445c29433` |
+| `m-plus-rounded-1c-400-core.woff2` | 24380 | `4510d6037a0150be18c04221e6e14ed44999dc54723e0cebee7c759a138f0e81` |
 | `m-plus-rounded-1c-400-ext.woff2` | 40292 | `e9c6ab663613e674acf3d9ab85d72dc159b40a60f563f3c1f2d5daef3f1ffba2` |
-| `m-plus-rounded-1c-500-core.woff2` | 23872 | `e40ef158ceb9befe2f62b5d407342c62783382ef61928486358b2e9ed0f861b8` |
+| `m-plus-rounded-1c-500-core.woff2` | 24392 | `ad84e0bfecf77d8a24d4f7c84a6f794bd4235ce4482cf3d80d5e1e825cb2dbee` |
 | `m-plus-rounded-1c-500-ext.woff2` | 40420 | `412d666fec537535211d1f543062e3ba304c943db6f338cb05fbf1986822bb7d` |
-| `m-plus-rounded-1c-700-core.woff2` | 24396 | `08d0ad04c850ea064e32784b7d60a768af29a7bccf759fd24bd508ecd5063a54` |
+| `m-plus-rounded-1c-700-core.woff2` | 24936 | `9dce57fa99879304d70b24c52b94e7468fd8ea14d3d251a9f2059f166f45c623` |
 | `m-plus-rounded-1c-700-ext.woff2` | 40720 | `5e1a6bb2feef4e5cc3023bb5becad777e2da1e8ebfff0f56c044cf800dcb909d` |

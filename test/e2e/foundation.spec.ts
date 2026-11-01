@@ -803,7 +803,9 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.locator(".table th").first()).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
-  await page.evaluate(async () => {
+  // Rendered arrows and symbols that the source fonts contain; see the subset README.
+  const renderedSymbols = "←↑→↓↗—№∅◇✓×•«»·–";
+  await page.evaluate(async (symbols) => {
     const visible = Array.from(document.querySelectorAll(".wordmark")).find(
       (element) => element.getClientRects().length > 0,
     );
@@ -819,22 +821,34 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
       probe.textContent = "0123456789";
       document.querySelector("main")?.append(probe);
     }
+    for (const [name, text] of [
+      ["symbols", symbols],
+      ["ellipsis", "…"],
+    ] as const) {
+      const probe = document.createElement("span");
+      probe.setAttribute("data-font-probe", name);
+      probe.textContent = text;
+      document.querySelector("main")?.append(probe);
+    }
     await Promise.all(
       [400, 500, 700].map((weight) =>
-        document.fonts.load(`${weight} 14px "M PLUS Rounded 1c"`, "Yukon 0123456789"),
+        document.fonts.load(`${weight} 14px "M PLUS Rounded 1c"`, `Yukon 0123456789${symbols}`),
       ),
     );
-  });
+  }, renderedSymbols);
   const session = await page.context().newCDPSession(page);
   await session.send("DOM.enable");
   await session.send("CSS.enable");
   const { root } = await session.send("DOM.getDocument", { depth: -1 });
-  const faces = async (selector: string) => {
+  const platformFonts = async (selector: string) => {
     const { nodeId } = await session.send("DOM.querySelector", { nodeId: root.nodeId, selector });
     expect(nodeId, selector).toBeGreaterThan(0);
-    const { fonts } = await session.send("CSS.getPlatformFontsForNode", { nodeId });
-    return fonts.filter((font) => font.isCustomFont).map((font) => font.postScriptName);
+    return (await session.send("CSS.getPlatformFontsForNode", { nodeId })).fonts;
   };
+  const faces = async (selector: string) =>
+    (await platformFonts(selector))
+      .filter((font) => font.isCustomFont)
+      .map((font) => font.postScriptName);
   // Upstream PostScript names; 600 and 750 have no static face and resolve to Bold.
   expect(await faces("main h1")).toEqual(["RoundedMplus1c-Bold"]);
   expect(await faces("[data-font-probe=wordmark]")).toEqual(["RoundedMplus1c-Bold"]);
@@ -842,6 +856,37 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
   expect(await faces("main .lead")).toEqual(["RoundedMplus1c-Regular"]);
   expect(await faces("[data-font-probe=numeric]")).toEqual(["RoundedMplus1c-Regular"]);
   expect(await faces("[data-font-probe=numeric-bold]")).toEqual(["RoundedMplus1c-Bold"]);
+  // Every rendered symbol comes from the core face; the centred-dot ellipsis stays in fallback.
+  expect(
+    (await platformFonts("[data-font-probe=symbols]")).map((font) => [
+      font.postScriptName,
+      font.isCustomFont,
+      font.glyphCount,
+    ]),
+  ).toEqual([["RoundedMplus1c-Regular", true, [...renderedSymbols].length]]);
+  expect(await faces("[data-font-probe=ellipsis]")).toEqual([]);
+  const declared = await page.evaluate(() => {
+    const items: { weight: string; range: string }[] = [];
+    const named: Record<string, string> = { normal: "400", bold: "700" };
+    document.fonts.forEach((face) => {
+      if (face.family.replaceAll('"', "") === "M PLUS Rounded 1c")
+        items.push({ weight: named[face.weight] ?? face.weight, range: face.unicodeRange });
+    });
+    return items;
+  });
+  const inRange = (range: string, code: number) =>
+    range.split(",").some((part) => {
+      const [start = "", end = start] = part.trim().replace(/^U\+/i, "").split("-");
+      return Number.parseInt(start, 16) <= code && code <= Number.parseInt(end, 16);
+    });
+  expect(declared).toHaveLength(6);
+  for (const weight of ["400", "500", "700"]) {
+    const core = declared.filter((face) => face.weight === weight && inRange(face.range, 0x41));
+    expect(core, weight).toHaveLength(1);
+    for (const symbol of renderedSymbols)
+      expect(inRange(core[0]?.range ?? "", symbol.codePointAt(0) ?? 0), symbol).toBe(true);
+  }
+  expect(declared.filter((face) => inRange(face.range, 0x2026))).toEqual([]);
   const result = await page.evaluate(() => {
     const spreads = ["numeric", "numeric-bold"].map((name) => {
       const probe = document.querySelector<HTMLElement>(`[data-font-probe=${name}]`);

@@ -4,7 +4,8 @@
  * M PLUS Rounded 1c ships only 400, 500 and 700 (third_party/m-plus-rounded-1c/README.md).
  * Weights 600 and above render Bold, 500 renders Medium; synthesis stays off.
  * The metric overrides keep the previous UI font's 263-unit space above the cap
- * height and its descent, so text sits in existing line boxes as before.
+ * height and its descent, so explicit line heights keep their boxes;
+ * line-height: normal boxes grow by about 0.023em (1.298em instead of 1.275em).
  */
 @font-face {
   font-family: "M PLUS Rounded 1c";
@@ -16,7 +17,7 @@
   descent-override: 30.5%;
   line-gap-override: 0%;
   unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2013, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+2713, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "M PLUS Rounded 1c";
@@ -40,7 +41,7 @@
   descent-override: 30.5%;
   line-gap-override: 0%;
   unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2013, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+2713, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "M PLUS Rounded 1c";
@@ -64,7 +65,7 @@
   descent-override: 30.5%;
   line-gap-override: 0%;
   unicode-range:
-    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2013, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+2713, U+FEFF, U+FFFD;
 }
 @font-face {
   font-family: "M PLUS Rounded 1c";
