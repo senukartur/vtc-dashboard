@@ -144,7 +144,7 @@ export function TripTable({
                     <CellLabel>{t("distance")}</CellLabel>
                     <span>{formatQuantity(trip.actualDistanceM, "km", locale)}</span>
                   </td>
-                  <td className="trips-muted">
+                  <td className="trips-source trips-muted">
                     <CellLabel>{t("source")}</CellLabel>
                     <span>{sourceNames(trip, t)}</span>
                   </td>

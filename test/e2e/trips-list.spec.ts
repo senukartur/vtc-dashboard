@@ -303,6 +303,17 @@ test("wide screens open a validated ?trip= side panel without refetching the lis
   const closeBox = await region.getByRole("button", { name: "Close details" }).boundingBox();
   expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(24);
   expect(Math.abs((closeBox?.width ?? 0) - (closeBox?.height ?? 0))).toBeLessThanOrEqual(7);
+  // Beside the panel the table drops Sources (shown in the panel) and keeps badges on one line.
+  await expect(table(page).getByRole("columnheader")).toHaveText([
+    "Route",
+    "Cargo",
+    "Driven distance",
+    "Company decision",
+    "Reporting time",
+  ]);
+  await expect(table(page).locator("tbody tr").first().getByRole("cell")).toHaveCount(5);
+  const badge = table(page).locator("tbody tr").nth(1).getByText("Pending review");
+  expect((await badge.boundingBox())?.height ?? 99).toBeLessThanOrEqual(22);
   await capture(page, info, "trips-panel-en");
   await catalogLanguage(page, "ru");
   await expect(

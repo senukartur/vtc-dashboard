@@ -115,6 +115,26 @@
 .trip-page .trips-col-time {
   width: 15%;
 }
+/* Beside the panel the table is narrower: sources move to the panel and the route gets the room. */
+.trip-page .trips-layout[data-panel] .trips-col-source,
+.trip-page .trips-layout[data-panel] .trips-source {
+  display: none;
+}
+.trip-page .trips-layout[data-panel] .trips-col-route {
+  width: 33%;
+}
+.trip-page .trips-layout[data-panel] .trips-col-cargo {
+  width: 18%;
+}
+.trip-page .trips-layout[data-panel] .trips-col-distance {
+  width: 13%;
+}
+.trip-page .trips-layout[data-panel] .trips-col-decision {
+  width: 19%;
+}
+.trip-page .trips-layout[data-panel] .trips-col-time {
+  width: 17%;
+}
 .trip-page .trips-table .trips-numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -211,6 +231,9 @@
 .trip-page .trips-decision[data-decision="rejected"] {
   background: var(--rejected-surface);
   color: var(--destructive);
+}
+.trip-page .trips-layout[data-panel] .trips-decision {
+  white-space: nowrap;
 }
 /* Side panel: non-modal region; keep the 1200px breakpoint in sync with WIDE_QUERY in layout.ts. */
 @media (min-width: 1200px) {
