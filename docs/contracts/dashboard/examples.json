@@ -17,6 +17,66 @@
       }
     },
     {
+      "id": "getPublicCompanyStats:success",
+      "operationId": "getPublicCompanyStats",
+      "status": 200,
+      "response": {
+        "data": {
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "activeMembers": 12,
+          "currentMonth": {
+            "status": "available",
+            "month": "2026-10",
+            "reportingTimezone": "UTC",
+            "fromDate": "2026-10-01",
+            "toDateExclusive": "2026-11-01",
+            "acceptedTrips": 3,
+            "actualDistanceM": "412500.5",
+            "games": [
+              "ets2",
+              "ats"
+            ]
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getPublicCompanyStats:unavailable",
+      "operationId": "getPublicCompanyStats",
+      "status": 200,
+      "response": {
+        "data": {
+          "computedAt": "2026-10-17T12:00:00.000Z",
+          "activeMembers": 3,
+          "currentMonth": {
+            "status": "unavailable",
+            "reason": "company_reporting_timezone"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getPublicCompanyStats:error-409",
+      "operationId": "getPublicCompanyStats",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "SETUP_REQUIRED",
+          "messageKey": "errors.setup_required",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-002"
+        }
+      }
+    },
+    {
       "id": "listPublicEvents:success",
       "operationId": "listPublicEvents",
       "status": 200,

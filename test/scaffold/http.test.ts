@@ -265,3 +265,55 @@ test("production SPA fallback never replaces API, evidence or missing-asset erro
     await rm(absolute, { recursive: true });
   }
 });
+
+test("only the allowlisted public summary route keeps its short public cache on 200", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const app = await createApp({ checkReadiness: async () => true });
+  let fail = false;
+  app.get("/api/v1/public/company-stats", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=60");
+    if (fail) throw Object.assign(new Error("PRIVATE_ERROR_DETAIL"), { statusCode: 503 });
+    return { ok: true };
+  });
+  app.get("/api/v1/public/company", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=60");
+    return { ok: true };
+  });
+  app.get("/api/v1/public/company-stats/other", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=60");
+    return { ok: true };
+  });
+  app.get("/cache-probe/created", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=60");
+    return reply.code(201).send({ ok: true });
+  });
+  app.get("/cache-probe/stronger", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=3600");
+    return { ok: true };
+  });
+  try {
+    const kept = await app.inject("/api/v1/public/company-stats");
+    assert.equal(kept.statusCode, 200);
+    assert.equal(kept.headers["cache-control"], "public, max-age=60");
+    assert.equal(kept.headers["x-content-type-options"], "nosniff");
+    // The route pattern, not the query string, decides; schema validation guards real queries.
+    assert.equal(
+      (await app.inject("/api/v1/public/company-stats?probe=1")).headers["cache-control"],
+      "public, max-age=60",
+    );
+    for (const url of [
+      "/api/v1/public/company",
+      "/api/v1/public/company-stats/other",
+      "/cache-probe/created",
+      "/cache-probe/stronger",
+    ])
+      assert.equal((await app.inject(url)).headers["cache-control"], "no-store", url);
+    fail = true;
+    const unavailable = await app.inject("/api/v1/public/company-stats");
+    assert.equal(unavailable.statusCode, 503);
+    assert.equal(unavailable.headers["cache-control"], "no-store");
+    assert.ok(!unavailable.body.includes("PRIVATE_ERROR_DETAIL"));
+  } finally {
+    await app.close();
+  }
+});
