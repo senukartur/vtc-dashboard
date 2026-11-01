@@ -300,6 +300,9 @@ test("wide screens open a validated ?trip= side panel without refetching the lis
   );
   expect(details).toEqual([second]);
   expect(lists.length).toBe(listCount);
+  const closeBox = await region.getByRole("button", { name: "Close details" }).boundingBox();
+  expect(closeBox?.width ?? 0).toBeGreaterThanOrEqual(24);
+  expect(Math.abs((closeBox?.width ?? 0) - (closeBox?.height ?? 0))).toBeLessThanOrEqual(7);
   await capture(page, info, "trips-panel-en");
   await catalogLanguage(page, "ru");
   await expect(
@@ -326,6 +329,11 @@ test("wide screens open a validated ?trip= side panel without refetching the lis
   await page.goBack();
   await expect(panel(page, first)).toBeVisible();
   await expect(panel(page, second)).toHaveCount(0);
+  await rowLink(page, second).click();
+  await panel(page, second).getByRole("button", { name: "Close details" }).focus();
+  await page.goBack();
+  await expect(panel(page, first)).toBeVisible();
+  await expect(rowLink(page, second)).toBeFocused();
 
   await rowLink(page, third).click();
   const missing = page.getByRole("region", { name: /Fictional Long Valley/ });
@@ -359,8 +367,10 @@ test("wide screens open a validated ?trip= side panel without refetching the lis
   await expect(table(page)).toContainText("Fictional Colleague");
   expect(others).toEqual([]);
 
+  await shared.getByRole("button", { name: "Close details" }).focus();
   await page.setViewportSize({ width: 1100, height: 800 });
   await expect(page.getByRole("region")).toHaveCount(0);
+  await expect(rowLink(page, colleague)).toBeFocused();
   await expect(rowLink(page, colleague)).toHaveAttribute("href", `/account/trips/${colleague}`);
   expectListParams(lists);
 });

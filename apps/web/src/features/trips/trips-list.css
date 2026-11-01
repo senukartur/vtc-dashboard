@@ -247,6 +247,11 @@
   gap: 4px;
   margin-left: auto;
 }
+/* Icon-only close: square target, 40px under a coarse pointer via the shared tokens. */
+.trip-page .trips-panel-close {
+  min-width: var(--target-min);
+  padding-inline: 0;
+}
 .trip-page .trips-panel h2 {
   margin: 0;
   font-size: 15px;

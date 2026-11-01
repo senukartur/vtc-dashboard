@@ -1,4 +1,11 @@
-import { type KeyboardEvent, type ReactNode, type RefObject, useId } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useId,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -52,13 +59,25 @@ export function TripPanel({
     current = summary ?? fallback,
     // The list row names the heading first so the focused heading does not change on load.
     titled = fallback ?? summary;
+  const section = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const node = section.current;
+    return () => {
+      // Back/Forward, narrowing below the wide layout or an outside selection change can remove
+      // the panel while it holds focus. Close/Escape already moved focus to the row link.
+      if (!node?.contains(document.activeElement)) return;
+      (
+        document.getElementById(`trip-link-${tripId}`) ?? document.getElementById("main-content")
+      )?.focus();
+    };
+  }, [tripId]);
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key !== "Escape") return;
     event.stopPropagation();
     onClose();
   }
   return (
-    <section className="trips-panel" aria-labelledby={headingId} onKeyDown={keyDown}>
+    <section ref={section} className="trips-panel" aria-labelledby={headingId} onKeyDown={keyDown}>
       <header className="trips-panel-header">
         <div className="trips-panel-bar">
           {current && <GameChip game={current.game} />}
@@ -71,6 +90,7 @@ export function TripPanel({
               type="button"
               variant="ghost"
               size="xs"
+              className="trips-panel-close"
               aria-label={t("closeDetails")}
               onClick={onClose}
             >
