@@ -1,81 +1,521 @@
+/* Compact game catalog review and publication. Page rules are scoped to .catalog-page and built
+   from shared tokens; .catalog-selection also styles the shared CatalogSelector elsewhere, and the
+   dialog rules are portaled outside the page. */
 .catalog-page {
-  max-width: 78rem;
-  margin-inline: auto;
-}
-.catalog-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.5rem;
-  align-items: start;
-}
-.catalog-page .stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
   min-width: 0;
 }
-.catalog-page .input {
-  width: 100%;
+.catalog-page .card.catalog-card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+/* Grid items keep their content width by default; wide tab lists and tables must scroll instead. */
+.catalog-page .catalog-card > * {
   min-width: 0;
 }
-.catalog-page input[type="file"] {
-  height: auto;
-  padding-block: 0.75rem;
+.catalog-page .catalog-muted {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.catalog-page p,
+.catalog-page dd,
+.catalog-page small,
+.catalog-page code,
+.catalog-selection a {
+  overflow-wrap: anywhere;
 }
 .catalog-page select {
   color-scheme: dark;
 }
-.catalog-page dt {
-  font-weight: 650;
-  color: var(--color-text-muted, #b7c4da);
+.catalog-page .button {
+  white-space: normal;
 }
-.catalog-page dd {
-  margin: 0 0 0.6rem;
+.catalog-page .catalog-id {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-badge);
 }
-.catalog-page dd,
-.catalog-page small,
-.catalog-page p,
-.catalog-dialog p,
-.catalog-selection a {
-  overflow-wrap: anywhere;
-}
-.catalog-facts {
-  display: grid;
-  grid-template-columns: minmax(8rem, 1fr) minmax(0, 3fr);
-  gap: 0.5rem 1rem;
-}
-.catalog-toolbar,
-.catalog-summary {
+
+/* Header: title and status badge, game switch pushed right, description below. */
+.catalog-page .catalog-header {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px 16px;
 }
-.catalog-summary span {
-  border-left: 3px solid #75a7ff;
-  padding: 0.5rem 0.75rem;
+.catalog-page .catalog-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.catalog-page .catalog-game {
+  margin-left: auto;
+}
+.catalog-page .catalog-description {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+
+/* Layout: revisions and upload beside the candidate on wide screens; DOM order below. */
+.catalog-page .catalog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space);
+  align-items: start;
+}
+.catalog-page .catalog-column {
+  display: grid;
+  gap: var(--space);
+  min-width: 0;
+}
+@media (min-width: 1051px) {
+  .catalog-page .catalog-layout {
+    grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr);
+  }
+}
+
+/* State tones always pair with a glyph and text. */
+.catalog-page .catalog-tone-accepted {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.catalog-page .catalog-tone-pending {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.catalog-page .catalog-tone-destructive {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.catalog-page .catalog-tone-neutral {
+  background: var(--surface-active);
+  color: var(--secondary);
+}
+.catalog-page .catalog-tone-preview {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.catalog-page .catalog-fallback {
+  color: var(--pending);
+  font-size: var(--font-badge);
+  font-weight: 600;
+}
+
+/* Tables */
+.catalog-page .catalog-table tbody th {
+  color: var(--foreground);
+  font-size: inherit;
+  font-weight: 500;
+}
+.catalog-page .catalog-revisions-table th:last-child {
+  width: 128px;
+}
+.catalog-page .catalog-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.catalog-page .catalog-scroll:focus-visible {
+  outline-offset: 2px;
+}
+.catalog-page .catalog-scroll .table {
+  min-width: 560px;
+}
+.catalog-page .catalog-scroll .table th,
+.catalog-page .catalog-scroll .table td {
+  padding-inline: 8px;
+}
+.catalog-page .catalog-changes-table th:nth-child(1),
+.catalog-page .catalog-translations-table th:nth-child(1),
+.catalog-page .catalog-coverage-table th:nth-child(1),
+.catalog-page .catalog-mappings-table th:nth-child(1) {
+  width: 30%;
+}
+.catalog-page .catalog-changes-table th:nth-child(2) {
+  width: 14%;
+}
+.catalog-page .catalog-changes-table thead th:last-child,
+.catalog-page .catalog-translations-table thead th:last-child,
+.catalog-page .catalog-coverage-table thead th:last-child {
+  width: 128px;
+}
+.catalog-page .catalog-mappings-table thead th:last-child {
+  width: 176px;
+}
+.catalog-page .catalog-fields {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.catalog-page .catalog-fields div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+.catalog-page .catalog-fields dt {
+  color: var(--muted);
+}
+.catalog-page .catalog-fields dt::after {
+  content: ":";
+}
+.catalog-page .catalog-fields dd {
+  margin: 0;
+}
+.catalog-page .catalog-plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+.catalog-page .catalog-decision {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Candidate card */
+.catalog-page .catalog-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.catalog-page .catalog-card-head h2 {
+  font-size: 15px;
+}
+.catalog-page .catalog-head-action {
+  margin-left: auto;
+}
+.catalog-page .catalog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+}
+.catalog-page .catalog-meta > div {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.catalog-page .catalog-meta > .catalog-meta-wide {
+  flex: 2 1 260px;
+}
+.catalog-page .catalog-meta dt,
+.catalog-page .catalog-tiles dt,
+.catalog-page .catalog-pairs dt {
+  color: var(--muted);
+  font-size: var(--font-badge);
+}
+.catalog-page .catalog-meta dd {
+  margin: 0;
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-meta code {
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-summary {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.catalog-page .catalog-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.catalog-page .catalog-tiles > div {
+  min-width: 0;
+  padding: 6px 12px;
+  box-shadow:
+    -1px 0 0 var(--border),
+    0 -1px 0 var(--border);
+}
+.catalog-page .catalog-tiles dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.catalog-page .catalog-tile-added dd {
+  color: var(--accepted);
+}
+.catalog-page .catalog-tile-changed dd {
+  color: var(--focus);
+}
+.catalog-page .catalog-conditions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-conditions li {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+.catalog-page .catalog-ok > span:first-child {
+  color: var(--accepted);
+  font-weight: 700;
+}
+.catalog-page .catalog-blocked > span:first-child,
+.catalog-page span.catalog-blocked {
+  color: var(--destructive);
+  font-weight: 700;
+}
+.catalog-page .catalog-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.catalog-page .catalog-panel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.catalog-page .catalog-panel-toolbar .label {
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-panel-toolbar select {
+  width: auto;
+}
+.catalog-page .catalog-panel-foot {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-panel-foot p {
+  line-height: 1.5;
+}
+.catalog-page .catalog-more {
+  justify-self: start;
+}
+/* The saved-mapping status stays mounted as a live region; empty, it takes no grid gap. */
+.catalog-page .catalog-saved:empty {
+  position: absolute;
+}
+.catalog-page .catalog-inline-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.catalog-page .catalog-inline-alert p,
+.catalog-page .catalog-why-blocked {
+  color: var(--pending);
+}
+.catalog-page .catalog-publish {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.catalog-page .catalog-publish p {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+/* list-item keeps the native disclosure marker; padding and line-height reach the target. */
+.catalog-page .catalog-details summary {
+  display: list-item;
+  min-height: var(--target-min);
+  padding-block: 6px;
+  line-height: 18px;
+  cursor: pointer;
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-provenance-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-provenance-list time {
+  color: var(--muted);
+}
+
+/* Upload card */
+.catalog-page .catalog-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.catalog-page .catalog-form .button,
+.catalog-page .catalog-start {
+  justify-self: start;
+}
+.catalog-page .catalog-file {
+  height: auto;
+  padding-block: 4px;
+}
+/* Steps sit in one row when the card has room and stack below 420px, so a glyph never wraps
+   away from its label. */
+.catalog-page .catalog-import {
+  container-type: inline-size;
+}
+.catalog-page .catalog-steps {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.catalog-page .catalog-step {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  font-size: var(--font-badge);
+  font-weight: 600;
+  text-align: center;
+}
+.catalog-page .catalog-step-done {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.catalog-page .catalog-step-current {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.catalog-page .catalog-step-failed {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.catalog-page .catalog-step-pending {
+  border-color: var(--border-strong);
+  color: var(--muted);
+}
+@container (max-width: 420px) {
+  .catalog-page .catalog-steps {
+    flex-direction: column;
+  }
+  .catalog-page .catalog-steps .catalog-step {
+    text-align: left;
+  }
+}
+.catalog-page .catalog-artifact,
+.catalog-page .catalog-operation {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.catalog-page .catalog-pairs {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+  font-size: var(--font-small);
+}
+.catalog-page .catalog-pairs dd {
+  margin: 0;
+}
+
+/* Search card */
+.catalog-page .catalog-search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 10px 16px;
+  align-items: start;
+}
+.catalog-page .catalog-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 .catalog-selection {
   border: 1px solid var(--border);
   border-radius: 0.8rem;
   padding: 1rem;
 }
-.catalog-dialog {
-  max-height: 85dvh;
-  overflow-y: auto;
+
+/* Portaled dialogs */
+.dialog-content.catalog-dialog,
+.dialog-content.catalog-mapping-dialog {
+  gap: 12px;
+  padding: 16px;
 }
-.catalog-page summary {
-  cursor: pointer;
-  padding-block: 6px;
+.dialog-content.catalog-dialog h2,
+.dialog-content.catalog-mapping-dialog h2 {
+  font-size: 15px;
+}
+.dialog-content.catalog-dialog p,
+.dialog-content.catalog-dialog li,
+.dialog-content.catalog-mapping-dialog p,
+.dialog-content.catalog-mapping-dialog label {
+  overflow-wrap: anywhere;
+}
+.catalog-dialog .catalog-points {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.catalog-dialog .catalog-dialog-form,
+.catalog-mapping-dialog .catalog-dialog-form {
+  display: grid;
+  gap: 10px;
+}
+.catalog-dialog .catalog-field,
+.catalog-mapping-dialog .catalog-field {
+  display: grid;
+  gap: 6px;
+}
+.catalog-dialog .catalog-dialog-actions,
+.catalog-mapping-dialog .catalog-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.catalog-mapping-dialog .catalog-radios {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.catalog-mapping-dialog .catalog-radios legend {
+  padding: 0 0 4px;
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.catalog-mapping-dialog .catalog-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-height: var(--target-min);
+  font-size: 13px;
+  cursor: pointer;
 }
-.catalog-page .button {
-  white-space: normal;
-}
-@media (max-width: 700px) {
-  .catalog-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .catalog-facts {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.1rem;
-  }
+.catalog-mapping-dialog .catalog-radio input {
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
