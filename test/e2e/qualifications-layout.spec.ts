@@ -79,14 +79,15 @@ async function settled(page: Page, locale: "en" | "ru" = "en") {
 }
 /**
  * Words in the levels table that wrap mid-word (a word whose text range spans more than one line).
- * Only the exact threshold distance (.qualification-exact) may break anywhere.
+ * Only the exact threshold distance (.qualification-exact) may break anywhere; visible phone cell
+ * labels are checked too, and display:none labels have no line boxes.
  */
 async function brokenWords(table: Locator) {
   return table.evaluate((element) => {
     const broken: string[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement?.closest(".qualification-exact, [aria-hidden='true']")) continue;
+      if (node.parentElement?.closest(".qualification-exact, .qualification-ordinal")) continue;
       // Phones clip the header row to 1px for assistive technology only.
       const head = node.parentElement?.closest("thead");
       if (head && head.getBoundingClientRect().height <= 1) continue;
@@ -185,6 +186,51 @@ test("L1 ru at 1051px keeps whole words, a fitting table and one column", async 
   expect((await box(table)).width).toBeLessThanOrEqual(region.width);
   expect(region.y).toBeLessThan(current.y);
   await capture(page, info, "qualifications-compact-ru-1051");
+});
+
+test("L1 ru at 1150px keeps whole words and a fitting table in two columns", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "The two-column band is a desktop check.");
+  await page.setViewportSize({ width: 1150, height: 800 });
+  await mockQualifications(page, "ru");
+  await page.goto("/account/qualifications");
+  await catalogLanguage(page, "ru");
+  await settled(page, "ru");
+  const table = levelsTable(page, "ru");
+  expect(await brokenWords(table)).toEqual([]);
+  const region = await box(levelsRegion(page, "ru")),
+    current = await box(currentCard(page, "ru"));
+  expect((await box(table)).width).toBeLessThanOrEqual(region.width);
+  expect(current.x).toBeGreaterThanOrEqual(region.x + region.width);
+  await capture(page, info, "qualifications-compact-ru-1150");
+});
+
+test("L1 rules facts keep their grid inside the portaled publication confirmation", async ({
+  page,
+}) => {
+  await mockQualifications(page);
+  await page.goto("/account/qualifications");
+  await settled(page);
+  const traineePanel = panel(page, traineeId);
+  await traineePanel.getByRole("button", { name: "Edit rules", exact: true }).click();
+  const editor = traineePanel.locator("section").last();
+  await editor.locator('[id^="reason-"]').fill("Fictional dialog styling check");
+  await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
+  const publish = editor.getByRole("button", { name: "Publish rule version", exact: true });
+  await expect(publish).toBeEnabled();
+  await publish.click();
+  const facts = page.getByRole("dialog").locator("dl.qualification-facts");
+  await expect(facts).toBeVisible();
+  expect(await facts.evaluate((element) => getComputedStyle(element).display)).toBe("grid");
+  expect(
+    await facts
+      .locator("dd")
+      .first()
+      .evaluate((element) => getComputedStyle(element).marginLeft),
+  ).toBe("0px");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
 test("L2 row selection swaps panels without reads, supports the keyboard and keeps drafts", async ({

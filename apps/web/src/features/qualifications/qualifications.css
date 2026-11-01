@@ -164,17 +164,18 @@
   gap: 8px;
   min-height: var(--target-min);
 }
-.qualification-workspace .qualification-facts {
+/* Rules lists also render inside portaled confirmation dialogs (publication). */
+:is(.qualification-workspace, .dialog-content) .qualification-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 8px 12px;
   margin: 0;
 }
-.qualification-workspace .qualification-facts dd {
+:is(.qualification-workspace, .dialog-content) .qualification-facts dd {
   margin: 2px 0 0;
   font-variant-numeric: tabular-nums;
 }
-.qualification-workspace .qualification-facts dt {
+:is(.qualification-workspace, .dialog-content) .qualification-facts dt {
   color: var(--muted);
   font-size: var(--font-small);
 }
