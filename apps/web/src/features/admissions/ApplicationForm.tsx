@@ -10,6 +10,7 @@ import {
   submitApplication,
   type SubmissionAttempt,
 } from "./transport.js";
+import "./admissions.css";
 
 export function ApplicationForm() {
   const { t, i18n } = useTranslation("admissions");
@@ -108,7 +109,7 @@ export function ApplicationForm() {
           className="application-fields"
         >
           {(["nickname", "email", "steamProfileUrl", "discord"] as const).map((name) => (
-            <div className="field" key={name}>
+            <div className={name === "steamProfileUrl" ? "field field-wide" : "field"} key={name}>
               <Label htmlFor={`application-${name}`}>{t(name)}</Label>
               <Input
                 id={`application-${name}`}
@@ -146,12 +147,12 @@ export function ApplicationForm() {
             ))}
             <FieldError id="games-error">{errors.games ? t("errors.games") : undefined}</FieldError>
           </fieldset>
-          <div className="field">
+          <div className="field field-wide">
             <Label htmlFor="application-introduction">{t("introduction")}</Label>
             <textarea
               className="input"
               id="application-introduction"
-              rows={4}
+              rows={3}
               aria-invalid={Boolean(errors.introduction)}
               aria-describedby={errors.introduction ? "introduction-error" : undefined}
               {...register("introduction")}

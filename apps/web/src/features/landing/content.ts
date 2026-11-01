@@ -30,21 +30,49 @@ export const publicContent = {
       },
     ],
     requirementsTitle: "Начните со знакомства",
-    requirementsText:
-      "Для заявки нужны никнейм, email для приглашения, ссылка на профиль Steam и хотя бы одна игра — ETS2 или ATS. Discord и рассказ о себе необязательны.",
-    review:
-      "Заявку рассмотрит руководство компании. После одобрения вы сможете получить одноразовое приглашение для создания пароля, действующее семь дней. Отправка заявки не означает принятия в компанию.",
     contactsTitle: "Остаёмся на связи",
     contactsText: "Наши публичные сообщества и страницы компании.",
     contactPage: "Страница контактов",
     noScript:
       "Для отправки заявки включите JavaScript. Связаться с компанией можно по ссылкам ниже.",
-    eventsTitle: "Публичные события ещё готовятся",
-    eventsText:
-      "Публикация конвоев появится позже. Списки участников и причины отказа не публикуются для гостей.",
-    loginTitle: "Вход в кабинет ещё готовится",
-    loginText:
-      "Экран входа и работа с приглашением появятся позже. Здесь можно познакомиться с компанией и подать заявку.",
+    pauseMotion: "Остановить анимацию",
+    nextConvoy: "Следующий конвой",
+    nextConvoyIn: "Следующий конвой через",
+    units: { d: "д", h: "ч", min: "мин" },
+    statsTitle: "Компания в цифрах",
+    statsMonth: "Текущий месяц",
+    statsTimezone: "часовой пояс отчётности",
+    statsMembers: "Активные участники",
+    statsTrips: "Принятые рейсы",
+    statsDistance: "Пробег по принятым рейсам",
+    statsGames: "Игры в принятых рейсах",
+    convoysEmpty: "Открытых конвоев пока не запланировано.",
+    convoysNote:
+      "Время указано в часовом поясе вашего браузера. Списки участников гостям не показываются.",
+    ladderTitle: "Путь водителя",
+    ladderNote:
+      "Отдельно в каждой игре. Руководство задаёт для каждой ступени лимиты массы груза, типов прицепов и опасных грузов и подтверждает повышение по принятым рейсам и пробегу.",
+    ladder: [
+      { name: "Стажёр", text: "Старт в каждой игре" },
+      { name: "Водитель III", text: null },
+      { name: "Водитель II", text: null },
+      { name: "Водитель I", text: null },
+    ],
+    joinSteps: [
+      {
+        title: "Заявка",
+        text: "Никнейм, email для приглашения, ссылка на профиль Steam и хотя бы одна игра — ETS2 или ATS. Discord и рассказ о себе необязательны. Заявку рассмотрит руководство компании.",
+      },
+      {
+        title: "Приглашение",
+        text: "После одобрения вы сможете получить одноразовое приглашение для создания пароля, действующее семь дней.",
+      },
+      {
+        title: "В дорогу",
+        text: "Войдите, привяжите Steam и начните стажёром в каждой игре. Рейсы отправляются через приложение телеметрии или ручным отчётом со скриншотом.",
+      },
+    ],
+    joinNote: "Отправка заявки не означает принятия в компанию.",
   },
   en: {
     title: "Yukon Union — ETS2 and ATS virtual trucking company",
@@ -76,21 +104,48 @@ export const publicContent = {
       },
     ],
     requirementsTitle: "Start with an introduction",
-    requirementsText:
-      "Your application needs a nickname, an invitation email, a Steam profile link and at least one game — ETS2 or ATS. Discord and an introduction are optional.",
-    review:
-      "Company leadership reviews applications. After approval, you can receive a one-time invitation to set a password, valid for seven days. Submitting an application does not mean acceptance into the company.",
     contactsTitle: "Stay in touch",
     contactsText: "Our public communities and company pages.",
     contactPage: "Contact page",
     noScript:
       "Enable JavaScript to submit an application. You can contact the company using the links below.",
-    eventsTitle: "Public events are on the way",
-    eventsText:
-      "Convoy publishing will arrive later. Participant lists and decline reasons are not public for visitors.",
-    loginTitle: "Member sign-in is on the way",
-    loginText:
-      "Sign-in and invitation screens will arrive later. You can learn about the company and apply here.",
+    pauseMotion: "Pause animation",
+    nextConvoy: "Next convoy",
+    nextConvoyIn: "Next convoy in",
+    units: { d: "d", h: "h", min: "min" },
+    statsTitle: "Company in numbers",
+    statsMonth: "Current month",
+    statsTimezone: "reporting timezone",
+    statsMembers: "Active members",
+    statsTrips: "Accepted trips",
+    statsDistance: "Distance on accepted trips",
+    statsGames: "Games on accepted trips",
+    convoysEmpty: "No public convoys are scheduled yet.",
+    convoysNote: "Times use your browser's timezone. Participant lists are not shown to visitors.",
+    ladderTitle: "Driver path",
+    ladderNote:
+      "Separately in each game. Leadership sets cargo mass, trailer type and hazardous cargo limits for each level and confirms promotions based on accepted trips and distance.",
+    ladder: [
+      { name: "Trainee", text: "Start in each game" },
+      { name: "Driver III", text: null },
+      { name: "Driver II", text: null },
+      { name: "Driver I", text: null },
+    ],
+    joinSteps: [
+      {
+        title: "Application",
+        text: "Your nickname, an invitation email, a Steam profile link and at least one game — ETS2 or ATS. Discord and an introduction are optional. Company leadership reviews applications.",
+      },
+      {
+        title: "Invitation",
+        text: "After approval, you can receive a one-time invitation to set a password, valid for seven days.",
+      },
+      {
+        title: "On the road",
+        text: "Sign in, link Steam and start as a Trainee in each game. Submit trips through the telemetry app or a manual report with a screenshot.",
+      },
+    ],
+    joinNote: "Submitting an application does not mean acceptance into the company.",
   },
 } as const;
 export const publicContacts = [

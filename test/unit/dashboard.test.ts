@@ -1,44 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { pagination } from "../../apps/api/src/modules/identity/pagination.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
+import {
+  computePeriodDates,
+  progressPercent,
+} from "../../apps/web/src/features/dashboard/model.ts";
+import { dashboardTranslations } from "../../apps/web/src/features/dashboard/translations.ts";
 import { formatDecimal, formatQuantity, formatUtc } from "../../apps/web/src/shared/formatting.ts";
+
+function keys(value: object, prefix = ""): string[] {
+  return Object.entries(value)
+    .flatMap(([key, item]) =>
+      typeof item === "object" ? keys(item, `${prefix}${key}.`) : [`${prefix}${key}`],
+    )
+    .sort();
+}
+
+function values(value: object): string[] {
+  return Object.values(value).flatMap((item) =>
+    typeof item === "object" ? values(item) : [String(item)],
+  );
+}
 
 describe("Dashboard & Driver Profiles Unit Tests", () => {
   describe("Period calculations", () => {
-    function computePeriodDates(
-      period: "thisMonth" | "lastMonth" | "last30Days" | "last7Days",
-      now: Date,
-    ): { fromDate: string; toDateExclusive: string } {
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const formatDate = (d: Date) =>
-        `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
-      const currentYear = now.getUTCFullYear();
-      const currentMonth = now.getUTCMonth();
-
-      if (period === "thisMonth") {
-        const from = new Date(Date.UTC(currentYear, currentMonth, 1));
-        const to = new Date(Date.UTC(currentYear, currentMonth + 1, 1));
-        return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-      }
-      if (period === "lastMonth") {
-        const from = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
-        const to = new Date(Date.UTC(currentYear, currentMonth, 1));
-        return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-      }
-      if (period === "last7Days") {
-        const to = new Date(
-          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
-        );
-        const from = new Date(to.getTime() - 7 * 86400000);
-        return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-      }
-      // last30Days
-      const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-      const from = new Date(to.getTime() - 30 * 86400000);
-      return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-    }
-
     const midOctober = new Date("2026-10-15T12:00:00.000Z");
 
     it("computes thisMonth correctly for mid-month date", () => {
@@ -70,6 +55,80 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
       const res = computePeriodDates("last30Days", midOctober);
       expect(res.toDateExclusive).toBe("2026-10-16");
       expect(res.fromDate).toBe("2026-09-16");
+    });
+  });
+
+  describe("Qualification progress bar geometry", () => {
+    it("computes the filled share of a requirement", () => {
+      expect(progressPercent("15", "20")).toBe(75);
+      expect(progressPercent("45000000", "60000000")).toBe(75);
+    });
+
+    it("clamps overachievement and handles missing or zero requirements", () => {
+      expect(progressPercent("30", "20")).toBe(100);
+      expect(progressPercent("15", null)).toBeNull();
+      expect(progressPercent("0", "0")).toBe(100);
+      expect(progressPercent("5", "0")).toBe(100);
+      expect(progressPercent("0", "20")).toBe(0);
+    });
+
+    it("returns null when the requirement exceeds safe chart geometry", () => {
+      expect(progressPercent("1", "9007199254740993")).toBeNull();
+    });
+  });
+
+  describe("Overview translations", () => {
+    const { en, ru } = dashboardTranslations;
+
+    it("keeps RU and EN key sets identical", () => {
+      expect(keys(en)).toEqual(keys(ru));
+    });
+
+    it("provides the compact overview keys and drops the removed help texts", () => {
+      const present = keys(en);
+      for (const key of [
+        "metrics.label",
+        "chart.granularity",
+        "chart.view",
+        "chart.viewChart",
+        "chart.viewTable",
+        "chart.peakSummary",
+        "chart.tableHint",
+        "myQualification.trips",
+        "myQualification.distance",
+        "myQualification.progressLoading",
+        "myQualification.progressUnavailable",
+        "leaderboard.error",
+        "leaderboard.allDrivers",
+        "leaderboard.retry",
+        "reviewQueue.error",
+        "upcomingEvent.error",
+        "states.forbidden",
+      ])
+        expect(present).toContain(key);
+      for (const key of [
+        "metrics.distanceHelp",
+        "metrics.tripsHelp",
+        "metrics.driversHelp",
+        "chart.help",
+      ])
+        expect(present).not.toContain(key);
+    });
+
+    it("uses the overview title and interpolates the peak summary in both languages", () => {
+      expect(en.title).toBe("Company Overview");
+      expect(ru.title).toBe("Обзор компании");
+      for (const summary of [en.chart.peakSummary, ru.chart.peakSummary]) {
+        expect(summary).toContain("{{date}}");
+        expect(summary).toContain("{{distance}}");
+      }
+    });
+
+    it("contains no empty values and no mockup-only slogan", () => {
+      for (const value of [...values(en), ...values(ru)]) {
+        expect(value.trim()).not.toBe("");
+        expect(value).not.toMatch(/Достаточно суров|Yukon\?/);
+      }
     });
   });
 

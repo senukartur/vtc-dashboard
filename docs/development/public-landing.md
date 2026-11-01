@@ -1,10 +1,10 @@
 # VTC-016 public landing and membership application
 
-The public company page is available in Russian at `/` and English at `/en`. The language control changes between those routes without storing form data. Company information, the required application fields, the review/invitation explanation and established public community links share one content source. No production totals, qualification thresholds, private contact details or legacy membership data are imported.
+The public company page is available in Russian at `/` and English at `/en`. The language control changes between those routes without storing form data. Company information, the required application fields, the review/invitation explanation and established public community links share one content source. No production totals, qualification thresholds, private contact details or legacy membership data are imported or prerendered; company totals appear only at runtime from the [VTC-052 public aggregate](analytics.md#public-company-statistics-vtc-052).
 
 ## Routes and initial HTML
 
-The web build renders the shared public React content into deterministic RU/EN documents. Both contain meaningful content, language, title and description before JavaScript executes. The client adds the interactive application form. With JavaScript disabled, the page explains how to enable submission and keeps public contact links usable.
+The web build renders the shared public React content into deterministic RU/EN documents. Both contain meaningful content, language, title and description before JavaScript executes. The client adds the interactive application form and the live parts described below. With JavaScript disabled, the page explains how to enable submission and keeps public contact links usable.
 
 Language-alternate (`hreflang`) annotations are deliberately omitted until a verified public deployment origin is available. Google requires fully qualified URLs for these optional annotations; relative `/` and `/en` annotations are invalid. The localized documents remain indexable with meaningful language, title and description metadata. No deployment hostname or canonical URL is inferred. See [Google's localized-version guidance](https://developers.google.com/search/docs/specialty/international/localized-versions).
 
@@ -13,6 +13,31 @@ Document generation requires exactly one language, robots, title and application
 The built API selects an indexable public document only for exact, query-free `/` and `/en` URLs. Query-bearing public URLs, unknown routes, `/status`, foundation previews, account/invitation paths and the `/events` boundary and account entry points receive the noindex shell and `X-Robots-Tag: noindex, nofollow`. Static document filenames also receive that response header. Request/query values are never reflected into generated HTML. HTML and API responses remain `no-store`, except a successful anonymous [company statistics](analytics.md#public-company-statistics-vtc-052) response (`public, max-age=60`); fingerprinted JS/CSS retain their existing immutable caching. Reserved API/health/evidence/upload paths and missing assets retain 404 behavior. Vite development serves its ordinary shell; verify initial public HTML against the production build.
 
 `/status` preserves the real cancellable readiness query, pending/error/503/retry semantics and authenticated MySQL baseline probe. `/foundation` and `/foundation/member` remain explicitly synthetic previews. `/events` honestly explains that public listings belong to VTC-035; `/login` opens the [VTC-017 account screens](account.md). These boundaries do not publish participant data or simulate account workflows.
+
+## Live landing (VTC-050)
+
+The prerendered RU/EN documents depend only on the locale and static content: hero (eyebrow, the live slogan, lead, Apply and Public events links), static decorative art with `data-motion="static"`, the public convoy heading with its events link, values, the driver path, the three join steps, the no-script note and contacts. Everything time-dependent or fetched renders only in the client through `LandingContent` slots, so repeated builds are byte-identical and no countdown, stats, ticker, pause control, form or convoy card is in the initial HTML.
+
+- **Hero art.** A project-authored inline SVG of two abstract roads (`aria-hidden`, not focusable, no map text or game assets). It sits to the right of the copy from 1024px and as a 160px strip below the actions on narrower screens, never under text. Two markers travel along the roads (11 s and 15 s) and two stops ping (2.4 s), using transform/opacity only.
+- **Next convoy chip.** The earliest scheduled public convoy that has not started, linking to its event page. The visible text shows a minute-granular countdown (rounded up); the accessible name stays fixed as "next convoy: title, absolute start time" in the browser timezone, and there is no live region. One timer runs until the next minute change or the start; when the convoy starts, the shared list is refetched once per event and the chip moves on.
+- **Route ticker.** An `aria-hidden` strip of scheduled routes (catalog origin → destination, otherwise the route text) without focusable content, repeated to two identical halves for a seamless 40 s loop.
+- **Convoy cards.** All returned public events, including cancelled ones with a status badge, with static route art, title link, route, start time and server. The chip, ticker and cards share one `/public/events?period=upcoming&limit=3` read; with no events the chip and ticker disappear and the section explains that none are scheduled. Read failures keep the existing translated error and retry. Participant lists are never shown.
+- **Stats band.** Shown only after a valid `GET /api/v1/public/company-stats` response, fetched without cookies (`credentials: "omit"`), no retry, 60 s stale time. Values are exact and unrounded: active members, and for an available month accepted trips, distance on accepted trips in km and the games present, with the month and reporting timezone as a caption. An unavailable month shows only active members; loading, any error status, malformed data, timeout or network failure render nothing, so unavailable is never shown as zero.
+- **Driver path and join steps.** Level names come from the qualification translations; only the trainee start is described, and limits/promotions are attributed to leadership without numbers. The join steps restate the existing application, invitation and first-trip rules.
+- **Compact form.** Presentation only: Steam and introduction span the card, other fields use two columns when the card is at least 480px wide, games are pill-styled native checkboxes. Field order, labels, validation, submission, retry, privacy and focus behaviour are unchanged.
+
+Motion exists only under `prefers-reduced-motion: no-preference` once the client sets `data-motion` to `running` or `paused`. To meet WCAG 2.2.2, the "Pause animation" toggle (`aria-pressed`) after the hero actions freezes the markers, pings, chip pulse and ticker and replaces the countdown with the absolute start time. The state is not persisted. Under reduced motion nothing animates, the ticker shows one non-moving row, and the toggle remains only while the public list contains a scheduled convoy.
+
+### Bundle note
+
+Measured with `pnpm build` on the same host, summing the entry script, its modulepreloaded chunks and stylesheets referenced by `dist/index.html` (gzip level 9):
+
+| Initial assets | Before (5aca2dc) raw / gzip | After raw / gzip |
+| --- | --- | --- |
+| JavaScript | 1,043,286 / 299,962 B | 1,046,570 / 300,865 B |
+| CSS | 49,006 / 11,277 B | 60,616 / 13,272 B |
+
+The landing no longer imports `EventsPage`, so that route chunk is lazy again; the new landing modules and `landing.css`/`admissions.css` account for the remaining increase. No dependency was added; there is no automated size budget.
 
 ## Submission and recovery
 
@@ -26,7 +51,7 @@ Form data, CSRF and receipts live only in component/request memory. They are not
 
 ## Verification
 
-`test/unit/landing.test.ts` covers scenario 6 field rules, approved wire-schema fixtures, response validation, safe errors and stable retry keys. `test/e2e/landing.spec.ts` covers initial HTTP HTML/indexing, RU/EN rendered phone/tablet/desktop layouts, skip/navigation/form interaction, pending protection, recovery, changed input and rate/unavailable feedback. Controlled states intercept only the network boundary and save synthetic screenshots under ignored test output.
+`test/unit/landing.test.ts` covers scenario 6 field rules, approved wire-schema fixtures, response validation, safe errors and stable retry keys. `test/unit/landing-live.test.ts` covers RU/EN content parity and the kept slogan, the next-convoy choice, countdown formatting, ticker routes and the anonymous stats read and its exact presentation, including unavailable and zero months and safe failures. `test/e2e/landing.spec.ts` covers initial HTTP HTML/indexing, RU/EN rendered phone/tablet/desktop layouts, skip/navigation/form interaction, pending protection, recovery, changed input and rate/unavailable feedback. Live cases that route dated convoy fixtures install a fixed browser clock, so they do not depend on the run date; with fictional events/aggregates they cover the countdown and stable chip name, the start-time refetch, ticker, cookie-free stats, hidden/partial/zero stats, empty/cancelled/failed convoy reads, pause and reduced motion, keyboard order, focus, target sizes and the compact form layout. Built-document checks also assert the static live-landing markers and absence of client-only parts. Controlled states intercept only the network boundary and save synthetic screenshots under ignored test output.
 
 `test/unit/public-documents.test.ts` checks malformed shell markers, literal replacement sequences, metadata escaping and actual temporary-file cleanup after success/failure, including cleanup failures. Built-server HTML checks also verify omitted language annotations and the HTTPS Steam destination.
 
