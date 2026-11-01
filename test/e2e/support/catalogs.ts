@@ -52,24 +52,56 @@ export const list = (items: unknown[], nextCursor: string | null = null) =>
 export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
   await switchLanguage(page, locale);
 }
-export async function mockCatalogs(page: Page, staff = true) {
+/** Optional overrides; omitting them keeps the original synthetic responses unchanged. */
+export type CatalogMockOptions = {
+  /** Published revisions per game, current first. */
+  revisions?: Partial<Record<S["CatalogRevision"]["game"], S["CatalogRevision"][]>>;
+  candidate?: Partial<S["CatalogRevision"]>;
+  review?: Partial<S["CatalogReview"]>;
+  /** Replaces the session capabilities after the staff adjustment. */
+  capabilities?: string[];
+  /** Pathname suffix (after /api/v1) answered with this HTTP status instead. */
+  failures?: Record<string, number>;
+  /** Published revision discovery waits for this promise. */
+  gate?: Promise<void>;
+};
+export async function mockCatalogs(page: Page, staff = true, options: CatalogMockOptions = {}) {
+  const requests: URL[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/v1/")) requests.push(url);
+  });
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
     const url = new URL(route.request().url()),
       path = url.pathname;
     const json = (data: unknown) => route.fulfill({ json: data });
+    const failure = Object.entries(options.failures ?? {}).find(([suffix]) =>
+      path.endsWith(suffix),
+    );
+    if (failure)
+      return route.fulfill({ status: failure[1], json: { error: { code: "PRIVATE_SENTINEL" } } });
     if (path === "/api/v1/me") {
       const self = accountFixture();
       if (staff) {
         self.data.member.roles = ["deputy_director"];
         self.data.capabilities.push("qualifications.manage");
       }
+      if (options.capabilities)
+        self.data.capabilities = options.capabilities as typeof self.data.capabilities;
       return json(self);
     }
     if (path === "/api/v1/auth/csrf") return json(envelope({ token: "NONFUNCTIONAL_FIXTURE" }));
-    if (path === "/api/v1/catalogs/revisions")
-      return json(list(url.searchParams.get("game") === "ats" ? [] : [revision()]));
+    if (path === "/api/v1/catalogs/revisions") {
+      if (options.gate) await options.gate;
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
+      return json(
+        list(
+          options.revisions?.[game] ?? (url.searchParams.get("game") === "ats" ? [] : [revision()]),
+        ),
+      );
+    }
     if (path.startsWith("/api/v1/catalogs/entities")) {
       const historical = path !== "/api/v1/catalogs/entities",
         kind = url.searchParams.get("kind") ?? (path.endsWith(regionId) ? "region" : "city"),
@@ -109,11 +141,14 @@ export async function mockCatalogs(page: Page, staff = true) {
       );
     if (path === `/api/v1/admin/catalog-revisions/${candidateId}`)
       return route.fulfill({
-        json: envelope(revision(candidateId, "draft")),
+        json: envelope({ ...revision(candidateId, "draft"), ...options.candidate }),
         headers: { ETag: '"v1"' },
       });
     if (path.endsWith("/review"))
-      return route.fulfill({ json: envelope(review), headers: { ETag: '"v1"' } });
+      return route.fulfill({
+        json: envelope({ ...review, ...options.review }),
+        headers: { ETag: '"v1"' },
+      });
     if (path.endsWith("/diff"))
       return json(
         list(
@@ -156,4 +191,5 @@ export async function mockCatalogs(page: Page, staff = true) {
     if (path.endsWith("/mapping-issues")) return json(list([]));
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });
+  return { requests };
 }
