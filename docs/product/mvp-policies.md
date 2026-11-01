@@ -54,7 +54,7 @@ Administrative roles add permissions to the user's member roles; game qualificat
 | Delete/deactivate the serving director or remove the Director role outside succession | No | No | No | No |
 | Change the director's email/login credentials | No | No | No | Self-service with confirmation via current verified email |
 
-Anonymous visitors may view public landing/event content and submit membership applications. Member-only data, event participant lists, and decline reasons are not public.
+Anonymous visitors may view public landing/event content and submit membership applications. The landing may show only company aggregates: active member count and the current reporting month's accepted trips, actual distance and games, without identities or per-driver data. Member-only data, event participant lists, and decline reasons are not public.
 
 ## Confirmed roles and responsibilities
 

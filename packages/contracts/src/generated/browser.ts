@@ -1912,6 +1912,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/company-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getPublicCompanyStats
+         * @description VTC-052 anonymous landing summary. Accepts no query parameters (unknown parameters return 422). Never reads or sets cookies; uses the public read rate limit. Successful responses may be shared-cached for 60 seconds and repeat meta.requestId; no ETag. currentMonth is unavailable (never zero) when no valid reporting timezone is configured.
+         */
+        get: operations["getPublicCompanyStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/events": {
         parameters: {
             query?: never;
@@ -2681,6 +2701,29 @@ export interface components {
         CompanySettingsInput: {
             reportingTimezone: string;
         };
+        CompanyStatsPublic: {
+            activeMembers: number;
+            /** Format: date-time */
+            computedAt: string;
+            currentMonth: {
+                acceptedTrips: number;
+                actualDistanceM: string;
+                /** Format: date */
+                fromDate: string;
+                games: ("ets2" | "ats")[];
+                month: string;
+                reportingTimezone: string;
+                /** @constant */
+                status: "available";
+                /** Format: date */
+                toDateExclusive: string;
+            } | {
+                /** @enum {string} */
+                reason: "company_reporting_timezone";
+                /** @constant */
+                status: "unavailable";
+            };
+        };
         CredentialChallengeInput: {
             /** Format: email */
             newEmail: string;
@@ -2811,6 +2854,10 @@ export interface components {
         };
         EnvelopeCompanySettings: {
             data: components["schemas"]["CompanySettings"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeCompanyStatsPublic: {
+            data: components["schemas"]["CompanyStatsPublic"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeCsrf: {
@@ -7553,6 +7600,33 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeCompanyPublic"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPublicCompanyStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Company aggregate summary; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Short shared cache for this anonymous aggregate; every error response is no-store. */
+                    "Cache-Control"?: "public, max-age=60";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCompanyStatsPublic"];
+                };
+            };
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
