@@ -7,6 +7,8 @@ import {
   proposalResult,
   revisionFields,
   schema,
+  selectedTrip,
+  selectionSearch,
   tripFilters,
 } from "../../apps/web/src/features/trips/transport.ts";
 
@@ -45,6 +47,51 @@ test("URL scope validation cannot grant review or invent unsupported filters", (
     game: undefined,
     decision: undefined,
   });
+});
+test("side-panel selection accepts only canonical UUIDv4 values and never reaches list filters", () => {
+  const id = "49000000-0000-4000-8000-000000000002";
+  expect(selectedTrip(new URLSearchParams(`trip=${id}`))).toBe(id);
+  for (const value of ["", "nope", "49000000-0000-1000-8000-000000000002", `../${id}`, `${id}/x`])
+    expect(selectedTrip(new URLSearchParams({ trip: value }))).toBeNull();
+  expect(selectedTrip(new URLSearchParams("scope=company"))).toBeNull();
+  expect(tripFilters(new URLSearchParams(`scope=company&game=ats&trip=${id}`))).toEqual(
+    tripFilters(new URLSearchParams("scope=company&game=ats")),
+  );
+  const filters = new URLSearchParams("scope=company&game=ets2&decision=accepted&cursor=c2");
+  expect(selectionSearch(filters, id)).toBe(
+    `?scope=company&game=ets2&decision=accepted&trip=${id}`,
+  );
+  expect(selectionSearch(new URLSearchParams(`game=ats&trip=${id}&cursor=c2`), null)).toBe(
+    "?game=ats",
+  );
+  expect(selectionSearch(new URLSearchParams(`trip=${id}`), null)).toBe("");
+  expect(filters.get("cursor")).toBe("c2");
+});
+test("dense list strings exist in both locales and never include mockup-only copy", () => {
+  const keys = [
+    "scopeLabel",
+    "filters",
+    "allGames",
+    "anyDecision",
+    "listLabel",
+    "timesIn",
+    "distance",
+    "reportingColumn",
+    "outcome",
+    "outcomeOpen",
+    "details",
+    "openFull",
+    "closeDetails",
+    "noDecisions",
+    "historyUnavailable",
+  ] as const;
+  for (const locale of ["en", "ru"] as const) {
+    const strings = tripTranslations[locale];
+    for (const key of keys) expect(strings[key], `${locale}.${key}`).toMatch(/\S/);
+    expect(strings.timesIn).toContain("{{timezone}}");
+    for (const value of Object.values(strings))
+      expect(value).not.toMatch(/Достаточно суров|Yukon\?/);
+  }
 });
 test("quantities remain exact including zero and very large values", () => {
   expect(canonicalDecimal("0,000")).toBe("0");

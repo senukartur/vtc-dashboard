@@ -159,6 +159,20 @@ export function proposalResult(value: DTO["Decision"] | DTO["TripProposal"]) {
 }
 export const validId = (value: string | undefined): value is string =>
   z.uuidv4().safeParse(value).success;
+/** Side-panel selection from `?trip=`; anything but a canonical UUIDv4 selects nothing. */
+export function selectedTrip(params: URLSearchParams): string | null {
+  const value = params.get("trip") ?? undefined;
+  return validId(value) ? value : null;
+}
+/** Search string selecting (or clearing) a trip while keeping filters; never carries a cursor. */
+export function selectionSearch(params: URLSearchParams, id: string | null): string {
+  const next = new URLSearchParams(params);
+  if (id) next.set("trip", id);
+  else next.delete("trip");
+  next.delete("cursor");
+  const query = next.toString();
+  return query ? `?${query}` : "";
+}
 export function queryString(params: Record<string, string | number | null | undefined>) {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params))
