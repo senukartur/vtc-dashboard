@@ -184,14 +184,17 @@
 }
 /* Touch screens keep hover after a tap, so hover feedback is limited to real hover devices. */
 @media (hover: hover) {
-  .trip-page .trips-row:hover td {
-    background: var(--surface-hover);
-  }
-  .trip-page .trips-row[data-selected]:hover td {
-    background: var(--accent-soft);
-  }
   .trip-page .trips-link:hover {
     color: var(--focus);
+  }
+}
+/* In the table only the route cell is clickable, so only it reacts to the pointer. */
+@media (hover: hover) and (min-width: 761px) {
+  .trip-page .trips-row td.trips-route:hover {
+    background: var(--surface-hover);
+  }
+  .trip-page .trips-row[data-selected] td.trips-route:hover {
+    background: var(--accent-soft);
   }
 }
 .trip-page .trips-owner {

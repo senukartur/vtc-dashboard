@@ -66,9 +66,17 @@ export function TripPanel({
       // Back/Forward, narrowing below the wide layout or an outside selection change can remove
       // the panel while it holds focus. Close/Escape already moved focus to the row link.
       if (!node?.contains(document.activeElement)) return;
-      (
-        document.getElementById(`trip-link-${tripId}`) ?? document.getElementById("main-content")
-      )?.focus();
+      // Development Strict Mode also runs this cleanup without removing the panel, and a route
+      // change may already have placed focus. Act only once the panel is really gone and focus
+      // has fallen back to the document body.
+      queueMicrotask(() => {
+        if (node.isConnected) return;
+        const active = document.activeElement;
+        if (active && active !== document.body) return;
+        (
+          document.getElementById(`trip-link-${tripId}`) ?? document.getElementById("main-content")
+        )?.focus();
+      });
     };
   }, [tripId]);
   function keyDown(event: KeyboardEvent<HTMLElement>) {
