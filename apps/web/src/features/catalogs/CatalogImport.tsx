@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { type CatalogDTO, type Game, uuid } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
+import { formatDecimal } from "../../shared/formatting.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
+import { importSteps, type StepState } from "./model.js";
 import { artifactSchema, operationSchema, policySchema } from "./transport.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 
@@ -15,8 +17,10 @@ export function CatalogImport({
   game: Game;
   onCandidate: (id: string) => void;
 }) {
-  const { t } = useTranslation("catalogs"),
-    [params, setParams] = useSearchParams();
+  const { t, i18n } = useTranslation("catalogs"),
+    [params, setParams] = useSearchParams(),
+    headingId = useId();
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const opParam = params.get("operation"),
     operationId = uuid.safeParse(opParam).success ? opParam : null;
   const policy = useCatalogQuery(["policy"], "/admin/catalog-import-policy", policySchema);
@@ -42,17 +46,27 @@ export function CatalogImport({
   const p = policy.data?.data.data,
     op = operation.data?.data.data;
   const busy = preparing || command.pending || command.seconds > 0;
+  const steps = importSteps(artifact?.state, operationId ? (op?.state ?? "unknown") : undefined);
+  const stepLabel = { uploaded: "stepUploaded", imported: "stepImported", ready: "stepReady" },
+    stateLabel: Record<StepState, string> = {
+      done: "stepDone",
+      current: "stepCurrent",
+      failed: "stepFailed",
+      pending: "stepPending",
+    },
+    glyph: Record<StepState, string> = { done: "✓", current: "●", failed: "✕", pending: "—" };
   return (
-    <Card className="stack">
-      <h2>{t("importTitle")}</h2>
-      <p>{t("operationHelp")}</p>
+    <Card className="catalog-card catalog-import" aria-labelledby={headingId}>
+      <h2 id={headingId}>{t("importTitle")}</h2>
       {p?.enabled && p.maxFileBytes ? (
-        <p>{t("policy", { bytes: p.maxFileBytes })}</p>
+        <p className="catalog-muted">{t("policy", { bytes: p.maxFileBytes })}</p>
       ) : (
-        <p role="status">{t("policyUnavailable")}</p>
+        <p role="status" className="catalog-muted">
+          {t("policyUnavailable")}
+        </p>
       )}
       <form
-        className="stack"
+        className="catalog-form"
         aria-label={t("importTitle")}
         onSubmit={async (e) => {
           e.preventDefault();
@@ -96,6 +110,7 @@ export function CatalogImport({
       >
         <Label htmlFor="catalog-file">{t("file")}</Label>
         <Input
+          className="catalog-file"
           id="catalog-file"
           type="file"
           accept="application/json,.json"
@@ -112,18 +127,31 @@ export function CatalogImport({
           {t(command.pending ? "pendingAction" : "upload")}
         </Button>
       </form>
+      <ol className="catalog-steps" aria-label={t("progressLabel")}>
+        {steps.map((step) => (
+          <li key={step.id} className={`catalog-step catalog-step-${step.state}`}>
+            <span aria-hidden="true">{glyph[step.state]}</span> <span>{t(stepLabel[step.id])}</span>
+            <span className="visually-hidden">: {t(stateLabel[step.state])}</span>
+          </li>
+        ))}
+      </ol>
       {artifact && (
-        <div className="stack catalog-selection">
+        <div className="catalog-artifact">
           <strong>{t("uploaded")}</strong>
-          <dl>
+          <dl className="catalog-pairs">
             <dt>{t("artifact")}</dt>
-            <dd>{artifact.id}</dd>
+            <dd>
+              <code>{artifact.id}</code>
+            </dd>
             <dt>{t("sha256")}</dt>
-            <dd>{artifact.sha256}</dd>
+            <dd>
+              <code>{artifact.sha256}</code>
+            </dd>
             <dt>{t("bytes")}</dt>
-            <dd>{artifact.byteLength}</dd>
+            <dd>{formatDecimal(String(artifact.byteLength), locale)}</dd>
           </dl>
           <Button
+            className="catalog-start"
             disabled={busy || artifact.state !== "ready"}
             onClick={async () => {
               const result = await command.run(
@@ -152,10 +180,10 @@ export function CatalogImport({
       )}
       <Failure error={command.failure} seconds={command.seconds} />
       {operationId && (
-        <div role="status" className="catalog-selection">
+        <div role="status" className="catalog-operation">
           <strong>{t(op?.state ?? "loading")}</strong>
-          <p>
-            {t("operation")}: {operationId}
+          <p className="catalog-muted">
+            {t("operation")}: <code>{operationId}</code>
           </p>
           {op?.state === "failed" && (
             <p>{t(op.failureCode === "artifact_expired" ? "expired" : "failed")}</p>
@@ -163,18 +191,20 @@ export function CatalogImport({
         </div>
       )}
       {operation.isError && (
-        <p role="alert">
-          {t("readError")}{" "}
-          <Button variant="outline" onClick={() => void operation.refetch()}>
+        <div role="alert" className="catalog-inline-alert">
+          <p>{t("readError")}</p>
+          <Button size="xs" variant="outline" onClick={() => void operation.refetch()}>
             {t("refresh")}
           </Button>
-        </p>
+        </div>
       )}
-      <details>
+      <p className="catalog-muted">{t("importNote")}</p>
+      <details className="catalog-details">
         <summary>{t("recover")}</summary>
+        <p className="catalog-muted">{t("operationHelp")}</p>
         <form
           ref={recover}
-          className="stack"
+          className="catalog-form"
           onSubmit={(e) => {
             e.preventDefault();
             const data = new FormData(e.currentTarget),

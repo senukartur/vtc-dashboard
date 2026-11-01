@@ -1,21 +1,54 @@
-import { useCallback, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { kinds, uuid } from "../../shared/catalog-selectors/contracts.js";
-import {
-  CatalogSelector,
-  type Game,
-  type Kind,
-  type Selection,
-} from "../../shared/catalog-selectors/index.js";
-import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { revisionSchema, uuid } from "../../shared/catalog-selectors/contracts.js";
+import type { Game, Kind, Selection } from "../../shared/catalog-selectors/index.js";
+import { useCatalogQuery, usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
+import { Card } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { CatalogImport } from "./CatalogImport.js";
 import { CatalogReview } from "./CatalogReview.js";
+import { CatalogRevisions } from "./CatalogRevisions.js";
+import { CatalogSearch } from "./CatalogSearch.js";
+import { StateBadge } from "./ReviewTables.js";
 import "./catalogs.css";
 
+const games = [
+  { value: "ets2", label: "ETS2" },
+  { value: "ats", label: "ATS" },
+] as const;
+
+/** Gate: without company.read no catalog query hook mounts, so nothing is requested. */
 export function CatalogsPage() {
+  const { t } = useTranslation("catalogs"),
+    session = useSession();
+  if (!session.self?.capabilities.includes("company.read"))
+    return (
+      <div className="catalog-page">
+        <header className="catalog-header">
+          <h1>{t("title")}</h1>
+        </header>
+        <Card className="catalog-card">
+          <p>{t("pageForbidden")}</p>
+        </Card>
+      </div>
+    );
+  return <CatalogWorkspace />;
+}
+
+function NoCandidate() {
+  const { t } = useTranslation("catalogs"),
+    headingId = useId();
+  return (
+    <Card className="catalog-card catalog-empty" aria-labelledby={headingId}>
+      <h2 id={headingId}>{t("noCandidateTitle")}</h2>
+      <p className="catalog-muted">{t("noCandidateHelp")}</p>
+    </Card>
+  );
+}
+
+function CatalogWorkspace() {
   const { t } = useTranslation("catalogs"),
     session = useSession(),
     [params, setParams] = useSearchParams();
@@ -27,10 +60,16 @@ export function CatalogsPage() {
   const publications = usePublishedRevisions(game),
     list = publications.data?.pages.flatMap((p) => p.data.data.items) ?? [],
     active = revision || list[0]?.id || "";
-  const staff = session.self?.capabilities.includes("qualifications.manage"),
-    read = session.self?.capabilities.includes("company.read");
+  const staff = !!session.self?.capabilities.includes("qualifications.manage");
   const candidate = params.get("candidate"),
     candidateId = uuid.safeParse(candidate).success ? candidate : null;
+  // Same key as CatalogReview's detail query, so the revisions row shares its cache entry.
+  const candidateDetail = useCatalogQuery(
+    ["candidate", candidateId],
+    `/admin/catalog-revisions/${candidateId}`,
+    revisionSchema,
+    staff && !!candidateId,
+  );
   const selectCandidate = useCallback(
     (id: string) => {
       setParams(
@@ -45,133 +84,82 @@ export function CatalogsPage() {
     },
     [setParams],
   );
-  if (!read)
-    return (
-      <Card>
-        <h1>{t("title")}</h1>
-        <p>{t("forbidden")}</p>
-      </Card>
-    );
   return (
-    <div className="stack catalog-page">
-      <header>
-        <h1>{t("title")}</h1>
-        <p>{t("intro")}</p>
-      </header>
-      <Card className="stack">
-        <div className="catalog-grid">
-          <div className="stack">
-            <Label htmlFor="catalog-game">{t("game")}</Label>
-            <select
-              id="catalog-game"
-              className="input"
-              value={game}
-              onChange={(e) => {
-                setGame(e.target.value as Game);
-                setParams(
-                  (previous) => {
-                    const next = new URLSearchParams(previous);
-                    next.set("game", e.target.value);
-                    return next;
-                  },
-                  { replace: true },
-                );
-                setRevision("");
-                setRegion(null);
-              }}
-            >
-              <option value="ets2">ETS2</option>
-              <option value="ats">ATS</option>
-            </select>
-          </div>
-          <div className="stack">
-            <Label htmlFor="catalog-revision">{t("revision")}</Label>
-            <select
-              id="catalog-revision"
-              className="input"
-              value={active}
-              disabled={!list.length}
-              onChange={(e) => {
-                setRevision(e.target.value);
-                setRegion(null);
-              }}
-            >
-              {!list.length && <option value="">{t("noPublication")}</option>}
-              {list.map((r, i) => (
-                <option value={r.id} key={r.id}>
-                  {i === 0 ? t("current") : r.createdAt} · {r.id}
-                </option>
-              ))}
-            </select>
-            {active && <small>{active}</small>}
-          </div>
+    <div className="catalog-page">
+      <header className="catalog-header">
+        <div className="catalog-heading">
+          <h1>{t("title")}</h1>
+          {publications.isSuccess && (
+            <StateBadge
+              state={list.length ? "current" : "replaced"}
+              label={t(list.length ? "badgeInUse" : "badgeNone")}
+            />
+          )}
         </div>
-        {publications.isPending && <p role="status">{t("loading")}</p>}
-        {publications.isError && (
-          <p role="alert">
-            {t("readError")}{" "}
-            <Button onClick={() => void publications.refetch()}>{t("refresh")}</Button>
-          </p>
-        )}
-        {publications.hasNextPage && (
-          <Button
-            variant="outline"
-            disabled={publications.isFetchingNextPage}
-            onClick={() => void publications.fetchNextPage()}
-          >
-            {t("more")}
-          </Button>
-        )}
-        <div className="catalog-grid">
-          <div className="stack">
-            <Label htmlFor="catalog-kind">{t("kind")}</Label>
-            <select
-              id="catalog-kind"
-              className="input"
-              value={kind}
-              onChange={(e) => setKind(e.target.value as Kind)}
-            >
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {t(k)}
-                </option>
-              ))}
-            </select>
-            {kind === "city" && (
-              <CatalogSelector
-                key={`${game}-${active}`}
-                label={t("regionFilter")}
-                game={game}
-                revisionId={active}
-                kind="region"
-                value={region}
-                onChange={setRegion}
-              />
-            )}
-          </div>
-          <CatalogSelector
-            label={t(kind)}
+        <SegmentedControl
+          aria-label={t("game")}
+          className="catalog-game"
+          value={game}
+          options={games}
+          onValueChange={(next) => {
+            setGame(next);
+            setParams(
+              (previous) => {
+                const nextParams = new URLSearchParams(previous);
+                nextParams.set("game", next);
+                return nextParams;
+              },
+              { replace: true },
+            );
+            setRevision("");
+            setRegion(null);
+          }}
+        />
+        <p className="catalog-description">{t("description")}</p>
+      </header>
+      <div className="catalog-layout">
+        <div className="catalog-column">
+          <CatalogRevisions
             game={game}
-            revisionId={active}
+            published={list}
+            candidate={candidateDetail.data?.data.data}
+            isPending={publications.isPending}
+            isError={publications.isError}
+            isSuccess={publications.isSuccess}
+            hasNextPage={publications.hasNextPage}
+            isFetchingNextPage={publications.isFetchingNextPage}
+            refetch={() => void publications.refetch()}
+            fetchNextPage={() => void publications.fetchNextPage()}
+          />
+          {staff ? (
+            <CatalogImport game={game} onCandidate={selectCandidate} />
+          ) : (
+            <Card className="catalog-card">
+              <p className="catalog-muted">{t("staffOnly")}</p>
+            </Card>
+          )}
+        </div>
+        <div className="catalog-column">
+          {staff && candidate && !candidateId && <p role="alert">{t("invalidId")}</p>}
+          {staff &&
+            (candidateId ? <CatalogReview key={candidateId} id={candidateId} /> : <NoCandidate />)}
+          <CatalogSearch
+            game={game}
+            list={list}
+            active={active}
+            onRevision={(id) => {
+              setRevision(id);
+              setRegion(null);
+            }}
             kind={kind}
-            regionId={
-              kind === "city" && region?.revisionId === active ? region.entityId : undefined
-            }
+            onKind={setKind}
+            region={region}
+            onRegion={setRegion}
             value={value}
-            onChange={setValue}
+            onValue={setValue}
           />
         </div>
-      </Card>
-      {staff ? (
-        <>
-          <h2>{t("administration")}</h2>
-          <CatalogImport game={game} onCandidate={selectCandidate} />
-          {candidateId && <CatalogReview key={candidateId} id={candidateId} />}
-        </>
-      ) : (
-        <p>{t("staffOnly")}</p>
-      )}
-      {staff && candidate && !candidateId && <p role="alert">{t("invalidId")}</p>}
+      </div>
     </div>
   );
 }
