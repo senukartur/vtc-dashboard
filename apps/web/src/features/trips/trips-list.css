@@ -168,7 +168,7 @@
   min-width: 0;
   min-height: var(--target-min);
   color: var(--foreground);
-  font-weight: 550;
+  font-weight: 500;
   text-decoration: none;
 }
 .trip-page .trips-link:focus-visible {
@@ -204,7 +204,7 @@
   flex-shrink: 0;
   padding: 0 5px;
   border-radius: var(--radius-badge);
-  font-size: 10px;
+  font-size: var(--font-badge);
   font-weight: 700;
   line-height: 1.6;
 }
@@ -277,7 +277,7 @@
 }
 .trip-page .trips-panel h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--font-body);
   font-weight: 600;
   line-height: 1.35;
 }
