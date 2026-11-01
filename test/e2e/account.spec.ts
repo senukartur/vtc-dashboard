@@ -1553,8 +1553,8 @@ test("preferences save language at once and timezone explicitly, with row status
   await expect(page.getByText(/^Wait \d+ s before retrying\.$/)).toBeVisible();
   await expect(save).toHaveAttribute("aria-disabled", "true");
   await save.press("Enter");
-  expect(state.preferences).toHaveLength(4);
   await expect(save).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
+  expect(state.preferences).toHaveLength(4);
   state.preferenceStatus = 409;
   await timezone.fill("America/Denver");
   await save.click();
@@ -1673,16 +1673,28 @@ test("settings row controls follow the compact and coarse-pointer target sizes",
   await check(page.getByRole("link", { name: "Open profile", exact: true }), 24);
 });
 
-for (const start of ["read failure", "expired on refresh"] as const)
-  test(`a forced-open email panel stays open with focus inside when ${start} resolves to no pending request`, async ({
+for (const start of [
+  "a read failure",
+  "an expiry found on refresh",
+  "a held read after focus moved",
+] as const)
+  test(`a forced-open email panel stays open and keeps focus sensible after ${start} resolves to no pending request`, async ({
     page,
   }) => {
     await settingsWorkspace(page, { verified: true });
+    const failed = start !== "an expiry found on refresh";
     let read = 0;
-    await page.route("**/api/v1/me/email-change", (route) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/me/email-change", async (route) => {
       read++;
-      if (read > 1) return route.fulfill({ json: { data: { pending: null }, meta } });
-      if (start === "read failure") return route.fulfill(error(503));
+      if (read > 1) {
+        if (start === "a held read after focus moved") await held;
+        return route.fulfill({ json: { data: { pending: null }, meta } });
+      }
+      if (failed) return route.fulfill(error(503));
       return route.fulfill({
         json: {
           data: {
@@ -1702,29 +1714,37 @@ for (const start of ["read failure", "expired on refresh"] as const)
     const panel = page.locator("#security-email-panel");
     const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
     const badge = page.getByText("Replacement pending", { exact: true });
-    const refresh =
-      start === "read failure"
-        ? page.getByRole("button", { name: "Check again", exact: true })
-        : page.getByRole("button", { name: "Refresh pending request", exact: true });
+    const refresh = failed
+      ? page.getByRole("button", { name: "Check again", exact: true })
+      : page.getByRole("button", { name: "Refresh pending request", exact: true });
     await expect(refresh).toBeVisible();
     await expect(
       page.getByRole("form", { name: "Request email change", exact: true }),
     ).toBeVisible();
     // An unknown pending state claims no replacement; a known one replaces the toggle.
     await expect(changeEmail).toHaveCount(0);
-    await expect(badge).toHaveCount(start === "read failure" ? 0 : 1);
-    await refresh.click();
+    await expect(badge).toHaveCount(failed ? 0 : 1);
+    const changePassword = page.getByRole("button", { name: "Change password", exact: true });
+    try {
+      await refresh.click();
+      if (start === "a held read after focus moved") {
+        // The user moves on while the read is in flight; the vanished button must not pull focus back.
+        await expect.poll(() => read).toBe(2);
+        await changePassword.focus();
+      }
+    } finally {
+      release();
+    }
     await expect(
       panel.getByText("No usable email replacement is pending.", { exact: true }),
     ).toBeVisible();
     await expect(panel).toBeVisible();
     await expect(badge).toHaveCount(0);
     await expect(changeEmail).toHaveAttribute("aria-expanded", "true");
-    expect(
-      await panel.evaluate(
-        (element) => document.activeElement !== null && element.contains(document.activeElement),
-      ),
-    ).toBe(true);
+    if (start === "a held read after focus moved") {
+      await expect(changePassword).toBeFocused();
+      await expect(panel.locator(":focus")).toHaveCount(0);
+    } else await expect(panel.locator(":focus")).toHaveCount(1);
     await changeEmail.click();
     await expect(changeEmail).toHaveAttribute("aria-expanded", "false");
     await expect(panel).toBeHidden();

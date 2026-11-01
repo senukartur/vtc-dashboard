@@ -303,10 +303,12 @@ function EmailRow({
   const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const origin = returnFocus.current;
-    if (!origin || pending.isFetching) return;
+    if (!origin || busy) return;
     returnFocus.current = null;
+    // Only repair lost focus; a user who moved on (for example by Tab) keeps their place.
     const active = document.activeElement;
-    if (!origin.isConnected || active === null || active === document.body) result.current?.focus();
+    if (active !== null && active !== document.body) return;
+    (origin.isConnected ? origin : result.current)?.focus();
   });
   function refetchFrom(button: HTMLElement) {
     returnFocus.current = button;
