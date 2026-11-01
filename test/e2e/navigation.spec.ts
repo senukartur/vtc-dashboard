@@ -263,11 +263,12 @@ test("breadcrumb, document title and current markers follow the route in RU and 
   await page.goto("/account/admin/members");
   await expect(crumb.getByRole("listitem")).toHaveText(["Management", "Members and roles"]);
   await page.goto("/account");
-  await expect(crumb.getByRole("listitem")).toHaveText(["Account", "Account and security"]);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Account and security");
+  await expect(page).toHaveURL(/\/account\/security$/);
+  await expect(crumb.getByRole("listitem")).toHaveText(["Account", "Security"]);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Security");
   await switchLanguage(page, "ru");
-  await expect(crumb.getByRole("listitem")).toHaveText(["Аккаунт", "Аккаунт и безопасность"]);
-  await expect(page).toHaveTitle("Аккаунт и безопасность · Yukon Union");
+  await expect(crumb.getByRole("listitem")).toHaveText(["Аккаунт", "Безопасность"]);
+  await expect(page).toHaveTitle("Безопасность · Yukon Union");
 });
 
 test("user menu is keyboard operable, routes to main and switches language without losing input", async ({
@@ -317,15 +318,20 @@ test("user menu is keyboard operable, routes to main and switches language witho
   await page.keyboard.press("ArrowDown");
   await expect(menu.getByRole("menuitem", { name: "Account and security" })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/account\/security$/);
   await expect(page.getByRole("main")).toBeFocused();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Account and security");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Security");
+  await page
+    .getByRole("main")
+    .getByRole("navigation", { name: "Account sections", exact: true })
+    .getByRole("link", { name: "Preferences", exact: true })
+    .click();
   await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
   const opened = await openUserMenu(page);
   await opened.getByRole("menuitemradio", { name: "Русский", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   await expect(trigger).toBeFocused();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Аккаунт и безопасность");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Предпочтения");
   await expect(page.getByLabel("Часовой пояс отображения", { exact: true })).toHaveValue(
     "Europe/Warsaw",
   );
@@ -535,7 +541,7 @@ test("sign-out from the user menu ends the session or keeps private content hidd
   await switchLanguage(page, "en");
   await page.getByRole("button", { name: "Check session before returning", exact: true }).click();
   await expect(accountEntry(page)).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Account and security");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Security");
   state.logout = 200;
   await signOutFromMenu(page);
   await expect(
@@ -815,12 +821,17 @@ test("More sheet contains focus, closes with Escape and restores focus after rou
   }
   await more.click();
   await dialog.getByRole("link", { name: "Account and security", exact: true }).click();
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/account\/security$/);
   await expect(dialog).toHaveCount(0);
   await expect(more).toBeFocused();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Account and security");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Security");
 
   // Switching language keeps the sheet open, focus on the choice and unsaved input.
+  await page
+    .getByRole("main")
+    .getByRole("navigation", { name: "Account sections", exact: true })
+    .getByRole("link", { name: "Preferences", exact: true })
+    .click();
   await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
   await more.click();
   await expect(dialog).toBeVisible();
@@ -863,7 +874,7 @@ test("More sheet contains focus, closes with Escape and restores focus after rou
   await expect(page.getByLabel("Часовой пояс отображения", { exact: true })).toHaveValue(
     "Europe/Warsaw",
   );
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Аккаунт и безопасность");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Предпочтения");
 });
 
 test("tablet and desktop keep the dialog or sidebar without a bottom bar", async ({

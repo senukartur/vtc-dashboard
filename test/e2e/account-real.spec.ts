@@ -84,11 +84,9 @@ async function login(page: Page, email: string, password: string) {
   // (the More sheet on phones).
   await expect(page).toHaveURL(/\/account\/dashboard$/);
   await chooseAccountItem(page, /^(Account and security|Аккаунт и безопасность)$/);
+  // The menu item opens the Security section of account settings.
   await expect(
-    page.getByRole("heading", {
-      name: /^(Account and security|Аккаунт и безопасность)$/,
-      exact: true,
-    }),
+    page.getByRole("heading", { level: 1, name: /^(Security|Безопасность)$/, exact: true }),
   ).toBeVisible();
   await english(page);
   return self;
@@ -195,10 +193,17 @@ test("real rendered application, invitation, login, wrong verification code, pre
     await form.getByRole("button", { name: "Retry this action", exact: true }).click();
     await expect(page.getByText("Your current email is verified.", { exact: true })).toBeVisible();
     phase = "PREFERENCES";
-    const prefs = page.getByRole("form", { name: "Preferences", exact: true });
-    await prefs.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
-    await prefs.getByRole("combobox", { name: "Language", exact: true }).selectOption("ru");
-    await prefs.getByRole("button", { name: "Save preferences", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Account sections", exact: true })
+      .getByRole("link", { name: "Preferences", exact: true })
+      .click();
+    await page.getByLabel("Display timezone", { exact: true }).fill("Europe/Warsaw");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+    await page
+      .getByRole("group", { name: "Interface language", exact: true })
+      .getByRole("button", { name: "Русский", exact: true })
+      .click();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
     await page.reload();
     await expect(page.getByLabel("Часовой пояс отображения", { exact: true })).toHaveValue(
@@ -313,6 +318,7 @@ test("real recoverable two-proof email replacement reloads both stages, replaces
     await verify(page, userId);
     const proposed = `${randomUUID()}@example.invalid`;
     phase = "REQUEST";
+    await page.getByRole("button", { name: "Change email", exact: true }).click();
     let request = page.getByRole("form", { name: "Request email change", exact: true });
     await request.getByLabel("Proposed email", { exact: true }).fill(proposed);
     await request.getByRole("button", { name: "Start email replacement", exact: true }).click();
@@ -365,7 +371,7 @@ test("real recoverable two-proof email replacement reloads both stages, replaces
     await form.getByRole("button", { name: "Confirm this email code", exact: true }).click();
     await expect(form.getByRole("alert")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Account and security", exact: true }),
+      page.getByRole("heading", { level: 1, name: "Security", exact: true }),
     ).toBeVisible();
     phase = "FINAL_PROOF";
     await form.getByLabel("Email code", { exact: true }).fill(proof.code);
@@ -402,6 +408,7 @@ test("real verified-email password change and recovery revoke old sessions and a
     phase = "VERIFY";
     await verify(page, userId);
     phase = "PASSWORD";
+    await page.getByRole("button", { name: "Change password", exact: true }).click();
     await page.getByRole("button", { name: "Send code to current email", exact: true }).click();
     await expect(page.getByRole("form", { name: "Change password", exact: true })).toBeVisible();
     const proof = await privateMail(userId, "password_change"),
