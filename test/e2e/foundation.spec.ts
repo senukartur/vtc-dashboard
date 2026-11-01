@@ -904,20 +904,27 @@ test("CSS weights render the shipped font face with synthesized bold and aligned
         spread: Math.max(...widths) - Math.min(...widths),
       };
     });
+    const synthesis = (selector: string) => {
+      const element = Array.from(document.querySelectorAll(selector)).find(
+        (item) => item.getClientRects().length > 0,
+      );
+      return element ? getComputedStyle(element).fontSynthesisWeight : `MISSING_${selector}`;
+    };
     return {
-      synthesis: getComputedStyle(document.querySelector("main h1") ?? document.body)
-        .fontSynthesisWeight,
+      synthesis: ["main h1", "main button", ".table th", ".wordmark"].map(synthesis),
       spreads,
     };
   });
-  expect(result.synthesis).toBe("auto");
+  // Weight-400-only Huninn needs synthesized bold on headings, controls, headers and the wordmark.
+  expect(result.synthesis).toEqual(["auto", "auto", "auto", "auto"]);
   expect(result.spreads).toHaveLength(2);
   for (const { numeric, spread } of result.spreads) {
     expect(numeric).toBe("tabular-nums");
     expect(spread).toBeLessThan(0.5);
   }
   // Huninn ships only weight 400, so weight 700 must render with visibly heavier synthesized
-  // strokes. Ink is compared, not width.
+  // strokes. Ink is compared, not width. The canvas uses no app CSS, so this proves the
+  // browser can synthesize bold for the face; the computed values above cover the app CSS.
   const ink = await page.evaluate(async () => {
     await document.fonts.load('700 32px "Huninn"', "Язык Yukon");
     const canvas = document.createElement("canvas");

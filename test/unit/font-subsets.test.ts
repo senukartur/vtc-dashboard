@@ -192,17 +192,11 @@ describe("Huninn subsets", () => {
         if (code > 0x7e) used.add(code);
       }
     expect(used.has(0x2192) && used.has(0x2190)).toBe(true);
-    for (const weight of ["400"]) {
-      const mapped = new Set(
-        faces
-          .filter((face) => face.weight === weight)
-          .flatMap((face) => [...(cmaps.get(face.file) ?? [])]),
-      );
-      const uncovered = [...used]
-        .filter((code) => !mapped.has(code) && !fallback.has(code))
-        .map((code) => `U+${code.toString(16).toUpperCase()}`);
-      expect(uncovered, weight).toEqual([]);
-    }
+    const mapped = new Set(faces.flatMap((face) => [...(cmaps.get(face.file) ?? [])]));
+    const uncovered = [...used]
+      .filter((code) => !mapped.has(code) && !fallback.has(code))
+      .map((code) => `U+${code.toString(16).toUpperCase()}`);
+    expect(uncovered).toEqual([]);
   });
 
   test("the core subset maps every Russian letter", () => {
@@ -212,8 +206,18 @@ describe("Huninn subsets", () => {
     expect(russian.filter((code) => !core.has(code))).toEqual([]);
   });
 
-  test("bold is synthesized and only the Huninn subsets are bundled", async () => {
-    expect(css).not.toMatch(/font-synthesis-weight:\s*none/);
+  test("no stylesheet disables weight synthesis and only the Huninn subsets are bundled", async () => {
+    // Huninn ships only weight 400, so bold relies on the browser's synthesized weight.
+    const disabled: string[] = [];
+    for (const file of await sourceFiles(resolve("apps/web/src"))) {
+      if (extname(file) !== ".css") continue;
+      const text = await readFile(file, "utf8");
+      for (const [declaration, value = ""] of text.matchAll(/font-synthesis\s*:\s*([^;}]*)/g))
+        if (!/\bweight\b/.test(value)) disabled.push(`${file}: ${declaration.trim()}`);
+      for (const [declaration] of text.matchAll(/font-synthesis-weight\s*:\s*none\b/g))
+        disabled.push(`${file}: ${declaration}`);
+    }
+    expect(disabled).toEqual([]);
     const assets = (await readdir(resolve("apps/web/src/assets"))).filter(
       (file) => extname(file) === ".woff2",
     );
