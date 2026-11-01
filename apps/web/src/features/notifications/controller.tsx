@@ -339,7 +339,7 @@ function ActiveNotifications({
         dismiss: (id) => setToasts((previous) => previous.filter((item) => item.id !== id)),
       }}
     >
-      {children}
+      <ReadThroughOwner>{children}</ReadThroughOwner>
     </Context>
   );
 }
@@ -413,4 +413,48 @@ export function useNotificationCommand() {
 }
 export function OptionalNotifications({ children }: { children: ReactNode }) {
   return useContext(Context) ? children : null;
+}
+type ReadThrough = {
+  start: () => void;
+  pending: boolean;
+  error: unknown;
+  seconds: number;
+  disabled: boolean;
+};
+const ReadThroughContext = createContext<ReadThrough | null>(null);
+/**
+ * One read-through command per notification scope, shared by the bell popup and the page, so an
+ * uncertain attempt keeps its checkpoint and idempotency key across both surfaces. Scope loss
+ * unmounts this owner and aborts the request; closing the popup does not.
+ */
+function ReadThroughOwner({ children }: { children: ReactNode }) {
+  const context = useNotifications(),
+    command = useNotificationCommand();
+  return (
+    <ReadThroughContext
+      value={{
+        start: () => {
+          const cursor = context.checkpoint();
+          if (cursor)
+            void command.run(
+              "/notifications/read-all",
+              { throughCursor: cursor },
+              "EnvelopeCommandResult",
+            );
+        },
+        pending: command.pending,
+        error: command.error,
+        seconds: command.seconds,
+        disabled:
+          context.blocked || !context.checkpoint() || command.pending || command.seconds > 0,
+      }}
+    >
+      {children}
+    </ReadThroughContext>
+  );
+}
+export function useReadThrough() {
+  const value = useContext(ReadThroughContext);
+  if (!value) throw new Error("NOTIFICATION_BOUNDARY_MISSING");
+  return value;
 }
