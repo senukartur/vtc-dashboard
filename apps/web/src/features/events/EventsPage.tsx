@@ -107,27 +107,3 @@ export function CreateEventPage() {
     </div>
   );
 }
-export function PublicEventWidget() {
-  const { t } = useTranslation("events"),
-    query = useEventQuery("/public/events?period=upcoming&limit=3", "EnvelopeListEventPublic");
-  const data = query.data?.data.data;
-  return (
-    <section className="landing-section stack" aria-labelledby="landing-events">
-      <header className="event-heading">
-        <h2 id="landing-events">{t("publicTitle")}</h2>
-        <Link to="/events">{t("title")}</Link>
-      </header>
-      <EventState query={query} />
-      {data &&
-        (data.items.length ? (
-          <div className="event-grid">
-            {data.items.map((event) => (
-              <EventCard key={event.id} event={event} publicView />
-            ))}
-          </div>
-        ) : (
-          <p>{t("empty")}</p>
-        ))}
-    </section>
-  );
-}

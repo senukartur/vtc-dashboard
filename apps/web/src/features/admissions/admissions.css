@@ -1,0 +1,73 @@
+/* Compact application card (VTC-050). Presentation only: field order, labels and behaviour are
+   unchanged. Feature CSS loads before shared/styles.css, so selectors stay compound. */
+.landing .application-card {
+  padding: 16px;
+  container-type: inline-size;
+}
+.landing .application-card > h3 {
+  font-size: 17px;
+}
+.application-card .application-fields {
+  gap: 12px;
+}
+.application-card .field {
+  gap: 4px;
+}
+.application-card .label {
+  font-size: var(--font-small);
+}
+.application-card .input {
+  min-height: var(--field-h-sm);
+}
+.application-card textarea.input {
+  min-height: calc(var(--field-h-sm) * 2);
+}
+.application-card .game-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-radius: var(--radius);
+}
+.application-card .game-options legend {
+  font-size: var(--font-small);
+}
+.application-card .game-options .field-error {
+  flex-basis: 100%;
+}
+.application-card .checkbox-label {
+  display: inline-flex;
+  gap: 8px;
+  min-height: var(--target-min);
+  padding: 2px 12px 2px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 999px;
+  background: var(--inset);
+  font-weight: 600;
+}
+.application-card .checkbox-label:hover {
+  background: var(--surface-hover);
+}
+.application-card .checkbox-label:has(input:checked) {
+  border-color: var(--selection-border);
+  background: var(--accent-soft);
+  color: var(--foreground);
+}
+.application-card form > .muted {
+  font-size: var(--font-small);
+}
+@container (min-width: 480px) {
+  .application-card .application-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+  .application-card .application-fields > .field-wide {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 760px) {
+  .landing .application-card {
+    padding: 20px;
+  }
+}
