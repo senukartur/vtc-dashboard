@@ -1186,6 +1186,10 @@ async function settingsWorkspace(
         ifMatch: request.headers()["if-match"],
       });
       if (state.hold) await state.hold;
+      if (state.preferenceStatus === 429) {
+        state.preferenceStatus = 200;
+        return route.fulfill({ ...error(429), headers: { "Retry-After": "1" } });
+      }
       if (state.preferenceStatus !== 200) {
         state.preferenceStatus = 200;
         state.version++;
@@ -1532,12 +1536,25 @@ test("preferences save language at once and timezone explicitly, with row status
     // Playwright will not click an aria-disabled control; keyboard activation still reaches it.
     await save.press("Enter");
     await english.click();
-    expect(state.preferences).toHaveLength(3);
+    // An unguarded press would replace or clear this row's pending status.
+    await expect(statuses.nth(1)).toHaveText("Please wait…");
+    await expect(statuses.nth(0)).toHaveText("");
+    await expect(english).toHaveAttribute("aria-pressed", "false");
   } finally {
     release();
     state.hold = null;
   }
   await expect(statuses.nth(1)).toHaveText("Timezone saved");
+  expect(state.preferences).toHaveLength(3);
+  // A rate-limit wait keeps Save focusable but aria-disabled until the wait ends.
+  state.preferenceStatus = 429;
+  await timezone.fill("Asia/Seoul");
+  await save.click();
+  await expect(page.getByText(/^Wait \d+ s before retrying\.$/)).toBeVisible();
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  await save.press("Enter");
+  expect(state.preferences).toHaveLength(4);
+  await expect(save).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
   state.preferenceStatus = 409;
   await timezone.fill("America/Denver");
   await save.click();
@@ -1655,3 +1672,61 @@ test("settings row controls follow the compact and coarse-pointer target sizes",
   await page.goto("/account/profile");
   await check(page.getByRole("link", { name: "Open profile", exact: true }), 24);
 });
+
+for (const start of ["read failure", "expired on refresh"] as const)
+  test(`a forced-open email panel stays open with focus inside when ${start} resolves to no pending request`, async ({
+    page,
+  }) => {
+    await settingsWorkspace(page, { verified: true });
+    let read = 0;
+    await page.route("**/api/v1/me/email-change", (route) => {
+      read++;
+      if (read > 1) return route.fulfill({ json: { data: { pending: null }, meta } });
+      if (start === "read failure") return route.fulfill(error(503));
+      return route.fulfill({
+        json: {
+          data: {
+            pending: {
+              id: fixtureId,
+              stage: "current_email",
+              proposedEmail: "replacement@example.invalid",
+              expiresAt: challenge.data.expiresAt,
+            },
+          },
+          meta,
+        },
+      });
+    });
+    await page.goto("/account/security");
+    await language(page, "en");
+    const panel = page.locator("#security-email-panel");
+    const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
+    const badge = page.getByText("Replacement pending", { exact: true });
+    const refresh =
+      start === "read failure"
+        ? page.getByRole("button", { name: "Check again", exact: true })
+        : page.getByRole("button", { name: "Refresh pending request", exact: true });
+    await expect(refresh).toBeVisible();
+    await expect(
+      page.getByRole("form", { name: "Request email change", exact: true }),
+    ).toBeVisible();
+    // An unknown pending state claims no replacement; a known one replaces the toggle.
+    await expect(changeEmail).toHaveCount(0);
+    await expect(badge).toHaveCount(start === "read failure" ? 0 : 1);
+    await refresh.click();
+    await expect(
+      panel.getByText("No usable email replacement is pending.", { exact: true }),
+    ).toBeVisible();
+    await expect(panel).toBeVisible();
+    await expect(badge).toHaveCount(0);
+    await expect(changeEmail).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await panel.evaluate(
+        (element) => document.activeElement !== null && element.contains(document.activeElement),
+      ),
+    ).toBe(true);
+    await changeEmail.click();
+    await expect(changeEmail).toHaveAttribute("aria-expanded", "false");
+    await expect(panel).toBeHidden();
+    expect(read).toBe(2);
+  });

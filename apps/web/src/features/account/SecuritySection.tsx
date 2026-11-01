@@ -293,9 +293,25 @@ function EmailRow({
     if (pending.error instanceof AccountFailure && pending.error.kind === "unauthorized")
       endSession();
   }, [pending.error, endSession]);
-  // A replacement in progress (or an unknown pending state) keeps its forms open after reload.
+  // A replacement in progress (or an unknown pending state) opens the forms, also after reload.
+  // The disclosure then stays open (latched) so a later "no pending request" result stays visible.
   const forced = current != null || pending.isError;
-  const open = expanded || forced;
+  if (forced && !expanded) setExpanded(true);
+  // Refresh controls live in the result branch that a completed read may replace; when the
+  // pressed one disappears, keep focus on the new result instead of dropping it to the page.
+  const result = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const origin = returnFocus.current;
+    if (!origin || pending.isFetching) return;
+    returnFocus.current = null;
+    const active = document.activeElement;
+    if (!origin.isConnected || active === null || active === document.body) result.current?.focus();
+  });
+  function refetchFrom(button: HTMLElement) {
+    returnFocus.current = button;
+    void coordinate(() => pending.refetch());
+  }
   const panel = "security-email-panel";
   return (
     <SettingsRow
@@ -304,9 +320,9 @@ function EmailRow({
       hint={t("emailHint")}
       value={<EmailValue address={address} verified />}
       action={
-        forced ? (
+        current != null ? (
           <Badge className="badge-pending">{t("emailPendingBadge")}</Badge>
-        ) : (
+        ) : pending.isError ? undefined : (
           <ChangeToggle
             ref={toggleRef}
             target="email"
@@ -318,7 +334,7 @@ function EmailRow({
         )
       }
     >
-      <div id={panel} className="settings-panel" hidden={!open}>
+      <div id={panel} className="settings-panel" hidden={!expanded}>
         <p>{t("emailChangeHelp")}</p>
         <Form
           id="emailChallenge"
@@ -348,78 +364,80 @@ function EmailRow({
             })
           }
         />
-        {pending.isPending ? (
-          <p role="status">{t("checking")}</p>
-        ) : pending.isError ? (
-          <>
-            <p role="alert">{t("pendingUnavailable")}</p>
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => void coordinate(() => pending.refetch())}
-            >
-              {t("refresh")}
-            </Button>
-          </>
-        ) : current ? (
-          <>
-            <p role="status">
-              {t(current.stage === "current_email" ? "currentStage" : "proposedStage", {
-                email: current.proposedEmail,
-              })}
-            </p>
-            <p className="muted">
-              {t("expires", {
-                date: formatUtc(
-                  current.expiresAt,
-                  i18n.resolvedLanguage === "en" ? "en" : "ru",
-                  session.self?.preferences.displayTimezone ?? "UTC",
-                ),
-              })}
-            </p>
-            <Form
-              key={current.id}
-              id="emailConfirm"
-              fields={[codeField]}
-              {...confirm}
-              pending={busy}
-              action="confirmEmail"
-              submit={(values) =>
-                coordinate(async () => {
-                  const result =
-                    current.stage === "current_email"
-                      ? await confirm.run("emailCurrent", {
-                          kind: "email_change",
-                          challengeId: current.id,
-                          code: values.code ?? "",
-                        })
-                      : await confirm.run("emailProposed", {
-                          challengeId: current.id,
-                          code: values.code ?? "",
-                        });
-                  if (result) {
-                    if (current.stage === "current_email") await pending.refetch();
-                    else {
-                      session.end();
-                      navigate("/login", { replace: true });
+        <div ref={result} tabIndex={-1} className="settings-panel">
+          {pending.isPending ? (
+            <p role="status">{t("checking")}</p>
+          ) : pending.isError ? (
+            <>
+              <p role="alert">{t("pendingUnavailable")}</p>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={(event) => refetchFrom(event.currentTarget)}
+              >
+                {t("refresh")}
+              </Button>
+            </>
+          ) : current ? (
+            <>
+              <p role="status">
+                {t(current.stage === "current_email" ? "currentStage" : "proposedStage", {
+                  email: current.proposedEmail,
+                })}
+              </p>
+              <p className="muted">
+                {t("expires", {
+                  date: formatUtc(
+                    current.expiresAt,
+                    i18n.resolvedLanguage === "en" ? "en" : "ru",
+                    session.self?.preferences.displayTimezone ?? "UTC",
+                  ),
+                })}
+              </p>
+              <Form
+                key={current.id}
+                id="emailConfirm"
+                fields={[codeField]}
+                {...confirm}
+                pending={busy}
+                action="confirmEmail"
+                submit={(values) =>
+                  coordinate(async () => {
+                    const result =
+                      current.stage === "current_email"
+                        ? await confirm.run("emailCurrent", {
+                            kind: "email_change",
+                            challengeId: current.id,
+                            code: values.code ?? "",
+                          })
+                        : await confirm.run("emailProposed", {
+                            challengeId: current.id,
+                            code: values.code ?? "",
+                          });
+                    if (result) {
+                      if (current.stage === "current_email") await pending.refetch();
+                      else {
+                        session.end();
+                        navigate("/login", { replace: true });
+                      }
+                    } else {
+                      await recheck();
                     }
-                  } else {
-                    await recheck();
-                  }
-                })
-              }
-            />
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => void coordinate(() => pending.refetch())}
-            >
-              {t("refreshPending")}
-            </Button>
-          </>
-        ) : (
-          <p>{t("noPending")}</p>
-        )}
+                  })
+                }
+              />
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={(event) => refetchFrom(event.currentTarget)}
+              >
+                {t("refreshPending")}
+              </Button>
+            </>
+          ) : (
+            <p>{t("noPending")}</p>
+          )}
+        </div>
       </div>
     </SettingsRow>
   );

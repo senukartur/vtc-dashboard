@@ -120,9 +120,11 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
   // Remounts the timezone field with refreshed authoritative values after a conflict.
   const [revision, setRevision] = useState(0);
   const busy = status?.state === "pending" || request.pending;
+  // A rate-limit wait blocks saving too; Save shows it as aria-disabled like other forms.
+  const waiting = request.seconds > 0;
   const saved = self.preferences;
   async function save(row: Row, preferences: { locale: Locale; displayTimezone: string }) {
-    if (!etag || busy || request.seconds > 0) return;
+    if (!etag || busy || waiting) return;
     setStatus({ row, state: "pending" });
     const result = await request.run("preferences", preferences, etag);
     if (result) {
@@ -168,7 +170,7 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
           <TimezoneForm
             key={revision}
             initial={saved.displayTimezone}
-            busy={busy || !etag}
+            busy={busy || waiting || !etag}
             onEdit={() => {
               if (status?.state === "saved") setStatus(null);
             }}
@@ -185,7 +187,7 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
           {t(`errors.${request.failure.kind}`)}
         </p>
       )}
-      {request.seconds > 0 && <p role="status">{t("wait", { seconds: request.seconds })}</p>}
+      {waiting && <p role="status">{t("wait", { seconds: request.seconds })}</p>}
       {request.failure?.kind === "conflict" && (
         <Button
           type="button"
