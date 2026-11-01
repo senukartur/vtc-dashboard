@@ -87,6 +87,77 @@ export function makeLeaderboardFixture(empty = false) {
   };
 }
 
+/** Per-game daily buckets for filter tests; ETS2 + ATS add up to the all-games fixture. */
+const gameBuckets = {
+  ets2: [
+    { date: "2026-10-01", acceptedTrips: 3, actualDistanceM: "9000000" },
+    { date: "2026-10-02", acceptedTrips: 7, actualDistanceM: "22000000" },
+    { date: "2026-10-04", acceptedTrips: 10, actualDistanceM: "30430000" },
+  ],
+  ats: [
+    { date: "2026-10-01", acceptedTrips: 2, actualDistanceM: "6000000" },
+    { date: "2026-10-02", acceptedTrips: 5, actualDistanceM: "16000000" },
+    { date: "2026-10-03", acceptedTrips: 8, actualDistanceM: "24000000" },
+    { date: "2026-10-04", acceptedTrips: 7, actualDistanceM: "18000000" },
+  ],
+} as const;
+
+/**
+ * Filter-aware analytics: buckets follow the requested game and granularity, totals are the exact
+ * bucket sums, and the echoed period matches the request.
+ */
+export function makeFilteredAnalyticsFixture(search: URLSearchParams, empty = false) {
+  const base = makeAnalyticsFixture(empty);
+  const game = search.get("game");
+  const daily: { date: string; acceptedTrips: number; actualDistanceM: string }[] = empty
+    ? []
+    : game === "ets2" || game === "ats"
+      ? gameBuckets[game].map((bucket) => ({ ...bucket }))
+      : base.data.buckets;
+  const acceptedTrips = daily.reduce((sum, bucket) => sum + bucket.acceptedTrips, 0);
+  const actualDistanceM = String(
+    daily.reduce((sum, bucket) => sum + BigInt(bucket.actualDistanceM), 0n),
+  );
+  const granularity = search.get("granularity") === "month" ? ("month" as const) : ("day" as const);
+  const buckets =
+    granularity === "month" && daily.length > 0
+      ? [{ date: "2026-10-01", acceptedTrips, actualDistanceM }]
+      : daily;
+  return {
+    data: {
+      ...base.data,
+      acceptedTrips,
+      actualDistanceM,
+      fromDate: search.get("fromDate") ?? base.data.fromDate,
+      toDateExclusive: search.get("toDateExclusive") ?? base.data.toDateExclusive,
+      granularity,
+      buckets,
+    },
+    meta,
+  };
+}
+
+/** Leaderboard with `size` fictional entries; the first two match the default fixture. */
+export function makeSizedLeaderboardFixture(size: number, nextCursor: string | null = null) {
+  const base = makeLeaderboardFixture(false).data.items;
+  const items = Array.from({ length: size }, (_, index) => {
+    const known = base[index];
+    if (known) return known;
+    const number = String(index + 1).padStart(3, "0");
+    return {
+      member: {
+        id: `41000000-0000-4000-8000-000000001${number}`,
+        nickname: `Fictional Driver ${number}`,
+        formerMember: false,
+        roles: ["driver" as const],
+      },
+      acceptedTrips: Math.max(1, 17 - index),
+      actualDistanceM: String((200 - index) * 200000),
+    };
+  });
+  return { data: { items, nextCursor }, meta };
+}
+
 export function makeMembersListFixture() {
   return {
     data: {
@@ -276,31 +347,99 @@ export function makeUpcomingEventFixture() {
   };
 }
 
+export type DashboardEndpoint = "analytics" | "leaderboard" | "progress" | "review" | "event";
+
+/** Mutable mock state returned to the test; changes apply to the next matching request. */
+export interface DashboardMockState {
+  /** Every intercepted `/api/v1/**` request URL, in order. */
+  requests: URL[];
+  /** HTTP status to return instead of the fixture for an endpoint. */
+  failures: Partial<Record<DashboardEndpoint, number>>;
+  /** Full `/me` capability list; undefined keeps the default staff fixture. */
+  capabilities: string[] | undefined;
+  /** Holds company analytics responses until `releaseAnalytics` is called. */
+  holdAnalytics(): void;
+  releaseAnalytics(): void;
+}
+
+const endpointPaths: Record<DashboardEndpoint, string> = {
+  analytics: "/api/v1/analytics/company",
+  leaderboard: "/api/v1/analytics/leaderboard",
+  progress: "/api/v1/me/qualification-progress",
+  review: "/api/v1/trips",
+  event: "/api/v1/me/upcoming-event",
+};
+
 export async function mockDashboardRoutes(
   page: Page,
   options: {
     emptyCompany?: boolean;
     qualificationLevels?: "unavailable" | "missing";
+    /** Answer analytics per requested game/granularity (see makeFilteredAnalyticsFixture). */
+    filterAware?: boolean;
+    failures?: Partial<Record<DashboardEndpoint, number>>;
+    capabilities?: string[];
+    holdAnalytics?: boolean;
+    leaderboardSize?: number;
+    leaderboardNextCursor?: boolean;
+    reviewNextCursor?: boolean;
   } = {},
-) {
+): Promise<DashboardMockState> {
+  let gate: { promise: Promise<void>; release: () => void } | undefined;
+  const state: DashboardMockState = {
+    requests: [],
+    failures: { ...options.failures },
+    capabilities: options.capabilities ? [...options.capabilities] : undefined,
+    holdAnalytics() {
+      if (gate) return;
+      let release = () => {};
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      gate = { promise, release };
+    },
+    releaseAnalytics() {
+      gate?.release();
+      gate = undefined;
+    },
+  };
+  if (options.holdAnalytics) state.holdAnalytics();
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
     const url = new URL(route.request().url());
     const path = url.pathname;
+    state.requests.push(url);
+    if (path === endpointPaths.analytics && gate) await gate.promise;
+    for (const [endpoint, status] of Object.entries(state.failures)) {
+      if (status && path === endpointPaths[endpoint as DashboardEndpoint])
+        return route.fulfill({ status, json: { error: { code: "SYNTHETIC_FAILURE" } } });
+    }
 
     if (path === "/api/v1/auth/csrf") {
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });
     }
     if (path === "/api/v1/me") {
       const self = accountFixture("en");
-      self.data.capabilities.push("trips.review", "company.read");
+      if (state.capabilities) self.data.capabilities = [...state.capabilities];
+      else self.data.capabilities.push("trips.review", "company.read");
       return route.fulfill({ json: self });
     }
     if (path === "/api/v1/analytics/company") {
+      if (options.filterAware)
+        return route.fulfill({
+          json: makeFilteredAnalyticsFixture(url.searchParams, options.emptyCompany),
+        });
       return route.fulfill({ json: makeAnalyticsFixture(options.emptyCompany) });
     }
     if (path === "/api/v1/analytics/leaderboard") {
+      if (options.leaderboardSize !== undefined || options.leaderboardNextCursor)
+        return route.fulfill({
+          json: makeSizedLeaderboardFixture(
+            options.leaderboardSize ?? 2,
+            options.leaderboardNextCursor ? "NONFUNCTIONAL_CURSOR" : null,
+          ),
+        });
       return route.fulfill({ json: makeLeaderboardFixture(options.emptyCompany) });
     }
     if (path === "/api/v1/me/trip-status-summary") {
@@ -345,9 +484,22 @@ export async function mockDashboardRoutes(
       return route.fulfill({ json: makeMemberProfileFixture(memberId) });
     }
     if (path === "/api/v1/trips") {
-      return route.fulfill({ json: makeTripSummaryListFixture() });
+      const fixture = makeTripSummaryListFixture();
+      // A full first page of the five-item review queue with more pending behind the cursor.
+      if (options.reviewNextCursor) {
+        const [item] = fixture.data.items;
+        const items = [0, 1, 2, 3, 4].map((index) => ({
+          ...item,
+          id: `018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a9${index}`,
+        }));
+        return route.fulfill({
+          json: { ...fixture, data: { items, nextCursor: "NONFUNCTIONAL_CURSOR" } },
+        });
+      }
+      return route.fulfill({ json: fixture });
     }
 
     return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });
   });
+  return state;
 }
