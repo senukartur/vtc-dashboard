@@ -42,11 +42,15 @@ Administrative roles add permissions to the user's member roles; game qualificat
 | Submit own reports, manage own telemetry token, respond to events | Yes | Through member role | Through member role | Through member role |
 | Read own pending/rejected reports and evidence | Yes | Yes | Yes | Yes |
 | Review other members' manual/disputed trips and evidence | No | Yes | Yes | Yes |
+| Accept another member's manual report over ordinary qualification limits, after explicit confirmation | No | Yes | Yes | Yes |
 | Approve own manual report | No | No | No | No |
-| Review applications and issue/copy invitations | No | No | Yes | Yes |
+| Review applications and send or copy invitations | No | No | Yes | Yes |
 | Manage events and confirm actual participation | No | No | Yes | Yes |
+| View an accessible event's participant and decliner lists | Yes | Yes | Yes | Yes |
+| View an event's list of members who have not answered | No | No | Yes | Yes |
 | Read another member's event-decline reason | No | No | Yes | Yes |
 | Configure qualifications and confirm promotion | No | No | Yes | Yes |
+| Set a member's membership directly to Trainee or Driver | No | No | Yes | Yes |
 | Administer users/roles, deactivate or reinstate ordinary members | No | No | Yes | Yes |
 | Replace a member's Steam link on request | No | No | Yes | Yes |
 | Configure company integrations and reporting settings | No | No | Yes | Yes |
@@ -54,7 +58,7 @@ Administrative roles add permissions to the user's member roles; game qualificat
 | Delete/deactivate the serving director or remove the Director role outside succession | No | No | No | No |
 | Change the director's email/login credentials | No | No | No | Self-service with confirmation via current verified email |
 
-Anonymous visitors may view public landing/event content and submit membership applications. The landing may show only company aggregates: active member count and the current reporting month's accepted trips, actual distance and games, without identities or per-driver data. Member-only data, event participant lists, and decline reasons are not public.
+Anonymous visitors may view public landing/event content and submit membership applications. The landing may show only company aggregates: active member count and the current reporting month's accepted trips, actual distance and games, without identities or per-driver data. Member-only data, event participant and decliner lists, and decline reasons are not public.
 
 ## Confirmed roles and responsibilities
 
@@ -68,7 +72,7 @@ The five MVP roles are Trainee, Driver, Dispatcher, Deputy Director, and Directo
 | Deputy Director | The same administrative permissions as Director, except director-only leadership transfer and protected changes to the serving director's account. |
 | Director | Full administrative access, including membership applications, event management, users, qualifications, and company integrations. |
 
-There must be exactly one director after the initial company bootstrap. Administrative roles are additive: the director can also hold Driver and have independent ETS2/ATS qualifications. Assigning an administrative role must not replace driver membership or qualification history. Trainee-to-driver promotion changes only those membership roles and preserves other assigned roles.
+There must be exactly one director after the initial company bootstrap. Administrative roles are additive: the director can also hold Driver and have independent ETS2/ATS qualifications. Assigning an administrative role must not replace driver membership or qualification history. Trainee-to-driver promotion changes only those membership roles and preserves other assigned roles. The director or deputy may also set a member's membership directly to Trainee or Driver. This audited change replaces only that membership role and does not change game-specific qualifications or other assigned roles.
 
 Do not delete or deactivate the serving director or remove their Director role without the director-only succession workflow below. A deputy cannot transfer leadership through direct role assignment or remove/deactivate the serving director. Do not allow multiple directors as an implementation shortcut.
 
@@ -81,11 +85,11 @@ Membership application review and event management belong to the director and de
 - The serving director selects another active member and confirms transfer. Only the serving director may authorize this operation.
 - Change the Director role in one atomic operation so exactly one director remains. The former director retains Driver membership, game-specific qualifications, and historical trips.
 - Require the email-code verification below before executing transfer.
-- Deputy administration must not provide an alternate path to succession. Implementation must enforce bounded attempts/send rates, concurrency safety, and replay protection.
+- Deputy administration must not provide an alternate path to succession. Implementation must enforce the code limits below, concurrency safety, and replay protection.
 
 ### Confirmed email-code verification
 
-- Send a one-time code to the serving director's verified email. The code is bound to that director and the selected successor, expires after ten minutes, and is invalidated after use or replacement. Apply bounded attempts and send throttling during implementation.
+- Send a one-time code to the serving director's verified email. The code is bound to that director and the selected successor, expires after ten minutes, and is invalidated after use or replacement. Each code allows at most five entry attempts; after five incorrect entries it is invalidated. The serving director may request a new code no sooner than 60 seconds after the previous one, and at most five codes in any 60-minute period.
 - Execute the atomic transfer only after the serving director enters the valid code. A changed successor requires new confirmation.
 - Only the serving director may change their email or login credentials, with confirmation through the existing verified email. Deputies cannot change those settings, redirect the transfer code, or recover access through an administrative bypass.
 
@@ -107,6 +111,8 @@ Membership application review and event management belong to the director and de
 | Transfer company leadership | Serving director only, with additional verification. |
 
 Accepted-trip visibility does not make its restricted rejection/review history or evidence public to other members. Public event information on the landing page remains supported by the planning baseline; member-only driver and trip visibility does not imply anonymous public access.
+
+The members administration list shows each member's most recent accepted trip as its activity signal. The dashboard does not add sign-in or other site-activity tracking for this purpose.
 
 ## Trainee and driver equivalence
 
@@ -130,12 +136,12 @@ Qualifications remain separate for ETS2 and ATS. The confirmed initial progressi
 - Director/deputy confirmation applies both to the transition from trainee to driver and to subsequent qualification levels.
 - Each level has a separate promotion-progress period beginning when that level is assigned in the relevant game. For telemetry trips, count accepted trips started after that assignment; trips from earlier levels remain in historical statistics but are not reused for the next promotion.
 - For manual reports without a trip date, use the qualification and rule versions effective at confirmation/acceptance. Attribute their progress to the game-specific qualification level assigned at that confirmation time. This is an explicit source-specific policy and does not establish an actual trip-start timestamp.
-- After director/deputy-confirmed completion of the trainee stage in at least one game, the user receives the global Driver role instead of Trainee. The other game's qualification and restrictions remain unchanged; the driver may therefore have Driver III in ETS2 and Trainee qualification in ATS.
+- After director/deputy-confirmed completion of the trainee stage in at least one game, the user receives the global Driver role instead of Trainee. The other game's qualification and restrictions remain unchanged; the driver may therefore have Driver III in ETS2 and Trainee qualification in ATS. The director or deputy may also set the global Trainee or Driver role directly; that change leaves every game-specific qualification and its progress period unchanged.
 - When an accepted trip is corrected or its acceptance is revoked, recalculate affected statistics and qualification progress. If the change invalidates the requirements for a previously confirmed promotion, notify the director and retain the assigned qualification until the director decides what to do. Never automatically demote a driver.
 
 ## Qualification exceptions for company events
 
-The owner confirmed the current company policy: qualification restrictions do not prevent participants in a company-wide event from carrying the load prescribed by that event, regardless of their ordinary qualification level. This exception is part of the event policy, rather than a separate discretionary waiver that the director must grant to each participant.
+The owner confirmed the current company policy: qualification restrictions do not prevent participants in a company-wide event from carrying the load prescribed by that event, regardless of their ordinary qualification level. This exception is part of the event policy, rather than a separate discretionary waiver that the director must grant to each participant. It is also distinct from the discretionary over-limit acceptance in [manual report review](#manual-report-review-and-resubmission): a trip covered by this exception is accepted normally, not marked as accepted over limits.
 
 The event's conditions determine the permitted load. For the MVP, a driver selects the event when submitting the report, and the director confirms actual participation. An RSVP alone does not establish participation. Automatic association of telemetry trips using event conditions may be added later; it is not an MVP prerequisite.
 
@@ -149,8 +155,8 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 - After the event starts, the director records actual attendance separately from the member's prior response. The previously agreed director confirmation is used for event-trip participation.
 - Send an in-app reminder one hour before the event starts to members whose response is Participating. Notifications are delivered while the website is open; Web Push remains deferred.
 - Show the nearest upcoming event in the header to VTC members who may access that event, regardless of their participation response.
-- The list of members who signed up is visible to VTC members with access to the event. A decline reason is visible only to its author, the director, and deputies, reflecting the deputy's confirmed administrative parity.
-- Public event pages do not expose the participant list or decline reasons.
+- VTC members with access to the event can see who signed up and who declined. A decline reason is visible only to its author, the director, and deputies, reflecting the deputy's confirmed administrative parity. Only the director and deputies can see which members have not answered.
+- Public event pages do not expose participant or decliner lists, unanswered members, or decline reasons.
 
 Response and actual attendance are distinct facts. Participation is voluntary in the MVP: members may leave an event unanswered, and the system imposes no automatic penalty for declining or not attending. The director can view responses and actual attendance, subject to the confirmed privacy rules.
 
@@ -176,7 +182,7 @@ Application review is the director's or deputy's responsibility. The required em
 - A director rejecting an application must provide a reason. Email the reason to the applicant and preserve the application and decision history.
 - Rejected candidates may submit a new application; rejection does not erase the prior application.
 - After approval, provide a one-time invitation link for setting the account password, valid for seven days.
-- Support both email delivery and a director-facing copy-link action for manual delivery through Discord or another messenger. Manual delivery must not depend on successful email delivery; the dashboard is not required to send messenger messages itself.
+- Approval does not send the invitation email automatically. The director or deputy delivers the link with an explicit Send to email action, or copies it for manual delivery through Discord, Steam, or another messenger. Manual delivery must not depend on successful email delivery; the dashboard is not required to send messenger messages itself.
 - The same one-time use and expiry rules apply regardless of delivery channel. Reissuing an invitation invalidates its previous link.
 
 ## Departure and account deactivation
@@ -195,6 +201,7 @@ Application review is the director's or deputy's responsibility. The required em
 ## Manual report review and resubmission
 
 - Every manual report requires a different authorized reviewer. Dispatchers, deputies, and directors may not approve their own manual reports; there are no role-based exceptions.
+- An authorized reviewer other than the author may, at their discretion, accept a manual report that breaks ordinary qualification limits when no event exception applies. Before acceptance, show every exceeded limit and require explicit confirmation. Record the decision as accepted over limits, together with the reviewer. This waives only qualification limits, not other report requirements or review rules; the accepted trip then follows the ordinary statistics and progress rules.
 - The author may correct a rejected manual report and resubmit it for review.
 - Resubmission creates a new report revision for the same canonical trip. Preserve the previous version, rejection reason, and review history.
 - A corrected submission must not create a second trip or duplicate statistics, qualification progress, or other trip effects.
@@ -274,6 +281,12 @@ The required manual-report fields are game, origin city, destination city, cargo
 40. The serving director transfers leadership to another active member after the required additional verification. Exactly one director remains, and the former director retains driver membership, qualifications, and trip history.
 41. The serving director selects a successor and receives a one-time code at their verified email. A code older than ten minutes, already used/replaced, or associated with another successor cannot authorize transfer.
 42. A deputy attempts to change the serving director's email/login credentials or bypass succession through role administration. The operation is denied; a director's own credential change requires confirmation through the current verified email.
+43. A director or deputy sets a member's membership from Trainee to Driver, or back to Trainee, without a promotion confirmation. The change is audited; ETS2/ATS qualifications, their progress periods and other assigned roles stay unchanged. Trainee, Driver, or Dispatcher roles alone cannot make this change.
+44. A director approves an application. No invitation email is sent until the director or deputy chooses Send to email; alternatively they copy the link and send it through Discord or Steam. Either way the same one-time use and seven-day expiry apply.
+45. After five incorrect entries, a leadership-transfer code cannot authorize transfer, even with the correct value. A new code requested within 60 seconds of the previous one, or a sixth code within 60 minutes, is refused.
+46. A dispatcher reviews another member's manual report whose cargo mass exceeds the driver's ordinary limit, and no event exception applies. The review shows every exceeded limit. The dispatcher accepts only after explicit confirmation, and the decision is recorded as accepted over limits with that dispatcher. The author cannot make this decision on their own report. A trip covered by the event exception in scenario 14 is accepted without the over-limit marker.
+47. A VTC member with access to an event sees its participant and decliner lists, but not decline reasons or the members who have not answered. The reason's author, the director and deputies can read a decline reason. An anonymous visitor to a public event page sees none of these lists.
+48. The members administration list shows each member's most recent accepted trip and no sign-in or site-activity data.
 
 
 These are approved requirements scenarios, not evidence that the application is implemented or tested. Administrative examples apply equally to a deputy unless the action is explicitly reserved to the serving director.

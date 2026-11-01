@@ -22,15 +22,15 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 ## Features
 
 - **Public site**: landing page with current-month company totals, public convoys and a membership application (nickname, email, Steam profile, games; Discord and introduction optional).
-- **Admissions**: approve, or reject with a reason that is emailed to the applicant; a one-time invitation link valid for seven days, sent by email or copied for manual delivery.
+- **Admissions**: approve, or reject with a reason that is emailed to the applicant; a one-time invitation link valid for seven days, sent by email on staff request or copied for manual delivery.
 - **Accounts**: email/password sign-in, linked Steam and basic TruckersMP. Staff replace a Steam link on request with an audit trail. Leaving deactivates the account but keeps its history; a returning member gets the same account without old privileges.
 - **Telemetry**: a personal revocable token for the desktop client, which uploads all retained trips on first connection and then new ones. Uploads are durable and retry-safe.
-- **Manual reports**: game, cities, cargo, mass, trailer, actual distance and at least one screenshot, without a trip date. Reviewed by someone other than the author; edits and resubmissions create revisions. Screenshots are kept for at least one year after the latest decision.
+- **Manual reports**: game, cities, cargo, mass, trailer, actual distance and at least one screenshot, without a trip date. Reviewed by someone other than the author; edits and resubmissions create revisions. Screenshots are kept for at least one year after the latest decision. A reviewer may accept a report over qualification limits after explicit confirmation.
 - **One canonical trip**: replays, revisions and manual/telemetry overlap never duplicate trips, distance or progress. Late telemetry that changes a confirmed result goes to staff review.
 - **Qualifications**: per game Trainee → Driver III → Driver II → Driver I, limiting cargo mass, trailer types and hazardous cargo. Promotion progress counts accepted trips and distance; the Director or a Deputy confirms promotions, and the system never demotes automatically. Trips are judged by the rules in force at their actual start; undated manual reports by those at confirmation.
 - **Game catalogs**: versioned ETS2/ATS cities, cargo and trailers for the base games and all official DLCs, with IDs independent of RU/EN names and a visible English fallback for missing Russian names. Updates go through review before publication.
 - **Analytics**: company and personal totals from accepted trips only, using actual driven distance and one company reporting timezone.
-- **Events**: public and private convoys with RSVP. Declining requires a reason visible only to its author and administrators. Reminder one hour before start; the nearest event is shown in the header; attendance is recorded separately from the response. Confirmed event trips may carry the prescribed load beyond qualification limits.
+- **Events**: public and private convoys with RSVP. Members see who signed up and who declined; a decline reason is visible only to its author and administrators. Reminder one hour before start; the nearest event is shown in the header; attendance is recorded separately from the response. Confirmed event trips may carry the prescribed load beyond qualification limits.
 - **Notifications**: in-app history and updates while the site is open.
 - **Administration**: members and roles, qualification limits and thresholds, company settings and integrations. Leadership transfer is done only by the serving Director, confirmed with a ten-minute email code.
 
