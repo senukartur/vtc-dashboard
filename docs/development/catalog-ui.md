@@ -2,7 +2,7 @@
 
 VTC-020 adds `/account/catalogs` inside the authenticated member shell. Current `company.read` permits published search and history. Current `qualifications.manage` permits import, review, explicit mapping and publication, matching the [catalog API](catalogs.md). Catalog facts remain separate from qualification rules; this screen does not edit limits or infer launch configuration.
 
-The existing Yukon Union dark surfaces, Onest typography, blue actions, visible focus and the [compact control scale](ui-foundation.md#compact-control-scale) support a repeated staff job: inspect a maintainer-prepared update and publish the exact reviewed candidate. The first viewport contains game, current published revision and search. Review shows build, dated inventory, comparison revision, provenance, changes, coverage and publication gates. Native search/select fields and the existing Radix dialog supply keyboard and focus behavior. Responsive verification targets 390×844, 768×1024 and 1280×800 with RU/EN expansion.
+The existing Yukon Union dark surfaces, M PLUS Rounded 1c typography, blue actions, visible focus and the [compact control scale](ui-foundation.md#compact-control-scale) support a repeated staff job: inspect a maintainer-prepared update and publish the exact reviewed candidate. The first viewport contains game, current published revision and search. Review shows build, dated inventory, comparison revision, provenance, changes, coverage and publication gates. Native search/select fields and the existing Radix dialog supply keyboard and focus behavior. Responsive verification targets 390×844, 768×1024 and 1280×800 with RU/EN expansion.
 
 ## Published values
 

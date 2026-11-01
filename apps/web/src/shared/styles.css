@@ -1,15 +1,88 @@
 @import "tailwindcss" source("../");
 
+/*
+ * M PLUS Rounded 1c ships only 400, 500 and 700 (third_party/m-plus-rounded-1c/README.md).
+ * Weights 600 and above render Bold, 500 renders Medium; synthesis stays off.
+ * The metric overrides keep the previous UI font's 263-unit space above the cap
+ * height and its descent, so explicit line heights keep their boxes;
+ * line-height: normal boxes grow by about 0.023em (1.298em instead of 1.275em).
+ */
 @font-face {
-  font-family: "Onest";
-  src: url("../assets/Onest.ttf") format("truetype");
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-400-core.woff2") format("woff2");
   font-style: normal;
-  font-weight: 100 900;
+  font-weight: 400;
   font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+25CF, U+2713, U+2715, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-400-ext.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0460-048F, U+0492-04AF, U+04B2-052F, U+1C80-1C8A, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+20A0-20A7, U+20AA-20AB, U+20AD-20AE, U+20B1-20BC, U+20BE-20C0, U+2113, U+2C60-2C7F, U+2DE0-2DFF, U+A640-A69F, U+A720-A7FF, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-500-core.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+25CF, U+2713, U+2715, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-500-ext.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0460-048F, U+0492-04AF, U+04B2-052F, U+1C80-1C8A, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+20A0-20A7, U+20AA-20AB, U+20AD-20AE, U+20B1-20BC, U+20BE-20C0, U+2113, U+2C60-2C7F, U+2DE0-2DFF, U+A640-A69F, U+A720-A7FF, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-700-core.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0301, U+0304, U+0308, U+0329, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2000-2014, U+2016-2024, U+2027-202F, U+2032-203A, U+203D-2046, U+204A-2052, U+2054-206F, U+20AC, U+20BD, U+2116, U+2122, U+2190-2193, U+2197, U+2205, U+2212, U+2215, U+25C7, U+25CF, U+2713, U+2715, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  src: url("../assets/m-plus-rounded-1c-700-ext.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  ascent-override: 99.3%;
+  descent-override: 30.5%;
+  line-gap-override: 0%;
+  unicode-range:
+    U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0460-048F, U+0492-04AF, U+04B2-052F, U+1C80-1C8A, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+20A0-20A7, U+20AA-20AB, U+20AD-20AE, U+20B1-20BC, U+20BE-20C0, U+2113, U+2C60-2C7F, U+2DE0-2DFF, U+A640-A69F, U+A720-A7FF, U+FE2E-FE2F;
 }
 
 :root {
-  font-family: "Onest", system-ui, sans-serif;
+  font-family: "M PLUS Rounded 1c", system-ui, sans-serif;
+  font-synthesis-weight: none;
   font-size: 14px;
   color-scheme: dark;
   color: #f3f4f6;
@@ -614,7 +687,7 @@ input[type="checkbox"] {
   text-align: left;
   color: var(--muted);
   font-size: var(--font-small);
-  font-weight: 550;
+  font-weight: 500;
 }
 .table th,
 .table td {
