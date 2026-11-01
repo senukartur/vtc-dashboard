@@ -27,7 +27,7 @@ VTC-032 implements the read-only analytics APIs for company-level and member-lev
 
 ## Endpoints and authorization
 
-All analytics endpoints require the `company.read` permission (satisfied by active members with roles `driver`, `dispatcher`, `deputy_director`, or `director`).
+The anonymous [public company statistics](#public-company-statistics-vtc-052) route is the only exception. All other analytics endpoints require the `company.read` permission (satisfied by active members with roles `driver`, `dispatcher`, `deputy_director`, or `director`).
 
 - `GET /api/v1/analytics/company`:
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game` (`ets2` | `ats`), optional `granularity` (`day` | `month`).
@@ -41,6 +41,18 @@ All analytics endpoints require the `company.read` permission (satisfied by acti
   - Query parameters: `fromDate`, `toDateExclusive`, optional `game`, optional pagination `limit` (1-100, default 50) and signed `cursor`.
   - Returns ranked member items (`member: { id }`, `acceptedTrips`, `actualDistanceM`) ordered by distance descending, with deterministic tie-breaking by member ID ascending.
   - Keyset pagination uses HMAC-SHA256 cursors bound to the requester's identity session, access epoch, and filter scope to prevent cross-user replay and tampering.
+
+## Public company statistics (VTC-052)
+
+`GET /api/v1/public/company-stats` (`getPublicCompanyStats`) supplies the closed aggregate for the public landing stats band (VTC-050). It is registered with the other analytics routes, so it returns the ordinary JSON 404 when `ANALYTICS_ENABLED` is off.
+
+- **Access**: anonymous. The route charges the persistent public `read` rate limit (as public events) and never authenticates, reads or sets cookies; a session cookie does not change the result. Exceeding the limit returns 429 with `Retry-After: 60`. Unknown query parameters return 422.
+- **Caching**: a successful 200 carries `Cache-Control: public, max-age=60` through the shared allowlist in `apps/api/src/platform/http/cache.ts`; every error stays `no-store`. There is no ETag or in-process cache, so values can be up to 60 seconds stale and cached copies repeat `meta.requestId`.
+- **Fields**: `computedAt`, `activeMembers` (memberships with status `active`, any or no role) and `currentMonth`.
+- **Current month**: the calendar month containing the request time in the company reporting timezone (stored value, then `ANALYTICS_REPORTING_TIMEZONE`), with `month`, half-open `fromDate`/`toDateExclusive` and `reportingTimezone`. `acceptedTrips` and `actualDistanceM` use the same accepted canonical predicate and `reportingAt` window as the company analytics total: rejected, pending review, unassessed, superseded aliases and undated trips are excluded; an accepted trip with a pending correction counts with its confirmed facts. Distance is `SUM(TRUNCATE(actual_distance_m, 1))` in exact MySQL decimals, the per-trip tenth-metre truncation of `addDistances`, so it equals `GET /api/v1/analytics/company` for the same month. Null distances count as trips only. `games` lists games with at least one such trip (`ets2` before `ats`), so early in a month it can be short or empty.
+- **Unavailable versus zero**: with a valid timezone and no trips the month is `available` with `0`, `"0"` and `[]`. Without a valid timezone it is `{ "status": "unavailable", "reason": "company_reporting_timezone" }` while `activeMembers` is still returned. A missing company row returns 409 `SETUP_REQUIRED`; database unavailability returns 503.
+- **Privacy**: the DTO is a closed allowlist with no IDs, names, per-driver or per-game totals, pending/review counters or projection fields. There is no small-number threshold, so a month with a single accepted trip reveals that trip's distance, without any identity.
+- **Cost**: one transaction with three non-locking consistent reads (company timezone, active member count, one aggregate statement). It never locks the company or member rows, so concurrent identity commands do not block it. The aggregate range-scans `trip_analytics_reporting`; `test/integration/public-company-stats.test.ts` checks the plan.
 
 ## Database schema and index optimization
 

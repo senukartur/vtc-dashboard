@@ -4,7 +4,7 @@ Use [routes](routes.md) and [OpenAPI](openapi.json) for exact methods/shapes. Ea
 
 | Planned screen / journey | Operation IDs | State and semantic checks / owner |
 | --- | --- | --- |
-| Public landing | `getPublicCompany`, `listPublicEvents`, `getPublicEvent` | VTC-016 landing and VTC-035 runtime public-event widget/list/detail; loading, empty, unavailable and private-event 404. Public reads never request participant/reason data. |
+| Public landing | `getPublicCompany`, `getPublicCompanyStats`, `listPublicEvents`, `getPublicEvent` | VTC-016 landing and VTC-035 runtime public-event widget/list/detail; loading, empty, unavailable and private-event 404. Public reads never request participant/reason data. VTC-050 stats band: show current-month figures only for `currentMonth.status = available` (real zeros allowed); 404/409/429/503, network failure or `unavailable` render an unavailable state, never 0. |
 | Membership application | `submitApplication` | Required nickname/email/Steam/games, optional Discord/introduction; pending submit, field errors, rate limit and safe confirmation without membership/email enumeration. VTC-016 |
 | Login / recovery | `getCsrf`, `login`, `logout`, `requestPasswordReset`, `resetPassword` | Generic invalid credentials, revoked/inactive session, CSRF failure, expiry, loading and no email enumeration. VTC-017 |
 | Invitation redemption | `redeemInvitation` | Seven-day expiry, used/replaced link, duplicate request, atomic account creation; no automatic session before commit. VTC-017 |
