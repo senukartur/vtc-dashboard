@@ -52,6 +52,8 @@
   align-items: start;
 }
 .trip-page .trips-list-area {
+  /* Containing block of last resort: a row-link overlay can never cover the app chrome. */
+  position: relative;
   display: grid;
   gap: 8px;
   min-width: 0;
@@ -123,8 +125,9 @@
 .trip-page .trips-cell-label {
   display: none;
 }
-/* Stretched route link: the whole row is one target without nesting controls in the row. */
-.trip-page .trips-row {
+/* The route link is the row's only control. Its overlay fills the route cell in the table
+   (WebKit ignores position: relative on table rows) and the whole card on phones. */
+.trip-page .trips-table td.trips-route {
   position: relative;
 }
 .trip-page .trips-row[data-selected] td {
@@ -148,6 +151,9 @@
   font-weight: 550;
   text-decoration: none;
 }
+.trip-page .trips-link:focus-visible {
+  outline-offset: 2px;
+}
 .trip-page .trips-link::after {
   content: "";
   position: absolute;
@@ -166,15 +172,6 @@
   }
   .trip-page .trips-link:hover {
     color: var(--focus);
-  }
-}
-@supports selector(:has(*)) {
-  .trip-page .trips-link:focus-visible {
-    outline: none;
-  }
-  .trip-page .trips-row:has(.trips-link:focus-visible) {
-    outline: 3px solid var(--focus);
-    outline-offset: -3px;
   }
 }
 .trip-page .trips-owner {
@@ -344,6 +341,7 @@
     white-space: nowrap;
   }
   .trip-page .trips-table tr.trips-row {
+    position: relative;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px 12px;
@@ -364,6 +362,7 @@
     box-shadow: none;
   }
   .trip-page .trips-table td.trips-route {
+    position: static;
     grid-column: 1 / -1;
   }
   .trip-page .trips-table .trips-numeric {

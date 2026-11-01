@@ -135,6 +135,22 @@ const table = (page: Page, name = "Trip list") => page.getByRole("table", { name
 const rowLink = (page: Page, tripId: string) => page.locator(`#trip-link-${tripId}`);
 const panel = (page: Page, tripId: string) =>
   page.getByRole("region", { name: routeName(tripId), exact: true });
+/** Id of the link that receives a click at the centre of the given cell, if any. */
+function linkAtCellCentre(page: Page, row: number, cell: number) {
+  return page.evaluate(
+    ([r, c]) => {
+      const td = document.querySelectorAll("tbody tr")[r]?.querySelectorAll("td")[c];
+      if (!td) throw new Error("CELL_NOT_RENDERED");
+      td.scrollIntoView({ block: "center" });
+      const at = td.getBoundingClientRect();
+      return (
+        document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2)?.closest("a")?.id ??
+        null
+      );
+    },
+    [row, cell] as const,
+  );
+}
 async function noOverflow(page: Page) {
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -188,6 +204,23 @@ test("trip list layout: tabs, compact filters, dense table or phone cards in RU 
   await expect(link).toHaveAccessibleName(routeName(first));
   const linkBox = await link.boundingBox();
   expect(linkBox?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 30);
+  // The row link is the only control. Its overlay covers the route cell in the table and the whole
+  // card on phones, but never other cells, other rows or the page chrome.
+  const routeCell = await trips.locator("tbody tr").first().locator("td").first().boundingBox();
+  if (!linkBox || !routeCell) throw new Error("ROUTE_NOT_RENDERED");
+  expect(linkBox.x).toBeGreaterThanOrEqual(routeCell.x - 0.5);
+  expect(linkBox.y).toBeGreaterThanOrEqual(routeCell.y - 0.5);
+  expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(routeCell.x + routeCell.width + 0.5);
+  expect(linkBox.y + linkBox.height).toBeLessThanOrEqual(routeCell.y + routeCell.height + 0.5);
+  expect(await linkAtCellCentre(page, 0, 0)).toBe(`trip-link-${first}`);
+  expect(await linkAtCellCentre(page, 2, 0)).toBe(`trip-link-${third}`);
+  expect(await linkAtCellCentre(page, 0, 1)).toBe(phone ? `trip-link-${first}` : null);
+  for (const target of [
+    page.getByRole("combobox", { name: "Game", exact: true }),
+    page.getByRole("tab", { name: "Accepted company trips", exact: true }),
+    header.getByRole("link", { name: "Saved drafts", exact: true }),
+  ])
+    await target.click({ trial: true, timeout: 2000 });
   const nextPage = page.getByRole("button", { name: "Next page", exact: true });
   expect((await nextPage.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 30);
   for (const locale of ["en", "ru"] as const) {
@@ -207,6 +240,8 @@ test("trip list layout: tabs, compact filters, dense table or phone cards in RU 
       expect(headBox?.width ?? 0).toBeLessThanOrEqual(1);
       const row = current.locator("tbody tr").first();
       await expect(row).toHaveRole("row");
+      await expect(row.locator("td").nth(1)).toHaveRole("cell");
+      await expect(row.locator(".trips-cell-label").first()).toHaveAttribute("aria-hidden", "true");
       for (const text of names.slice(1))
         await expect(row.getByText(text, { exact: true })).toBeVisible();
       const [routeBox, cargoBox, rowBox, listBox] = [
@@ -230,6 +265,9 @@ test("trip list layout: tabs, compact filters, dense table or phone cards in RU 
     await noOverflow(page);
     await capture(page, info, `trips-list-${locale}`);
   }
+  await catalogLanguage(page);
+  await header.getByRole("link", { name: "Saved drafts", exact: true }).click();
+  await expect(page).toHaveURL(/\/account\/reports$/);
   expectListParams(lists);
 });
 
