@@ -91,7 +91,7 @@ test("corrective URL history never crosses filter cursor authority and refresh r
   await page.getByLabel("Company decision", { exact: true }).selectOption("accepted");
   await next.click();
   await expect.poll(() => requests.at(-1)?.cursor).toBe("mine:ats:accepted");
-  await page.getByRole("button", { name: "Accepted company trips", exact: true }).click();
+  await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
   await next.click();
   await expect.poll(() => requests.at(-1)?.cursor).toBe("company:ats:");
   await page.goBack();
@@ -328,8 +328,9 @@ test("corrective Russian summaries visibly distinguish English catalog fallbacks
   );
   await page.goto("/account/trips");
   await catalogLanguage(page, "ru");
-  const flagged = page.locator("article.trip-row").first(),
-    ordinary = page.locator("article.trip-row").nth(1);
+  const rows = page.getByRole("table", { name: "Список рейсов" }).locator("tbody tr");
+  const flagged = rows.first(),
+    ordinary = rows.nth(1);
   await expect(flagged.getByText("Показано на английском", { exact: false })).toHaveCount(3);
   await expect(ordinary).not.toContainText("Показано на английском");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
