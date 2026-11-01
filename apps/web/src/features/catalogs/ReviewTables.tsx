@@ -122,14 +122,15 @@ function LabelCell({ value, russian }: { value: LabelValue; russian: boolean }) 
 }
 
 /** Only changes that returned label fields; this is not a complete translation queue. */
-export function TranslationsTable({ changes }: { changes: Change[] }) {
+export function TranslationsTable({ changes, more }: { changes: Change[]; more: boolean }) {
   const { t } = useTranslation("catalogs"),
     type = useChangeType();
   const rows = changes.flatMap((change) => {
     const labels = labelChange(change);
     return labels ? [{ change, labels }] : [];
   });
-  if (!rows.length) return <p>{t("none")}</p>;
+  // Later pages may still hold label changes, so "None" is final only after the last page.
+  if (!rows.length) return <p>{t(more ? "noLabelsLoaded" : "none")}</p>;
   return (
     <ScrollRegion label={t("translations")}>
       <Table size="xs" className="catalog-table catalog-translations-table">

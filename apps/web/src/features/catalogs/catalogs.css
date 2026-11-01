@@ -308,6 +308,10 @@
 .catalog-page .catalog-more {
   justify-self: start;
 }
+/* The saved-mapping status stays mounted as a live region; empty, it takes no grid gap. */
+.catalog-page .catalog-saved:empty {
+  position: absolute;
+}
 .catalog-page .catalog-inline-alert {
   display: flex;
   flex-wrap: wrap;
@@ -332,10 +336,12 @@
   font-size: var(--font-small);
   line-height: 1.5;
 }
+/* list-item keeps the native disclosure marker; padding and line-height reach the target. */
 .catalog-page .catalog-details summary {
-  display: flex;
-  align-items: center;
+  display: list-item;
   min-height: var(--target-min);
+  padding-block: 6px;
+  line-height: 18px;
   cursor: pointer;
   color: var(--secondary);
   font-size: var(--font-small);
@@ -365,6 +371,11 @@
 .catalog-page .catalog-file {
   height: auto;
   padding-block: 4px;
+}
+/* Steps sit in one row when the card has room and stack below 420px, so a glyph never wraps
+   away from its label. */
+.catalog-page .catalog-import {
+  container-type: inline-size;
 }
 .catalog-page .catalog-steps {
   display: flex;
@@ -398,6 +409,14 @@
 .catalog-page .catalog-step-pending {
   border-color: var(--border-strong);
   color: var(--muted);
+}
+@container (max-width: 420px) {
+  .catalog-page .catalog-steps {
+    flex-direction: column;
+  }
+  .catalog-page .catalog-steps .catalog-step {
+    text-align: left;
+  }
 }
 .catalog-page .catalog-artifact,
 .catalog-page .catalog-operation {

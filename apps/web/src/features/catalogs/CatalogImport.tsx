@@ -130,7 +130,10 @@ export function CatalogImport({
       <ol className="catalog-steps" aria-label={t("progressLabel")}>
         {steps.map((step) => (
           <li key={step.id} className={`catalog-step catalog-step-${step.state}`}>
-            <span aria-hidden="true">{glyph[step.state]}</span> <span>{t(stepLabel[step.id])}</span>
+            {/* A no-break space keeps the glyph on the same line as the label's first word. */}
+            <span aria-hidden="true">{glyph[step.state]}</span>
+            {" "}
+            <span>{t(stepLabel[step.id])}</span>
             <span className="visually-hidden">: {t(stateLabel[step.state])}</span>
           </li>
         ))}

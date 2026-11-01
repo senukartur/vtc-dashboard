@@ -404,11 +404,14 @@ test("mapping resolution submits only explicit candidate and required reason; mi
   await record.click();
   await expect.poll(() => submitted).toBe(1);
   await expect(dialog).toHaveCount(0);
-  await expect(
-    page.getByRole("status").filter({
-      hasText: "Mapping recorded. Candidate review has been refreshed.",
-    }),
-  ).toBeVisible();
+  const saved = page.getByRole("status").filter({
+    hasText: "Mapping recorded. Candidate review has been refreshed.",
+  });
+  await expect(saved).toBeVisible();
+  await expect(saved).toBeFocused();
+  await page.getByRole("tab", { name: "Changes · 4", exact: true }).click();
+  await page.getByRole("tab", { name: "Mappings", exact: true }).click();
+  await expect(saved).toHaveCount(0);
 });
 test("anonymous and revoked catalog sessions cannot retain private catalog content", async ({
   page,
@@ -720,6 +723,44 @@ test("coverage lists packs as row headers with contribution, reasons and a faile
   await expect(publishButton(page)).toBeDisabled();
 });
 
+test("translations without label rows on loaded pages do not claim a final empty result", async ({
+  page,
+}) => {
+  await mockCatalogs(page);
+  await page.route("**/diff?*", (route) => {
+    const next = new URL(route.request().url()).searchParams.has("cursor");
+    return route.fulfill({
+      json: list(
+        next
+          ? []
+          : [
+              {
+                entityId,
+                kind: "cargo",
+                changeKind: "changed",
+                fields: [{ field: "cargo_unit_mass_kg", before: 1000, after: 1200 }],
+                reasonCodes: [],
+              },
+            ],
+        next ? null : "synthetic-next",
+      ),
+    });
+  });
+  await openReview(page);
+  await page.getByRole("tab", { name: "Translations", exact: true }).click();
+  const panel = page.getByRole("tabpanel");
+  await expect(
+    panel.getByText("No label changes on the loaded pages.", { exact: true }),
+  ).toBeVisible();
+  await expect(panel.getByText("None", { exact: true })).toHaveCount(0);
+  await panel.getByRole("button", { name: "Load more", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
+  await expect(panel.getByText("None", { exact: true })).toBeVisible();
+  await expect(
+    panel.getByText("No label changes on the loaded pages.", { exact: true }),
+  ).toHaveCount(0);
+});
+
 test("translations show only returned labels with an explicit Russian fallback marker", async ({
   page,
 }) => {
@@ -921,6 +962,19 @@ test("catalog controls keep compact fine-pointer metrics and 40px touch targets"
   await expectTarget(publishButton(page), 30);
   await expectTarget(page.getByRole("button", { name: "Upload artifact", exact: true }), 30);
   await expectTarget(page.getByLabel("Normalized JSON artifact", { exact: true }), 32);
+  for (const name of ["Recover operation or candidate", /^Public provenance and permitted use/]) {
+    const summary = page.locator("summary").filter({ hasText: name });
+    expect(await summary.evaluate((node) => getComputedStyle(node).display)).toBe("list-item");
+    expect((await box(summary)).height).toBeGreaterThanOrEqual(coarse ? 40 : 29.5);
+  }
+  for (const step of await page
+    .getByRole("list", { name: "Import progress", exact: true })
+    .getByRole("listitem")
+    .all()) {
+    const glyph = await box(step.locator("span").nth(0)),
+      label = await box(step.locator("span").nth(1));
+    expect(Math.abs(glyph.y - label.y)).toBeLessThanOrEqual(2);
+  }
   const changes = candidate.getByRole("region", { name: "Changes", exact: true });
   await changes.focus();
   await expect(changes).toBeFocused();

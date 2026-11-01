@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogDTO, Game } from "../../shared/catalog-selectors/contracts.js";
 import {
@@ -42,7 +42,8 @@ export function CatalogMapping({
     id = useId(),
     [open, setOpen] = useState(false),
     [candidate, setCandidate] = useState(""),
-    [reason, setReason] = useState("");
+    [reason, setReason] = useState(""),
+    saved = useRef(false);
   const command = useCatalogCommand(),
     possible = mappingPossible(issue);
   const unavailable = t("unavailable"),
@@ -104,6 +105,11 @@ export function CatalogMapping({
                 onPointerDownOutside={(e) => {
                   if (command.pending) e.preventDefault();
                 }}
+                onCloseAutoFocus={(e) => {
+                  // After a save the review owns focus (its status line); skip the trigger.
+                  if (saved.current) e.preventDefault();
+                  saved.current = false;
+                }}
               >
                 <DialogTitle>{t("mappingTitle")}</DialogTitle>
                 <DialogDescription>
@@ -134,6 +140,7 @@ export function CatalogMapping({
                       commandResultSchema,
                     );
                     if (result) {
+                      saved.current = true;
                       setOpen(false);
                       await changed();
                       onSaved();

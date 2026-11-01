@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type CatalogDTO, revisionSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogPages, useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
@@ -129,7 +129,12 @@ export function CatalogReview({ id }: { id: string }) {
     [reason, setReason] = useState(""),
     [success, setSuccess] = useState(false),
     [stale, setStale] = useState(false),
-    [mappingSaved, setMappingSaved] = useState(false);
+    [mappingSaved, setMappingSaved] = useState(false),
+    savedRef = useRef<HTMLParagraphElement>(null);
+  // A saved mapping can remount or remove its row, so focus moves to the stable status line.
+  useEffect(() => {
+    if (mappingSaved) savedRef.current?.focus();
+  }, [mappingSaved]);
   const command = useCatalogCommand(),
     valid = !!r && !!manifest && r.version === manifest.version;
   const diff = useCatalogPages(
@@ -327,7 +332,13 @@ export function CatalogReview({ id }: { id: string }) {
               </li>
             ))}
           </ul>
-          <Tabs value={view} onValueChange={(next) => setView(next as View)}>
+          <Tabs
+            value={view}
+            onValueChange={(next) => {
+              setView(next as View);
+              setMappingSaved(false);
+            }}
+          >
             <TabsList aria-label={t("sectionsLabel")} className="catalog-tabs">
               <TabsTrigger value="changes">
                 {t("tabChanges", { n: number(changeCount(manifest)) })}
@@ -383,7 +394,9 @@ export function CatalogReview({ id }: { id: string }) {
                   </>
                 }
               >
-                {mappingSaved && <p role="status">{t("mappingSaved")}</p>}
+                <p ref={savedRef} role="status" tabIndex={-1} className="catalog-saved">
+                  {mappingSaved ? t("mappingSaved") : ""}
+                </p>
                 {issueItems.length > 0 && (
                   <ScrollRegion label={t("mappings")}>
                     <MappingsTable>
@@ -409,7 +422,9 @@ export function CatalogReview({ id }: { id: string }) {
             <TabsContent value="translations">
               <Panel foot={<p>{t("translationHelp")}</p>}>
                 <ChangeKindFilter value={changeKind} onChange={setChangeKind} />
-                {changes.length > 0 && <TranslationsTable changes={changes} />}
+                {changes.length > 0 && (
+                  <TranslationsTable changes={changes} more={diff.hasNextPage} />
+                )}
                 <PanelStates query={diff} />
               </Panel>
             </TabsContent>

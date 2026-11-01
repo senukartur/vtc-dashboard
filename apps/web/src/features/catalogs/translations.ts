@@ -139,6 +139,7 @@ export const catalogTranslations = {
     reasons: "Reason codes",
     none: "None",
     labelUnchanged: "Not changed",
+    noLabelsLoaded: "No label changes on the loaded pages.",
     changesFoot: "Retired entities are never deleted; historical references keep pointing to them.",
     coverageFoot:
       "The target is the base game plus all official DLCs. A pack that adds no catalog entities is recorded as checked and non-contributing.",
@@ -335,6 +336,7 @@ export const catalogTranslations = {
     reasons: "Коды причин",
     none: "Нет",
     labelUnchanged: "Без изменений",
+    noLabelsLoaded: "На загруженных страницах нет изменений названий.",
     changesFoot:
       "Архивированные сущности не удаляются; исторические ссылки продолжают на них указывать.",
     coverageFoot:
