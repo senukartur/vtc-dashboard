@@ -5,6 +5,7 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | Method / path | Operation | Capability | Owner |
 | --- | --- | --- | --- |
 | `GET /api/v1/public/company` | `getPublicCompany` | `public` | VTC-016 |
+| `GET /api/v1/public/company-stats` | `getPublicCompanyStats` | `public` | VTC-052 |
 | `GET /api/v1/public/events` | `listPublicEvents` | `public` | VTC-034 |
 | `GET /api/v1/public/events/{eventId}` | `getPublicEvent` | `public` | VTC-034 |
 | `POST /api/v1/public/applications` | `submitApplication` | `public` | VTC-015 |
