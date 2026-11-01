@@ -40,7 +40,10 @@ test("real catalog upload, durable import, review, publication, localized select
     phase = "IMPORT";
     await page.goto("/account/catalogs");
     await catalogLanguage(page);
-    await page.getByRole("combobox", { name: "Game", exact: true }).selectOption("ats");
+    await page
+      .getByRole("group", { name: "Game", exact: true })
+      .getByRole("button", { name: "ATS", exact: true })
+      .click();
     async function importArtifact() {
       const previousCandidate = new URL(page.url()).searchParams.get("candidate");
       await page.getByLabel("Normalized JSON artifact", { exact: true }).setInputFiles({
@@ -76,9 +79,9 @@ test("real catalog upload, durable import, review, publication, localized select
     await importArtifact();
     phase = "REVIEW";
     await expect(page.getByText("synthetic-build", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Coverage", exact: true }).click();
+    await page.getByRole("tab", { name: /^Coverage/ }).click();
     await expect(
-      page.getByRole("heading", { name: "Fictional base pack · base", exact: true }),
+      page.getByRole("rowheader", { name: "Fictional base pack · base", exact: true }),
     ).toBeVisible();
     phase = "PUBLICATION";
     await publish();
@@ -173,15 +176,17 @@ test("real catalog upload, durable import, review, publication, localized select
       page.getByRole("heading", { name: "Candidate review", exact: true }),
     ).toBeVisible();
     phase = "RELOAD_PUBLISHED_CANDIDATE";
-    await expect(page.getByText(`${candidate} · Published`, { exact: true })).toBeVisible();
+    const review = page.getByRole("region", { name: "Candidate review", exact: true });
+    await expect(review.getByText(candidate, { exact: true })).toBeVisible();
+    await expect(review.getByText("Published", { exact: true })).toBeVisible();
     phase = "RELOAD_BUILD";
     await expect(page.getByText("synthetic-build", { exact: true })).toBeVisible();
     phase = "RELOAD_COMPLETED_OPERATION";
     await expect(page.getByText("Import completed", { exact: true })).toBeVisible();
     phase = "RELOAD_RETIRED_ENTITY";
-    await expect(page.getByRole("heading", { name: chosen, exact: true })).toBeVisible();
+    await expect(page.getByRole("rowheader", { name: chosen, exact: true })).toBeVisible();
     phase = "RELOAD_RETIRED_CHANGE";
-    await expect(page.getByText("Before: false → After: true", { exact: true })).toBeVisible();
+    await expect(page.getByText("false → true", { exact: true })).toBeVisible();
     phase = "RELOAD_PUBLICATION";
     const publication = page.getByRole("combobox", { name: "Published revision", exact: true });
     await expect(publication).toHaveValue(candidate);
