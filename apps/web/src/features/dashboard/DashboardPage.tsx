@@ -101,12 +101,11 @@ function DashboardContent() {
         {t("title")}
       </h1>
       <p className="dashboard-subtitle">{t("subtitle")}</p>
-      {/* Announced only: per-block placeholders show loading without shifting the layout. */}
-      {!analyticsFailed && (
-        <p className="visually-hidden" role="status">
-          {pending ? t("states.loading") : ""}
-        </p>
-      )}
+      {/* Announced only: per-block placeholders show loading without shifting the layout.
+          Always mounted so screen readers announce text changes, including after Retry. */}
+      <p className="visually-hidden" role="status">
+        {pending && !analyticsFailed ? t("states.loading") : ""}
+      </p>
     </div>
   );
 

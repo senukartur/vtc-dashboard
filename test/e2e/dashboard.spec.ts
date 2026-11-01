@@ -32,6 +32,13 @@ const loadingStatus = (page: Page) =>
 // Capabilities of the fictional account fixture without company.read.
 const withoutCompanyRead = ["events.respond", "trips.read_own_private", "trips.submit_own"];
 
+// Requests only the dashboard makes; the forbidden view must issue none of them.
+const dashboardOnlyPaths = [
+  "/api/v1/analytics/",
+  "/api/v1/me/qualification-progress",
+  "/api/v1/me/upcoming-event",
+  "/api/v1/qualification-levels",
+];
 function requestsTo(state: DashboardMockState, prefix: string) {
   return state.requests.filter((url) => url.pathname.startsWith(prefix)).map(String);
 }
@@ -500,6 +507,43 @@ test.describe("Company Dashboard E2E", () => {
     await expect(qualification.getByText("No qualification assigned")).toHaveCount(0);
   });
 
+  test("keeps current values when a background refresh fails", async ({ page }) => {
+    await page.clock.install();
+    const state = await mockDashboardRoutes(page);
+    await page.goto("/account/dashboard");
+    await loaded(page);
+    await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+    const initial = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"].map(
+      (path) => lastRequest(state, path)?.href ?? "",
+    );
+
+    // Let the cached data go stale (TanStack marks it on a timer), break both endpoints, then
+    // leave and return to the same period: the cached query keys refetch and fail.
+    await page.clock.fastForward(60_000);
+    state.failures.analytics = 503;
+    state.failures.leaderboard = 503;
+    await periodSelect(page).selectOption("lastMonth");
+    await expect(page.getByRole("alert")).toBeVisible();
+    const refetched = Promise.all(
+      initial.map((href) =>
+        page.waitForResponse((response) => response.url() === href && response.status() === 503),
+      ),
+    );
+    await periodSelect(page).selectOption("thisMonth");
+    await refetched;
+    for (const href of initial)
+      expect(state.requests.filter((url) => url.href === href).length).toBe(2);
+    // Retained data has no visible change to wait for; give the failed responses time to settle.
+    await page.waitForTimeout(500);
+
+    await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+    await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByText("Could not load the leaderboard")).toHaveCount(0);
+    await expect(chartCard(page).locator("figcaption")).toContainText("48,430 km");
+  });
+
   test("explains missing company access without requesting statistics", async ({ page }, info) => {
     const state = await mockDashboardRoutes(page, { capabilities: withoutCompanyRead });
     await page.goto("/account/dashboard");
@@ -509,14 +553,12 @@ test.describe("Company Dashboard E2E", () => {
     ).toBeVisible();
     await expect(gameGroup(page)).toHaveCount(0);
     await expect(kpis(page)).toHaveCount(0);
-    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
-    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+    for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
     await capture(page, info, "dashboard-forbidden-en");
     await switchLanguage(page, "ru");
     await expect(page.getByText("Нет доступа к статистике компании.")).toBeVisible();
     await capture(page, info, "dashboard-forbidden-ru");
-    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
-    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+    for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
   });
 
   test("shows no qualification for members who cannot submit own trips", async ({ page }) => {
