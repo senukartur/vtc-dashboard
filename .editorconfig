@@ -9,3 +9,7 @@ indent_size = 2
 
 [*.py]
 indent_size = 4
+
+[third_party/**/OFL.txt]
+insert_final_newline = false
+trim_trailing_whitespace = false

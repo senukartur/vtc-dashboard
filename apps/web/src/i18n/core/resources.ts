@@ -26,7 +26,7 @@ export const core = {
     renderError: "This view could not be displayed",
     recover: "Reload this view",
     footer: "Yukon Union · Development foundations",
-    fontLicense: "M PLUS Rounded 1c font license",
+    fontLicense: "Huninn font license",
     nav: {
       primary: "Main navigation",
       workspace: "Workspace",
@@ -113,7 +113,7 @@ export const core = {
     renderError: "Не удалось отобразить страницу",
     recover: "Перезагрузить страницу",
     footer: "Yukon Union · Основа интерфейса",
-    fontLicense: "Лицензия шрифта M PLUS Rounded 1c",
+    fontLicense: "Лицензия шрифта Huninn",
     nav: {
       primary: "Основная навигация",
       workspace: "Рабочее пространство",
