@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { Locator, Page, Response, TestInfo } from "@playwright/test";
 import { expect, test } from "./support/fixtures.ts";
 
 async function capture(page: Page, info: TestInfo, name: string) {
@@ -7,6 +7,9 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path, fullPage: true, animations: "disabled" });
   await info.attach(name, { path, contentType: "image/png" });
 }
+
+const bundledFont = /\/assets\/m-plus-rounded-1c-[^/]+\.woff2$/;
+const fontStack = /^"M PLUS Rounded 1c", system-ui, sans-serif$/;
 
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -581,21 +584,64 @@ for (const path of ["/foundation/member/", "/FoUnDaTiOn/MeMbEr"]) {
 test("dark public and member shells retain readable controls, bundled font/license and working navigation", async ({
   page,
 }, info) => {
+  const requested: string[] = [];
+  const fontResponses: Response[] = [];
+  page.on("request", (request) => requested.push(request.url()));
+  page.on("response", (response) => {
+    if (bundledFont.test(new URL(response.url()).pathname)) fontResponses.push(response);
+  });
   await page.goto("/foundation/member");
+  const origin = new URL(page.url()).origin;
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Композиция кабинета участника");
   await page.evaluate(() => document.fonts.ready);
+  for (const weight of [400, 700])
+    expect(
+      await page.evaluate(async (weight) => {
+        const font = `${weight} 14px "M PLUS Rounded 1c"`;
+        const faces = await document.fonts.load(font, "Язык · Yukon Union");
+        return (
+          document.fonts.check(font, "Язык · Yukon Union") &&
+          faces.some(
+            (face) =>
+              face.family.replaceAll('"', "") === "M PLUS Rounded 1c" && face.status === "loaded",
+          )
+        );
+      }, weight),
+    ).toBe(true);
+  await expect(page.getByRole("main")).toHaveCSS("font-family", fontStack);
+  const fonts = await Promise.all(
+    fontResponses.map(async (response) => ({
+      url: new URL(response.url()),
+      status: response.status(),
+      type: response.headers()["content-type"],
+      bytes: (await response.body()).length,
+    })),
+  );
+  expect(fonts.length).toBeGreaterThan(0);
+  for (const font of fonts) {
+    expect(font.url.origin).toBe(origin);
+    expect(font.status).toBe(200);
+    expect(font.type).toBe("font/woff2");
+    expect(font.url.pathname).not.toMatch(/m-plus-rounded-1c-\d{3}-ext-/);
+  }
+  // The core Latin/Cyrillic faces of one page stay below the former 193056-byte font file.
+  expect(fonts.reduce((total, font) => total + font.bytes, 0)).toBeLessThan(193056);
+  await page.evaluate(() => document.fonts.load('400 14px "M PLUS Rounded 1c"', "Łódź"));
+  await expect
+    .poll(() =>
+      fontResponses.some((response) =>
+        /\/assets\/m-plus-rounded-1c-400-ext-[^/]+\.woff2$/.test(new URL(response.url()).pathname),
+      ),
+    )
+    .toBe(true);
   expect(
-    await page.evaluate(async () => {
-      const faces = await document.fonts.load('14px "Onest"', "Язык · Yukon Union");
-      return (
-        document.fonts.check('14px "Onest"', "Язык · Yukon Union") &&
-        faces.some((font) => font.family === "Onest" && font.status === "loaded")
-      );
+    requested.filter((url) => {
+      const parsed = new URL(url);
+      return !["data:", "blob:"].includes(parsed.protocol) && parsed.origin !== origin;
     }),
-  ).toBe(true);
-  await expect(page.getByRole("main")).toHaveCSS("font-family", /Onest/);
+  ).toEqual([]);
   const license = await page
-    .getByRole("link", { name: "Лицензия шрифта Onest", exact: true })
+    .getByRole("link", { name: "Лицензия шрифта M PLUS Rounded 1c", exact: true })
     .getAttribute("href");
   expect(license).toMatch(/^\/assets\/OFL-[^/]+\.txt$/);
   const response = await page.request.get(license ?? "");
@@ -604,7 +650,7 @@ test("dark public and member shells retain readable controls, bundled font/licen
     createHash("sha256")
       .update(await response.body())
       .digest("hex"),
-  ).toBe("071195d8806e226faeee60259c28ca67b458227af5195a73f5cfcab06e3003bc");
+  ).toBe("2f6ab907c3fc803a369cf3a25f906b8e6b528fa176dde716de6aba2e3895c504");
   const sidebar = page.getByRole("complementary", {
     name: "Пример рабочего пространства",
     exact: true,
@@ -750,6 +796,124 @@ test("compact control sizes follow pointer type", async ({ page }, info) => {
   await capture(page, info, `compact-controls-${coarse ? "coarse" : "fine"}`);
 });
 
+test("CSS weights render the shipped font faces and tabular digits stay aligned", async ({
+  page,
+}) => {
+  await page.goto("/foundation");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.locator(".table th").first()).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  // Rendered arrows and symbols that the source fonts contain; see the subset README.
+  const renderedSymbols = "←↑→↓↗—№∅◇●✓✕×•«»·–";
+  await page.evaluate(async (symbols) => {
+    const visible = Array.from(document.querySelectorAll(".wordmark")).find(
+      (element) => element.getClientRects().length > 0,
+    );
+    visible?.setAttribute("data-font-probe", "wordmark");
+    for (const [name, weight] of [
+      ["numeric", ""],
+      ["numeric-bold", "700"],
+    ] as const) {
+      const probe = document.createElement("span");
+      probe.className = "numeric";
+      probe.style.fontWeight = weight;
+      probe.setAttribute("data-font-probe", name);
+      probe.textContent = "0123456789";
+      document.querySelector("main")?.append(probe);
+    }
+    for (const [name, text] of [
+      ["symbols", symbols],
+      ["ellipsis", "…"],
+    ] as const) {
+      const probe = document.createElement("span");
+      probe.setAttribute("data-font-probe", name);
+      probe.textContent = text;
+      document.querySelector("main")?.append(probe);
+    }
+    await Promise.all(
+      [400, 500, 700].map((weight) =>
+        document.fonts.load(`${weight} 14px "M PLUS Rounded 1c"`, `Yukon 0123456789${symbols}`),
+      ),
+    );
+  }, renderedSymbols);
+  const session = await page.context().newCDPSession(page);
+  await session.send("DOM.enable");
+  await session.send("CSS.enable");
+  const { root } = await session.send("DOM.getDocument", { depth: -1 });
+  const platformFonts = async (selector: string) => {
+    const { nodeId } = await session.send("DOM.querySelector", { nodeId: root.nodeId, selector });
+    expect(nodeId, selector).toBeGreaterThan(0);
+    return (await session.send("CSS.getPlatformFontsForNode", { nodeId })).fonts;
+  };
+  const faces = async (selector: string) =>
+    (await platformFonts(selector))
+      .filter((font) => font.isCustomFont)
+      .map((font) => font.postScriptName);
+  // Upstream PostScript names; 600 and 750 have no static face and resolve to Bold.
+  expect(await faces("main h1")).toEqual(["RoundedMplus1c-Bold"]);
+  expect(await faces("[data-font-probe=wordmark]")).toEqual(["RoundedMplus1c-Bold"]);
+  expect(await faces(".table th")).toEqual(["RoundedMplus1c-Medium"]);
+  expect(await faces("main .lead")).toEqual(["RoundedMplus1c-Regular"]);
+  expect(await faces("[data-font-probe=numeric]")).toEqual(["RoundedMplus1c-Regular"]);
+  expect(await faces("[data-font-probe=numeric-bold]")).toEqual(["RoundedMplus1c-Bold"]);
+  // Every rendered symbol comes from the core face; the centred-dot ellipsis stays in fallback.
+  expect(
+    (await platformFonts("[data-font-probe=symbols]")).map((font) => [
+      font.postScriptName,
+      font.isCustomFont,
+      font.glyphCount,
+    ]),
+  ).toEqual([["RoundedMplus1c-Regular", true, [...renderedSymbols].length]]);
+  expect(await faces("[data-font-probe=ellipsis]")).toEqual([]);
+  const declared = await page.evaluate(() => {
+    const items: { weight: string; range: string }[] = [];
+    const named: Record<string, string> = { normal: "400", bold: "700" };
+    document.fonts.forEach((face) => {
+      if (face.family.replaceAll('"', "") === "M PLUS Rounded 1c")
+        items.push({ weight: named[face.weight] ?? face.weight, range: face.unicodeRange });
+    });
+    return items;
+  });
+  const inRange = (range: string, code: number) =>
+    range.split(",").some((part) => {
+      const [start = "", end = start] = part.trim().replace(/^U\+/i, "").split("-");
+      return Number.parseInt(start, 16) <= code && code <= Number.parseInt(end, 16);
+    });
+  expect(declared).toHaveLength(6);
+  for (const weight of ["400", "500", "700"]) {
+    const core = declared.filter((face) => face.weight === weight && inRange(face.range, 0x41));
+    expect(core, weight).toHaveLength(1);
+    for (const symbol of renderedSymbols)
+      expect(inRange(core[0]?.range ?? "", symbol.codePointAt(0) ?? 0), symbol).toBe(true);
+  }
+  expect(declared.filter((face) => inRange(face.range, 0x2026))).toEqual([]);
+  const result = await page.evaluate(() => {
+    const spreads = ["numeric", "numeric-bold"].map((name) => {
+      const probe = document.querySelector<HTMLElement>(`[data-font-probe=${name}]`);
+      if (!probe) throw new Error("MISSING_PROBE");
+      const widths = ["1111111111", "0000000000", "8888888888"].map((digits) => {
+        probe.textContent = digits;
+        return probe.getBoundingClientRect().width;
+      });
+      return {
+        numeric: getComputedStyle(probe).fontVariantNumeric,
+        spread: Math.max(...widths) - Math.min(...widths),
+      };
+    });
+    return {
+      synthesis: getComputedStyle(document.querySelector("main h1") ?? document.body)
+        .fontSynthesisWeight,
+      spreads,
+    };
+  });
+  expect(result.synthesis).toBe("none");
+  expect(result.spreads).toHaveLength(2);
+  for (const { numeric, spread } of result.spreads) {
+    expect(numeric).toBe("tabular-nums");
+    expect(spread).toBeLessThan(0.5);
+  }
+});
+
 for (const locale of ["ru", "en"]) {
   test(`segmented control and tabs keyboard semantics ${locale}`, async ({ page }, info) => {
     await page.goto("/foundation");
@@ -805,11 +969,19 @@ for (const locale of ["ru", "en"]) {
 test("controlled font-download failure keeps the Cyrillic interface usable with the system fallback", async ({
   page,
 }, info) => {
-  await page.route(/\/assets\/Onest-[^/]+\.ttf$/, (route) => route.abort("failed"));
+  let aborted = 0;
+  await page.route(bundledFont, (route) => {
+    aborted += 1;
+    return route.abort("failed");
+  });
   await page.goto("/foundation/member");
   await page.evaluate(() => document.fonts.ready);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Композиция кабинета участника");
-  expect(await page.evaluate(() => document.fonts.check('14px "Onest"', "Язык"))).toBe(false);
+  expect(aborted).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.fonts.check('14px "M PLUS Rounded 1c"', "Язык"))).toBe(
+    false,
+  );
+  await expect(page.getByRole("main")).toHaveCSS("font-family", fontStack);
   await expect(page.getByRole("textbox", { name: "Текст примера", exact: true })).toBeVisible();
   await noOverflow(page);
   await capture(page, info, "font-unavailable-system-fallback");
