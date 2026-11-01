@@ -1,0 +1,201 @@
+/* Compact public account entry screens. Feature CSS loads before shared/styles.css, so these
+   selectors are compound to win over the shared single-class rules; metrics come from tokens. */
+.auth-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+.auth-layout .auth-panel {
+  width: min(100%, 360px);
+  gap: 16px;
+  align-content: start;
+  margin-block: clamp(8px, 4vw, 32px);
+}
+.auth-layout .auth-brand {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .auth-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 32px;
+    align-items: center;
+    min-height: min(640px, calc(100dvh - 220px));
+  }
+  .auth-layout .auth-brand {
+    display: block;
+    align-self: stretch;
+    justify-self: stretch;
+  }
+}
+/* Field label row: the label and an optional related link share one line above the control. */
+.field .field-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+.field-label-row > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h-xs);
+  margin-inline-start: auto;
+  font-size: var(--font-small);
+}
+
+.auth-panel .field {
+  gap: 4px;
+}
+.auth-panel form > .button {
+  width: 100%;
+  min-height: var(--field-h-sm);
+}
+.auth-panel > a {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-h-xs);
+  font-size: var(--font-small);
+}
+.auth-panel .auth-back {
+  gap: 4px;
+  color: var(--secondary);
+  text-decoration: none;
+}
+.auth-panel .auth-back:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.auth-panel .auth-alt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.auth-panel .auth-alt a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--control-h-xs);
+}
+.auth-panel .auth-steps {
+  display: grid;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-small);
+  color: var(--muted);
+}
+.auth-steps .auth-steps-title {
+  font-size: var(--font-small);
+  color: var(--secondary);
+}
+.auth-steps ol {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-inline-start: 18px;
+  list-style: decimal;
+  line-height: 1.5;
+}
+.auth-steps li[aria-current="step"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* In-field password visibility toggle; the input reserves room so text never runs under it. */
+.field .password-field {
+  position: relative;
+  min-width: 0;
+}
+.password-field .input {
+  display: block;
+  padding-inline-end: calc(var(--field-h-sm) + 4px);
+}
+.password-field .input::-ms-reveal {
+  display: none;
+}
+.password-field .password-toggle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--field-h-sm);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  background: transparent;
+  color: var(--muted);
+}
+.password-field .password-toggle[aria-pressed="false"]:hover:not(:disabled) {
+  color: var(--foreground);
+}
+.password-field .password-toggle[aria-pressed="true"] {
+  color: var(--focus);
+}
+.password-field .password-toggle:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.password-field .password-toggle:disabled {
+  background: transparent;
+  color: var(--muted);
+}
+
+/* Decorative, static brand panel (aria-hidden, no motion); only shown beside the form on wide screens. */
+.auth-layout .auth-brand {
+  position: relative;
+  overflow: hidden;
+  min-height: 420px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: radial-gradient(
+    120% 90% at 80% 10%,
+    var(--surface-active) 0%,
+    var(--surface) 45%,
+    var(--chrome) 100%
+  );
+}
+.auth-brand .auth-brand-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.auth-brand-map .brand-road {
+  fill: none;
+  stroke: var(--chart);
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.auth-brand-map .brand-lane {
+  fill: none;
+  stroke: var(--focus);
+  stroke-dasharray: 16 20;
+  opacity: 0.5;
+}
+.auth-brand-map .brand-stop {
+  fill: var(--foreground);
+}
+.auth-brand .auth-brand-copy {
+  position: absolute;
+  inset-inline: 32px;
+  bottom: 32px;
+  display: grid;
+  gap: 8px;
+}
+.auth-brand .auth-brand-heading {
+  font-size: 28px;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+}

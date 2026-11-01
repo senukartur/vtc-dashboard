@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Label, FieldError } from "../../shared/ui/primitives.js";
+import { PasswordInput } from "./PasswordInput.js";
 import type { AccountFailure } from "./transport.js";
 export interface AccountField {
   name: string;
@@ -12,11 +13,21 @@ export interface AccountField {
   hint?: string | undefined;
   validate: (value: string, values: Record<string, string>) => boolean;
   options?: { value: string; label: string }[];
+  /** Related action shown on the label row, outside the label element (for example a link). */
+  labelAction?: ReactNode;
 }
 export const emailValid = (value: string) =>
   value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 export const newPasswordValid = (value: string) => value.length >= 12 && value.length <= 128;
 export const codeValid = (value: string) => value.length >= 1 && value.length <= 128;
+// Fixed toggle names; aria-pressed carries the shown/hidden state.
+function toggleName(label: string) {
+  return label === "password" || label === "newPassword"
+    ? "showPassword"
+    : label === "confirmation"
+      ? "showConfirmation"
+      : "showField";
+}
 export function Form({
   id,
   fields,
@@ -58,6 +69,8 @@ export function Form({
       className="stack"
       aria-label={t(id)}
       onSubmit={handleSubmit(async (values) => {
+        // Submit with masked fields (values stay) so browsers and password managers see passwords.
+        setVisible({});
         clearErrors();
         const invalidFields = fields.filter((f) => !f.validate(values[f.name] ?? "", values));
         if (invalidFields.length) {
@@ -92,66 +105,71 @@ export function Form({
         </div>
       )}
       <fieldset className="account-fields stack" disabled={pending}>
-        {fields.map((field) => (
-          <div className="field" key={field.name}>
-            <Label htmlFor={`${id}-${field.name}`}>{t(field.label)}</Label>
-            {field.hint && (
-              <p id={`${id}-${field.name}-hint`} className="muted">
-                {t(field.hint)}
-              </p>
-            )}
-            {field.options ? (
-              <select
-                id={`${id}-${field.name}`}
-                className="input"
-                aria-invalid={Boolean(errors[field.name])}
-                aria-describedby={`${id}-${field.name}-error`}
-                {...register(field.name)}
-              >
-                {field.options.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <Input
-                id={`${id}-${field.name}`}
-                type={
-                  field.type === "password" && visible[field.name] ? "text" : (field.type ?? "text")
-                }
-                autoComplete={field.autocomplete ?? "off"}
-                aria-required="true"
-                aria-invalid={Boolean(errors[field.name])}
-                aria-describedby={
-                  [
-                    field.hint ? `${id}-${field.name}-hint` : "",
-                    errors[field.name] ? `${id}-${field.name}-error` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ") || undefined
-                }
-                {...register(field.name)}
-              />
-            )}
-            {field.type === "password" && (
-              <Button
-                type="button"
-                variant="ghost"
-                aria-pressed={Boolean(visible[field.name])}
-                aria-controls={`${id}-${field.name}`}
-                onClick={() => setVisible((old) => ({ ...old, [field.name]: !old[field.name] }))}
-              >
-                {t(visible[field.name] ? "hidePassword" : "showPassword", {
-                  field: t(field.label),
-                })}
-              </Button>
-            )}
-            <FieldError id={`${id}-${field.name}-error`}>
-              {errors[field.name] ? t("invalidField", { field: t(field.label) }) : undefined}
-            </FieldError>
-          </div>
-        ))}
+        {fields.map((field) => {
+          const control = `${id}-${field.name}`;
+          const describedBy =
+            [field.hint ? `${control}-hint` : "", errors[field.name] ? `${control}-error` : ""]
+              .filter(Boolean)
+              .join(" ") || undefined;
+          const label = <Label htmlFor={control}>{t(field.label)}</Label>;
+          return (
+            <div className="field" key={field.name}>
+              {field.labelAction ? (
+                <div className="field-label-row">
+                  {label}
+                  {field.labelAction}
+                </div>
+              ) : (
+                label
+              )}
+              {field.options ? (
+                <select
+                  id={control}
+                  className="input"
+                  aria-invalid={Boolean(errors[field.name])}
+                  aria-describedby={`${control}-error`}
+                  {...register(field.name)}
+                >
+                  {field.options.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              ) : field.type === "password" ? (
+                <PasswordInput
+                  id={control}
+                  visible={Boolean(visible[field.name])}
+                  onToggle={() => setVisible((old) => ({ ...old, [field.name]: !old[field.name] }))}
+                  toggleLabel={t(toggleName(field.label), { field: t(field.label) })}
+                  autoComplete={field.autocomplete ?? "off"}
+                  aria-required="true"
+                  aria-invalid={Boolean(errors[field.name])}
+                  aria-describedby={describedBy}
+                  {...register(field.name)}
+                />
+              ) : (
+                <Input
+                  id={control}
+                  type={field.type ?? "text"}
+                  autoComplete={field.autocomplete ?? "off"}
+                  aria-required="true"
+                  aria-invalid={Boolean(errors[field.name])}
+                  aria-describedby={describedBy}
+                  {...register(field.name)}
+                />
+              )}
+              {field.hint && (
+                <p id={`${control}-hint`} className="muted">
+                  {t(field.hint)}
+                </p>
+              )}
+              <FieldError id={`${control}-error`}>
+                {errors[field.name] ? t("invalidField", { field: t(field.label) }) : undefined}
+              </FieldError>
+            </div>
+          );
+        })}
       </fieldset>
       {failure && (
         <p role="alert" className="field-error">
