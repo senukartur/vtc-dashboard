@@ -1,0 +1,293 @@
+/* Account settings: section navigation beside (or above, on phones) rows of settings. */
+.account-page.account-settings {
+  display: grid;
+  gap: 16px;
+  max-width: 980px;
+}
+.account-settings-aside {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+}
+.account-settings .account-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-inline: 6px;
+}
+.account-settings .account-identity .user-avatar {
+  width: 36px;
+  height: 36px;
+}
+.account-settings .account-identity-text {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.account-settings .account-identity-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.account-settings .account-identity-role {
+  color: var(--muted);
+  font-size: var(--font-badge);
+}
+.account-settings .account-sections-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.account-settings .account-section-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target-min);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--secondary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.account-settings .account-section-link:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.account-settings .account-section-link[aria-current="page"] {
+  border-color: var(--selection-border);
+  background: var(--surface-active);
+  color: var(--foreground);
+}
+.account-settings .account-section-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.account-settings .account-attention {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pending);
+}
+.account-settings-content {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
+}
+.account-settings .page-heading {
+  gap: 2px;
+  padding: 0;
+}
+.account-settings .page-heading p {
+  font-size: var(--font-small);
+}
+@media (min-width: 768px) {
+  .account-page.account-settings {
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .account-settings .account-sections-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+  }
+  .account-settings .account-section-link {
+    border-color: transparent;
+  }
+}
+
+/* Cards of settings rows. */
+.account-settings .settings-card {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.account-settings .settings-card > h2 {
+  margin: 12px 14px 0;
+}
+.account-settings .settings-card-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.account-settings .settings-row {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.account-settings .settings-card > .settings-row:first-child,
+.account-settings .settings-card > h2 + .settings-card-body,
+.account-settings .settings-card > h2 + .settings-row {
+  border-top: 0;
+}
+.account-settings .settings-card > h2 + .settings-row {
+  margin-top: 0;
+}
+.account-settings .settings-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  min-width: 0;
+}
+.account-settings .settings-row-text {
+  display: grid;
+  flex: 1 1 240px;
+  gap: 2px;
+  min-width: 0;
+}
+.account-settings .settings-row-title {
+  font-size: var(--font-body);
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.account-settings .settings-row-hint {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.account-settings .settings-row-hint a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  overflow-wrap: anywhere;
+}
+.account-settings .settings-row-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.account-settings .settings-row-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.account-settings .settings-row p {
+  overflow-wrap: anywhere;
+}
+.account-settings .settings-row h4 {
+  font-size: var(--font-body);
+  font-weight: 600;
+  margin: 0;
+}
+.account-settings .settings-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 1.45em;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.account-settings .settings-status-saved {
+  color: var(--accepted);
+}
+.account-settings .badge-pending {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+
+/* Disabled-but-focusable actions keep their explanation reachable by keyboard. */
+.account-settings .button[aria-disabled="true"] {
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.account-settings .button[aria-disabled="true"]:hover {
+  background: transparent;
+}
+
+/* Verification notice above the security rows. */
+.account-settings .settings-notice {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--pending);
+  border-radius: var(--radius);
+  background: var(--pending-surface);
+}
+.account-settings .settings-notice-text {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--foreground);
+}
+.account-settings .settings-notice-text svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--pending);
+}
+
+/* Inline single-field forms: the field grows, Save stays beside it while there is room. */
+.account-settings .settings-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.account-settings .settings-inline-form .input {
+  flex: 1 1 200px;
+  width: auto;
+  max-width: 320px;
+  font-size: var(--font-body);
+}
+@media (pointer: coarse) {
+  .account-settings .settings-inline-form .input {
+    font-size: 16px;
+  }
+}
+.account-settings .settings-row .field-error {
+  flex-basis: 100%;
+}
+
+/* Disclosed row content; collapsed panels stay mounted so their state survives. */
+.account-settings .settings-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.account-settings .settings-panel[hidden] {
+  display: none;
+}
+/* An empty live region stays in the accessibility tree without taking a grid gap. */
+.account-settings .settings-status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+/* Buttons keep their natural width inside rows, notices and below the cards. */
+.account-settings-content > .button {
+  justify-self: start;
+}
+.account-settings .settings-panel form > .button,
+.account-settings .settings-notice form > .button {
+  justify-self: start;
+}
+/* Field-less shared forms (code requests) render an empty fieldset; it adds no gap here. */
+.account-settings .account-fields:empty {
+  display: none;
+}

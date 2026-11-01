@@ -16,6 +16,7 @@ import {
   routeMeta,
   visibleGroups,
 } from "../../apps/web/src/app/navigation-model.ts";
+import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
 import { core } from "../../apps/web/src/i18n/core/resources.ts";
 
 const shape = (roles: Role[]) =>
@@ -66,7 +67,14 @@ test("empty or unknown capabilities show no groups and personal pages stay out o
   expect(visibleGroups(["unknown.capability", "leadership.transfer"])).toEqual([]);
   expect(canReport([])).toBe(false);
   const routes = navGroups.flatMap((group) => group.items.map((item) => item.route));
-  for (const personal of ["account", "connections", "notifications"] as const)
+  for (const personal of [
+    "account",
+    "accountProfile",
+    "accountSecurity",
+    "accountPreferences",
+    "connections",
+    "notifications",
+  ] as const)
     expect(routes).not.toContain(personal);
   expect(new Set(routes).size).toBe(routes.length);
 });
@@ -101,6 +109,24 @@ test("every workspace route has metadata and resolves through router ranking", (
     group: "account",
     titleKey: "nav.account.security",
   });
+  expect(matchRouteMeta("/account/security")).toEqual({
+    id: "accountSecurity",
+    group: "account",
+    titleKey: "account:sections.security",
+  });
+  expect(matchRouteMeta("/account/profile")).toMatchObject({
+    id: "accountProfile",
+    titleKey: "account:sections.profile",
+  });
+  expect(matchRouteMeta("/ACCOUNT/Preferences")).toMatchObject({
+    id: "accountPreferences",
+    titleKey: "account:sections.preferences",
+  });
+  expect(matchRouteMeta("/account/connections")).toEqual({
+    id: "connections",
+    group: "account",
+    titleKey: "account:sections.connections",
+  });
   for (const unknown of ["/", "/accounting", "/account/unknown", "/foundation/member"])
     expect(matchRouteMeta(unknown)).toBeNull();
 });
@@ -132,6 +158,9 @@ test("sign-in returns only to same-app workspace locations", () => {
     }),
   ).toBe("/account/trips?scope=company#x");
   expect(loginDestination({ from: { pathname: "/account" } })).toBe("/account");
+  expect(loginDestination({ from: { pathname: "/account/preferences", hash: "#x" } })).toBe(
+    "/account/preferences#x",
+  );
 });
 
 test("primary role follows leadership precedence", () => {
@@ -178,8 +207,14 @@ test("every navigation label used by the model exists in Russian and English", (
     }
   for (const entry of accountLinks({ capabilities: ["company.read"], memberId: "x" }))
     keys.add(entry.labelKey);
-  for (const key of keys)
-    for (const locale of [core.en, core.ru]) expect(typeof lookup(locale, key), key).toBe("string");
+  // Account section titles resolve in the account namespace; everything else is core.
+  for (const key of keys) {
+    const [namespace, path] = key.startsWith("account:")
+      ? [accountTranslations, key.slice("account:".length)]
+      : [core, key];
+    for (const locale of [namespace.en, namespace.ru])
+      expect(typeof lookup(locale, path), key).toBe("string");
+  }
   expect(Object.keys(core.ru.nav.items)).toEqual(Object.keys(core.en.nav.items));
   expect(Object.keys(core.ru.nav.bar)).toEqual(Object.keys(core.en.nav.bar));
 });
@@ -282,11 +317,11 @@ test("account links are shared by the user menu and the More sheet", () => {
   const memberId = "41000000-0000-4000-8000-000000000017";
   expect(accountLinks({ capabilities: capabilities(["trainee"]), memberId })).toEqual([
     { id: "profile", to: `/account/drivers/${memberId}`, labelKey: "nav.myProfile" },
-    { id: "security", to: "/account", labelKey: "nav.account.security" },
+    { id: "security", to: "/account/security", labelKey: "nav.account.security" },
     { id: "connections", to: "/account/connections", labelKey: "nav.account.connections" },
   ]);
   expect(accountLinks({ capabilities: [], memberId })).toEqual([
-    { id: "security", to: "/account", labelKey: "nav.account.security" },
+    { id: "security", to: "/account/security", labelKey: "nav.account.security" },
   ]);
   expect(accountLinks({ capabilities: ["company.read"], memberId: "a/b" })[0]?.to).toBe(
     "/account/drivers/a%2Fb",
