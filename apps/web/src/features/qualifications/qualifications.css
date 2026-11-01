@@ -1,6 +1,10 @@
 .qualification-workspace {
-  max-width: 70rem;
-  margin-inline: auto;
+  gap: var(--space);
+  min-width: 0;
+}
+.qualification-workspace .card {
+  gap: 8px;
+  padding: 12px 14px;
 }
 .qualification-workspace :is(p, small, code, dd, li, button, summary) {
   overflow-wrap: anywhere;
@@ -8,8 +12,8 @@
 .qualification-workspace fieldset {
   min-width: 0;
   border: 1px solid var(--border);
-  padding: 1rem;
-  border-radius: 0.5rem;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
 }
 .qualification-workspace button {
   white-space: normal;
@@ -20,37 +24,203 @@
   min-height: 1.25rem;
   accent-color: var(--accent);
 }
+.qualification-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.qualification-title {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.qualification-intro {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.qualification-roles {
+  color: var(--muted);
+  font-size: var(--font-badge);
+  line-height: 1.5;
+}
+.qualification-banner {
+  padding: 8px 12px;
+  border: 1px solid var(--pending);
+  border-left-width: 3px;
+  border-radius: var(--radius-control);
+  background: var(--pending-surface);
+  color: var(--pending);
+  font-size: var(--font-small);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.qualification-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space);
+  align-items: start;
+  min-width: 0;
+}
+@media (min-width: 1051px) {
+  .qualification-layout {
+    grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  }
+}
+.qualification-workspace .qualification-level-panel[hidden] {
+  display: none;
+}
+.qualification-muted,
+.qualification-panel-meta {
+  color: var(--muted);
+}
+.qualification-panel-meta {
+  font-size: var(--font-small);
+}
+/* Levels table: the selected row carries the accent surface and an inset bar, not color alone. */
+.qualification-levels thead th:nth-child(1) {
+  width: 22%;
+}
+.qualification-levels thead th:nth-child(5) {
+  width: 22%;
+}
+.qualification-levels thead th:nth-child(6) {
+  width: 17%;
+}
+.qualification-levels :is(th, td) {
+  vertical-align: middle;
+}
+.qualification-levels :is(th, td):first-child {
+  padding-left: 8px;
+}
+.qualification-levels :is(th, td):last-child {
+  padding-right: 8px;
+}
+.qualification-levels tbody th {
+  padding-block: 2px;
+}
+.qualification-levels tr[data-selected] > * {
+  background: var(--accent-soft);
+}
+.qualification-levels tr[data-selected] > th {
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+.qualification-level-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--target-min);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.qualification-level-button:hover {
+  background: var(--surface-hover);
+}
+.qualification-level-button:focus-visible {
+  outline-offset: -3px;
+}
+.qualification-ordinal {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.qualification-cell-label {
+  display: none;
+}
+.qualification-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.qualification-badge-pending {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.qualification-edit {
+  justify-self: start;
+  min-height: var(--target-min);
+}
 .qualification-check {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 8px;
   min-height: var(--target-min);
 }
 .qualification-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 8px 12px;
+  margin: 0;
 }
 .qualification-facts dd {
-  margin: 0.35rem 0 0;
+  margin: 2px 0 0;
   font-variant-numeric: tabular-nums;
 }
 .qualification-facts dt {
   color: var(--muted);
+  font-size: var(--font-small);
+}
+.qualification-progress-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.qualification-progress dd {
+  display: grid;
+  gap: 4px;
+}
+.qualification-bar {
+  display: block;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-active);
+}
+.qualification-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.qualification-callout {
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--pending);
+  border-left-width: 3px;
+  border-radius: var(--radius-control);
+  background: var(--pending-surface);
+  font-size: var(--font-small);
+}
+.qualification-callout strong {
+  color: var(--pending);
 }
 .qualification-history {
   border-top: 1px solid var(--border);
-  padding-block: 1rem;
+  padding-block: 8px;
 }
 .qualification-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 8px;
 }
 .qualification-workspace .trip-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 8px;
 }
 .qualification-workspace summary {
   cursor: pointer;
@@ -59,7 +229,6 @@
 }
 .qualification-workspace .input {
   width: 100%;
-  font-size: 16px;
 }
 .qualification-command-context {
   overflow-wrap: anywhere;
@@ -74,4 +243,52 @@
 .qualification-draft-entities span,
 .qualification-history code {
   overflow-wrap: anywhere;
+}
+/* Phones: each level row becomes a compact card; the header row stays available to assistive
+   technology while the visible cell labels are presentation only. */
+@media (max-width: 760px) {
+  .qualification-levels,
+  .qualification-levels tbody,
+  .qualification-levels tr,
+  .qualification-levels :is(th, td) {
+    display: block;
+    width: 100%;
+  }
+  .qualification-levels thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .qualification-levels tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
+    padding: 6px 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .qualification-levels tbody :is(th, td) {
+    padding: 0;
+    border-bottom: 0;
+  }
+  .qualification-levels tbody th {
+    grid-column: 1 / -1;
+  }
+  .qualification-levels tr[data-selected] > * {
+    background: transparent;
+  }
+  .qualification-levels tr[data-selected] {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--focus);
+  }
+  .qualification-levels tr[data-selected] > th {
+    box-shadow: none;
+  }
+  .qualification-cell-label {
+    display: block;
+    color: var(--muted);
+    font-size: var(--font-badge);
+  }
 }
