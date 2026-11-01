@@ -360,7 +360,12 @@ export function useNotificationCommand() {
   );
   useEffect(() => {
     if (!until) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      // Stop ticking once the wait has elapsed; the shared read-through owner lives per scope.
+      if (current >= until) setUntil(0);
+    }, 1000);
     return () => clearInterval(timer);
   }, [until]);
   async function run<K extends "EnvelopeCommandResult" | "EnvelopeNotificationPreferences">(
