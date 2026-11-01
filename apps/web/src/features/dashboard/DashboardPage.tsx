@@ -1,73 +1,63 @@
-import { useMemo, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { formatDecimal, formatQuantity, type Locale } from "../../shared/formatting.js";
-import { Button, Card } from "../../shared/ui/primitives.js";
+import type { Locale } from "../../shared/formatting.js";
+import { Button, Card, Select } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import {
   ActualDistanceChart,
+  KpiStrip,
   LeaderboardWidget,
-  MetricCard,
   MetricDefinitionsCard,
   MyQualificationWidget,
   ReviewerQueueWidget,
   UpcomingEventWidget,
 } from "./components.js";
+import { computePeriodDates, type GameFilter, type PeriodFilter, periods } from "./model.js";
 import {
   useCompanyAnalytics,
   useDriverLeaderboard,
   useMyQualificationProgress,
   useReviewQueueTrips,
-  useTripStatusSummary,
   useUpcomingEvent,
 } from "./queries.js";
+import "./dashboard.css";
 
-type GameFilter = "all" | "ets2" | "ats";
-type PeriodFilter = "thisMonth" | "lastMonth" | "last30Days" | "last7Days";
-
-function computePeriodDates(
-  period: PeriodFilter,
-  now = new Date(),
-): { fromDate: string; toDateExclusive: string } {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const formatDate = (d: Date) =>
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
-  const currentYear = now.getUTCFullYear();
-  const currentMonth = now.getUTCMonth();
-
-  if (period === "thisMonth") {
-    const from = new Date(Date.UTC(currentYear, currentMonth, 1));
-    const to = new Date(Date.UTC(currentYear, currentMonth + 1, 1));
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  if (period === "lastMonth") {
-    const from = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
-    const to = new Date(Date.UTC(currentYear, currentMonth, 1));
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  if (period === "last7Days") {
-    const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-    const from = new Date(to.getTime() - 7 * 86400000);
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  // last30Days
-  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  const from = new Date(to.getTime() - 30 * 86400000);
-  return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
+/** Gate: without company.read no dashboard query hook mounts, so nothing is requested. */
+export function DashboardPage() {
+  const { t } = useTranslation("dashboard");
+  const session = useSession();
+  if (!session.self?.capabilities.includes("company.read"))
+    return (
+      <div className="dashboard-page">
+        <header className="dashboard-header">
+          <div className="dashboard-title">
+            <h1>{t("title")}</h1>
+            <p className="dashboard-subtitle">{t("subtitle")}</p>
+          </div>
+        </header>
+        <Card className="dashboard-forbidden">
+          <p>{t("states.forbidden")}</p>
+        </Card>
+      </div>
+    );
+  return <DashboardContent />;
 }
 
-export function DashboardPage() {
+function DashboardContent() {
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
   const session = useSession();
   const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const capabilities = session.self?.capabilities ?? [];
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
+  const periodId = useId();
   const [game, setGame] = useState<GameFilter>("all");
   const [period, setPeriod] = useState<PeriodFilter>("thisMonth");
   const [granularity, setGranularity] = useState<"day" | "month">("day");
 
-  const dates = useMemo(() => computePeriodDates(period), [period]);
-
+  const dates = computePeriodDates(period);
   const effectiveGame = game === "all" ? undefined : game;
 
   const analyticsQuery = useCompanyAnalytics({
@@ -77,11 +67,12 @@ export function DashboardPage() {
     granularity,
   });
 
+  // Contract maximum: the widget shows the top ten, the KPI counts every returned driver.
   const leaderboardQuery = useDriverLeaderboard({
     fromDate: dates.fromDate,
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
-    limit: 10,
+    limit: 100,
   });
 
   const ets2ProgressQuery = useMyQualificationProgress("ets2");
@@ -89,109 +80,78 @@ export function DashboardPage() {
   const upcomingEventQuery = useUpcomingEvent();
   const reviewTripsQuery = useReviewQueueTrips();
 
-  const canReview = !!session.self?.capabilities.includes("trips.review");
-
-  const isLoading = analyticsQuery.isLoading || leaderboardQuery.isLoading;
-  const isError = analyticsQuery.isError;
-
+  const canReview = capabilities.includes("trips.review");
   const analytics = analyticsQuery.data;
   const leaderboard = leaderboardQuery.data;
+  const pending = analyticsQuery.isPending || leaderboardQuery.isPending;
+  // A failed background refresh keeps the last data; the alert is only for having none.
+  const analyticsFailed = analyticsQuery.isError && !analytics;
 
-  // New company starting at zero check
+  // Zero only counts as an empty company when both sources actually answered.
   const isCompanyEmpty =
     analytics !== undefined &&
     analytics.acceptedTrips === 0 &&
-    (leaderboard?.items.length ?? 0) === 0;
+    leaderboard !== undefined &&
+    leaderboard.items.length === 0;
+
+  const heading = (
+    <div className="dashboard-title">
+      {/* Focus target after Retry replaces the alert, so focus never falls to the body. */}
+      <h1 ref={titleRef} tabIndex={-1}>
+        {t("title")}
+      </h1>
+      <p className="dashboard-subtitle">{t("subtitle")}</p>
+      {/* Announced only: per-block placeholders show loading without shifting the layout.
+          Always mounted so screen readers announce text changes, including after Retry. */}
+      <p className="visually-hidden" role="status">
+        {pending && !analyticsFailed ? t("states.loading") : ""}
+      </p>
+    </div>
+  );
 
   return (
-    <div className="dashboard-page stack space-y-6">
-      <header className="page-heading">
-        <span className="eyebrow">{session.self?.member.nickname}</span>
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <p className="lead muted">{t("subtitle")}</p>
-      </header>
-
-      {/* Filters Bar */}
-      <Card className="filters-card p-4">
-        <div className="flex flex-wrap gap-4 items-center justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium mr-1">{t("filters.game")}:</span>
-            <fieldset className="button-group" aria-label={t("filters.game")}>
-              <Button
-                type="button"
-                variant={game === "all" ? "default" : "outline"}
-                onClick={() => setGame("all")}
-                aria-pressed={game === "all"}
-              >
-                {t("filters.allGames")}
-              </Button>
-              <Button
-                type="button"
-                variant={game === "ets2" ? "default" : "outline"}
-                onClick={() => setGame("ets2")}
-                aria-pressed={game === "ets2"}
-              >
-                ETS2
-              </Button>
-              <Button
-                type="button"
-                variant={game === "ats" ? "default" : "outline"}
-                onClick={() => setGame("ats")}
-                aria-pressed={game === "ats"}
-              >
-                ATS
-              </Button>
-            </fieldset>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium mr-1">{t("filters.period")}:</span>
-            <fieldset className="button-group" aria-label={t("filters.period")}>
-              <Button
-                type="button"
-                variant={period === "thisMonth" ? "default" : "outline"}
-                onClick={() => setPeriod("thisMonth")}
-                aria-pressed={period === "thisMonth"}
-              >
-                {t("filters.thisMonth")}
-              </Button>
-              <Button
-                type="button"
-                variant={period === "lastMonth" ? "default" : "outline"}
-                onClick={() => setPeriod("lastMonth")}
-                aria-pressed={period === "lastMonth"}
-              >
-                {t("filters.lastMonth")}
-              </Button>
-              <Button
-                type="button"
-                variant={period === "last30Days" ? "default" : "outline"}
-                onClick={() => setPeriod("last30Days")}
-                aria-pressed={period === "last30Days"}
-              >
-                {t("filters.last30Days")}
-              </Button>
-              <Button
-                type="button"
-                variant={period === "last7Days" ? "default" : "outline"}
-                onClick={() => setPeriod("last7Days")}
-                aria-pressed={period === "last7Days"}
-              >
-                {t("filters.last7Days")}
-              </Button>
-            </fieldset>
+    <div className="dashboard-page">
+      <header className="dashboard-header">
+        {heading}
+        <div className="dashboard-filters">
+          <SegmentedControl
+            aria-label={t("filters.game")}
+            value={game}
+            onValueChange={setGame}
+            options={[
+              { value: "all", label: t("filters.allGames") },
+              { value: "ets2", label: "ETS2" },
+              { value: "ats", label: "ATS" },
+            ]}
+          />
+          <div className="dashboard-period">
+            <label htmlFor={periodId}>{t("filters.period")}</label>
+            <Select
+              id={periodId}
+              value={period}
+              onChange={(event) => {
+                const next = periods.find((item) => item === event.target.value);
+                if (next) setPeriod(next);
+              }}
+            >
+              {periods.map((item) => (
+                <option key={item} value={item}>
+                  {t(`filters.${item}`)}
+                </option>
+              ))}
+            </Select>
           </div>
         </div>
-      </Card>
+      </header>
 
-      {/* Error state */}
-      {isError && (
-        <Card className="error-card p-6 text-center">
-          <p className="text-red-400 font-medium mb-3">{t("states.error")}</p>
+      {analyticsFailed ? (
+        <Card className="dashboard-error" role="alert">
+          <p>{t("states.error")}</p>
           <Button
             type="button"
             variant="outline"
             onClick={() => {
+              titleRef.current?.focus();
               void analyticsQuery.refetch();
               void leaderboardQuery.refetch();
             }}
@@ -199,77 +159,49 @@ export function DashboardPage() {
             {t("states.retry")}
           </Button>
         </Card>
-      )}
-
-      {/* Loading state */}
-      {isLoading && !isError && (
-        <Card className="loading-card p-8 text-center" role="status" aria-busy="true">
-          <p className="muted">{t("states.loading")}</p>
-        </Card>
-      )}
-
-      {/* Main dashboard content */}
-      {!isLoading && !isError && analytics && (
+      ) : (
         <>
-          {/* Empty company state notification if zero metrics */}
           {isCompanyEmpty && (
-            <Card className="empty-company-card p-4 border-blue-900 bg-blue-950/40">
-              <h3 className="font-semibold text-blue-200">{t("emptyState.newCompanyTitle")}</h3>
-              <p className="text-sm text-blue-300 mt-1">{t("emptyState.newCompanyDesc")}</p>
-            </Card>
+            <div className="dashboard-notice">
+              <p className="dashboard-notice-title">{t("emptyState.newCompanyTitle")}</p>
+              <p>{t("emptyState.newCompanyDesc")}</p>
+            </div>
           )}
 
-          {/* Metric KPI cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <MetricCard
-              title={t("metrics.totalDistance")}
-              value={formatQuantity(analytics.actualDistanceM, "km", locale)}
-              help={t("metrics.distanceHelp")}
-            />
-            <MetricCard
-              title={t("metrics.acceptedTrips")}
-              value={formatDecimal(String(analytics.acceptedTrips), locale)}
-              help={t("metrics.tripsHelp")}
-            />
-            <MetricCard
-              title={t("metrics.activeDrivers")}
-              value={formatDecimal(String(leaderboard?.items.length ?? 0), locale)}
-              help={t("metrics.driversHelp")}
-            />
-          </div>
-
-          {/* Actual Distance Chart */}
-          <ActualDistanceChart
+          <KpiStrip
             analytics={analytics}
+            analyticsPending={analyticsQuery.isPending}
+            leaderboard={leaderboard}
+            leaderboardPending={leaderboardQuery.isPending}
+            leaderboardFailed={leaderboardQuery.isError && !leaderboard}
             locale={locale}
-            displayTimezone={displayTimezone}
-            granularity={granularity}
-            onGranularityChange={setGranularity}
           />
 
-          {/* Widgets Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <LeaderboardWidget leaderboard={leaderboard} locale={locale} />
-            </div>
-
-            <div className="space-y-6">
-              <MyQualificationWidget
-                ets2Progress={ets2ProgressQuery.data}
-                atsProgress={atsProgressQuery.data}
-              />
-
-              {canReview && <ReviewerQueueWidget reviewTrips={reviewTripsQuery.data} />}
-
+          <div className="dashboard-grid" aria-busy={pending}>
+            <ActualDistanceChart
+              analytics={analytics}
+              pending={analyticsQuery.isPending}
+              locale={locale}
+              displayTimezone={displayTimezone}
+              granularity={granularity}
+              onGranularityChange={setGranularity}
+            />
+            <MyQualificationWidget
+              ets2Progress={ets2ProgressQuery}
+              atsProgress={atsProgressQuery}
+              available={capabilities.includes("trips.submit_own")}
+            />
+            <LeaderboardWidget query={leaderboardQuery} locale={locale} />
+            <div className="dashboard-side">
+              {canReview && <ReviewerQueueWidget query={reviewTripsQuery} locale={locale} />}
               <UpcomingEventWidget
-                eventData={upcomingEventQuery.data}
+                query={upcomingEventQuery}
                 locale={locale}
                 displayTimezone={displayTimezone}
               />
             </div>
           </div>
 
-          {/* Informational definitions section */}
           <MetricDefinitionsCard />
         </>
       )}
