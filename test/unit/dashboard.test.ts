@@ -101,6 +101,8 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
         "leaderboard.error",
         "leaderboard.allDrivers",
         "leaderboard.retry",
+        "reviewQueue.error",
+        "upcomingEvent.error",
         "states.forbidden",
       ])
         expect(present).toContain(key);

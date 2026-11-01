@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis } from "recharts";
@@ -39,37 +39,39 @@ export function KpiStrip({
   analyticsPending,
   leaderboard,
   leaderboardPending,
+  leaderboardFailed,
   locale,
 }: {
   analytics: AnalyticsData | undefined;
   analyticsPending: boolean;
   leaderboard: LeaderboardData | undefined;
   leaderboardPending: boolean;
+  /** True only when the leaderboard errored and no earlier data is available. */
+  leaderboardFailed: boolean;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
-  // Leaderboard failure leaves the driver count unknown, which is distinct from zero.
+  // Shown values come from the latest data; a failure without data is unknown, never zero.
   const activeDrivers = leaderboard
     ? `${formatDecimal(String(leaderboard.items.length), locale)}${leaderboard.nextCursor ? "+" : ""}`
-    : formatDecimal(null, locale);
+    : leaderboardFailed
+      ? formatDecimal(null, locale)
+      : undefined;
   const items = [
     {
       key: "distance",
       label: t("metrics.totalDistance"),
       value: analytics ? formatQuantity(analytics.actualDistanceM, "km", locale) : undefined,
-      pending: analyticsPending,
     },
     {
       key: "trips",
       label: t("metrics.acceptedTrips"),
       value: analytics ? formatDecimal(String(analytics.acceptedTrips), locale) : undefined,
-      pending: analyticsPending,
     },
     {
       key: "drivers",
       label: t("metrics.activeDrivers"),
       value: activeDrivers,
-      pending: leaderboardPending,
     },
   ];
 
@@ -83,7 +85,7 @@ export function KpiStrip({
         {items.map((item) => (
           <div key={item.key} className="dashboard-kpi">
             <dt>{item.label}</dt>
-            <dd>{item.pending || item.value === undefined ? <Skeleton /> : item.value}</dd>
+            <dd>{item.value ?? <Skeleton />}</dd>
           </div>
         ))}
       </dl>
@@ -266,14 +268,24 @@ export function LeaderboardWidget({
 }) {
   const { t } = useTranslation("dashboard");
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const entries = query.data?.items.slice(0, 10) ?? [];
 
+  // Data first: a failed background refresh keeps the last rows instead of an error.
   let body: ReactNode;
-  if (query.isError) {
+  if (!query.data && query.isError) {
     body = (
       <div className="dashboard-block-error">
         <p>{t("leaderboard.error")}</p>
-        <Button type="button" variant="outline" onClick={() => void query.refetch()}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            // The button unmounts on success; keep focus inside the card.
+            headingRef.current?.focus();
+            void query.refetch();
+          }}
+        >
           {t("leaderboard.retry")}
         </Button>
       </div>
@@ -344,7 +356,9 @@ export function LeaderboardWidget({
   return (
     <Card className="dashboard-leaderboard-card" aria-labelledby={headingId}>
       <div className="dashboard-card-head">
-        <h2 id={headingId}>{t("leaderboard.title")}</h2>
+        <h2 id={headingId} ref={headingRef} tabIndex={-1}>
+          {t("leaderboard.title")}
+        </h2>
         <Link to="/account/drivers" className="dashboard-head-link">
           {t("leaderboard.allDrivers")}
         </Link>
@@ -377,7 +391,7 @@ function QualificationGame({
   if (!available || (progress && !progress.assignment)) {
     // Members without own-trip submission have no driver qualification to show.
     content = <p className="dashboard-muted">{t("myQualification.noQualification")}</p>;
-  } else if (query.isError) {
+  } else if (!progress && query.isError) {
     content = <p className="dashboard-muted">{t("myQualification.progressUnavailable")}</p>;
   } else if (!progress) {
     content = <p className="dashboard-muted">{t("myQualification.progressLoading")}</p>;
@@ -531,7 +545,7 @@ export function ReviewerQueueWidget({
             : t("reviewQueue.noPending")}
         </p>
       ) : query.isError ? (
-        <p className="dashboard-muted">{t("states.error")}</p>
+        <p className="dashboard-muted">{t("reviewQueue.error")}</p>
       ) : (
         <Skeleton className="dashboard-skeleton-line" />
       )}
@@ -568,10 +582,11 @@ export function UpcomingEventWidget({
         </Link>
       </>
     );
-  } else if (query.isError) {
-    body = <p className="dashboard-muted">{t("states.error")}</p>;
-  } else if (query.isSuccess) {
+  } else if (event === null) {
+    // Success without an event; kept even if a later background refresh fails.
     body = <p className="dashboard-muted">{t("upcomingEvent.noUpcoming")}</p>;
+  } else if (query.isError) {
+    body = <p className="dashboard-muted">{t("upcomingEvent.error")}</p>;
   } else {
     body = <Skeleton className="dashboard-skeleton-line" />;
   }

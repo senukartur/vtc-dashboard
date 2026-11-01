@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import type { Locale } from "../../shared/formatting.js";
@@ -23,13 +23,34 @@ import {
 } from "./queries.js";
 import "./dashboard.css";
 
+/** Gate: without company.read no dashboard query hook mounts, so nothing is requested. */
 export function DashboardPage() {
+  const { t } = useTranslation("dashboard");
+  const session = useSession();
+  if (!session.self?.capabilities.includes("company.read"))
+    return (
+      <div className="dashboard-page">
+        <header className="dashboard-header">
+          <div className="dashboard-title">
+            <h1>{t("title")}</h1>
+            <p className="dashboard-subtitle">{t("subtitle")}</p>
+          </div>
+        </header>
+        <Card className="dashboard-forbidden">
+          <p>{t("states.forbidden")}</p>
+        </Card>
+      </div>
+    );
+  return <DashboardContent />;
+}
+
+function DashboardContent() {
   const { t, i18n } = useTranslation("dashboard");
   const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
   const session = useSession();
   const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
   const capabilities = session.self?.capabilities ?? [];
-  const canRead = capabilities.includes("company.read");
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   const periodId = useId();
   const [game, setGame] = useState<GameFilter>("all");
@@ -63,6 +84,8 @@ export function DashboardPage() {
   const analytics = analyticsQuery.data;
   const leaderboard = leaderboardQuery.data;
   const pending = analyticsQuery.isPending || leaderboardQuery.isPending;
+  // A failed background refresh keeps the last data; the alert is only for having none.
+  const analyticsFailed = analyticsQuery.isError && !analytics;
 
   // Zero only counts as an empty company when both sources actually answered.
   const isCompanyEmpty =
@@ -73,26 +96,19 @@ export function DashboardPage() {
 
   const heading = (
     <div className="dashboard-title">
-      <h1>{t("title")}</h1>
+      {/* Focus target after Retry replaces the alert, so focus never falls to the body. */}
+      <h1 ref={titleRef} tabIndex={-1}>
+        {t("title")}
+      </h1>
       <p className="dashboard-subtitle">{t("subtitle")}</p>
-      {canRead && !analyticsQuery.isError && (
-        <p className="dashboard-status" role="status">
+      {/* Announced only: per-block placeholders show loading without shifting the layout. */}
+      {!analyticsFailed && (
+        <p className="visually-hidden" role="status">
           {pending ? t("states.loading") : ""}
         </p>
       )}
     </div>
   );
-
-  if (!canRead) {
-    return (
-      <div className="dashboard-page">
-        <header className="dashboard-header">{heading}</header>
-        <Card className="dashboard-forbidden">
-          <p>{t("states.forbidden")}</p>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="dashboard-page">
@@ -129,13 +145,14 @@ export function DashboardPage() {
         </div>
       </header>
 
-      {analyticsQuery.isError ? (
+      {analyticsFailed ? (
         <Card className="dashboard-error" role="alert">
           <p>{t("states.error")}</p>
           <Button
             type="button"
             variant="outline"
             onClick={() => {
+              titleRef.current?.focus();
               void analyticsQuery.refetch();
               void leaderboardQuery.refetch();
             }}
@@ -157,6 +174,7 @@ export function DashboardPage() {
             analyticsPending={analyticsQuery.isPending}
             leaderboard={leaderboard}
             leaderboardPending={leaderboardQuery.isPending}
+            leaderboardFailed={leaderboardQuery.isError && !leaderboard}
             locale={locale}
           />
 

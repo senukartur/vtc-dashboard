@@ -59,6 +59,7 @@ export const dashboardTranslations = {
       pendingCount: "Рейсов ожидают проверки",
       reviewLink: "Перейти к проверке",
       noPending: "Все рейсы проверены",
+      error: "Не удалось загрузить очередь проверки",
     },
     leaderboard: {
       title: "Таблица лидеров",
@@ -76,6 +77,7 @@ export const dashboardTranslations = {
       title: "Ближайшее мероприятие",
       noUpcoming: "Нет запланированных конвоев",
       viewEvent: "Подробнее",
+      error: "Не удалось загрузить ближайшее мероприятие",
     },
     definitions: {
       title: "Как считаются показатели",
@@ -167,6 +169,7 @@ export const dashboardTranslations = {
       pendingCount: "Trips pending review",
       reviewLink: "Go to review",
       noPending: "All trips reviewed",
+      error: "Could not load the review queue",
     },
     leaderboard: {
       title: "Driver Leaderboard",
@@ -184,6 +187,7 @@ export const dashboardTranslations = {
       title: "Upcoming Event",
       noUpcoming: "No scheduled convoys",
       viewEvent: "Details",
+      error: "Could not load the upcoming event",
     },
     definitions: {
       title: "How Metrics Are Calculated",

@@ -26,14 +26,10 @@
   flex: 1 1 260px;
   min-width: 0;
 }
-.dashboard-page .dashboard-subtitle,
-.dashboard-page .dashboard-status {
+.dashboard-page .dashboard-subtitle {
   color: var(--muted);
   font-size: var(--font-small);
   line-height: 1.5;
-}
-.dashboard-page .dashboard-status {
-  color: var(--secondary);
 }
 .dashboard-page .dashboard-filters {
   display: flex;
