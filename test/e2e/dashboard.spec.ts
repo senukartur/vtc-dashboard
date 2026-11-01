@@ -32,6 +32,9 @@ const loadingStatus = (page: Page) =>
 // Capabilities of the fictional account fixture without company.read.
 const withoutCompanyRead = ["events.respond", "trips.read_own_private", "trips.submit_own"];
 
+function requestsTo(state: DashboardMockState, prefix: string) {
+  return state.requests.filter((url) => url.pathname.startsWith(prefix)).map(String);
+}
 function lastRequest(state: DashboardMockState, path: string) {
   return state.requests.filter((url) => url.pathname === path).at(-1);
 }
@@ -396,14 +399,17 @@ test.describe("Company Dashboard E2E", () => {
     await activate(page, monthly, touch);
     await expect(monthly).toHaveAttribute("aria-pressed", "true");
     await expect(tableButton).toHaveAttribute("aria-pressed", "true");
-    await expect(loadingStatus(page)).toBeVisible();
+    // The status is announced, not shown, so nothing below the header shifts.
+    await expect(loadingStatus(page)).toHaveCount(1);
     if (!touch) await expect(monthly).toBeFocused();
     await expect
       .poll(() => lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("granularity"))
       .toBe("month");
+    const loadingTop = (await box(chart)).y;
     state.releaseAnalytics();
     await expect(loadingStatus(page)).toHaveCount(0);
     if (!touch) await expect(monthly).toBeFocused();
+    expect(Math.abs((await box(chart)).y - loadingTop)).toBeLessThanOrEqual(1);
     const monthRow = chart.locator("tbody tr").filter({ hasText: "2026-10-01" });
     await expect(chart.locator("tbody tr")).toHaveCount(1);
     await expect(monthRow).toContainText("125,430 km");
@@ -433,14 +439,14 @@ test.describe("Company Dashboard E2E", () => {
   }, info) => {
     const state = await mockDashboardRoutes(page, { holdAnalytics: true });
     await page.goto("/account/dashboard");
-    await expect(loadingStatus(page)).toBeVisible();
+    await expect(loadingStatus(page)).toHaveCount(1);
     await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
     for (const button of await gameGroup(page).getByRole("button").all())
       await expect(button).toBeEnabled();
     await expect(periodSelect(page)).toBeEnabled();
     await capture(page, info, "dashboard-loading-en");
     await switchLanguage(page, "ru");
-    await expect(loadingStatus(page)).toBeVisible();
+    await expect(loadingStatus(page)).toHaveCount(1);
     await capture(page, info, "dashboard-loading-ru");
     await switchLanguage(page, "en");
     state.releaseAnalytics();
@@ -463,6 +469,8 @@ test.describe("Company Dashboard E2E", () => {
     await alert.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
     await expect(page.getByRole("alert")).toHaveCount(0);
+    // The alert and its button are gone; focus lands on the page title, not the body.
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   });
 
   test("keeps partial failures distinct from empty data", async ({ page }) => {
@@ -480,6 +488,11 @@ test.describe("Company Dashboard E2E", () => {
     await expect(page.getByText("Company starting from zero")).toHaveCount(0);
 
     delete state.failures.leaderboard;
+    await leaderboard.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(leaderboard.getByText("No confirmed trips in this period yet")).toBeVisible();
+    await expect(leaderboard.getByRole("heading", { level: 2 })).toBeFocused();
+    await expect(page.getByText("Company starting from zero")).toBeVisible();
+
     state.failures.progress = 503;
     await page.reload();
     const qualification = qualificationCard(page);
@@ -496,16 +509,43 @@ test.describe("Company Dashboard E2E", () => {
     ).toBeVisible();
     await expect(gameGroup(page)).toHaveCount(0);
     await expect(kpis(page)).toHaveCount(0);
-    expect(state.requests.filter((url) => url.pathname.startsWith("/api/v1/analytics/"))).toEqual(
-      [],
-    );
+    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
+    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
     await capture(page, info, "dashboard-forbidden-en");
     await switchLanguage(page, "ru");
     await expect(page.getByText("Нет доступа к статистике компании.")).toBeVisible();
     await capture(page, info, "dashboard-forbidden-ru");
-    expect(state.requests.filter((url) => url.pathname.startsWith("/api/v1/analytics/"))).toEqual(
-      [],
+    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
+    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+  });
+
+  test("shows no qualification for members who cannot submit own trips", async ({ page }) => {
+    const state = await mockDashboardRoutes(page, { capabilities: ["company.read"] });
+    await page.goto("/account/dashboard");
+    await loaded(page);
+    const qualification = qualificationCard(page);
+    await expect(qualification.getByText("No qualification assigned", { exact: true })).toHaveCount(
+      2,
     );
+    await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
+    await expect(reviewCard(page)).toHaveCount(0);
+    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+  });
+
+  test("keeps review queue and event failures inside their cards", async ({ page }) => {
+    await mockDashboardRoutes(page, { failures: { review: 503, event: 503 } });
+    await page.goto("/account/dashboard");
+    await loaded(page);
+    await expect(reviewCard(page).getByText("Could not load the review queue")).toBeVisible();
+    await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
+    await expect(eventCard(page).getByText("Could not load the upcoming event")).toBeVisible();
+    await expect(eventCard(page).getByText("No scheduled convoys")).toHaveCount(0);
+    await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
+    await switchLanguage(page, "ru");
+    await expect(reviewCard(page).getByText("Не удалось загрузить очередь проверки")).toBeVisible();
+    await expect(
+      eventCard(page).getByText("Не удалось загрузить ближайшее мероприятие"),
+    ).toBeVisible();
   });
 
   test("replaces earlier values when company access is revoked", async ({ page }) => {
