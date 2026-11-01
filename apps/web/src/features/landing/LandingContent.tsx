@@ -1,23 +1,42 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { publicContacts, publicContent, type PublicLocale, publicPath } from "./content.js";
+import { HeroArt } from "./HeroArt.js";
+import "./landing.css";
 
-/** Shared public copy for the build-time document and interactive page. */
+export type LandingMotion = "static" | "running" | "paused";
+
+/**
+ * Shared public copy for the build-time document and interactive page. Time-dependent and
+ * fetched parts arrive only through the client slots, so the prerendered output depends on
+ * the locale and static content alone.
+ */
 export function LandingContent({
   locale,
   application,
   events,
+  heroChip,
+  heroControls,
+  ticker,
+  stats,
+  motion = "static",
   interactive = false,
 }: {
   locale: PublicLocale;
   application?: ReactNode;
   events?: ReactNode;
+  heroChip?: ReactNode;
+  heroControls?: ReactNode;
+  ticker?: ReactNode;
+  stats?: ReactNode;
+  motion?: LandingMotion;
   interactive?: boolean;
 }) {
   const c = publicContent[locale];
   return (
-    <div className="landing">
+    <div className="landing" data-motion={motion}>
       <section className="landing-hero" aria-labelledby="landing-title">
+        {heroChip}
         <p className="eyebrow">{c.eyebrow}</p>
         <h1 id="landing-title">{c.heading}</h1>
         <p className="lead">{c.intro}</p>
@@ -33,12 +52,11 @@ export function LandingContent({
             {c.events}
           </PublicLink>
         </div>
-        <div className="road-line" aria-hidden="true">
-          <span>ETS2</span>
-          <span>YUKON UNION</span>
-          <span>ATS</span>
-        </div>
+        {heroControls}
+        <HeroArt />
       </section>
+      {ticker}
+      {stats}
       {events ?? (
         <section className="landing-section">
           <h2>{c.events}</h2>
@@ -61,13 +79,41 @@ export function LandingContent({
             </article>
           ))}
         </div>
+        <div className="landing-ladder">
+          <h3 id="landing-ladder-title">{c.ladderTitle}</h3>
+          <ol aria-labelledby="landing-ladder-title">
+            {c.ladder.map((level, index) => (
+              <li key={level.name}>
+                <span className="landing-ladder-mark" aria-hidden="true">
+                  <span className="landing-ladder-number">{index + 1}</span>
+                  <span className="landing-ladder-line" />
+                </span>
+                <strong>{level.name}</strong>
+                {level.text && <span className="landing-ladder-text">{level.text}</span>}
+              </li>
+            ))}
+          </ol>
+          <p className="muted">{c.ladderNote}</p>
+        </div>
       </section>
       <section id="apply" className="landing-section application-grid" aria-labelledby="join-title">
         <div className="join-copy">
           <p className="eyebrow">{c.requirements}</p>
           <h2 id="join-title">{c.requirementsTitle}</h2>
-          <p>{c.requirementsText}</p>
-          <p className="muted">{c.review}</p>
+          <ol className="landing-steps">
+            {c.joinSteps.map((step, index) => (
+              <li key={step.title}>
+                <span className="landing-step-number" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <p>{step.text}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          <p className="muted">{c.joinNote}</p>
         </div>
         {application ?? <p>{c.noScript}</p>}
       </section>

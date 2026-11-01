@@ -1,0 +1,590 @@
+/* Lively public landing (VTC-050). Feature CSS loads before shared/styles.css, so every rule is
+   compound under .landing. Motion uses transform/opacity only and exists solely under
+   prefers-reduced-motion: no-preference on the client (data-motion running/paused). */
+
+/* Hero panel: copy on the left, decorative art on the right (bottom strip below 1024px). */
+.landing .landing-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  justify-items: start;
+  align-content: start;
+  gap: 16px;
+  padding: 24px 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(90% 80% at 85% 15%, var(--accent-soft), transparent 70%), var(--surface);
+}
+.landing .landing-hero > :not(.landing-hero-art) {
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+}
+.landing .landing-hero h1 {
+  max-width: 14ch;
+}
+.landing .landing-hero .heading-actions {
+  margin-top: 0;
+}
+.landing .landing-hero-art {
+  position: relative;
+  justify-self: stretch;
+  height: 160px;
+  margin: 0 -20px;
+  pointer-events: none;
+}
+.landing .landing-hero-art::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, var(--surface) 0%, transparent 45%);
+}
+.landing .landing-hero-art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.landing .hero-glow-start {
+  stop-color: var(--chart);
+  stop-opacity: 0.45;
+}
+.landing .hero-glow-end {
+  stop-color: var(--surface);
+  stop-opacity: 0;
+}
+.landing .hero-grid path {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.landing .hero-road,
+.landing .hero-lane {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.landing .hero-road {
+  stroke: var(--border-strong);
+  stroke-width: 22;
+}
+.landing .hero-road-b {
+  stroke-width: 14;
+  opacity: 0.8;
+}
+.landing .hero-lane {
+  stroke: var(--focus);
+  stroke-width: 2;
+  stroke-dasharray: 12 14;
+  opacity: 0.7;
+}
+.landing .hero-lane-b {
+  stroke: var(--secondary);
+  stroke-width: 1.5;
+  stroke-dasharray: 8 14;
+  opacity: 0.5;
+}
+.landing .hero-stops circle {
+  fill: var(--foreground);
+}
+.landing .hero-ping {
+  fill: var(--foreground);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.landing .hero-marker rect {
+  fill: var(--accent);
+  stroke: var(--foreground);
+  stroke-width: 1.5;
+}
+.landing .hero-marker-b rect {
+  fill: var(--chart);
+  stroke-width: 1.2;
+}
+.landing .hero-marker-a {
+  transform: translate(330px, 250px);
+}
+.landing .hero-marker-b {
+  transform: translate(430px, 300px);
+}
+
+/* Next convoy chip and the reserved slot while events load. */
+.landing .landing-chip-slot {
+  display: block;
+  min-height: var(--target-min);
+}
+.landing .landing-convoy-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--target-min);
+  padding: 4px 12px 4px 10px;
+  border: 1px solid var(--selection-border);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--secondary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.landing .landing-convoy-chip:hover {
+  border-color: var(--focus);
+  color: var(--foreground);
+}
+.landing .landing-convoy-chip strong {
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+.landing .landing-chip-dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accepted);
+}
+.landing .landing-chip-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accepted);
+  opacity: 0;
+}
+.landing .landing-motion-toggle {
+  gap: 6px;
+  font-weight: 500;
+}
+.landing .landing-motion-toggle svg {
+  fill: currentColor;
+}
+
+/* Decorative route ticker. */
+.landing .landing-ticker {
+  overflow: hidden;
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--chrome);
+}
+.landing .landing-ticker-track {
+  display: flex;
+  width: max-content;
+}
+.landing .landing-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 20px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+.landing .landing-ticker-game {
+  padding: 1px 6px;
+  border-radius: var(--radius-badge);
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 700;
+}
+.landing .landing-ticker-label {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Company stats band: value above label through column-reverse; DOM keeps dt before dd. */
+.landing .landing-stats {
+  display: grid;
+  gap: 8px;
+  padding-top: 20px;
+}
+.landing .landing-stats dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+  margin: 0;
+}
+/* An unavailable month leaves only the member tile; keep it tile-sized. */
+.landing .landing-stats dl:has(> .landing-stat:only-child) {
+  grid-template-columns: minmax(0, 280px);
+}
+.landing .landing-stat {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  container-type: inline-size;
+}
+.landing .landing-stat dd {
+  margin: 0;
+  color: var(--foreground);
+  /* Exact values break between groups and unit, never inside a digit group. */
+  overflow-wrap: break-word;
+  font-size: clamp(15px, 10.5cqi, 24px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.landing .landing-stat dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.landing .landing-stats-caption {
+  color: var(--muted);
+  font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+
+/* Public convoy cards. */
+.landing .landing-convoys-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+}
+.landing .landing-convoy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing .landing-convoy-grid > li {
+  display: grid;
+  min-width: 0;
+}
+.landing .landing-convoy-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.landing .landing-convoy-card:hover,
+.landing .landing-convoy-card:focus-within {
+  border-color: var(--selection-border);
+}
+.landing .landing-convoy-art {
+  display: block;
+  width: 100%;
+  height: 72px;
+  background: linear-gradient(135deg, var(--surface-active), var(--inset));
+}
+.landing .landing-convoy-road,
+.landing .landing-convoy-lane {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.landing .landing-convoy-road {
+  stroke: var(--border-strong);
+  stroke-width: 8;
+}
+.landing .landing-convoy-lane {
+  stroke: var(--focus);
+  stroke-width: 2;
+  stroke-dasharray: 6 8;
+}
+.landing .landing-convoy-body {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 14px;
+}
+.landing .landing-convoy-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.landing .landing-convoy-body h3 {
+  font-size: 15px;
+  line-height: 1.35;
+}
+.landing .landing-convoy-body h3 > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+.landing .landing-convoy-route {
+  color: var(--secondary);
+}
+.landing .landing-convoy-facts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--font-small);
+}
+.landing .landing-convoy-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+}
+.landing .landing-convoy-facts dt {
+  color: var(--muted);
+}
+.landing .landing-convoy-facts dd {
+  margin: 0;
+}
+
+/* Driver path ladder. */
+.landing .landing-ladder {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.landing .landing-ladder h3 {
+  font-size: 15px;
+}
+.landing .landing-ladder ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing .landing-ladder li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  column-gap: 10px;
+}
+.landing .landing-ladder-mark {
+  display: flex;
+  align-items: center;
+  grid-row: span 2;
+  align-self: start;
+}
+.landing .landing-ladder-number,
+.landing .landing-step-number {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-active);
+  color: var(--secondary);
+  font-weight: 700;
+  font-size: var(--font-small);
+  font-variant-numeric: tabular-nums;
+}
+.landing .landing-ladder-number {
+  width: 26px;
+  height: 26px;
+}
+.landing .landing-step-number {
+  width: 28px;
+  height: 28px;
+}
+.landing .landing-ladder li:first-child .landing-ladder-number,
+.landing .landing-steps li:first-child .landing-step-number {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--foreground);
+}
+.landing .landing-ladder-line {
+  display: none;
+}
+.landing .landing-ladder-text {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+@media (min-width: 760px) {
+  .landing .landing-ladder ol {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0;
+  }
+  .landing .landing-ladder li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-right: 12px;
+  }
+  .landing .landing-ladder-mark {
+    align-self: stretch;
+  }
+  .landing .landing-ladder-line {
+    display: block;
+    flex: 1;
+    height: 2px;
+    margin: 0 8px;
+    border-radius: 1px;
+    background: var(--border-strong);
+  }
+  .landing .landing-ladder li:last-child .landing-ladder-line {
+    visibility: hidden;
+  }
+}
+
+/* Three-step join list. */
+.landing .landing-steps {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.landing .landing-steps li {
+  display: flex;
+  gap: 12px;
+}
+.landing .landing-steps p {
+  color: var(--secondary);
+}
+.landing .join-copy {
+  gap: 16px;
+}
+.landing .join-copy > .muted {
+  color: var(--muted);
+}
+
+@media (min-width: 1024px) {
+  .landing .landing-hero {
+    min-height: 420px;
+    padding: 48px 40px;
+  }
+  .landing .landing-hero > :not(.landing-hero-art) {
+    max-width: calc(45% - 40px);
+  }
+  .landing .landing-hero h1 {
+    max-width: none;
+  }
+  .landing .landing-hero-art {
+    position: absolute;
+    inset: 0 0 0 45%;
+    z-index: 0;
+    height: auto;
+    margin: 0;
+  }
+  .landing .landing-hero-art::before {
+    background: linear-gradient(90deg, var(--surface) 0%, transparent 35%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing .landing-motion-toggle[data-timer="false"] {
+    display: none;
+  }
+  .landing .landing-ticker-track {
+    flex-wrap: wrap;
+    width: auto;
+    height: 40px;
+    overflow: hidden;
+  }
+  .landing .landing-ticker [data-copy] {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes landing-route-a {
+    0% {
+      transform: translate(40px, 360px);
+      opacity: 0;
+    }
+    4% {
+      opacity: 1;
+    }
+    27.1% {
+      transform: translate(200px, 280px);
+    }
+    47.3% {
+      transform: translate(330px, 250px);
+    }
+    72.2% {
+      transform: translate(460px, 150px);
+    }
+    96% {
+      opacity: 1;
+    }
+    100% {
+      transform: translate(620px, 60px);
+      opacity: 0;
+    }
+  }
+  @keyframes landing-route-b {
+    0% {
+      transform: translate(180px, 30px);
+      opacity: 0;
+    }
+    4% {
+      opacity: 1;
+    }
+    22.1% {
+      transform: translate(260px, 130px);
+    }
+    39.2% {
+      transform: translate(300px, 220px);
+    }
+    65.6% {
+      transform: translate(430px, 300px);
+    }
+    96% {
+      opacity: 1;
+    }
+    100% {
+      transform: translate(620px, 360px);
+      opacity: 0;
+    }
+  }
+  @keyframes landing-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+  @keyframes landing-ticker {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .hero-marker-a {
+    animation: landing-route-a 11s linear infinite;
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .hero-marker-b {
+    animation: landing-route-b 15s linear -6s infinite;
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .hero-ping-a {
+    animation: landing-ping 2.4s ease-out infinite;
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .hero-ping-b {
+    animation: landing-ping 2.4s ease-out 0.8s infinite;
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .landing-chip-dot::after {
+    animation: landing-ping 1.6s ease-out infinite;
+  }
+  .landing:is([data-motion="running"], [data-motion="paused"]) .landing-ticker-track {
+    animation: landing-ticker 40s linear infinite;
+  }
+  .landing[data-motion="paused"] .landing-motion,
+  .landing[data-motion="paused"] .landing-motion::after {
+    animation-play-state: paused;
+  }
+}
