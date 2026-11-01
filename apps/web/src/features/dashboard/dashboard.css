@@ -1,0 +1,416 @@
+/* Compact overview dashboard. Scoped to the page and built from shared tokens only. */
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  min-width: 0;
+}
+.dashboard-page .card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+.dashboard-page .dashboard-muted {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+
+/* Header: title block on the left, filters on the right; wraps below the title when narrow. */
+.dashboard-page .dashboard-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.dashboard-page .dashboard-title {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-subtitle,
+.dashboard-page .dashboard-status {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-status {
+  color: var(--secondary);
+}
+.dashboard-page .dashboard-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.dashboard-page .dashboard-period select {
+  width: auto;
+}
+
+/* KPI strip: one bordered row; inset shadows draw dividers only between cells, so a wrapped
+   row never shows a coloured empty cell. */
+.dashboard-page .dashboard-kpis dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.dashboard-page .dashboard-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 14px;
+  box-shadow:
+    -1px 0 0 var(--border),
+    0 -1px 0 var(--border);
+}
+.dashboard-page .dashboard-kpi dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+}
+.dashboard-page .dashboard-kpi dd {
+  min-height: 26px;
+  margin: 0;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* Static placeholders (no animation); the status line carries the loading announcement. */
+.dashboard-page .dashboard-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-badge);
+  background: var(--surface-active);
+}
+.dashboard-page .dashboard-kpi .dashboard-skeleton,
+.dashboard-page .dashboard-skeleton-inline {
+  display: inline-block;
+  width: 7em;
+  max-width: 100%;
+  height: 0.8em;
+  vertical-align: middle;
+}
+.dashboard-page .dashboard-skeleton-line {
+  width: 60%;
+  margin-block: 4px;
+}
+.dashboard-page .dashboard-skeleton-rows {
+  display: grid;
+  gap: 10px;
+  padding-block: 4px;
+}
+.dashboard-page .dashboard-skeleton-rows .dashboard-skeleton {
+  height: 22px;
+}
+
+/* Layout: chart | qualification, then leaderboard | side column on wide screens. */
+.dashboard-page .dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space);
+  align-items: start;
+}
+.dashboard-page .dashboard-side {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space);
+  align-items: start;
+  min-width: 0;
+}
+@media (min-width: 1051px) {
+  .dashboard-page .dashboard-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  }
+  .dashboard-page .dashboard-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Card heading row; deliberately not `.card > h2`, so no accent bar. */
+.dashboard-page .dashboard-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-card-head h2 {
+  flex: 1 1 auto;
+  margin-right: auto;
+}
+.dashboard-page .dashboard-card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dashboard-page .dashboard-head-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+  text-decoration: none;
+}
+.dashboard-page .dashboard-head-link:hover {
+  text-decoration: underline;
+}
+.dashboard-page .dashboard-side-card .dashboard-head-link {
+  justify-self: start;
+}
+
+/* Distance card: the body keeps one height in every view and state. */
+.dashboard-page .dashboard-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-meta strong {
+  color: var(--secondary);
+  font-weight: 600;
+}
+.dashboard-page .dashboard-chart-body {
+  height: 212px;
+  min-width: 0;
+  margin: 0;
+}
+.dashboard-page .dashboard-chart-figure {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.dashboard-page .dashboard-chart-figure .chart {
+  height: 100%;
+}
+.dashboard-page .dashboard-chart-caption {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-chart-skeleton {
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+.dashboard-page .dashboard-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--font-small);
+  text-align: center;
+}
+.dashboard-page .dashboard-table-scroll {
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.dashboard-page .dashboard-table-scroll:focus-visible {
+  outline-offset: 2px;
+}
+.dashboard-page .dashboard-table-scroll .table caption {
+  caption-side: top;
+  padding: 6px 10px;
+}
+.dashboard-page .dashboard-table-scroll .table th,
+.dashboard-page .dashboard-table-scroll .table td {
+  padding-inline: 10px;
+}
+.dashboard-page .dashboard-table-scroll .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--inset);
+}
+.dashboard-page .dashboard-table-scroll .table thead th:nth-child(2) {
+  width: 38%;
+}
+.dashboard-page .dashboard-table-scroll .table thead th:nth-child(3) {
+  width: 20%;
+}
+.dashboard-page .dashboard-table-scroll .table tbody th {
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+.dashboard-page .dashboard-peak-badge {
+  margin-left: 6px;
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.dashboard-page .dashboard-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Leaderboard */
+.dashboard-page .dashboard-leaderboard.table td {
+  vertical-align: middle;
+}
+.dashboard-page .dashboard-leaderboard .dashboard-rank-col {
+  width: 36px;
+}
+.dashboard-page .dashboard-leaderboard .dashboard-trips-col {
+  width: 56px;
+}
+.dashboard-page .dashboard-leaderboard .dashboard-distance-col {
+  width: 104px;
+}
+.dashboard-page .dashboard-rank {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.dashboard-page .dashboard-rank-plain {
+  padding-left: 4px;
+  color: var(--muted);
+}
+.dashboard-page .dashboard-driver-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.dashboard-page .dashboard-driver-link:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.dashboard-page .dashboard-empty {
+  padding-block: 8px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.dashboard-page .dashboard-block-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.dashboard-page .dashboard-block-error p,
+.dashboard-page .dashboard-error p {
+  color: var(--destructive);
+}
+
+/* Qualification progress per game */
+.dashboard-page .dashboard-qualification-game {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-qualification-game + .dashboard-qualification-game {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.dashboard-page .dashboard-qualification-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dashboard-page .dashboard-qualification-title h3,
+.dashboard-page .dashboard-event-title,
+.dashboard-page .dashboard-definitions-content h3 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.dashboard-page .dashboard-progress {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.dashboard-page .dashboard-progress > div {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-small);
+}
+.dashboard-page .dashboard-progress dt {
+  color: var(--muted);
+}
+.dashboard-page .dashboard-progress dd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+.dashboard-page .dashboard-bar {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-active);
+}
+.dashboard-page .dashboard-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.dashboard-page .dashboard-progress-value {
+  margin-left: auto;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* States and notices */
+.dashboard-page .dashboard-error {
+  justify-items: start;
+}
+.dashboard-page .dashboard-forbidden p {
+  color: var(--secondary);
+}
+.dashboard-page .dashboard-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--selection-border);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.dashboard-page .dashboard-notice-title {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Definitions */
+.dashboard-page .dashboard-definitions-content {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.dashboard-page .dashboard-definitions-content[hidden] {
+  display: none;
+}
+.dashboard-page .dashboard-definitions-content p {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
