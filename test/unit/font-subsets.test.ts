@@ -4,13 +4,20 @@ import { extname, join, resolve } from "node:path";
 import { brotliDecompressSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
 
-// Rendered symbols the source fonts contain; they must stay in every core subset.
-const renderedSymbols = "←↑→↓↗—№∅◇●✓✕×•«»·–";
+// Rendered symbols the source font contains; they must stay in the core subset.
+const renderedSymbols = "←↑→↓—№∅◇●×•«»·–";
 // Rendered characters that intentionally use the system fallback: the source ellipsis is a
-// full-width form with centred dots, and the other glyphs are absent from the source fonts.
-const fallback = new Set([0x2026, 0x25a4, 0x25f7, 0x1f512]);
+// full-width form with centred dots, and the other glyphs are absent from the source font.
+const fallback = new Set([0x2026, 0x2197, 0x2713, 0x2715, 0x25a4, 0x25f7, 0x1f512]);
 
-type Face = { file: string; weight: string; part: string; range: Set<number>; text: string };
+type Face = {
+  file: string;
+  weight: string;
+  declared: string;
+  part: string;
+  range: Set<number>;
+  text: string;
+};
 
 function parseRange(value: string) {
   const codes = new Set<number>();
@@ -107,12 +114,20 @@ async function sourceFiles(directory: string): Promise<string[]> {
 }
 
 const css = await readFile(resolve("apps/web/src/shared/styles.css"), "utf8");
-const readme = await readFile(resolve("third_party/m-plus-rounded-1c/README.md"), "utf8");
+const readme = await readFile(resolve("third_party/huninn/README.md"), "utf8");
 const faces: Face[] = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)].map(([, body = ""]) => {
   const file = /url\("\.\.\/assets\/([^"]+)"\)/.exec(body)?.[1] ?? "";
   const range = /unicode-range:\s*([^;]+);/.exec(body)?.[1] ?? "";
+  const declared = /font-weight:\s*(\d+);/.exec(body)?.[1] ?? "";
   const [, weight = "", part = ""] = /-(\d{3})-(core|ext)\.woff2$/.exec(file) ?? [];
-  return { file, weight, part, range: parseRange(range), text: range.replace(/\s+/g, "") };
+  return {
+    file,
+    weight,
+    declared,
+    part,
+    range: parseRange(range),
+    text: range.replace(/\s+/g, ""),
+  };
 });
 const cmaps = new Map(
   await Promise.all(
@@ -123,13 +138,13 @@ const cmaps = new Map(
   ),
 );
 
-describe("M PLUS Rounded 1c subsets", () => {
-  test("six faces declare the documented disjoint core and ext ranges", () => {
-    expect(faces.map((face) => face.file)).toEqual(
-      ["400", "500", "700"].flatMap((weight) =>
-        ["core", "ext"].map((part) => `m-plus-rounded-1c-${weight}-${part}.woff2`),
-      ),
-    );
+describe("Huninn subsets", () => {
+  test("two weight-400 faces declare the documented disjoint core and ext ranges", () => {
+    expect(faces.map((face) => face.file)).toEqual([
+      "huninn-400-core.woff2",
+      "huninn-400-ext.woff2",
+    ]);
+    expect(faces.map((face) => face.declared)).toEqual(["400", "400"]);
     for (const part of ["core", "ext"]) {
       const documented = new RegExp(`^${part.toUpperCase()}='([^']+)'$`, "m").exec(readme)?.[1];
       for (const face of faces.filter((item) => item.part === part))
@@ -140,9 +155,7 @@ describe("M PLUS Rounded 1c subsets", () => {
   });
 
   test("documented output sizes and SHA-256 match the committed subsets", async () => {
-    const rows = [
-      ...readme.matchAll(/^\| `(m-plus-rounded-1c-[^`]+)` \| (\d+) \| `([0-9a-f]{64})` \|$/gm),
-    ];
+    const rows = [...readme.matchAll(/^\| `(huninn-[^`]+)` \| (\d+) \| `([0-9a-f]{64})` \|$/gm)];
     expect(rows.map(([, file]) => file)).toEqual(faces.map((face) => face.file));
     for (const [, file = "", size, hash] of rows) {
       const bytes = await readFile(resolve("apps/web/src/assets", file));
@@ -157,7 +170,8 @@ describe("M PLUS Rounded 1c subsets", () => {
     const symbols = [...renderedSymbols].map((symbol) => symbol.codePointAt(0) ?? 0);
     for (const face of faces) {
       const cmap = cmaps.get(face.file) ?? new Set();
-      expect(cmap.size).toBeGreaterThan(300);
+      // Measured: core maps 311 codepoints and ext 339.
+      expect(cmap.size).toBeGreaterThan(face.part === "core" ? 300 : 330);
       expect([...cmap].filter((code) => !face.range.has(code))).toEqual([]);
       for (const code of fallback) expect(cmap.has(code)).toBe(false);
       if (face.part !== "core") continue;
@@ -170,7 +184,7 @@ describe("M PLUS Rounded 1c subsets", () => {
     }
   });
 
-  test("every non-ASCII character in the web sources is in each weight or a documented fallback", async () => {
+  test("every non-ASCII character in the web sources is in the subsets or a documented fallback", async () => {
     const used = new Set<number>();
     for (const file of await sourceFiles(resolve("apps/web/src")))
       for (const character of await readFile(file, "utf8")) {
@@ -178,16 +192,35 @@ describe("M PLUS Rounded 1c subsets", () => {
         if (code > 0x7e) used.add(code);
       }
     expect(used.has(0x2192) && used.has(0x2190)).toBe(true);
-    for (const weight of ["400", "500", "700"]) {
-      const mapped = new Set(
-        faces
-          .filter((face) => face.weight === weight)
-          .flatMap((face) => [...(cmaps.get(face.file) ?? [])]),
-      );
-      const uncovered = [...used]
-        .filter((code) => !mapped.has(code) && !fallback.has(code))
-        .map((code) => `U+${code.toString(16).toUpperCase()}`);
-      expect(uncovered, weight).toEqual([]);
+    const mapped = new Set(faces.flatMap((face) => [...(cmaps.get(face.file) ?? [])]));
+    const uncovered = [...used]
+      .filter((code) => !mapped.has(code) && !fallback.has(code))
+      .map((code) => `U+${code.toString(16).toUpperCase()}`);
+    expect(uncovered).toEqual([]);
+  });
+
+  test("the core subset maps every Russian letter", () => {
+    const core = cmaps.get("huninn-400-core.woff2") ?? new Set();
+    const russian = [0x401, 0x451];
+    for (let code = 0x410; code <= 0x44f; code += 1) russian.push(code);
+    expect(russian.filter((code) => !core.has(code))).toEqual([]);
+  });
+
+  test("no stylesheet disables weight synthesis and only the Huninn subsets are bundled", async () => {
+    // Huninn ships only weight 400, so bold relies on the browser's synthesized weight.
+    const disabled: string[] = [];
+    for (const file of await sourceFiles(resolve("apps/web/src"))) {
+      if (extname(file) !== ".css") continue;
+      const text = await readFile(file, "utf8");
+      for (const [declaration, value = ""] of text.matchAll(/font-synthesis\s*:\s*([^;}]*)/g))
+        if (!/\bweight\b/.test(value)) disabled.push(`${file}: ${declaration.trim()}`);
+      for (const [declaration] of text.matchAll(/font-synthesis-weight\s*:\s*none\b/g))
+        disabled.push(`${file}: ${declaration}`);
     }
+    expect(disabled).toEqual([]);
+    const assets = (await readdir(resolve("apps/web/src/assets"))).filter(
+      (file) => extname(file) === ".woff2",
+    );
+    expect(assets.sort()).toEqual(["huninn-400-core.woff2", "huninn-400-ext.woff2"]);
   });
 });

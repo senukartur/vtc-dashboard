@@ -8,8 +8,8 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await info.attach(name, { path, contentType: "image/png" });
 }
 
-const bundledFont = /\/assets\/m-plus-rounded-1c-[^/]+\.woff2$/;
-const fontStack = /^"M PLUS Rounded 1c", system-ui, sans-serif$/;
+const bundledFont = /\/assets\/huninn-[^/]+\.woff2$/;
+const fontStack = /^"?Huninn"?, system-ui, sans-serif$/;
 
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -597,13 +597,12 @@ test("dark public and member shells retain readable controls, bundled font/licen
   for (const weight of [400, 700])
     expect(
       await page.evaluate(async (weight) => {
-        const font = `${weight} 14px "M PLUS Rounded 1c"`;
+        const font = `${weight} 14px "Huninn"`;
         const faces = await document.fonts.load(font, "Язык · Yukon Union");
         return (
           document.fonts.check(font, "Язык · Yukon Union") &&
           faces.some(
-            (face) =>
-              face.family.replaceAll('"', "") === "M PLUS Rounded 1c" && face.status === "loaded",
+            (face) => face.family.replaceAll('"', "") === "Huninn" && face.status === "loaded",
           )
         );
       }, weight),
@@ -622,15 +621,16 @@ test("dark public and member shells retain readable controls, bundled font/licen
     expect(font.url.origin).toBe(origin);
     expect(font.status).toBe(200);
     expect(font.type).toBe("font/woff2");
-    expect(font.url.pathname).not.toMatch(/m-plus-rounded-1c-\d{3}-ext-/);
+    expect(font.url.pathname).toMatch(/\/assets\/huninn-400-core-[^/]+\.woff2$/);
   }
-  // The core Latin/Cyrillic faces of one page stay below the former 193056-byte font file.
-  expect(fonts.reduce((total, font) => total + font.bytes, 0)).toBeLessThan(193056);
-  await page.evaluate(() => document.fonts.load('400 14px "M PLUS Rounded 1c"', "Łódź"));
+  // One page's Latin/Cyrillic font bytes stay below the previous UI font's 73892-byte
+  // per-page core maximum (its 400, 500 and 700 core subsets).
+  expect(fonts.reduce((total, font) => total + font.bytes, 0)).toBeLessThan(73892);
+  await page.evaluate(() => document.fonts.load('400 14px "Huninn"', "Łódź"));
   await expect
     .poll(() =>
       fontResponses.some((response) =>
-        /\/assets\/m-plus-rounded-1c-400-ext-[^/]+\.woff2$/.test(new URL(response.url()).pathname),
+        /\/assets\/huninn-400-ext-[^/]+\.woff2$/.test(new URL(response.url()).pathname),
       ),
     )
     .toBe(true);
@@ -641,7 +641,7 @@ test("dark public and member shells retain readable controls, bundled font/licen
     }),
   ).toEqual([]);
   const license = await page
-    .getByRole("link", { name: "Лицензия шрифта M PLUS Rounded 1c", exact: true })
+    .getByRole("link", { name: "Лицензия шрифта Huninn", exact: true })
     .getAttribute("href");
   expect(license).toMatch(/^\/assets\/OFL-[^/]+\.txt$/);
   const response = await page.request.get(license ?? "");
@@ -650,7 +650,7 @@ test("dark public and member shells retain readable controls, bundled font/licen
     createHash("sha256")
       .update(await response.body())
       .digest("hex"),
-  ).toBe("2f6ab907c3fc803a369cf3a25f906b8e6b528fa176dde716de6aba2e3895c504");
+  ).toBe("d71824aeb09afc4c2cac01acab5c3db79796e927ba37be40d69fb62a412639b6");
   const sidebar = page.getByRole("complementary", {
     name: "Пример рабочего пространства",
     exact: true,
@@ -796,15 +796,15 @@ test("compact control sizes follow pointer type", async ({ page }, info) => {
   await capture(page, info, `compact-controls-${coarse ? "coarse" : "fine"}`);
 });
 
-test("CSS weights render the shipped font faces and tabular digits stay aligned", async ({
+test("CSS weights render the shipped font face with synthesized bold and aligned tabular digits", async ({
   page,
 }) => {
   await page.goto("/foundation");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.locator(".table th").first()).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
-  // Rendered arrows and symbols that the source fonts contain; see the subset README.
-  const renderedSymbols = "←↑→↓↗—№∅◇●✓✕×•«»·–";
+  // Rendered arrows and symbols that the source font contains; see the subset README.
+  const renderedSymbols = "←↑→↓—№∅◇●×•«»·–";
   await page.evaluate(async (symbols) => {
     const visible = Array.from(document.querySelectorAll(".wordmark")).find(
       (element) => element.getClientRects().length > 0,
@@ -823,7 +823,8 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
     }
     for (const [name, text] of [
       ["symbols", symbols],
-      ["ellipsis", "…"],
+      // Rendered characters that the subset README leaves to the system fallback.
+      ["fallback", "…↗✓✕"],
     ] as const) {
       const probe = document.createElement("span");
       probe.setAttribute("data-font-probe", name);
@@ -832,7 +833,7 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
     }
     await Promise.all(
       [400, 500, 700].map((weight) =>
-        document.fonts.load(`${weight} 14px "M PLUS Rounded 1c"`, `Yukon 0123456789${symbols}`),
+        document.fonts.load(`${weight} 14px "Huninn"`, `Yukon 0123456789${symbols}`),
       ),
     );
   }, renderedSymbols);
@@ -849,27 +850,31 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
     (await platformFonts(selector))
       .filter((font) => font.isCustomFont)
       .map((font) => font.postScriptName);
-  // Upstream PostScript names; 600 and 750 have no static face and resolve to Bold.
-  expect(await faces("main h1")).toEqual(["RoundedMplus1c-Bold"]);
-  expect(await faces("[data-font-probe=wordmark]")).toEqual(["RoundedMplus1c-Bold"]);
-  expect(await faces(".table th")).toEqual(["RoundedMplus1c-Medium"]);
-  expect(await faces("main .lead")).toEqual(["RoundedMplus1c-Regular"]);
-  expect(await faces("[data-font-probe=numeric]")).toEqual(["RoundedMplus1c-Regular"]);
-  expect(await faces("[data-font-probe=numeric-bold]")).toEqual(["RoundedMplus1c-Bold"]);
-  // Every rendered symbol comes from the core face; the centred-dot ellipsis stays in fallback.
+  // Upstream PostScript name of the only face; 500 renders it regular, 600+ synthesize bold.
+  for (const selector of [
+    "main h1",
+    "[data-font-probe=wordmark]",
+    ".table th",
+    "main .lead",
+    "[data-font-probe=numeric]",
+    "[data-font-probe=numeric-bold]",
+  ])
+    expect(await faces(selector), selector).toEqual(["Huninn-Regular"]);
+  // Every rendered symbol comes from the core face; the centred-dot ellipsis and the
+  // symbols the source font lacks stay in the system fallback.
   expect(
     (await platformFonts("[data-font-probe=symbols]")).map((font) => [
       font.postScriptName,
       font.isCustomFont,
       font.glyphCount,
     ]),
-  ).toEqual([["RoundedMplus1c-Regular", true, [...renderedSymbols].length]]);
-  expect(await faces("[data-font-probe=ellipsis]")).toEqual([]);
+  ).toEqual([["Huninn-Regular", true, [...renderedSymbols].length]]);
+  expect(await faces("[data-font-probe=fallback]")).toEqual([]);
   const declared = await page.evaluate(() => {
     const items: { weight: string; range: string }[] = [];
     const named: Record<string, string> = { normal: "400", bold: "700" };
     document.fonts.forEach((face) => {
-      if (face.family.replaceAll('"', "") === "M PLUS Rounded 1c")
+      if (face.family.replaceAll('"', "") === "Huninn")
         items.push({ weight: named[face.weight] ?? face.weight, range: face.unicodeRange });
     });
     return items;
@@ -879,13 +884,12 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
       const [start = "", end = start] = part.trim().replace(/^U\+/i, "").split("-");
       return Number.parseInt(start, 16) <= code && code <= Number.parseInt(end, 16);
     });
-  expect(declared).toHaveLength(6);
-  for (const weight of ["400", "500", "700"]) {
-    const core = declared.filter((face) => face.weight === weight && inRange(face.range, 0x41));
-    expect(core, weight).toHaveLength(1);
-    for (const symbol of renderedSymbols)
-      expect(inRange(core[0]?.range ?? "", symbol.codePointAt(0) ?? 0), symbol).toBe(true);
-  }
+  expect(declared).toHaveLength(2);
+  expect(declared.map((face) => face.weight)).toEqual(["400", "400"]);
+  const core = declared.filter((face) => inRange(face.range, 0x41));
+  expect(core).toHaveLength(1);
+  for (const symbol of renderedSymbols)
+    expect(inRange(core[0]?.range ?? "", symbol.codePointAt(0) ?? 0), symbol).toBe(true);
   expect(declared.filter((face) => inRange(face.range, 0x2026))).toEqual([]);
   const result = await page.evaluate(() => {
     const spreads = ["numeric", "numeric-bold"].map((name) => {
@@ -900,18 +904,48 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
         spread: Math.max(...widths) - Math.min(...widths),
       };
     });
+    const synthesis = (selector: string) => {
+      const element = Array.from(document.querySelectorAll(selector)).find(
+        (item) => item.getClientRects().length > 0,
+      );
+      return element ? getComputedStyle(element).fontSynthesisWeight : `MISSING_${selector}`;
+    };
     return {
-      synthesis: getComputedStyle(document.querySelector("main h1") ?? document.body)
-        .fontSynthesisWeight,
+      synthesis: ["main h1", "main button", ".table th", ".wordmark"].map(synthesis),
       spreads,
     };
   });
-  expect(result.synthesis).toBe("none");
+  // Weight-400-only Huninn needs synthesized bold on headings, controls, headers and the wordmark.
+  expect(result.synthesis).toEqual(["auto", "auto", "auto", "auto"]);
   expect(result.spreads).toHaveLength(2);
   for (const { numeric, spread } of result.spreads) {
     expect(numeric).toBe("tabular-nums");
     expect(spread).toBeLessThan(0.5);
   }
+  // Huninn ships only weight 400, so weight 700 must render with visibly heavier synthesized
+  // strokes. Ink is compared, not width. The canvas uses no app CSS, so this proves the
+  // browser can synthesize bold for the face; the computed values above cover the app CSS.
+  const ink = await page.evaluate(async () => {
+    await document.fonts.load('700 32px "Huninn"', "Язык Yukon");
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 64;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("MISSING_CANVAS");
+    return [400, 700].map((weight) => {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.font = `${weight} 32px "Huninn"`;
+      context.fillStyle = "#000";
+      context.fillText("Язык Yukon", 8, 44);
+      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+      let pixels = 0;
+      for (let index = 3; index < data.length; index += 4)
+        if ((data[index] ?? 0) > 127) pixels += 1;
+      return pixels;
+    });
+  });
+  expect(ink[0] ?? 0).toBeGreaterThan(0);
+  expect(ink[1] ?? 0).toBeGreaterThanOrEqual((ink[0] ?? 0) * 1.05);
 });
 
 for (const locale of ["ru", "en"]) {
@@ -978,9 +1012,7 @@ test("controlled font-download failure keeps the Cyrillic interface usable with 
   await page.evaluate(() => document.fonts.ready);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Композиция кабинета участника");
   expect(aborted).toBeGreaterThan(0);
-  expect(await page.evaluate(() => document.fonts.check('14px "M PLUS Rounded 1c"', "Язык"))).toBe(
-    false,
-  );
+  expect(await page.evaluate(() => document.fonts.check('14px "Huninn"', "Язык"))).toBe(false);
   await expect(page.getByRole("main")).toHaveCSS("font-family", fontStack);
   await expect(page.getByRole("textbox", { name: "Текст примера", exact: true })).toBeVisible();
   await noOverflow(page);
