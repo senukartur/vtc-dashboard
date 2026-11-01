@@ -14,6 +14,12 @@ import {
   operations,
 } from "../../apps/web/src/features/account/transport.ts";
 import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
+import {
+  legacyAccountSection,
+  timezoneOptions,
+  timezoneValid,
+  visibleAccountSections,
+} from "../../apps/web/src/features/account/settings.ts";
 import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 const meta = { requestId: "synthetic-request" };
@@ -279,4 +285,80 @@ test("account entry copy keeps RU/EN parity, fixed visibility toggle names and o
   const mockupSlogan = /Достаточно суров|Yukon\?|Юкон\?/;
   for (const value of [JSON.stringify(accountTranslations), JSON.stringify(publicContent)])
     expect(mockupSlogan.test(value)).toBe(false);
+});
+test("account settings copy covers every section and row in RU/EN and drops the single-page keys", () => {
+  const { en, ru } = accountTranslations;
+  for (const locale of [en, ru]) {
+    for (const id of ["profile", "security", "connections", "preferences"] as const) {
+      expect(locale.sections[id].trim().length).toBeGreaterThan(0);
+      expect(locale.sectionLeads[id].trim().length).toBeGreaterThan(0);
+    }
+    for (const key of [
+      "needsAttention",
+      "nickname",
+      "nicknameHint",
+      "roles",
+      "noRoles",
+      "driverProfile",
+      "driverProfileHint",
+      "openProfile",
+      "emailHint",
+      "emailVerifiedBadge",
+      "emailUnverifiedBadge",
+      "emailPendingBadge",
+      "change",
+      "passwordHint",
+      "session",
+      "sessionHint",
+      "languageRow",
+      "languageHint",
+      "languageSaved",
+      "timezoneSaved",
+      "saveShort",
+      "steamHint",
+    ] as const)
+      expect(locale[key].trim().length).toBeGreaterThan(0);
+    expect(locale.changeTarget.email.trim().length).toBeGreaterThan(0);
+    expect(locale.changeTarget.password.trim().length).toBeGreaterThan(0);
+    for (const removed of [
+      "accountSecurity",
+      "save",
+      "saved",
+      "locale",
+      "preferences",
+      "verification",
+      "emailChange",
+    ])
+      expect(removed in locale).toBe(false);
+  }
+  // Fixed accessible names of the disclosure toggles: visible "Change" plus a hidden target.
+  expect(`${en.change} ${en.changeTarget.email}`).toBe("Change email");
+  expect(`${ru.change} ${ru.changeTarget.password}`).toBe("Изменить пароль");
+  expect(/Достаточно суров|Yukon\?|Юкон\?/.test(JSON.stringify(accountTranslations))).toBe(false);
+});
+test("account sections follow navigation order, hide Connections without company.read and map legacy anchors", () => {
+  expect(visibleAccountSections(["company.read"]).map(({ id, to }) => [id, to])).toEqual([
+    ["profile", "/account/profile"],
+    ["security", "/account/security"],
+    ["connections", "/account/connections"],
+    ["preferences", "/account/preferences"],
+  ]);
+  expect(visibleAccountSections([]).map((section) => section.id)).toEqual([
+    "profile",
+    "security",
+    "preferences",
+  ]);
+  expect(legacyAccountSection("#preferences")).toBe("preferences");
+  for (const hash of ["#verification", "#password", "#email", "", "#unknown"])
+    expect(legacyAccountSection(hash)).toBe("security");
+});
+test("display timezone validation and suggestions keep the existing technical bounds", () => {
+  for (const zone of ["UTC", "Europe/Warsaw"]) expect(timezoneValid(zone)).toBe(true);
+  for (const zone of ["", "Mars/Base", "x".repeat(129)]) expect(timezoneValid(zone)).toBe(false);
+  const options = timezoneOptions("Europe/Warsaw");
+  expect(options).toContain("UTC");
+  expect(options).toContain("Europe/Warsaw");
+  expect(new Set(options).size).toBe(options.length);
+  expect(options).toEqual([...options].sort());
+  expect(timezoneOptions("").includes("")).toBe(false);
 });

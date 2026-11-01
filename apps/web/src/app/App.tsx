@@ -10,7 +10,7 @@ import {
   useLocation,
   useMatch,
 } from "react-router-dom";
-import { AccountPage } from "../features/account/AccountPage.js";
+import { AccountIndex, AccountPage } from "../features/account/AccountPage.js";
 import { AuthPage } from "../features/account/AuthPage.js";
 import type { LinkHandoff } from "../features/account/link.js";
 import { SignOutProvider } from "../features/account/sign-out.js";
@@ -86,12 +86,6 @@ const MembersPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("../features/admin/SettingsPage.js").then((module) => ({ default: module.SettingsPage })),
 );
-const ConnectionsPage = lazy(() =>
-  import("../features/connections/ConnectionsPage.js").then((module) => ({
-    default: module.ConnectionsPage,
-  })),
-);
-
 const queryClient = createAppQueryClient();
 const EventsPage = lazy(() =>
   import("../features/events/EventsPage.js").then((m) => ({ default: m.EventsPage })),
@@ -105,8 +99,11 @@ const EventDetailPage = lazy(() =>
 const memberPath = "/foundation/member";
 // Keyed by the navigation model so every workspace pattern has exactly one element.
 const accountRoutes: Record<RouteId, ReactElement> = {
-  account: <AccountPage />,
-  connections: <ConnectionsPage />,
+  account: <AccountIndex />,
+  accountProfile: <AccountPage section="profile" />,
+  accountSecurity: <AccountPage section="security" />,
+  accountPreferences: <AccountPage section="preferences" />,
+  connections: <AccountPage section="connections" />,
   notifications: <NotificationsPage />,
   dashboard: <DashboardPage />,
   trips: <TripsPage />,
