@@ -319,6 +319,17 @@ const companySeeds: TripSeed[] = [
   },
 ];
 
+/** Seven more ETS2 trips by AlphaHauler, so the company window holds twelve of theirs. */
+const bulkSeeds: TripSeed[] = Array.from({ length: 7 }, (_, index) => ({
+  owner: alphaId,
+  game: "ets2" as const,
+  route: ["Берлин", "Гамбург"] as [string, string],
+  cargo: "Бумага",
+  km: String(280000 + index * 1000),
+  at: `2026-11-0${8 - index}T10:00:00.000Z`,
+  sources: ["ets2telemetry" as const],
+}));
+
 const ownSeeds: TripSeed[] = [
   {
     owner: selfId,
@@ -346,11 +357,17 @@ const ownSeeds: TripSeed[] = [
  */
 export function tripsFixture(
   search: URLSearchParams,
-  options: { nextCursor?: boolean; empty?: boolean } = {},
+  options: { nextCursor?: boolean; empty?: boolean; bulk?: boolean } = {},
 ): DTO["EnvelopeListTripSummary"] {
   const own = search.get("scope") === "mine";
   const game = search.get("game");
-  const seeds = options.empty ? [] : own ? ownSeeds : companySeeds;
+  const seeds = options.empty
+    ? []
+    : own
+      ? ownSeeds
+      : options.bulk
+        ? [...companySeeds, ...bulkSeeds]
+        : companySeeds;
   const items = seeds
     .map((seed, index) => trip(seed, own ? index + 50 : index))
     .filter((item) => !game || item.game === game);

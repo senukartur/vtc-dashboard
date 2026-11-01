@@ -154,10 +154,18 @@ test.describe("Compact driver profile", () => {
     const ets2 = qualification(page, "ETS2");
     await expect(ets2.getByRole("heading", { level: 2 })).toHaveText("ETS2 · Driver II");
     await expect(ets2.getByText("Next: Driver I")).toBeVisible();
-    await expect(ets2.getByRole("list", { name: "Level ladder" }).getByRole("listitem")).toHaveText(
-      ["Trainee", "Driver III", "Driver II", "Driver I"],
-    );
-    await expect(ets2.locator('[aria-current="step"]')).toHaveText("Driver II");
+    const ladder = ets2.getByRole("list", { name: "Level ladder" });
+    await expect(ladder.locator(".driver-ladder-arrow")).toHaveCount(3);
+    for (const arrow of await ladder.locator(".driver-ladder-arrow").all())
+      await expect(arrow).toHaveAttribute("aria-hidden", "true");
+    expect(await ladder.evaluate((element) => getComputedStyle(element).cursor)).toBe("default");
+    await expect(ladder.locator(".driver-ladder-name")).toHaveText([
+      "Trainee",
+      "Driver III",
+      "Driver II",
+      "Driver I",
+    ]);
+    await expect(ets2.locator('[aria-current="step"] .driver-ladder-name')).toHaveText("Driver II");
     await expect(ets2.getByRole("definition")).toHaveText(["41 / 80", "52,300 / 100,000 km"]);
     await expect(ets2.getByText(/Requirements met/)).toHaveCount(0);
     await expect(ets2.getByText("Progress since 20 Aug 2026, 09:00 (UTC)")).toBeVisible();
@@ -268,6 +276,37 @@ test.describe("Compact driver profile", () => {
     await expect(header.getByText("ETS2 · Driver II", { exact: true })).toBeVisible();
     await expect(header.getByText("ATS · Highway Driver III", { exact: true })).toBeVisible();
     await expect(ats).toBeFocused();
+    await expect(
+      tripsCard(page).getByText(
+        "Showing this driver's trips among the latest 100 accepted ATS company trips.",
+      ),
+    ).toBeVisible();
+  });
+
+  test("caps another member's list at ten and says so even when the window is complete", async ({
+    page,
+  }) => {
+    await mockDriverRoutes(page, { bulkTrips: true, tripsNextCursor: false });
+    await open(page, alphaId);
+    await loaded(page);
+    // Twelve of this member's trips are in the window; ten rows plus the header are shown.
+    await expect(tripsCard(page).getByRole("row")).toHaveCount(11);
+    await expect(
+      tripsCard(page).getByText(
+        "Showing the latest 10 of this driver's trips among the latest 100 accepted company trips.",
+      ),
+    ).toBeVisible();
+    await gameGroup(page).getByRole("button", { name: "ATS", exact: true }).click();
+    await expect(tripsCard(page).getByRole("row")).toHaveCount(3);
+    // Complete window and not truncated: the list is this member's full ATS list, no note.
+    await expect(tripsCard(page).getByText(/^Showing/)).toHaveCount(0);
+    await switchLanguage(page, "ru");
+    await gameGroup(page).getByRole("button", { name: "Все игры" }).click();
+    await expect(
+      tripsCard(page).getByText(
+        "Показаны последние 10 рейсов водителя среди последних 100 принятых рейсов компании.",
+      ),
+    ).toBeVisible();
   });
 
   test("own profile uses the exact own trip page and links to all own trips", async ({ page }) => {
@@ -541,9 +580,9 @@ test.describe("Compact driver profile", () => {
     await expect(tripsCard(page).getByRole("table")).toHaveAccessibleName(
       "Accepted trips of Fictional Yukon Member",
     );
-    await expect(qualification(page, "ETS2").locator('[aria-current="step"]')).toHaveText(
-      "Trainee",
-    );
+    await expect(
+      qualification(page, "ETS2").locator('[aria-current="step"] .driver-ladder-name'),
+    ).toHaveText("Trainee");
     await expect(qualification(page, "ETS2").locator(".driver-bar").first()).toHaveAttribute(
       "aria-hidden",
       "true",

@@ -86,12 +86,14 @@ export function tripsPath({ isSelf, game }: { isSelf: boolean; game?: Game | und
   return `/trips?${search.toString()}`;
 }
 
+/** The member's trips in server order, capped; `truncated` when more matches were dropped. */
 export function ownTrips(
   items: readonly TripSummary[],
   memberId: string,
   max = OWN_TRIPS_LIMIT,
-): TripSummary[] {
-  return items.filter((trip) => trip.owner.id === memberId).slice(0, max);
+): { items: TripSummary[]; truncated: boolean } {
+  const matches = items.filter((trip) => trip.owner.id === memberId);
+  return { items: matches.slice(0, max), truncated: matches.length > max };
 }
 
 /** Translation keys for the trip sources, deduplicated; an empty list is "unknown". */

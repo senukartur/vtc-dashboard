@@ -135,16 +135,28 @@ describe("driver profile model", () => {
     it("keeps only the member's trips in order and caps them at ten", () => {
       const items = tripsFixture(new URLSearchParams("scope=company")).data.items;
       const own = ownTrips(items, alphaId);
-      expect(own.map((trip) => trip.owner.id)).toEqual(Array(5).fill(alphaId));
-      expect(own.map((trip) => trip.id)).toEqual(
+      expect(own.truncated).toBe(false);
+      expect(own.items.map((trip) => trip.owner.id)).toEqual(Array(5).fill(alphaId));
+      expect(own.items.map((trip) => trip.id)).toEqual(
         items.filter((trip) => trip.owner.id === alphaId).map((trip) => trip.id),
       );
-      const many = Array.from({ length: 14 }, (_, index) => ({
-        ...items[0],
-        id: `${index}`,
-      })) as typeof items;
-      expect(ownTrips(many, alphaId)).toHaveLength(10);
-      expect(ownTrips(items, betaId, 1)).toHaveLength(1);
+      expect(ownTrips(items, betaId, 1)).toMatchObject({ truncated: false });
+      expect(ownTrips(items, betaId, 1).items).toHaveLength(1);
+    });
+
+    it("caps more than ten owner matches and reports the truncation", () => {
+      const bulk = tripsFixture(new URLSearchParams("scope=company"), { bulk: true }).data.items;
+      expect(bulk.filter((trip) => trip.owner.id === alphaId)).toHaveLength(12);
+      const own = ownTrips(bulk, alphaId);
+      expect(own.items).toHaveLength(10);
+      expect(own.truncated).toBe(true);
+      expect(own.items.map((trip) => trip.id)).toEqual(
+        bulk
+          .filter((trip) => trip.owner.id === alphaId)
+          .slice(0, 10)
+          .map((trip) => trip.id),
+      );
+      expect(ownTrips(bulk.slice(0, 7), alphaId).truncated).toBe(false);
     });
 
     it("names the sources and falls back to unknown", () => {
@@ -234,12 +246,13 @@ describe("driver profile fixtures match the browser contract", () => {
       parses("EnvelopeAnalytics", analyticsFixture(new URLSearchParams(), { empty: true })),
     ).toBe(true);
     for (const search of ["scope=company", "scope=mine", "scope=company&game=ats"])
-      expect(
-        parses(
-          "EnvelopeListTripSummary",
-          tripsFixture(new URLSearchParams(search), { nextCursor: true }),
-        ),
-      ).toBe(true);
+      for (const bulk of [false, true])
+        expect(
+          parses(
+            "EnvelopeListTripSummary",
+            tripsFixture(new URLSearchParams(search), { nextCursor: true, bulk }),
+          ),
+        ).toBe(true);
   });
 
   it("serves public progress, which the private progress schema rejects", () => {

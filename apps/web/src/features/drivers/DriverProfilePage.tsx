@@ -145,6 +145,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
             <DriverTrips
               query={tripsQuery}
               isSelf={isSelf}
+              game={effectiveGame}
               nickname={profile.member.nickname}
               locale={locale}
               displayTimezone={displayTimezone}

@@ -38,6 +38,8 @@ export interface DriverMockState {
   /** Next cursor on the first trips page (company window incomplete / more own trips). */
   tripsNextCursor: boolean;
   emptyTrips: boolean;
+  /** Twelve trips by AlphaHauler in the company window (more than the profile shows). */
+  bulkTrips: boolean;
   emptyAnalytics: boolean;
   holdProfile(): void;
   releaseProfile(): void;
@@ -75,6 +77,7 @@ export async function mockDriverRoutes(
     holdProfile?: boolean;
     tripsNextCursor?: boolean;
     emptyTrips?: boolean;
+    bulkTrips?: boolean;
     emptyAnalytics?: boolean;
   } = {},
 ): Promise<DriverMockState> {
@@ -86,6 +89,7 @@ export async function mockDriverRoutes(
     capabilities: options.capabilities ? [...options.capabilities] : undefined,
     tripsNextCursor: options.tripsNextCursor ?? true,
     emptyTrips: options.emptyTrips ?? false,
+    bulkTrips: options.bulkTrips ?? false,
     emptyAnalytics: options.emptyAnalytics ?? false,
     holdProfile() {
       if (gate) return;
@@ -147,6 +151,7 @@ export async function mockDriverRoutes(
         json: tripsFixture(url.searchParams, {
           nextCursor: state.tripsNextCursor,
           empty: state.emptyTrips,
+          bulk: state.bulkTrips,
         }),
       });
 

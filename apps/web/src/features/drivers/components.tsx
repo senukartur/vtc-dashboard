@@ -292,12 +292,14 @@ function ProgressRows({ progress, locale }: { progress: Progress; locale: Locale
         {rows.map((row) => (
           <div key={row.key}>
             <dt>{row.label}</dt>
-            <dd>{row.value}</dd>
-            {row.percent !== null && (
-              <span className="driver-bar" aria-hidden="true">
-                <span style={{ width: `${row.percent}%` }} />
-              </span>
-            )}
+            <dd>
+              <span className="driver-progress-value">{row.value}</span>
+              {row.percent !== null && (
+                <span className="driver-bar" aria-hidden="true">
+                  <span style={{ width: `${row.percent}%` }} />
+                </span>
+              )}
+            </dd>
           </div>
         ))}
       </dl>
@@ -371,7 +373,7 @@ export function QualificationCard({
       </div>
       {resolved && ladder.length > 0 && (
         <ol className="driver-ladder" aria-label={t("qualification.ladder")}>
-          {ladder.map((level) => {
+          {ladder.map((level, index) => {
             const current = level.id === resolved.id;
             const passed = LEVEL_ORDER.indexOf(level.code) < LEVEL_ORDER.indexOf(resolved.code);
             return (
@@ -380,7 +382,12 @@ export function QualificationCard({
                 aria-current={current ? "step" : undefined}
                 data-state={current ? "current" : passed ? "passed" : "upcoming"}
               >
-                {level.name}
+                {index > 0 && (
+                  <span className="driver-ladder-arrow" aria-hidden="true">
+                    →
+                  </span>
+                )}
+                <span className="driver-ladder-name">{level.name}</span>
               </li>
             );
           })}
@@ -433,12 +440,15 @@ function CellLabel({ children }: { children: ReactNode }) {
 export function DriverTrips({
   query,
   isSelf,
+  game,
   nickname,
   locale,
   displayTimezone,
 }: {
   query: UseQueryResult<AcceptedTrips>;
   isSelf: boolean;
+  /** Selected game; the company window then holds only that game's trips. */
+  game: Game | undefined;
   nickname: string;
   locale: Locale;
   displayTimezone: string;
@@ -448,6 +458,16 @@ export function DriverTrips({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const data = query.data;
   const limit = COMPANY_TRIPS_WINDOW;
+  const scope = game ? t("trips.scopeGame", { game: gameName[game] }) : t("trips.scopeAll");
+  // Another member: say what the list covers whenever it is not that member's complete list.
+  const windowNote =
+    data && !isSelf && data.items.length > 0
+      ? data.truncated
+        ? t("trips.truncatedNote", { shown: data.items.length, limit, scope })
+        : data.windowIncomplete
+          ? t("trips.windowNote", { limit, scope })
+          : null
+      : null;
 
   let body: ReactNode;
   if (!data && query.isError) {
@@ -481,7 +501,7 @@ export function DriverTrips({
         {isSelf
           ? t("trips.emptyOwn")
           : data.windowIncomplete
-            ? t("trips.emptyWindow", { limit })
+            ? t("trips.emptyWindow", { limit, scope })
             : t("trips.empty")}
       </p>
     );
@@ -561,9 +581,7 @@ export function DriverTrips({
         </span>
       </div>
       {body}
-      {data && !isSelf && data.windowIncomplete && data.items.length > 0 && (
-        <p className="driver-muted">{t("trips.windowNote", { limit })}</p>
-      )}
+      {windowNote && <p className="driver-muted">{windowNote}</p>}
       {data && isSelf && data.nextCursor && (
         <Link to="/account/trips" className="driver-head-link">
           {t("trips.allMine")}

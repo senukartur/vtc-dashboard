@@ -146,6 +146,8 @@ export type AcceptedTrips = {
   nextCursor: string | null;
   /** Other member only: the scanned company window has older trips that were not checked. */
   windowIncomplete: boolean;
+  /** Other member only: the window holds more of the member's trips than are shown. */
+  truncated: boolean;
 };
 
 /**
@@ -165,9 +167,14 @@ export function useMemberAcceptedTrips(
     queryFn: async ({ signal }): Promise<AcceptedTrips> => {
       const page = (await read(path, "EnvelopeListTripSummary", signal)).data;
       if (params.isSelf)
-        return { items: page.items, nextCursor: page.nextCursor, windowIncomplete: false };
+        return {
+          items: page.items,
+          nextCursor: page.nextCursor,
+          windowIncomplete: false,
+          truncated: false,
+        };
       return {
-        items: ownTrips(page.items, memberId),
+        ...ownTrips(page.items, memberId),
         nextCursor: null,
         windowIncomplete: page.nextCursor !== null,
       };
