@@ -3,6 +3,9 @@ import { matchRoutes } from "react-router-dom";
 /** Every authenticated workspace route. App.tsx renders exactly these patterns. */
 export const paths = {
   account: "/account",
+  accountProfile: "/account/profile",
+  accountSecurity: "/account/security",
+  accountPreferences: "/account/preferences",
   connections: "/account/connections",
   notifications: "/account/notifications",
   dashboard: "/account/dashboard",
@@ -101,7 +104,11 @@ const item = (group: NavGroupId, id: NavItemId, detail?: string): RouteMeta => (
 });
 export const routeMeta: Record<RouteId, RouteMeta> = {
   account: { group: "account", titleKey: "nav.account.security" },
-  connections: { group: "account", titleKey: "nav.account.connections" },
+  // Account settings sections reuse their own `account:` headings for the title and breadcrumb.
+  accountProfile: { group: "account", titleKey: "account:sections.profile" },
+  accountSecurity: { group: "account", titleKey: "account:sections.security" },
+  accountPreferences: { group: "account", titleKey: "account:sections.preferences" },
+  connections: { group: "account", titleKey: "account:sections.connections" },
   notifications: { group: "account", titleKey: "nav.account.notifications" },
   dashboard: item("personal", "overview"),
   trips: item("personal", "myTrips"),
@@ -235,14 +242,20 @@ export function accountLinks({
           },
         ]
       : []),
-    { id: "security" as const, to: paths.account, labelKey: "nav.account.security" },
+    { id: "security" as const, to: paths.accountSecurity, labelKey: "nav.account.security" },
     ...(company
       ? [{ id: "connections" as const, to: paths.connections, labelKey: "nav.account.connections" }]
       : []),
   ];
 }
 
-const rolePrecedence = ["director", "deputy_director", "dispatcher", "driver", "trainee"] as const;
+export const rolePrecedence = [
+  "director",
+  "deputy_director",
+  "dispatcher",
+  "driver",
+  "trainee",
+] as const;
 export type PrimaryRole = (typeof rolePrecedence)[number];
 export function primaryRole(roles: readonly string[]): PrimaryRole | null {
   return rolePrecedence.find((role) => roles.includes(role)) ?? null;
