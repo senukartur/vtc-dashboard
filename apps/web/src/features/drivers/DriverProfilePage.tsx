@@ -1,378 +1,197 @@
-import { useMemo, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
-import { Bar, BarChart, CartesianGrid, Cell, XAxis } from "recharts";
 import { useSession } from "../../app/Session.js";
+import type { Locale } from "../../shared/formatting.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
+import { useQualificationQuery } from "../qualifications/queries.js";
 import {
-  chartGeometry,
-  formatDecimal,
-  formatQuantity,
-  formatUtc,
-  type Locale,
-} from "../../shared/formatting.js";
-import { ChartContainer } from "../../shared/ui/chart.js";
-import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
+  DistanceByMonth,
+  DriverKpis,
+  DriverTrips,
+  type LevelsState,
+  ProfileHeader,
+  QualificationCard,
+  Skeleton,
+} from "./components.js";
+import { assignmentFor, failureView, GAMES, type GameFilter, twelveMonthWindow } from "./model.js";
 import {
   useMemberAcceptedTrips,
   useMemberAnalytics,
   useMemberProfile,
   useMemberProgress,
 } from "./queries.js";
+import "./drivers.css";
 
-type GameFilter = "all" | "ets2" | "ats";
-
+/** Gate: without company.read no profile query hook mounts, so nothing is requested. */
 export function DriverProfilePage() {
   const { memberId = "" } = useParams<{ memberId: string }>();
-  const { t, i18n } = useTranslation("drivers");
-  const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
+  const { t } = useTranslation("drivers");
   const session = useSession();
-  const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
-
-  const [game, setGame] = useState<GameFilter>("all");
-  const effectiveGame = game === "all" ? undefined : game;
-
-  // Dates for driver personal analytics (current year)
-  const currentYear = new Date().getUTCFullYear();
-  const fromDate = `${currentYear}-01-01`;
-  const toDateExclusive = `${currentYear + 1}-01-01`;
-
-  const profileQuery = useMemberProfile(memberId);
-  const analyticsQuery = useMemberAnalytics(memberId, {
-    fromDate,
-    toDateExclusive,
-    game: effectiveGame,
-    granularity: "month",
-  });
-  const ets2ProgressQuery = useMemberProgress(memberId, "ets2");
-  const atsProgressQuery = useMemberProgress(memberId, "ats");
-  const tripsQuery = useMemberAcceptedTrips(memberId, {
-    game: effectiveGame,
-  });
-
-  const profile = profileQuery.data;
-  const analytics = analyticsQuery.data;
-  const member = profile?.member;
-
-  const roleLabel = (r: string) => t(`roles.${r}` as any) || r;
-
-  const chartPoints = useMemo(() => {
-    if (!analytics) return [];
-    return analytics.buckets.map((b) => ({
-      date: b.date,
-      value: chartGeometry(b.actualDistanceM) ?? 0,
-      exactDistance: b.actualDistanceM,
-      trips: b.acceptedTrips,
-    }));
-  }, [analytics]);
-
-  const maxChartValue = Math.max(...chartPoints.map((p) => p.value), 0);
-
-  if (profileQuery.isLoading) {
+  if (!session.self?.capabilities.includes("company.read"))
     return (
-      <div className="driver-profile-page stack space-y-6">
-        <Card className="p-8 text-center" role="status" aria-busy="true">
-          <p className="muted">{t("states.loading")}</p>
+      <div className="driver-profile-page">
+        <header className="driver-header">
+          <div className="driver-identity">
+            <div className="driver-title-row">
+              <h1>{t("profile.title")}</h1>
+            </div>
+          </div>
+        </header>
+        <Card className="driver-notice">
+          <p>{t("states.forbidden")}</p>
         </Card>
       </div>
     );
-  }
+  // A new member resets the local game filter.
+  return <DriverProfileContent key={memberId} memberId={memberId} />;
+}
 
-  if (profileQuery.isError || !member) {
-    return (
-      <div className="driver-profile-page stack space-y-6">
-        <Card className="p-8 text-center text-red-400">
-          <p className="mb-4">{t("states.notFound")}</p>
-          <Button asChild variant="outline">
-            <Link to="/account/drivers">{t("states.backToDirectory")}</Link>
-          </Button>
-        </Card>
+function DriverProfileContent({ memberId }: { memberId: string }) {
+  const { t, i18n } = useTranslation("drivers");
+  const locale = (i18n.resolvedLanguage === "en" ? "en" : "ru") as Locale;
+  const session = useSession();
+  const isSelf = session.self?.member.id === memberId;
+  const displayTimezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [game, setGame] = useState<GameFilter>("all");
+  // Fixed for the page lifetime so a midnight rollover never silently changes the window.
+  const [period] = useState(() => twelveMonthWindow());
+  const effectiveGame = game === "all" ? undefined : game;
+
+  const profileQuery = useMemberProfile(memberId);
+  const profile = profileQuery.data;
+  const assignments = {
+    ets2: profile ? assignmentFor(profile, "ets2") : null,
+    ats: profile ? assignmentFor(profile, "ats") : null,
+  };
+  const analyticsQuery = useMemberAnalytics(memberId, { ...period, game: effectiveGame });
+  const tripsQuery = useMemberAcceptedTrips(memberId, { isSelf, game: effectiveGame });
+  const progress = {
+    ets2: useMemberProgress(memberId, "ets2", !!assignments.ets2),
+    ats: useMemberProgress(memberId, "ats", !!assignments.ats),
+  };
+  // Same request and cache key as the overview; only games with an assignment ask for names.
+  const ets2Levels = useQualificationQuery(
+    "/qualification-levels?game=ets2&limit=25",
+    "EnvelopeListQualificationLevel",
+    !!assignments.ets2,
+  );
+  const atsLevels = useQualificationQuery(
+    "/qualification-levels?game=ats&limit=25",
+    "EnvelopeListQualificationLevel",
+    !!assignments.ats,
+  );
+  const levels: Record<"ets2" | "ats", LevelsState> = {
+    ets2: { levels: ets2Levels.data?.data.data.items, pending: ets2Levels.isPending },
+    ats: { levels: atsLevels.data?.data.data.items, pending: atsLevels.isPending },
+  };
+
+  const failure = !profile && profileQuery.isError ? failureView(profileQuery.error) : null;
+  const pending =
+    !failure && (profileQuery.isPending || analyticsQuery.isPending || tripsQuery.isPending);
+
+  let content: ReactNode;
+  if (failure === "notFound") {
+    content = (
+      <Card className="driver-notice">
+        <p>{t("states.notFound")}</p>
+        <Link to="/account/drivers" className="driver-head-link">
+          {t("states.backToDirectory")}
+        </Link>
+      </Card>
+    );
+  } else if (failure === "forbidden") {
+    content = (
+      <Card className="driver-notice">
+        <p>{t("states.forbidden")}</p>
+      </Card>
+    );
+  } else if (failure) {
+    content = (
+      <Card className="driver-error" role="alert">
+        <p>{t("states.error")}</p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            // The alert unmounts on success; the title stays mounted and keeps focus.
+            titleRef.current?.focus();
+            void profileQuery.refetch();
+          }}
+        >
+          {t("states.retry")}
+        </Button>
+      </Card>
+    );
+  } else if (!profile) {
+    content = (
+      <div className="driver-layout" aria-hidden="true">
+        <div className="driver-main">
+          <Skeleton className="driver-skeleton-block" />
+        </div>
+        <div className="driver-side">
+          <Skeleton className="driver-skeleton-block" />
+        </div>
       </div>
+    );
+  } else {
+    const visibleGames = GAMES.filter((g) => game === "all" || g === game);
+    content = (
+      <>
+        <DriverKpis query={analyticsQuery} locale={locale} />
+        <div className="driver-layout">
+          <div className="driver-main">
+            <DriverTrips
+              query={tripsQuery}
+              isSelf={isSelf}
+              nickname={profile.member.nickname}
+              locale={locale}
+              displayTimezone={displayTimezone}
+            />
+          </div>
+          <div className="driver-side">
+            {visibleGames.map((g) => (
+              <QualificationCard
+                key={g}
+                game={g}
+                assignment={assignments[g]}
+                progress={progress[g]}
+                levels={levels[g]}
+                locale={locale}
+                displayTimezone={displayTimezone}
+              />
+            ))}
+            <p className="driver-note">{t("qualification.note")}</p>
+            <DistanceByMonth query={analyticsQuery} locale={locale} />
+          </div>
+        </div>
+      </>
     );
   }
 
   return (
-    <div className="driver-profile-page stack space-y-6">
-      {/* Header and navigation */}
-      <div className="flex items-center justify-between">
-        <Button asChild variant="ghost" className="text-sm">
-          <Link to="/account/drivers">← {t("states.backToDirectory")}</Link>
-        </Button>
-      </div>
-
-      {/* Driver profile identity card */}
-      <Card className="p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <span className="eyebrow">{t("profile.title")}</span>
-            <h1 className="text-2xl font-bold flex items-center gap-3 mt-1">
-              {member.nickname}
-              {member.formerMember ? (
-                <Badge className="bg-zinc-800 text-zinc-400 text-xs">{t("profile.former")}</Badge>
-              ) : (
-                <Badge className="bg-emerald-950 text-emerald-300 text-xs">
-                  {t("profile.active")}
-                </Badge>
-              )}
-            </h1>
-            <div className="flex flex-wrap gap-1 mt-3">
-              {member.roles.map((r) => (
-                <Badge key={r} className="bg-gray-800 text-gray-200">
-                  {roleLabel(r)}
-                </Badge>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Privacy Notice Card */}
-        <div className="mt-4 p-3 bg-gray-900 border border-gray-800 rounded text-xs text-gray-400">
-          🔒 {t("profile.privacyNotice")}
-        </div>
-      </Card>
-
-      {/* Game filter toggle */}
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium">{t("profile.gameCol")}:</span>
-          <fieldset className="button-group" aria-label={t("profile.gameCol")}>
-            <Button
-              type="button"
-              variant={game === "all" ? "default" : "outline"}
-              onClick={() => setGame("all")}
-              aria-pressed={game === "all"}
-            >
-              {t("profile.allGames")}
-            </Button>
-            <Button
-              type="button"
-              variant={game === "ets2" ? "default" : "outline"}
-              onClick={() => setGame("ets2")}
-              aria-pressed={game === "ets2"}
-            >
-              ETS2
-            </Button>
-            <Button
-              type="button"
-              variant={game === "ats" ? "default" : "outline"}
-              onClick={() => setGame("ats")}
-              aria-pressed={game === "ats"}
-            >
-              ATS
-            </Button>
-          </fieldset>
-        </div>
-      </Card>
-
-      {/* Personal statistics KPIs */}
-      {analytics && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">{t("profile.statsTitle")}</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="metric-card p-5">
-              <span className="eyebrow">{t("profile.totalDistance")}</span>
-              <div className="text-2xl font-bold mt-1">
-                {formatQuantity(analytics.actualDistanceM, "km", locale)}
-              </div>
-            </Card>
-            <Card className="metric-card p-5">
-              <span className="eyebrow">{t("profile.acceptedTrips")}</span>
-              <div className="text-2xl font-bold mt-1">
-                {formatDecimal(String(analytics.acceptedTrips), locale)}
-              </div>
-            </Card>
-          </div>
-        </div>
+    <div className="driver-profile-page">
+      {/* Always mounted so screen readers announce loading, including after Retry. */}
+      <p className="visually-hidden" role="status">
+        {pending ? t("states.loading") : ""}
+      </p>
+      {failure !== "notFound" && failure !== "forbidden" && (
+        <Link to="/account/drivers" className="driver-back">
+          <span aria-hidden="true">←</span> {t("profile.back")}
+        </Link>
       )}
-
-      {/* Driver Qualifications */}
-      <Card className="p-6">
-        <h2 className="text-lg font-semibold mb-4">{t("profile.qualificationsTitle")}</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div className="p-4 border border-gray-800 rounded">
-            <h3 className="font-semibold text-base mb-2">ETS2</h3>
-            {profile.qualifications.find((q) => q.game === "ets2") ? (
-              <div className="space-y-2">
-                <Badge className="bg-blue-950 text-blue-300">
-                  {profile.qualifications.find((q) => q.game === "ets2")?.levelId}
-                </Badge>
-                {ets2ProgressQuery.data && (
-                  <div className="text-xs text-gray-400 mt-2 space-y-1">
-                    <div>
-                      {t("profile.acceptedTrips")}: {ets2ProgressQuery.data.acceptedTrips}
-                      {ets2ProgressQuery.data.requiredTrips !== null
-                        ? ` / ${ets2ProgressQuery.data.requiredTrips}`
-                        : ""}
-                    </div>
-                    <div>
-                      {formatQuantity(ets2ProgressQuery.data.actualDistanceM, "km", locale)}
-                      {ets2ProgressQuery.data.requiredDistanceM !== null
-                        ? ` / ${formatQuantity(ets2ProgressQuery.data.requiredDistanceM, "km", locale)}`
-                        : ""}
-                    </div>
-                    {ets2ProgressQuery.data.eligibleForConfirmation && (
-                      <Badge className="bg-emerald-950 text-emerald-300">
-                        {t("profile.eligible")}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm muted">{t("profile.noQualifications")}</p>
-            )}
-          </div>
-
-          <div className="p-4 border border-gray-800 rounded">
-            <h3 className="font-semibold text-base mb-2">ATS</h3>
-            {profile.qualifications.find((q) => q.game === "ats") ? (
-              <div className="space-y-2">
-                <Badge className="bg-amber-950 text-amber-300">
-                  {profile.qualifications.find((q) => q.game === "ats")?.levelId}
-                </Badge>
-                {atsProgressQuery.data && (
-                  <div className="text-xs text-gray-400 mt-2 space-y-1">
-                    <div>
-                      {t("profile.acceptedTrips")}: {atsProgressQuery.data.acceptedTrips}
-                      {atsProgressQuery.data.requiredTrips !== null
-                        ? ` / ${atsProgressQuery.data.requiredTrips}`
-                        : ""}
-                    </div>
-                    <div>
-                      {formatQuantity(atsProgressQuery.data.actualDistanceM, "km", locale)}
-                      {atsProgressQuery.data.requiredDistanceM !== null
-                        ? ` / ${formatQuantity(atsProgressQuery.data.requiredDistanceM, "km", locale)}`
-                        : ""}
-                    </div>
-                    {atsProgressQuery.data.eligibleForConfirmation && (
-                      <Badge className="bg-emerald-950 text-emerald-300">
-                        {t("profile.eligible")}
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm muted">{t("profile.noQualifications")}</p>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      {/* Monthly Distance Dynamics Chart */}
-      {analytics && chartPoints.length > 0 && (
-        <Card className="p-6" aria-labelledby="driver-chart-heading">
-          <h2 id="driver-chart-heading" className="text-lg font-semibold mb-2">
-            {t("profile.chartTitle")}
-          </h2>
-          <figure aria-labelledby="driver-chart-heading">
-            <ChartContainer>
-              <BarChart
-                data={chartPoints}
-                accessibilityLayer={false}
-                margin={{ left: 8, right: 8, top: 12, bottom: 4 }}
-              >
-                <CartesianGrid vertical={false} stroke="var(--border)" />
-                <XAxis
-                  dataKey="date"
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fill: "var(--muted)", fontSize: 12 }}
-                />
-                <Bar
-                  dataKey="value"
-                  radius={[4, 4, 0, 0]}
-                  isAnimationActive={false}
-                  maxBarSize={48}
-                >
-                  {chartPoints.map((entry) => (
-                    <Cell
-                      key={`driver-cell-${entry.date}`}
-                      fill={
-                        entry.value === maxChartValue && maxChartValue > 0
-                          ? "var(--focus)"
-                          : "var(--chart)"
-                      }
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ChartContainer>
-
-            <figcaption className="chart-table-caption mt-4">
-              <Table>
-                <caption>
-                  {t("profile.chartTitle")} ({analytics.reportingTimezone})
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">{t("profile.dateCol")}</th>
-                    <th scope="col">{t("profile.distanceCol")}</th>
-                    <th scope="col">{t("profile.acceptedTrips")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {chartPoints.map((p) => (
-                    <tr key={p.date}>
-                      <th scope="row">{p.date}</th>
-                      <td>{formatQuantity(p.exactDistance, "km", locale)}</td>
-                      <td>{formatDecimal(String(p.trips), locale)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </figcaption>
-          </figure>
-        </Card>
-      )}
-
-      {/* History of Accepted Trips Table */}
-      <Card className="p-6">
-        <div className="section-heading mb-4">
-          <div>
-            <h2 className="text-lg font-semibold">{t("profile.tripsTitle")}</h2>
-            <p className="muted text-sm">{t("profile.tripsHelp")}</p>
-          </div>
-        </div>
-
-        {tripsQuery.isLoading && <p className="muted py-4 text-center">{t("states.loading")}</p>}
-
-        {!tripsQuery.isLoading && (tripsQuery.data?.items.length ?? 0) === 0 && (
-          <p className="muted py-6 text-center">{t("profile.noTrips")}</p>
-        )}
-
-        {!tripsQuery.isLoading && (tripsQuery.data?.items.length ?? 0) > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <thead>
-                <tr>
-                  <th scope="col">{t("profile.gameCol")}</th>
-                  <th scope="col">{t("profile.dateCol")}</th>
-                  <th scope="col">{t("profile.distanceCol")}</th>
-                  <th scope="col">{t("profile.cargoCol")}</th>
-                  <th scope="col">{t("profile.detailsCol")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tripsQuery.data?.items.map((trip) => (
-                  <tr key={trip.id}>
-                    <td>
-                      <Badge className="text-xs uppercase">{trip.game}</Badge>
-                    </td>
-                    <td>{formatUtc(trip.reportingAt, locale, displayTimezone)}</td>
-                    <td>{formatQuantity(trip.actualDistanceM, "km", locale)}</td>
-                    <td>{trip.cargo ? trip.cargo.label : "—"}</td>
-                    <td>
-                      <Button asChild variant="outline" size="xs">
-                        <Link to={`/account/trips/${trip.id}`}>{t("profile.viewTrip")}</Link>
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-        )}
-      </Card>
+      <ProfileHeader
+        profile={profile}
+        pending={profileQuery.isPending}
+        isSelf={isSelf}
+        assignments={assignments}
+        levels={levels}
+        game={game}
+        onGameChange={setGame}
+        titleRef={titleRef}
+      />
+      {content}
     </div>
   );
 }
