@@ -11,6 +11,7 @@ export const periods: readonly PeriodFilter[] = [
   "last7Days",
 ];
 
+// Period anchor ("today", month start) uses the UTC clock; the API interprets the dates in the reporting timezone.
 export function computePeriodDates(
   period: PeriodFilter,
   now = new Date(),

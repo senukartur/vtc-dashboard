@@ -1,7 +1,7 @@
 export const dashboardTranslations = {
   ru: {
     title: "Обзор компании",
-    subtitle: "Только принятые рейсы; периоды — по отчётному часовому поясу компании",
+    subtitle: "Только принятые рейсы; итоги — в отчётном часовом поясе компании",
     filters: {
       game: "Игра",
       allGames: "Все игры",
@@ -111,7 +111,7 @@ export const dashboardTranslations = {
   },
   en: {
     title: "Company Overview",
-    subtitle: "Accepted trips only; periods follow the company reporting timezone",
+    subtitle: "Accepted trips only; totals use the company reporting timezone",
     filters: {
       game: "Game",
       allGames: "All games",
