@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noRedundantRoles: explicit table roles survive the phone card layout (display: block/grid), where WebKit drops implicit table semantics.
 import { useTranslation } from "react-i18next";
 import { formatQuantity, type Locale } from "../../shared/formatting.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
@@ -40,18 +41,17 @@ export function LevelsTable({
 }) {
   const { t } = useTranslation("qualifications");
   return (
-    <Table size="xs" className="qualification-levels" aria-labelledby={headingId}>
-      <thead>
-        <tr>
-          <th scope="col">{t("level")}</th>
-          <th scope="col">{t("colMass")}</th>
-          <th scope="col">{t("colTrailers")}</th>
-          <th scope="col">{t("colAdr")}</th>
-          <th scope="col">{t("colThreshold")}</th>
-          <th scope="col">{t("version")}</th>
+    <Table size="xs" className="qualification-levels" role="table" aria-labelledby={headingId}>
+      <thead role="rowgroup">
+        <tr role="row">
+          {["level", "colMass", "colTrailers", "colAdr", "colThreshold", "version"].map((key) => (
+            <th key={key} scope="col" role="columnheader">
+              {t(key)}
+            </th>
+          ))}
         </tr>
       </thead>
-      <tbody>
+      <tbody role="rowgroup">
         {levels.map((level, index) => (
           <LevelRow
             key={level.id}
@@ -85,7 +85,11 @@ function LevelRow({
     rules = useRuleDetail(level),
     configured = !!level.ruleVersionId,
     summary = rules.data ? ruleSummary(rules.data.data.data.rules) : null,
-    threshold = thresholdSummary(level);
+    threshold = thresholdSummary(level),
+    distance =
+      threshold.kind === "value" && threshold.distanceM !== null
+        ? formatQuantity(threshold.distanceM, "km", locale)
+        : null;
   const unset = <span className="qualification-muted">{t("unset")}</span>;
   // A disabled query also reports pending, so unconfigured levels are handled before loading.
   const ruleCell = (render: (value: RuleSummary) => string) =>
@@ -110,8 +114,8 @@ function LevelRow({
     </span>
   );
   return (
-    <tr data-selected={selected ? "" : undefined}>
-      <th scope="row">
+    <tr role="row" data-selected={selected ? "" : undefined}>
+      <th scope="row" role="rowheader">
         <button
           type="button"
           className="qualification-level-button"
@@ -125,7 +129,7 @@ function LevelRow({
           {level.name}
         </button>
       </th>
-      <td>
+      <td role="cell">
         {label("colMass")}
         {ruleCell((value) =>
           value.mass.kind === "none"
@@ -133,29 +137,29 @@ function LevelRow({
             : formatQuantity(value.mass.maxKg, "t", locale),
         )}
       </td>
-      <td>
+      <td role="cell">
         {label("colTrailers")}
         {ruleCell((value) => allowlist(value.trailers))}
       </td>
-      <td>
+      <td role="cell">
         {label("colAdr")}
         {ruleCell((value) => allowlist(value.adr))}
       </td>
-      <td>
+      <td role="cell">
         {label("colThreshold")}
         {threshold.kind === "terminal"
           ? t("topLevel")
           : !configured || (threshold.trips === null && threshold.distanceM === null)
             ? unset
-            : t("thresholdValue", {
-                trips: threshold.trips ?? t("unset"),
-                distance:
-                  threshold.distanceM === null
-                    ? t("unset")
-                    : formatQuantity(threshold.distanceM, "km", locale),
-              })}
+            : thresholdText(
+                t("thresholdValue", {
+                  trips: threshold.trips ?? t("unset"),
+                  distance: distance ?? t("unset"),
+                }),
+                distance,
+              )}
       </td>
-      <td>
+      <td role="cell">
         {label("version")}
         <span className="qualification-version">
           <span>v{level.version}</span>
@@ -237,5 +241,18 @@ export function LevelPanel({
         </>
       )}
     </Card>
+  );
+}
+
+/** Only the exact (possibly very long) distance may break anywhere; words wrap normally. */
+function thresholdText(text: string, exact: string | null) {
+  const index = exact === null ? -1 : text.lastIndexOf(exact);
+  if (exact === null || index < 0) return text;
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className="qualification-exact">{exact}</span>
+      {text.slice(index + exact.length)}
+    </>
   );
 }

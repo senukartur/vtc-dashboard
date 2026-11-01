@@ -1,6 +1,7 @@
 .qualification-workspace {
   gap: var(--space);
   min-width: 0;
+  container: qualification-workspace / inline-size;
 }
 .qualification-workspace .card {
   gap: 8px;
@@ -24,29 +25,29 @@
   min-height: 1.25rem;
   accent-color: var(--accent);
 }
-.qualification-header {
+.qualification-workspace .qualification-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
 }
-.qualification-title {
+.qualification-workspace .qualification-title {
   display: grid;
   gap: 2px;
   flex: 1 1 260px;
   min-width: 0;
 }
-.qualification-intro {
+.qualification-workspace .qualification-intro {
   color: var(--muted);
   font-size: var(--font-small);
   line-height: 1.5;
 }
-.qualification-roles {
+.qualification-workspace .qualification-roles {
   color: var(--muted);
   font-size: var(--font-badge);
   line-height: 1.5;
 }
-.qualification-banner {
+.qualification-workspace .qualification-banner {
   padding: 8px 12px;
   border: 1px solid var(--pending);
   border-left-width: 3px;
@@ -57,57 +58,62 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.qualification-layout {
+.qualification-workspace .qualification-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space);
   align-items: start;
   min-width: 0;
 }
-@media (min-width: 1051px) {
-  .qualification-layout {
+/* Two columns only when the workspace itself is wide enough for the levels table's whole-word
+   minimum (RU included) beside a 300px member column; the shell sidebar changes that width. */
+@container qualification-workspace (min-width: 880px) {
+  .qualification-workspace .qualification-layout {
     grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
   }
 }
 .qualification-workspace .qualification-level-panel[hidden] {
   display: none;
 }
-.qualification-muted,
-.qualification-panel-meta {
+.qualification-workspace .qualification-muted,
+.qualification-workspace .qualification-panel-meta {
   color: var(--muted);
 }
-.qualification-panel-meta {
+.qualification-workspace .qualification-panel-meta {
   font-size: var(--font-small);
 }
-/* Levels table: the selected row carries the accent surface and an inset bar, not color alone. */
-.qualification-levels thead th:nth-child(1) {
-  width: 22%;
+/* Levels table: the selected row carries the accent surface and an inset bar, not color alone.
+   Automatic layout sizes columns to whole words; words never break mid-word, and only the exact
+   threshold distance (.qualification-exact) may break anywhere. */
+.qualification-workspace .qualification-levels {
+  table-layout: auto;
 }
-.qualification-levels thead th:nth-child(5) {
-  width: 22%;
+.qualification-workspace .qualification-levels :is(th, td),
+.qualification-workspace .qualification-level-button {
+  overflow-wrap: break-word;
 }
-.qualification-levels thead th:nth-child(6) {
-  width: 17%;
+.qualification-workspace .qualification-exact {
+  overflow-wrap: anywhere;
 }
-.qualification-levels :is(th, td) {
+.qualification-workspace .qualification-levels :is(th, td) {
   vertical-align: middle;
 }
-.qualification-levels :is(th, td):first-child {
+.qualification-workspace .qualification-levels :is(th, td):first-child {
   padding-left: 8px;
 }
-.qualification-levels :is(th, td):last-child {
+.qualification-workspace .qualification-levels :is(th, td):last-child {
   padding-right: 8px;
 }
-.qualification-levels tbody th {
+.qualification-workspace .qualification-levels tbody th {
   padding-block: 2px;
 }
-.qualification-levels tr[data-selected] > * {
+.qualification-workspace .qualification-levels tr[data-selected] > * {
   background: var(--accent-soft);
 }
-.qualification-levels tr[data-selected] > th {
+.qualification-workspace .qualification-levels tr[data-selected] > th {
   box-shadow: inset 3px 0 0 var(--focus);
 }
-.qualification-level-button {
+.qualification-workspace .qualification-level-button {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -118,84 +124,84 @@
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--foreground);
-  font-size: 12px;
+  font-size: var(--font-small);
   font-weight: 600;
   text-align: left;
   cursor: pointer;
 }
-.qualification-level-button:hover {
+.qualification-workspace .qualification-level-button:hover {
   background: var(--surface-hover);
 }
-.qualification-level-button:focus-visible {
+.qualification-workspace .qualification-level-button:focus-visible {
   outline-offset: -3px;
 }
-.qualification-ordinal {
+.qualification-workspace .qualification-ordinal {
   flex: none;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.qualification-cell-label {
+.qualification-workspace .qualification-cell-label {
   display: none;
 }
-.qualification-version {
+.qualification-workspace .qualification-version {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   font-variant-numeric: tabular-nums;
 }
-.qualification-badge-pending {
+.qualification-workspace .qualification-badge-pending {
   background: var(--pending-surface);
   color: var(--pending);
 }
-.qualification-edit {
+.qualification-workspace .qualification-edit {
   justify-self: start;
   min-height: var(--target-min);
 }
-.qualification-check {
+.qualification-workspace .qualification-check {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: var(--target-min);
 }
-.qualification-facts {
+.qualification-workspace .qualification-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: 8px 12px;
   margin: 0;
 }
-.qualification-facts dd {
+.qualification-workspace .qualification-facts dd {
   margin: 2px 0 0;
   font-variant-numeric: tabular-nums;
 }
-.qualification-facts dt {
+.qualification-workspace .qualification-facts dt {
   color: var(--muted);
   font-size: var(--font-small);
 }
-.qualification-progress-heading {
+.qualification-workspace .qualification-progress-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
-.qualification-progress dd {
+.qualification-workspace .qualification-progress dd {
   display: grid;
   gap: 4px;
 }
-.qualification-bar {
+.qualification-workspace .qualification-bar {
   display: block;
   height: 5px;
   overflow: hidden;
   border-radius: 3px;
   background: var(--surface-active);
 }
-.qualification-bar > span {
+.qualification-workspace .qualification-bar > span {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
 }
-.qualification-callout {
+.qualification-workspace .qualification-callout {
   display: grid;
   gap: 4px;
   padding: 8px 12px;
@@ -205,14 +211,14 @@
   background: var(--pending-surface);
   font-size: var(--font-small);
 }
-.qualification-callout strong {
+.qualification-workspace .qualification-callout strong {
   color: var(--pending);
 }
-.qualification-history {
+.qualification-workspace .qualification-history {
   border-top: 1px solid var(--border);
   padding-block: 8px;
 }
-.qualification-actions {
+.qualification-workspace .qualification-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -236,25 +242,25 @@
 .qualification-command-context :is(span, code) {
   display: block;
 }
-.qualification-draft-entities {
+.qualification-workspace .qualification-draft-entities {
   padding-inline-start: 1.25rem;
 }
-.qualification-draft-entities li,
-.qualification-draft-entities span,
-.qualification-history code {
+.qualification-workspace .qualification-draft-entities li,
+.qualification-workspace .qualification-draft-entities span,
+.qualification-workspace .qualification-history code {
   overflow-wrap: anywhere;
 }
 /* Phones: each level row becomes a compact card; the header row stays available to assistive
    technology while the visible cell labels are presentation only. */
 @media (max-width: 760px) {
-  .qualification-levels,
-  .qualification-levels tbody,
-  .qualification-levels tr,
-  .qualification-levels :is(th, td) {
+  .qualification-workspace .qualification-levels,
+  .qualification-workspace .qualification-levels tbody,
+  .qualification-workspace .qualification-levels tr,
+  .qualification-workspace .qualification-levels :is(th, td) {
     display: block;
     width: 100%;
   }
-  .qualification-levels thead {
+  .qualification-workspace .qualification-levels thead {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -262,31 +268,31 @@
     overflow: hidden;
     clip-path: inset(50%);
   }
-  .qualification-levels tbody tr {
+  .qualification-workspace .qualification-levels tbody tr {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px 12px;
     padding: 6px 8px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .qualification-levels tbody :is(th, td) {
+  .qualification-workspace .qualification-levels tbody :is(th, td) {
     padding: 0;
     border-bottom: 0;
   }
-  .qualification-levels tbody th {
+  .qualification-workspace .qualification-levels tbody th {
     grid-column: 1 / -1;
   }
-  .qualification-levels tr[data-selected] > * {
+  .qualification-workspace .qualification-levels tr[data-selected] > * {
     background: transparent;
   }
-  .qualification-levels tr[data-selected] {
+  .qualification-workspace .qualification-levels tr[data-selected] {
     background: var(--accent-soft);
     box-shadow: inset 3px 0 0 var(--focus);
   }
-  .qualification-levels tr[data-selected] > th {
+  .qualification-workspace .qualification-levels tr[data-selected] > th {
     box-shadow: none;
   }
-  .qualification-cell-label {
+  .qualification-workspace .qualification-cell-label {
     display: block;
     color: var(--muted);
     font-size: var(--font-badge);

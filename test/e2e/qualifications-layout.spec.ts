@@ -34,7 +34,7 @@ const text = {
     effective: "Действует",
     current: "Текущая квалификация · ETS2",
     distance: "0,100000000000000000001 км / 0,1 км",
-    ready: "Можно подтвердить",
+    ready: "Готово к подтверждению",
     unconfigured:
       "У 4 из 4 уровней ETS2 нет опубликованных правил. Значения по умолчанию не подставляются — их публикует директор или заместитель до запуска.",
   },
@@ -76,6 +76,30 @@ async function settled(page: Page, locale: "en" | "ru" = "en") {
   const cells = levelsTable(page, locale).locator("tbody tr td:first-of-type");
   await expect(cells).toHaveCount(4);
   for (const cell of await cells.all()) await expect(cell).toContainText(text[locale].mass);
+}
+/**
+ * Words in the levels table that wrap mid-word (a word whose text range spans more than one line).
+ * Only the exact threshold distance (.qualification-exact) may break anywhere.
+ */
+async function brokenWords(table: Locator) {
+  return table.evaluate((element) => {
+    const broken: string[] = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement?.closest(".qualification-exact, [aria-hidden='true']")) continue;
+      // Phones clip the header row to 1px for assistive technology only.
+      const head = node.parentElement?.closest("thead");
+      if (head && head.getBoundingClientRect().height <= 1) continue;
+      for (const match of (node.textContent ?? "").matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const lines = new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top)));
+        if (lines.size > 1) broken.push(match[0]);
+      }
+    }
+    return broken;
+  });
 }
 async function capture(page: Page, info: TestInfo, name: string) {
   await page.evaluate(() => document.fonts.ready);
@@ -127,9 +151,41 @@ for (const locale of ["en", "ru"] as const)
         row(page, "trainee", locale).locator(".qualification-cell-label").first(),
       ).toBeVisible();
     }
+    // RU "Без ограничений" and headers wrap only between words; the table never overflows its card.
+    expect(await brokenWords(table)).toEqual([]);
+    expect(
+      await table.evaluate(
+        (element) =>
+          element.scrollWidth <=
+          (element.parentElement?.clientWidth ?? 0) -
+            Number.parseFloat(getComputedStyle(element.parentElement as Element).paddingLeft) -
+            Number.parseFloat(getComputedStyle(element.parentElement as Element).paddingRight),
+      ),
+    ).toBe(true);
     await expect(page.locator("body")).not.toContainText(/Достаточно суров|Yukon\?|Юкон\?/);
     await capture(page, info, `qualifications-compact-${locale}`);
   });
+
+test("L1 ru at 1051px keeps whole words, a fitting table and one column", async ({
+  page,
+}, info) => {
+  test.skip(
+    info.project.name !== "desktop-chromium",
+    "The shell breakpoint width is a desktop check.",
+  );
+  await page.setViewportSize({ width: 1051, height: 800 });
+  await mockQualifications(page, "ru");
+  await page.goto("/account/qualifications");
+  await catalogLanguage(page, "ru");
+  await settled(page, "ru");
+  const table = levelsTable(page, "ru");
+  expect(await brokenWords(table)).toEqual([]);
+  const region = await box(levelsRegion(page, "ru")),
+    current = await box(currentCard(page, "ru"));
+  expect((await box(table)).width).toBeLessThanOrEqual(region.width);
+  expect(region.y).toBeLessThan(current.y);
+  await capture(page, info, "qualifications-compact-ru-1051");
+});
 
 test("L2 row selection swaps panels without reads, supports the keyboard and keeps drafts", async ({
   page,
@@ -279,9 +335,7 @@ test("L6 without company.read the page is forbidden and requests nothing", async
   await expect(page.getByRole("group", { name: "Game", exact: true })).toHaveCount(0);
   await capture(page, info, "qualifications-forbidden");
   expect(
-    requests
-      .filter((url) => /qualification-(levels|progress)/.test(url.pathname))
-      .map((url) => url.pathname),
+    requests.filter((url) => url.pathname.includes("/qualification")).map((url) => url.pathname),
   ).toEqual([]);
 });
 

@@ -159,7 +159,7 @@ export const qualificationTranslations = {
     unconfigured:
       "{{count}} of {{total}} {{game}} levels have no published rules. No default values are applied; the director or deputy publishes them before launch.",
     decisionNeeded: "Decision needed",
-    levelKept: "The assigned level is kept until staff decide. There is no automatic demotion.",
+    levelKept: "There is no automatic demotion.",
   },
   ru: {
     assignmentId: "Идентификатор назначения",
@@ -316,12 +316,11 @@ export const qualificationTranslations = {
     cellLoading: "Загрузка…",
     cellUnavailable: "Недоступно",
     draftOpen: "Черновик открыт",
-    ready: "Можно подтвердить",
+    ready: "Готово к подтверждению",
     emptyLevels: "Для этой игры нет уровней.",
     unconfigured:
       "У {{count}} из {{total}} уровней {{game}} нет опубликованных правил. Значения по умолчанию не подставляются — их публикует директор или заместитель до запуска.",
     decisionNeeded: "Нужно решение",
-    levelKept:
-      "Назначенный уровень сохраняется до решения руководства. Автоматического понижения нет.",
+    levelKept: "Автоматического понижения нет.",
   },
 };
