@@ -26,7 +26,7 @@ The prerendered RU/EN documents depend only on the locale and static content: he
 - **Driver path and join steps.** Level names come from the qualification translations; only the trainee start is described, and limits/promotions are attributed to leadership without numbers. The join steps restate the existing application, invitation and first-trip rules.
 - **Compact form.** Presentation only: Steam and introduction span the card, other fields use two columns when the card is at least 480px wide, games are pill-styled native checkboxes. Field order, labels, validation, submission, retry, privacy and focus behaviour are unchanged.
 
-Motion exists only under `prefers-reduced-motion: no-preference` once the client sets `data-motion` to `running` or `paused`. To meet WCAG 2.2.2, the "Pause animation" toggle (`aria-pressed`) after the hero actions freezes the markers, pings, chip pulse and ticker and replaces the countdown with the absolute start time. The state is not persisted. Under reduced motion nothing animates, the ticker shows one non-moving row, and the toggle remains only while a countdown is present.
+Motion exists only under `prefers-reduced-motion: no-preference` once the client sets `data-motion` to `running` or `paused`. To meet WCAG 2.2.2, the "Pause animation" toggle (`aria-pressed`) after the hero actions freezes the markers, pings, chip pulse and ticker and replaces the countdown with the absolute start time. The state is not persisted. Under reduced motion nothing animates, the ticker shows one non-moving row, and the toggle remains only while the public list contains a scheduled convoy.
 
 ### Bundle note
 
@@ -34,7 +34,7 @@ Measured with `pnpm build` on the same host, summing the entry script, its modul
 
 | Initial assets | Before (5aca2dc) raw / gzip | After raw / gzip |
 | --- | --- | --- |
-| JavaScript | 1,043,286 / 299,962 B | 1,046,605 / 300,882 B |
+| JavaScript | 1,043,286 / 299,962 B | 1,046,570 / 300,865 B |
 | CSS | 49,006 / 11,277 B | 60,616 / 13,272 B |
 
 The landing no longer imports `EventsPage`, so that route chunk is lazy again; the new landing modules and `landing.css`/`admissions.css` account for the remaining increase. No dependency was added; there is no automated size budget.
@@ -51,7 +51,7 @@ Form data, CSRF and receipts live only in component/request memory. They are not
 
 ## Verification
 
-`test/unit/landing.test.ts` covers scenario 6 field rules, approved wire-schema fixtures, response validation, safe errors and stable retry keys. `test/unit/landing-live.test.ts` covers RU/EN content parity and the kept slogan, the next-convoy choice, countdown formatting, ticker routes and the anonymous stats read and its exact presentation, including unavailable and zero months and safe failures. `test/e2e/landing.spec.ts` covers initial HTTP HTML/indexing, RU/EN rendered phone/tablet/desktop layouts, skip/navigation/form interaction, pending protection, recovery, changed input and rate/unavailable feedback. Live cases use a fixed browser clock and fictional events/aggregates to cover the countdown and stable chip name, the start-time refetch, ticker, cookie-free stats, hidden/partial/zero stats, empty/cancelled/failed convoy reads, pause and reduced motion, keyboard order, focus, target sizes and the compact form layout. Built-document checks also assert the static live-landing markers and absence of client-only parts. Controlled states intercept only the network boundary and save synthetic screenshots under ignored test output.
+`test/unit/landing.test.ts` covers scenario 6 field rules, approved wire-schema fixtures, response validation, safe errors and stable retry keys. `test/unit/landing-live.test.ts` covers RU/EN content parity and the kept slogan, the next-convoy choice, countdown formatting, ticker routes and the anonymous stats read and its exact presentation, including unavailable and zero months and safe failures. `test/e2e/landing.spec.ts` covers initial HTTP HTML/indexing, RU/EN rendered phone/tablet/desktop layouts, skip/navigation/form interaction, pending protection, recovery, changed input and rate/unavailable feedback. Live cases that route dated convoy fixtures install a fixed browser clock, so they do not depend on the run date; with fictional events/aggregates they cover the countdown and stable chip name, the start-time refetch, ticker, cookie-free stats, hidden/partial/zero stats, empty/cancelled/failed convoy reads, pause and reduced motion, keyboard order, focus, target sizes and the compact form layout. Built-document checks also assert the static live-landing markers and absence of client-only parts. Controlled states intercept only the network boundary and save synthetic screenshots under ignored test output.
 
 `test/unit/public-documents.test.ts` checks malformed shell markers, literal replacement sequences, metadata escaping and actual temporary-file cleanup after success/failure, including cleanup failures. Built-server HTML checks also verify omitted language annotations and the HTTPS Steam destination.
 

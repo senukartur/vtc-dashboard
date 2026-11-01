@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { components } from "@vtc/contracts";
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 import {
   formatCountdown,
@@ -164,6 +164,7 @@ describe("U4 ticker routes", () => {
 });
 
 describe("U5 public company stats", () => {
+  afterEach(() => vi.unstubAllGlobals());
   const stub = (response: () => Promise<Response>) => {
     const fetch = vi.fn((_url: string, _init: RequestInit) => response());
     vi.stubGlobal("fetch", fetch);

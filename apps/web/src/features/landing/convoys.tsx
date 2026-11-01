@@ -43,15 +43,12 @@ export function ConvoyChip({
     nextStart = next?.startsAt;
   useEffect(() => {
     if (!nextId || !nextStart) return;
-    const current = Date.now(),
-      start = Date.parse(nextStart);
-    // Resynchronise a stale clock snapshot (for example, data arriving after mount).
-    if (Math.abs(current - now) >= 1000) {
-      setNow(current);
-      return;
-    }
-    const remaining = start - current,
-      delay = paused ? remaining : nextChangeDelay(remaining);
+    // The delay derives from the same `now` the text uses. A stale snapshot (data arriving after
+    // mount, resuming after a pause) only ever shows more time than remains and is refreshed at
+    // once, because the elapsed time is subtracted from the delay.
+    const start = Date.parse(nextStart),
+      remaining = start - now,
+      delay = (paused ? remaining : nextChangeDelay(remaining)) - (Date.now() - now);
     const timer = window.setTimeout(
       () => {
         const fired = Date.now();

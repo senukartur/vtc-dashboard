@@ -227,7 +227,7 @@
 .landing .landing-stat dd {
   margin: 0;
   color: var(--foreground);
-  /* Exact values break between groups and unit, never inside a digit group. */
+  /* Exact values wrap before the unit; break-word is only an emergency fallback. */
   overflow-wrap: break-word;
   font-size: clamp(15px, 10.5cqi, 24px);
   font-weight: 700;

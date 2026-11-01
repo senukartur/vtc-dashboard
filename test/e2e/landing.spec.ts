@@ -548,6 +548,8 @@ const chipFor = (page: Page, locale: Locale, title: string) =>
   page.getByRole("link", {
     name: new RegExp(`^${escapeRegex(publicContent[locale].nextConvoy)}: ${escapeRegex(title)}`),
   });
+// Fixed before every dated convoy fixture, so live cases never depend on the run date.
+const liveClock = new Date("2026-10-30T12:00:00.000Z");
 const landingPath = (locale: Locale) => (locale === "en" ? "/en" : "/");
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
@@ -565,7 +567,7 @@ for (const locale of ["ru", "en"] as const) {
     await context.addCookies([
       { name: "vtc_fictional_probe", value: "fictional", url: baseURL ?? "" },
     ]);
-    await page.clock.install({ time: new Date("2026-10-30T12:00:00.000Z") });
+    await page.clock.install({ time: liveClock });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const cookies: { stats?: string | undefined; events?: string | undefined } = {};
     await page.route("**/api/v1/public/events?*", async (route) => {
@@ -642,16 +644,28 @@ test("reduced motion keeps the live landing static and hides the pause control w
   page,
 }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.clock.install({ time: liveClock });
   await routeEvents(page, liveEvents("en"));
   await page.goto("/en");
   const c = publicContent.en;
   await expect(chipFor(page, "en", "Fictional Evening Convoy")).toBeVisible();
   await expect(page.locator(".landing-ticker")).toBeAttached();
+  await page.evaluate(() => document.fonts.ready);
+  // Keyframe motion only: the shared reduced-motion rule turns any style change (such as a font
+  // swap resizing `ch` widths) into a 0.01ms CSS transition, which is not landing motion.
   expect(
     await page
       .locator(".landing")
-      .evaluate((element) => element.getAnimations({ subtree: true }).length),
+      .evaluate(
+        (element) =>
+          element
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation instanceof CSSAnimation).length,
+      ),
   ).toBe(0);
+  for (const selector of [".hero-marker", ".hero-ping", ".landing-ticker-track"])
+    for (const element of await page.locator(selector).all())
+      expect(await element.evaluate((node) => node.getAnimations().length)).toBe(0);
   await expect(page.locator(".landing-ticker [data-copy]").first()).toBeHidden();
   await expect(page.getByRole("button", { name: c.pauseMotion, exact: true })).toBeVisible();
   expect(await noOverflow(page)).toBe(true);
@@ -747,6 +761,7 @@ test("convoy chip and ticker disappear for empty, cancelled-only and failed publ
     e = eventTranslations.en;
   const convoys = page.getByRole("region", { name: e.publicTitle, exact: true });
   const nextChip = page.getByRole("link", { name: /^Next convoy/ });
+  await page.clock.install({ time: liveClock });
   await page.goto("/en");
   await expect(convoys.getByText(c.convoysEmpty, { exact: true })).toBeVisible();
   await expect(nextChip).toHaveCount(0);
@@ -799,6 +814,7 @@ test("live controls keep keyboard order, visible focus and pointer-sized targets
 }) => {
   const c = publicContent.en,
     e = eventTranslations.en;
+  await page.clock.install({ time: liveClock });
   await routeEvents(page, liveEvents("en"));
   await page.goto("/en");
   const main = page.getByRole("main"),
