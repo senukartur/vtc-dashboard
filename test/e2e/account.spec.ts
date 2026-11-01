@@ -1,6 +1,7 @@
 import { inertNotifications } from "./support/notifications.ts";
-import type { Page, Request, TestInfo } from "@playwright/test";
+import type { Locator, Page, Request, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
+import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 import { expect, test } from "./support/fixtures.ts";
 import { openMoreSheet, phone, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
@@ -135,7 +136,13 @@ for (const locale of ["en", "ru"] as const) {
     ).toBeFocused();
     const password = page.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
     await password.fill("NONFUNCTIONAL_FIXTURE");
-    await form.getByRole("button", { name: /^(Show:|Показать:)/ }).click();
+    const toggle = form.getByRole("button", {
+      name: locale === "en" ? "Show password" : "Показать пароль",
+      exact: true,
+    });
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
     await expect(password).toHaveAttribute("type", "text");
     await page
       .getByRole("banner")
@@ -144,6 +151,12 @@ for (const locale of ["en", "ru"] as const) {
     await expect(
       page.getByLabel(locale === "en" ? "Пароль" : "Password", { exact: true }),
     ).toHaveValue("NONFUNCTIONAL_FIXTURE");
+    await expect(
+      page.getByRole("button", {
+        name: locale === "en" ? "Показать пароль" : "Show password",
+        exact: true,
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
     await language(page, locale);
     await page.emulateMedia({ reducedMotion: "reduce" });
     await capture(page, info, `${locale}-login-validation`);
@@ -182,6 +195,256 @@ for (const locale of ["en", "ru"] as const) {
       }),
     ).toBeVisible();
     await capture(page, info, `${locale}-recovery`);
+  });
+}
+async function box(locator: Locator) {
+  const value = await locator.boundingBox();
+  if (!value) throw new Error("SYNTHETIC_LAYOUT_MISSING");
+  return value;
+}
+const lastControlType = (form: Locator) =>
+  form.evaluate((element) =>
+    Array.from(element.querySelectorAll("a, button, input, select, textarea"))
+      .at(-1)
+      ?.getAttribute("type"),
+  );
+const coarsePointer = (page: Page) => page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+const near = (actual: number, expected: number) =>
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(0.5);
+const linkToken = `${fixtureId}.${"x".repeat(43)}`;
+for (const locale of ["en", "ru"] as const) {
+  const en = locale === "en";
+  const copy = {
+    form: en ? "Sign in" : "Войти",
+    email: en ? "Email" : "Электронная почта",
+    password: en ? "Password" : "Пароль",
+    newPassword: en ? "New password" : "Новый пароль",
+    confirmation: en ? "Repeat new password" : "Повторите новый пароль",
+    forgot: en ? "Forgot your password?" : "Забыли пароль?",
+    show: en ? "Show password" : "Показать пароль",
+    showRepeat: en ? "Show repeated password" : "Показать повтор пароля",
+    back: en ? "Back to sign in" : "Ко входу",
+    home: en ? "Home" : "На главную",
+    notMember: en ? "Not in the company yet?" : "Ещё не в компании?",
+    steps: en ? "Next steps" : "Следующие шаги",
+  };
+  test(`controlled ${locale} sign-in layout keeps the recovery link on the password label row, submit last and the application link below`, async ({
+    page,
+  }, info) => {
+    await mocks(page);
+    await page.goto("/login");
+    await language(page, locale);
+    const main = page.getByRole("main");
+    const form = page.getByRole("form", { name: copy.form, exact: true });
+    const email = form.getByLabel(copy.email, { exact: true });
+    const password = form.getByLabel(copy.password, { exact: true });
+    const forgot = form.getByRole("link", { name: copy.forgot, exact: true });
+    const toggle = form.getByRole("button", { name: copy.show, exact: true });
+    const submit = form.getByRole("button", { name: copy.form, exact: true });
+    await expect(forgot).toHaveAttribute("href", "/password-recovery");
+    const [forgotBox, passwordBox, labelBox, toggleBox] = await Promise.all([
+      box(forgot),
+      box(password),
+      box(form.locator('label[for="login-password"]')),
+      box(toggle),
+    ]);
+    expect(forgotBox.y + forgotBox.height).toBeLessThanOrEqual(passwordBox.y + 0.5);
+    expect(
+      Math.abs(forgotBox.x + forgotBox.width - (passwordBox.x + passwordBox.width)),
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(forgotBox.y + forgotBox.height / 2 - (labelBox.y + labelBox.height / 2)),
+    ).toBeLessThanOrEqual(4);
+    expect(toggleBox.x).toBeGreaterThanOrEqual(passwordBox.x - 0.5);
+    expect(toggleBox.y).toBeGreaterThanOrEqual(passwordBox.y - 0.5);
+    expect(toggleBox.x + toggleBox.width).toBeLessThanOrEqual(
+      passwordBox.x + passwordBox.width + 0.5,
+    );
+    expect(toggleBox.y + toggleBox.height).toBeLessThanOrEqual(
+      passwordBox.y + passwordBox.height + 0.5,
+    );
+    const coarse = await coarsePointer(page);
+    for (const control of [email, password, submit]) {
+      const { height } = await box(control);
+      if (coarse) expect(height).toBeGreaterThanOrEqual(40);
+      else near(height, 32);
+    }
+    near(toggleBox.width, coarse ? 40 : 32);
+    near(toggleBox.height, coarse ? 40 : 32);
+    expect(forgotBox.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+    await email.focus();
+    for (const next of [forgot, password, toggle, submit]) {
+      await page.keyboard.press("Tab");
+      await expect(next).toBeFocused();
+    }
+    expect(await lastControlType(form)).toBe("submit");
+    const apply = main.getByRole("link", { name: publicContent[locale].apply, exact: true });
+    await expect(apply).toHaveAttribute("href", en ? "/en#apply" : "/#apply");
+    const formBox = await box(form);
+    expect((await box(apply)).y).toBeGreaterThanOrEqual(formBox.y + formBox.height);
+    await expect(main.getByText(copy.notMember, { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: copy.home, exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+    const brand = page.locator(".auth-brand");
+    await expect(brand).toHaveAttribute("aria-hidden", "true");
+    await expect(brand).toContainText(publicContent[locale].heading);
+    if (info.project.name === "desktop-chromium") {
+      await expect(brand).toBeVisible();
+      expect((await box(brand)).x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
+    } else await expect(brand).toBeHidden();
+    expect(await page.evaluate(() => document.body.textContent?.includes("Достаточно суров"))).toBe(
+      false,
+    );
+    for (const reducedMotion of ["no-preference", "reduce"] as const) {
+      await page.emulateMedia({ reducedMotion });
+      expect(
+        await brand.evaluate((element) =>
+          [element, ...Array.from(element.querySelectorAll("*"))].every(
+            (node) => getComputedStyle(node).animationName === "none",
+          ),
+        ),
+      ).toBe(true);
+    }
+    await capture(page, info, `${locale}-login-layout`);
+  });
+  test(`controlled ${locale} in-field password toggles keep value, focus and autocomplete, mask on submit and follow the entry-screen pattern`, async ({
+    page,
+  }, info) => {
+    await mocks(page);
+    await page.route("**/api/v1/auth/login", (route) => route.fulfill(error(401)));
+    await page.goto("/login");
+    await language(page, locale);
+    const main = page.getByRole("main");
+    const form = page.getByRole("form", { name: copy.form, exact: true });
+    const password = form.getByLabel(copy.password, { exact: true });
+    const toggle = form.getByRole("button", { name: copy.show, exact: true });
+    await expect(toggle).toHaveAttribute("aria-controls", "login-password");
+    await expect(password).toHaveAttribute("id", "login-password");
+    await password.fill("NONFUNCTIONAL_FIXTURE");
+    const before = await box(password);
+    await toggle.click();
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(password).toHaveAttribute("type", "text");
+    await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+    await expect(password).toHaveAttribute("autocomplete", "current-password");
+    await expect(password).toHaveAttribute("name", "password");
+    await expect(password).toHaveAttribute("spellcheck", "false");
+    const after = await box(password);
+    for (const key of ["x", "y", "width", "height"] as const) near(after[key], before[key]);
+    await page.keyboard.press("Space");
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(password).toHaveAttribute("type", "password");
+    await toggle.click();
+    await expect(password).toHaveAttribute("type", "text");
+    await form.getByLabel(copy.email, { exact: true }).fill("member@example.invalid");
+    await form.getByRole("button", { name: copy.form, exact: true }).click();
+    await expect(form.getByRole("alert")).toBeVisible();
+    await expect(password).toHaveAttribute("type", "password");
+    await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await page.goto(`/password-reset?token=${linkToken}`);
+    await language(page, locale);
+    const back = main.getByRole("link", { name: copy.back, exact: true });
+    await expect(back).toHaveAttribute("href", "/login");
+    expect(await main.evaluate((element) => element.querySelector("a")?.textContent)).toBe(
+      copy.back,
+    );
+    expect((await box(back)).y + (await box(back)).height).toBeLessThanOrEqual(
+      (await box(page.getByRole("heading", { level: 1 }))).y,
+    );
+    const newPassword = main.getByLabel(copy.newPassword, { exact: true });
+    const confirmation = main.getByLabel(copy.confirmation, { exact: true });
+    const show = main.getByRole("button", { name: copy.show, exact: true });
+    const showRepeat = main.getByRole("button", { name: copy.showRepeat, exact: true });
+    for (const input of [newPassword, confirmation])
+      await expect(input).toHaveAttribute("autocomplete", "new-password");
+    await show.click();
+    await expect(newPassword).toHaveAttribute("type", "text");
+    await expect(confirmation).toHaveAttribute("type", "password");
+    await expect(showRepeat).toHaveAttribute("aria-pressed", "false");
+    await showRepeat.click();
+    await expect(confirmation).toHaveAttribute("type", "text");
+    await expect(show).toHaveAttribute("aria-pressed", "true");
+    const hint = main.locator("#reset-password-hint");
+    await expect(newPassword).toHaveAttribute("aria-describedby", /(^| )reset-password-hint( |$)/);
+    const passwordBox = await box(newPassword);
+    expect((await box(hint)).y).toBeGreaterThanOrEqual(passwordBox.y + passwordBox.height);
+    await expect(main.getByRole("link", { name: copy.forgot, exact: true })).toHaveCount(0);
+    await expect(
+      main.getByRole("link", { name: publicContent[locale].apply, exact: true }),
+    ).toHaveCount(0);
+    await capture(page, info, `${locale}-reset`);
+
+    await page.goto(`/invitation?token=${linkToken}`);
+    await language(page, locale);
+    await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+    await main.getByRole("button", { name: copy.showRepeat, exact: true }).click();
+    await expect(main.getByLabel(copy.confirmation, { exact: true })).toHaveAttribute(
+      "type",
+      "text",
+    );
+    await expect(main.getByLabel(copy.newPassword, { exact: true })).toHaveAttribute(
+      "type",
+      "password",
+    );
+    const steps = main.getByRole("list", { name: copy.steps, exact: true });
+    await expect(steps.getByRole("listitem")).toHaveText(
+      en
+        ? [
+            "Set your account password",
+            "Sign in with your invitation email",
+            "Verify Steam ownership in Connections",
+          ]
+        : [
+            "Задайте пароль аккаунта",
+            "Войдите с почтой из приглашения",
+            "Подтвердите Steam в разделе «Подключения»",
+          ],
+    );
+    await expect(steps.getByRole("listitem").first()).toHaveAttribute("aria-current", "step");
+    const accept = await box(
+      main.getByRole("button", {
+        name: en ? "Accept invitation" : "Принять приглашение",
+        exact: true,
+      }),
+    );
+    expect((await box(steps)).y).toBeGreaterThanOrEqual(accept.y + accept.height);
+    await capture(page, info, `${locale}-invitation`);
+
+    await page.goto("/password-reset");
+    await language(page, locale);
+    await expect(
+      page.getByRole("heading", {
+        name: en ? "This link is unavailable" : "Ссылка недоступна",
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(main.getByRole("link", { name: copy.back, exact: true })).toBeVisible();
+    await expect(
+      main.getByRole("link", {
+        name: en ? "Request password recovery" : "Запросить восстановление пароля",
+        exact: true,
+      }),
+    ).toHaveAttribute("href", "/password-recovery");
+
+    await page.goto("/password-recovery");
+    await language(page, locale);
+    await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
+      "href",
+      "/login",
+    );
+    const recovery = page.getByRole("form", {
+      name: en ? "Request password recovery" : "Запросить восстановление пароля",
+      exact: true,
+    });
+    expect(await lastControlType(recovery)).toBe("submit");
+    await capture(page, info, `${locale}-recovery-form`);
   });
 }
 test("controlled uncertain invitation retry retains payload/key, pending prevents duplicates, expired result is safe", async ({
