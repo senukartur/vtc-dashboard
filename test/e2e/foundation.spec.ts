@@ -804,7 +804,7 @@ test("CSS weights render the shipped font faces and tabular digits stay aligned"
   await expect(page.locator(".table th").first()).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   // Rendered arrows and symbols that the source fonts contain; see the subset README.
-  const renderedSymbols = "←↑→↓↗—№∅◇✓×•«»·–";
+  const renderedSymbols = "←↑→↓↗—№∅◇●✓✕×•«»·–";
   await page.evaluate(async (symbols) => {
     const visible = Array.from(document.querySelectorAll(".wordmark")).find(
       (element) => element.getClientRects().length > 0,

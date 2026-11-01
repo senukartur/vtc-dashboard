@@ -5,7 +5,7 @@ import { brotliDecompressSync } from "node:zlib";
 import { describe, expect, test } from "vitest";
 
 // Rendered symbols the source fonts contain; they must stay in every core subset.
-const renderedSymbols = "←↑→↓↗—№∅◇✓×•«»·–";
+const renderedSymbols = "←↑→↓↗—№∅◇●✓✕×•«»·–";
 // Rendered characters that intentionally use the system fallback: the source ellipsis is a
 // full-width form with centred dots, and the other glyphs are absent from the source fonts.
 const fallback = new Set([0x2026, 0x25a4, 0x25f7, 0x1f512]);
