@@ -14,6 +14,8 @@ import {
   operations,
 } from "../../apps/web/src/features/account/transport.ts";
 import { clearPrivateQueries, createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
+import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
+import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 const meta = { requestId: "synthetic-request" };
 const receipt = { data: { id: fixtureId, version: 1 }, meta };
 const csrf = { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta };
@@ -243,4 +245,38 @@ test("a stalled session read reaches a bounded safe unavailable result and exter
   const disposedAssertion = expect(disposed).rejects.toMatchObject({ kind: "unavailable" });
   controller.abort();
   await disposedAssertion;
+});
+test("account entry copy keeps RU/EN parity, fixed visibility toggle names and only approved brand copy", () => {
+  const keys = (value: object, prefix = ""): string[] =>
+    Object.entries(value)
+      .flatMap(([key, child]) =>
+        typeof child === "object" && child !== null
+          ? keys(child, `${prefix}${key}.`)
+          : [`${prefix}${key}`],
+      )
+      .sort();
+  const { en, ru } = accountTranslations;
+  expect(keys(ru)).toEqual(keys(en));
+  expect(en.showPassword).toBe("Show password");
+  expect(ru.showPassword).toBe("Показать пароль");
+  expect(en.showConfirmation).toBe("Show repeated password");
+  expect(ru.showConfirmation).toBe("Показать повтор пароля");
+  for (const locale of [en, ru]) {
+    for (const key of [
+      "showField",
+      "backToLogin",
+      "notMember",
+      "nextSteps",
+      "stepPassword",
+      "stepSignIn",
+      "stepSteam",
+    ] as const)
+      expect(locale[key].trim().length).toBeGreaterThan(0);
+    expect(locale.showField).toContain("{{field}}");
+    expect("hidePassword" in locale).toBe(false);
+  }
+  // The approved mockup slogan stays out of the app; the brand panel reuses the landing copy.
+  const mockupSlogan = /Достаточно суров|Yukon\?|Юкон\?/;
+  for (const value of [JSON.stringify(accountTranslations), JSON.stringify(publicContent)])
+    expect(mockupSlogan.test(value)).toBe(false);
 });

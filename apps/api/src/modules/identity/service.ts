@@ -1751,6 +1751,14 @@ export function createIdentity(
       return { ...actor, capabilities: [...actor.capabilities], locale: member.locale };
     },
     qualificationMembersInTransaction: queryQualificationMembers,
+    // Anonymous aggregate read (VTC-052): plain consistent-snapshot count, no company/member locks.
+    async activeMemberCountInTransaction(tx: TxContext): Promise<number> {
+      const [row] = await client(tx)
+        .select({ count: sql<number | string>`count(*)` })
+        .from(membership)
+        .where(eq(membership.status, "active"));
+      return Number(row?.count ?? 0);
+    },
     async memberSummariesInTransaction(tx: TxContext, ids: string[]) {
       const current = await lockCompany(tx);
       if (ids.length > 100) throw new Error("MEMBER_SUMMARY_BOUND_EXCEEDED");

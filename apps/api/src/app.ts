@@ -33,11 +33,11 @@ import { registerTripDecisionRoutes } from "./modules/trip-decisions/http.js";
 import type { TripDecisions } from "./modules/trip-decisions/service.js";
 import { registerTripRoutes } from "./modules/trips/http.js";
 import type { Trips } from "./modules/trips/service.js";
+import { assetCache, keepsCacheControl } from "./platform/http/cache.js";
 import { ingressTrust } from "./platform/http/ingress.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 import type { Administration } from "./use-cases/administration.js";
 
-const assetCache = "public, max-age=31536000, immutable";
 const errorCodes: Readonly<Record<number, string>> = {
   400: "BAD_REQUEST",
   401: "UNAUTHORIZED",
@@ -92,8 +92,11 @@ export async function createApp(options: AppOptions) {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
     if (
-      ![200, 206, 304].includes(reply.statusCode) ||
-      reply.getHeader("cache-control") !== assetCache
+      !keepsCacheControl(
+        reply.statusCode,
+        reply.getHeader("cache-control"),
+        request.routeOptions.url,
+      )
     )
       reply.header("Cache-Control", "no-store");
   });
