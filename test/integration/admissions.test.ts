@@ -355,7 +355,7 @@ test("public duplicates preserve immutable evidence and return only binding-owne
   expect(changedBinding.id).not.toBe(a.id);
   expect(await status(admissions.submit(scope, newId(), { ...raw, games: [] }))).toBe(422);
 });
-test("actual messaging approval/rejection enqueue atomically, preserves RU intent/history and reapplication", async () => {
+test("actual messaging rejection and explicit invitation email request enqueue atomically, preserve RU intent/history and reapplication", async () => {
   const app = await submitted(admissions, input(), "ru"),
     key = newId();
   const rejected = await admissions.decide(director, app.id, key, 1, {
@@ -407,7 +407,15 @@ test("actual messaging approval/rejection enqueue atomically, preserves RU inten
   ).toBe(true);
   const ru = await submitted(admissions, input(), "ru");
   const accepted = await admissions.decide(director, ru.id, newId(), 1, { decision: "approve" });
-  const invitation = await admissions.inspect(director, accepted.invitationId as string);
+  expect((await admissions.inspect(director, accepted.invitationId as string)).emailDelivery).toBe(
+    "not_requested",
+  );
+  const invitation = await admissions.requestEmail(
+    director,
+    accepted.invitationId as string,
+    newId(),
+    1,
+  );
   expect(invitation.emailDelivery).toBe("queued");
   const [invitationMail] = await unit.run((tx) =>
     unit
@@ -422,6 +430,43 @@ test("actual messaging approval/rejection enqueue atomically, preserves RU inten
       invitationMail?.ciphertext as string,
     ).intent.locale,
   ).toBe("ru");
+});
+test("scenario 44: enabled mail approval and reissue send no invitation email until one explicit request; copy works throughout", async () => {
+  const mailFor = (generationId: string) =>
+    unit.run((tx) =>
+      unit
+        .client(tx)
+        .select()
+        .from(mailDeliveries)
+        .where(eq(mailDeliveries.generationId, generationId)),
+    );
+  const app = await submitted();
+  const decided = await admissions.decide(director, app.id, newId(), 1, { decision: "approve" });
+  const first = decided.invitationId as string;
+  const issued = await admissions.inspect(director, first);
+  expect(issued.emailDelivery).toBe("not_requested");
+  expect(issued.deliveryId).toBe(null);
+  expect((await mailFor(first)).length).toBe(0);
+  expect(decided.decision?.deliveryId).toBe(null);
+  const firstLink = (await admissions.copy(director, first, 1)).link;
+  const replacement = await admissions.reissue(director, first, newId(), 1);
+  expect(replacement.emailDelivery).toBe("not_requested");
+  expect(replacement.deliveryId).toBe(null);
+  expect((await mailFor(replacement.id)).length).toBe(0);
+  expect((await mailFor(first)).length).toBe(0);
+  const before = await admissions.copy(director, replacement.id, 1);
+  expect(before.link).not.toBe(firstLink);
+  const sent = await admissions.requestEmail(director, replacement.id, newId(), 1);
+  expect(sent.emailDelivery).toBe("queued");
+  expect(sent.version).toBe(2);
+  expect(sent.expiresAt).toBe(replacement.expiresAt);
+  const rows = await mailFor(replacement.id);
+  expect(rows.map((row) => [row.id, row.kind])).toEqual([[sent.deliveryId, "invitation"]]);
+  expect(await status(admissions.requestEmail(director, replacement.id, newId(), 2))).toBe(409);
+  expect((await mailFor(replacement.id)).length).toBe(1);
+  const after = await admissions.copy(director, replacement.id, 2);
+  expect(after.link).toBe(before.link);
+  expect(after.expiresAt).toBe(before.expiresAt);
 });
 test("disabled mail preserves seven-day copy and redemption; rejection fails closed without changing decision", async () => {
   const noMail = harness({ mail: false }).admissions,
@@ -524,11 +569,12 @@ test.each([["ets2"], ["ats"]] as ("ets2" | "ats")[][])(
 );
 test("reissue removes old hash/ciphertext/mail and copy, redeemer and worker reject replaced/expired generations", async () => {
   const f = await approved();
-  const old = await admissions.inspect(director, f.invitationId);
-  const replacement = await admissions.reissue(director, f.invitationId, newId(), 1);
+  const old = await admissions.requestEmail(director, f.invitationId, newId(), 1);
+  const replacement = await admissions.reissue(director, f.invitationId, newId(), 2);
   expect(replacement.id).not.toBe(f.invitationId);
+  expect(replacement.emailDelivery).toBe("not_requested");
   expect(await status(admissions.redeem("pre:old", newId(), f.token, password))).toBe(409);
-  expect(await status(admissions.copy(director, f.invitationId, 2))).toBe(409);
+  expect(await status(admissions.copy(director, f.invitationId, 3))).toBe(409);
   const staleMail = await messaging.inspect(director, old.deliveryId as string);
   expect(staleMail.state).toBe("suppressed");
   expect(
@@ -591,29 +637,41 @@ test.each([
     expect((await admissions.redeem("pre:rollback", newId(), f.token, password)).version).toBe(1);
   },
 );
-test.each(["approve", "reject"] as const)(
-  "mail enqueue failure rolls back %s and leaves application undecided",
-  async (decision) => {
-    const app = await submitted();
-    const failure = failAfterInsert("mail_deliveries"),
-      h = harness({ unit: failure.unit });
-    expect(
-      await status(
-        h.admissions.decide(
-          director,
-          app.id,
-          newId(),
-          1,
-          decision === "approve" ? { decision } : { decision, reason: "Fictional" },
-        ),
-      ),
-    ).toBe(500);
-    expect(failure.writes()).toBe(1);
-    expect((await admissions.detail(director, app.id)).status).toBe("submitted");
-    expect(await count("admissions_decisions", "WHERE application_id=?", [app.id])).toBe(0);
-    expect(await count("admissions_invitations", "WHERE application_id=?", [app.id])).toBe(0);
-  },
-);
+test("mail enqueue failure rolls back reject and leaves application undecided", async () => {
+  const app = await submitted();
+  const failure = failAfterInsert("mail_deliveries"),
+    h = harness({ unit: failure.unit });
+  expect(
+    await status(
+      h.admissions.decide(director, app.id, newId(), 1, {
+        decision: "reject",
+        reason: "Fictional",
+      }),
+    ),
+  ).toBe(500);
+  expect(failure.writes()).toBe(1);
+  expect((await admissions.detail(director, app.id)).status).toBe("submitted");
+  expect(await count("admissions_decisions", "WHERE application_id=?", [app.id])).toBe(0);
+  expect(await count("admissions_invitations", "WHERE application_id=?", [app.id])).toBe(0);
+});
+test("approval writes no mail; post-insert enqueue failure rolls back the explicit invitation email request", async () => {
+  const app = await submitted();
+  const failure = failAfterInsert("mail_deliveries"),
+    h = harness({ unit: failure.unit });
+  const decided = await h.admissions.decide(director, app.id, newId(), 1, { decision: "approve" });
+  expect(failure.writes()).toBe(0);
+  const id = decided.invitationId as string;
+  expect(await status(h.admissions.requestEmail(director, id, newId(), 1))).toBe(500);
+  expect(failure.writes()).toBe(1);
+  const after = await admissions.inspect(director, id);
+  expect(after.version).toBe(1);
+  expect(after.deliveryId).toBe(null);
+  expect(after.emailDelivery).toBe("not_requested");
+  const rows = await unit.run((tx) =>
+    unit.client(tx).select().from(mailDeliveries).where(eq(mailDeliveries.generationId, id)),
+  );
+  expect(rows.length).toBe(0);
+});
 test.each(["active", "inactive"] as const)(
   "existing %s identity, including changed case, is never adopted or recredentialed",
   async (membershipStatus) => {
@@ -753,7 +811,7 @@ test("mail rejected/ambiguous/simulated outcomes never prevent valid manual copy
     };
     const h = harness({ provider }),
       f = await approved(h.admissions),
-      invite = await h.admissions.inspect(director, f.invitationId);
+      invite = await h.admissions.requestEmail(director, f.invitationId, newId(), 1);
     await h.messaging.handler
       .external?.(
         { deliveryId: invite.deliveryId },
@@ -763,7 +821,7 @@ test("mail rejected/ambiguous/simulated outcomes never prevent valid manual copy
       )
       .catch(() => {});
     expect(sends).toBe(1);
-    expect(Boolean((await h.admissions.copy(director, f.invitationId, 1)).link)).toBe(true);
+    expect(Boolean((await h.admissions.copy(director, f.invitationId, 2)).link)).toBe(true);
     expect((await h.admissions.inspect(director, f.invitationId)).emailDelivery).toBe(
       outcome === "rejected" ? "failed" : outcome,
     );
@@ -782,8 +840,8 @@ test("worker current validity suppresses mail replaced/consumed before its fence
     },
   });
   const f = await approved(h.admissions),
-    invite = await h.admissions.inspect(director, f.invitationId);
-  await h.admissions.reissue(director, f.invitationId, newId(), 1);
+    invite = await h.admissions.requestEmail(director, f.invitationId, newId(), 1);
+  await h.admissions.reissue(director, f.invitationId, newId(), 2);
   await h.messaging.handler.external?.(
     { deliveryId: invite.deliveryId },
     `messaging.mail:${invite.deliveryId}`,
@@ -792,7 +850,7 @@ test("worker current validity suppresses mail replaced/consumed before its fence
   );
   expect(sends).toBe(0);
   const current = await approved(h.admissions),
-    delivery = await h.admissions.inspect(director, current.invitationId);
+    delivery = await h.admissions.requestEmail(director, current.invitationId, newId(), 1);
   await h.admissions.redeem("pre:worker", newId(), current.token, password);
   await Promise.all([
     h.messaging.inspect(director, delivery.deliveryId as string),
@@ -1491,8 +1549,8 @@ test("staff command replay retains original ordinary response after reissue and 
 test("mail enabled-to-disabled mode flip still clears old private payloads atomically on reissue and consumption", async () => {
   const noMail = harness({ mail: false }).admissions;
   const f = await approved(),
-    before = await admissions.inspect(director, f.invitationId);
-  const replacement = await noMail.reissue(director, f.invitationId, newId(), 1);
+    before = await admissions.requestEmail(director, f.invitationId, newId(), 1);
+  const replacement = await noMail.reissue(director, f.invitationId, newId(), 2);
   expect(replacement.emailDelivery).toBe("not_requested");
   const [old] = await unit.run((tx) =>
     unit
@@ -1504,7 +1562,7 @@ test("mail enabled-to-disabled mode flip still clears old private payloads atomi
   expect(old?.ciphertext).toBe(null);
   expect(old?.state).toBe("suppressed");
   const active = await approved(),
-    delivery = await admissions.inspect(director, active.invitationId);
+    delivery = await admissions.requestEmail(director, active.invitationId, newId(), 1);
   const result = await noMail.redeem("pre:mode-flip", newId(), active.token, password);
   expect(result.version).toBe(1);
   const [consumed] = await unit.run((tx) =>
