@@ -84,6 +84,8 @@ export function Confirmation({
   disabled,
   children,
   confirm,
+  variant = "outline",
+  triggerClassName,
 }: {
   label: string;
   description: string;
@@ -91,6 +93,9 @@ export function Confirmation({
   disabled?: boolean;
   children?: ReactNode;
   confirm: () => Promise<boolean>;
+  /** Trigger style; existing callers keep the outline default. */
+  variant?: "default" | "outline";
+  triggerClassName?: string;
 }) {
   const { t } = useTranslation("administration"),
     [open, setOpen] = useState(false),
@@ -106,7 +111,7 @@ export function Confirmation({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" disabled={disabled || busy}>
+        <Button variant={variant} className={triggerClassName} disabled={disabled || busy}>
           {label}
         </Button>
       </DialogTrigger>
