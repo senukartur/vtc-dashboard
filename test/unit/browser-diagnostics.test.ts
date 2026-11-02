@@ -1,9 +1,11 @@
+import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { FullResult, TestCase, TestResult } from "@playwright/test/reporter";
 import { expect, test, vi } from "vitest";
 import {
   browserFailureLine,
   browserFailurePrefix,
+  browserFiles,
   browserPreparationLine,
   browserPreparationPrefix,
   browserProjects,
@@ -556,4 +558,12 @@ test("preparation diagnostics reject private fields and malformed progress witho
   }
   expect(browserPreparationLine(wrapper)).not.toContain(privateText);
   expect(safeBrowserPreparation(valid)).toBeUndefined();
+});
+test("every committed e2e spec maps to a fixed diagnostics identifier", () => {
+  // An unmapped spec reports only the global "unmapped-test" category, hiding its file in CI.
+  const specs = readdirSync("test/e2e").filter((name) => name.endsWith(".spec.ts"));
+  expect(specs.map((name) => `test/e2e/${name}`).filter((path) => !(path in browserFiles))).toEqual(
+    [],
+  );
+  expect(new Set(Object.values(browserFiles)).size).toBe(Object.keys(browserFiles).length);
 });

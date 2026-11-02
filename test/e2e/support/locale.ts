@@ -37,6 +37,10 @@ export async function chooseAccountItem(page: Page, name: RegExp) {
   if (phone(page)) await (await openMoreSheet(page)).getByRole("link", { name }).click();
   else await (await openUserMenu(page)).getByRole("menuitem", { name }).click();
 }
+/**
+ * Radix returns focus to the More/user menu trigger in a timer after the overlay unmounts, so
+ * wait for it: a late return would move focus out of whatever the caller opens next.
+ */
 export async function switchLanguage(page: Page, locale: "ru" | "en") {
   const select = page.getByRole("banner").getByRole("combobox", { name: /^(Language|Язык)$/ });
   await expect(select.or(accountEntry(page))).toBeVisible();
@@ -52,10 +56,12 @@ export async function switchLanguage(page: Page, locale: "ru" | "en") {
     await expect(page.locator("html")).toHaveAttribute("lang", locale);
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0);
+    await expect(moreButton(page)).toBeFocused();
   } else {
     const menu = await openUserMenu(page);
     await menu.getByRole("menuitemradio", { name: language, exact: true }).click();
     await expect(menu).toHaveCount(0);
+    await expect(userMenuTrigger(page)).toBeFocused();
   }
   await expect(page.locator("html")).toHaveAttribute("lang", locale);
 }
