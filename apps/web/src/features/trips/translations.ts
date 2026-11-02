@@ -228,6 +228,19 @@ export const tripTranslations = {
     closeDetails: "Close details",
     noDecisions: "No company decisions yet.",
     historyUnavailable: "Decision history is not included in this view.",
+    cargoMassHelp: "Actual shipment mass, not the catalog unit mass.",
+    distanceHelp: "Driven distance from the results screen, not the planned route length.",
+    catalogNone:
+      "No catalog is published for this game yet. You can save a draft and return later.",
+    reportMissing: "Before submitting, complete or correct:",
+    missingEvidence: "A ready completion screenshot",
+    missingInvalid: "Exact values in the required fields",
+    reportNextTitle: "What happens next",
+    reportNext1: "A different staff member reviews the report; you cannot review your own report.",
+    reportNext2: "It does not count in company totals until it is accepted.",
+    reportNext3: "You can edit it while it awaits a decision; every change is kept as a revision.",
+    reportNext4:
+      "If it is rejected, correct and resubmit it on the same trip; after acceptance, request a correction instead.",
   },
   ru: {
     historicalRules: "Историческое определение правил",
@@ -458,5 +471,19 @@ export const tripTranslations = {
     closeDetails: "Закрыть детали",
     noDecisions: "Решений компании пока нет.",
     historyUnavailable: "История решений не входит в это представление.",
+    cargoMassHelp: "Фактическая масса отправки, а не масса единицы груза из каталога.",
+    distanceHelp: "Пробег с экрана результатов, а не плановая длина маршрута.",
+    catalogNone:
+      "Для этой игры пока нет опубликованного каталога. Можно сохранить черновик и вернуться позже.",
+    reportMissing: "Перед отправкой заполните или исправьте:",
+    missingEvidence: "Готовый скриншот завершения рейса",
+    missingInvalid: "Точные значения обязательных полей",
+    reportNextTitle: "Что будет дальше",
+    reportNext1: "Отчёт проверяет другой сотрудник; проверять собственный отчёт нельзя.",
+    reportNext2: "До принятия отчёт не входит в итоги компании.",
+    reportNext3:
+      "Пока решения нет, отчёт можно изменить; каждое изменение сохраняется как ревизия.",
+    reportNext4:
+      "Если отчёт отклонят, исправьте и отправьте его снова в том же рейсе; после принятия нужен запрос на исправление.",
   },
 };

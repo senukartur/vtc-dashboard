@@ -60,6 +60,7 @@ export function Confirm({
   disabled = false,
   pending = false,
   failure,
+  variant = "outline",
 }: {
   label: string;
   guard: string;
@@ -68,6 +69,7 @@ export function Confirm({
   disabled?: boolean;
   pending?: boolean;
   failure?: unknown;
+  variant?: "default" | "outline";
 }) {
   const { t } = useTranslation("trips"),
     [snapshot, setSnapshot] = useState<{
@@ -95,7 +97,7 @@ export function Confirm({
       <DialogTrigger asChild>
         <Button
           type="button"
-          variant="outline"
+          variant={variant}
           disabled={disabled || pending}
           onClick={() => setSnapshot({ guard, run: onConfirm, content: children, failure })}
         >
