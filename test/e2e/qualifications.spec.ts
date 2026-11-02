@@ -572,7 +572,14 @@ for (const locale of ["en", "ru"] as const)
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       locale === "en" ? "Qualifications" : "Квалификации",
     );
-    await expect(page.getByText("100.000000000000000001 / 100", { exact: false })).toBeVisible();
+    await expect(
+      page.getByText(
+        locale === "en"
+          ? "0.100000000000000000001 km / 0.1 km"
+          : "0,100000000000000000001 км / 0,1 км",
+        { exact: false },
+      ),
+    ).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -800,7 +807,10 @@ test("controlled loading and game change discard the obsolete pending progress r
   await expect(current.getByRole("status")).toBeVisible();
   await current.screenshot({ path: info.outputPath("qualification-loading.png") });
   state.progressGate = null;
-  await page.getByLabel("Game", { exact: true }).selectOption("ats");
+  await page
+    .getByRole("group", { name: "Game", exact: true })
+    .getByRole("button", { name: "ATS", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Current qualification · ATS", exact: true }),
   ).toBeVisible();
@@ -808,7 +818,9 @@ test("controlled loading and game change discard the obsolete pending progress r
   await expect(
     page.getByRole("heading", { name: "Current qualification · ETS2", exact: true }),
   ).toHaveCount(0);
-  await expect(page.getByText("100.000000000000000001 / 100", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("0.100000000000000000001 km / 0.1 km", { exact: false }),
+  ).toBeVisible();
 });
 
 test("controlled committed promotion with lost response remains recoverable after eligibility changes", async ({
@@ -930,7 +942,10 @@ test("controlled member permissions unset thresholds retained-review and unavail
     path: info.outputPath("qualification-unconfigured.png"),
     fullPage: true,
   });
-  await page.getByLabel("Game", { exact: true }).selectOption("ats");
+  await page
+    .getByRole("group", { name: "Game", exact: true })
+    .getByRole("button", { name: "ATS", exact: true })
+    .click();
   await expect(page).toHaveURL(/game=ats/);
   await expect(
     page.getByRole("heading", { name: "Current qualification · ATS", exact: true }),
