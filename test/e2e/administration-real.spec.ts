@@ -107,25 +107,21 @@ test("real application review, manual invitation copy and redemption with histor
     await expect(page.getByRole("heading", { name: nickname, exact: true })).toBeVisible();
     await confirm(page, "Approve application");
     await expect(page.getByRole("heading", { name: "Invitation", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+    await page.getByRole("button", { name: "Copy link", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     const link = await dialog.locator("pre").textContent();
     if (!link) throw new Error("SYNTHETIC_LINK_REQUIRED");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "Show valid invitation link", exact: true }),
-    ).toBeFocused();
-    await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: "Copy link", exact: true }).click();
     await page
       .getByRole("dialog")
       .getByRole("button", { name: "Dismiss sensitive value", exact: true })
       .click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "Show valid invitation link", exact: true }),
-    ).toBeFocused();
+    await expect(page.getByRole("button", { name: "Copy link", exact: true })).toBeFocused();
     await page.goto(link);
     await expect(page.getByLabel(/^(New password|Новый пароль)$/, { exact: true })).toBeVisible();
     await catalogLanguage(page);
@@ -528,7 +524,10 @@ test("real rejection requires a reason and a later application retains the previ
     ).toBeDisabled();
     await page.getByLabel("Reason", { exact: true }).fill(reason);
     await confirm(page, "Reject application");
-    await expect(page.getByRole("heading", { name: "Decision", exact: true })).toBeVisible();
+    // The Decision heading is always present; the decided summary proves the rejection landed.
+    const decided = page.locator(".applications-decision");
+    await expect(decided.locator(".applications-summary")).toContainText("Rejected · ");
+    await expect(decided.locator(".applications-quote")).toHaveText(`«${reason}»`);
     expect((await submit(second)).status()).toBe(201);
     await page.goto("/account/admin/applications?status=submitted");
     await expect(
@@ -599,7 +598,7 @@ test("real disabled-mail invitation supports independent copy, first email, supp
     }
     async function copyLink() {
       const response = responseFor(`/admin/invitations/${invitationId}/copy-link`, "POST");
-      await page.getByRole("button", { name: "Show valid invitation link", exact: true }).click();
+      await page.getByRole("button", { name: "Copy link", exact: true }).click();
       expect((await response).status()).toBe(200);
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
@@ -616,7 +615,7 @@ test("real disabled-mail invitation supports independent copy, first email, supp
           new URL(response.url()).pathname.startsWith("/api/v1/mail-deliveries/") &&
           response.request().method() === "GET",
       );
-    await page.getByRole("button", { name: "Request first invitation email", exact: true }).click();
+    await page.getByRole("button", { name: "Send to email", exact: true }).click();
     expect((await firstEmail).status()).toBe(200);
     expect((await firstDelivery).status()).toBe(200);
     await expect(page.getByText("Email status: Queued", { exact: true })).toBeVisible();
@@ -652,7 +651,7 @@ test("real disabled-mail invitation supports independent copy, first email, supp
     expect((await copyLink()) === original).toBe(true);
     const retry = responseFor(`/mail-deliveries/${requested.deliveryId}/resends`, "POST"),
       queued = responseFor(`/mail-deliveries/${requested.deliveryId}`);
-    await page.getByRole("button", { name: "Retry rejected email", exact: true }).click();
+    await page.getByRole("button", { name: "Retry email", exact: true }).click();
     expect((await retry).status()).toBe(200);
     const queuedResponse = await queued;
     expect(queuedResponse.status()).toBe(200);
@@ -664,9 +663,7 @@ test("real disabled-mail invitation supports independent copy, first email, supp
     expect(retriedJob.state).toBe("ready");
     await controlledInvitationMailFailure(staff, requested.deliveryId, true);
     await showWorkerOutcome("ambiguous", "Email status: Outcome unknown; retry is blocked");
-    await expect(
-      page.getByRole("button", { name: "Retry rejected email", exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Retry email", exact: true })).toHaveCount(0);
     expect((await copyLink()) === original).toBe(true);
     const state = await readInvitation();
     expect(state.id).toBe(invitationId);
@@ -828,7 +825,7 @@ test("controlled administration loading, read-error, explicit retry and empty st
     await ready;
     const master = page.locator(".admin-master");
     await expect(master.getByRole("status")).toHaveText("Loading…");
-    await expect(master.locator(".admin-list button")).toHaveCount(0);
+    await expect(master.locator("tbody tr")).toHaveCount(0);
     release();
     await expect(master.getByRole("alert")).toContainText("This information is unavailable.");
     await safeStateCapture(page, info, "administration-read-error-en.png");

@@ -1,0 +1,302 @@
+/* Compact applications queue and detail (VTC-063). Every selector is scoped to .applications-page
+   because this file also loads with the Connections chunk through SensitiveValue; portaled
+   confirmation dialogs are reached through .dialog-content:has(.applications-dialog).
+   The shared .table and .admin-detail break anywhere; text here wraps only between words, and
+   only .applications-break (email, Steam URL, IDs) may break anywhere. */
+.applications-page .applications-heading {
+  display: grid;
+  gap: 4px;
+}
+.applications-page .applications-heading .page-heading {
+  padding-bottom: 0;
+}
+.applications-page .card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+.applications-page .muted {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.applications-page .admin-detail,
+.applications-page .applications-table :is(th, td),
+.applications-page .applications-row-button {
+  overflow-wrap: break-word;
+}
+.applications-page .applications-break {
+  overflow-wrap: anywhere;
+}
+/* Side by side only above the shared 700px master/detail toggle, so its display:block and
+   display:none rules keep winning on phones. At 768 the detail wraps below the list. */
+@media (min-width: 701px) {
+  .applications-page .admin-workbench {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .applications-page .admin-workbench > .admin-master {
+    flex: 1.3 1 520px;
+    min-width: 0;
+  }
+  .applications-page .admin-workbench > .admin-detail {
+    flex: 1 1 380px;
+    min-width: 0;
+  }
+}
+
+/* Queue table: fixed column shares keep the layout independent of long names. */
+.applications-page .applications-table {
+  table-layout: fixed;
+}
+.applications-page .applications-table thead th:nth-child(1) {
+  width: 28%;
+}
+.applications-page .applications-table thead th:nth-child(2) {
+  width: 18%;
+}
+.applications-page .applications-table thead th:nth-child(3),
+.applications-page .applications-table thead th:nth-child(4) {
+  width: 27%;
+}
+.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(1) {
+  width: 26%;
+}
+.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(2) {
+  width: 13%;
+}
+.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(3),
+.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(5) {
+  width: 21%;
+}
+.applications-page .applications-table:has(thead th:nth-child(5)) thead th:nth-child(4) {
+  width: 19%;
+}
+.applications-page .applications-table :is(th, td) {
+  vertical-align: middle;
+}
+.applications-page .applications-table tbody th {
+  padding-block: 2px;
+}
+.applications-page .applications-table tr[data-selected] > * {
+  background: var(--accent-soft);
+}
+.applications-page .applications-table tr[data-selected] > th {
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+.applications-page .applications-row-button {
+  width: 100%;
+  min-height: var(--target-min);
+  justify-content: flex-start;
+  color: var(--foreground);
+  font-weight: 600;
+  text-align: left;
+  white-space: normal;
+}
+.applications-page .applications-row-button:focus-visible {
+  outline-offset: -3px;
+}
+.applications-page .applications-games {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.applications-page .applications-status.applications-tone-pending {
+  background: var(--pending-surface);
+}
+.applications-page .applications-status.applications-tone-accepted {
+  background: var(--accepted-surface);
+}
+.applications-page .applications-status.applications-tone-rejected {
+  background: var(--rejected-surface);
+}
+.applications-page .applications-tone-pending {
+  color: var(--pending);
+}
+.applications-page .applications-tone-accepted {
+  color: var(--accepted);
+}
+.applications-page .applications-tone-rejected {
+  color: var(--destructive);
+}
+
+/* Detail card. */
+.applications-page .applications-detail {
+  container: applications-detail / inline-size;
+}
+.applications-page .applications-detail > .admin-mobile-back {
+  justify-self: start;
+}
+.applications-page .applications-detail-head {
+  display: grid;
+  gap: 2px;
+}
+.applications-page .applications-title,
+.applications-page .applications-section-head,
+.applications-page .applications-history-line,
+.applications-page .applications-reissue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.applications-page .applications-title h2 {
+  min-width: 0;
+  font-size: 16px;
+}
+.applications-page .applications-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.applications-page .applications-facts > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: start;
+}
+.applications-page .applications-facts dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.applications-page .applications-facts dd {
+  margin: 0;
+}
+.applications-page .applications-facts .applications-wide {
+  grid-column: 1 / -1;
+}
+@container applications-detail (max-width: 359px) {
+  .applications-page .applications-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.applications-page .applications-section {
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.applications-page .applications-section h3 {
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.applications-page .applications-history-item {
+  display: grid;
+  gap: 2px;
+}
+.applications-page .applications-history-line {
+  font-size: var(--font-small);
+}
+.applications-page .applications-field {
+  display: grid;
+  gap: 4px;
+}
+.applications-page .applications-field textarea {
+  min-height: 0;
+  padding-block: 6px;
+  resize: vertical;
+}
+.applications-page .applications-danger:not(:disabled) {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+.applications-page .applications-summary {
+  font-weight: 600;
+}
+/* Reasons keep the applicant-facing line breaks the reviewer typed. */
+.applications-page :is(.applications-quote, .applications-reason-text) {
+  white-space: pre-line;
+}
+.applications-page .applications-quote {
+  padding-left: 8px;
+  border-left: 2px solid var(--border-strong);
+}
+.applications-page .applications-mail {
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+
+/* Portaled confirmation dialogs (approve, reject, reissue). */
+.dialog-content:has(.applications-dialog) {
+  overflow-wrap: break-word;
+}
+.dialog-content:has(.applications-dialog) .applications-dialog {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.dialog-content:has(.applications-dialog) .applications-break {
+  overflow-wrap: anywhere;
+}
+.dialog-content:has(.applications-dialog) .applications-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  list-style: disc;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.dialog-content:has(.applications-dialog) .applications-quote {
+  white-space: pre-line;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-strong);
+}
+
+/* Phones: the shared toggle shows the list or the detail; each queue row becomes a block with
+   the name, then games, submitted time and status. The header row stays available to assistive
+   technology only. */
+@media (max-width: 700px) {
+  .applications-page .applications-table,
+  .applications-page .applications-table tbody,
+  .applications-page .applications-table tr {
+    display: block;
+    width: 100%;
+  }
+  .applications-page .applications-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .applications-page .applications-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .applications-page .applications-table tbody :is(th, td) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: auto;
+    padding: 0;
+    border-bottom: 0;
+  }
+  .applications-page .applications-table tbody th {
+    flex: 1 1 100%;
+  }
+  .applications-page .applications-row-button {
+    padding-inline: 0;
+  }
+  /* The separator ends the previous item, so a wrapped item never starts with it. */
+  .applications-page .applications-table tbody td:not(:last-child)::after {
+    content: "·" / "";
+    color: var(--muted);
+  }
+  .applications-page .applications-table tr[data-selected] > :is(th, td) {
+    background: transparent;
+    box-shadow: none;
+  }
+  .applications-page .applications-table tbody tr[data-selected] {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--focus);
+  }
+}
