@@ -292,7 +292,10 @@ test("real company settings, safe sources/audit and RU/EN responsive keyboard re
       "Europe/Warsaw",
     );
     await expect(page.getByRole("heading", { name: "Trip sources", exact: true })).toBeVisible();
-    await expect(page.getByText("Deferred company adapter", { exact: true })).toHaveCount(2);
+    // Deferred company adapters (Trucky, VTCBase) are planned and unavailable in this runtime.
+    const sources = page.getByRole("region", { name: "Trip sources", exact: true });
+    await expect(sources.getByText("Planned", { exact: true })).toHaveCount(2);
+    await expect(sources.getByText("Unavailable", { exact: true })).toHaveCount(2);
     await page.getByRole("button", { name: "Save reporting timezone", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     await page.keyboard.press("Escape");
@@ -365,6 +368,8 @@ test("real director-only verified-email leadership transfer uses the bound succe
         );
       });
     }
+    // Start from the successor step: no pending code or resend wait from an earlier attempt.
+    await resetSuccessionChallenges(self.member.id);
     const initialSuccessors = successorPage(null);
     await staffPage(
       page,
@@ -372,13 +377,21 @@ test("real director-only verified-email leadership transfer uses the bound succe
       "/account/admin/settings",
       /^(Company settings|Настройки компании)$/,
     );
-    const leadership = page
-      .getByRole("heading", { name: "Transfer leadership", exact: true })
-      .locator("..");
+    const leadership = page.getByRole("complementary", {
+      name: "Transfer leadership",
+      exact: true,
+    });
+    const roleLabels: Record<string, string> = {
+      trainee: "Trainee",
+      driver: "Driver",
+      dispatcher: "Dispatcher",
+      deputy_director: "Deputy Director",
+      director: "Director",
+    };
     async function settledSuccessors(response: Response) {
       expect(response.status()).toBe(200);
       const data = (await response.json()).data as {
-        items: { profile: { member: { id: string; nickname: string } } }[];
+        items: { profile: { member: { id: string; nickname: string; roles: string[] } } }[];
         nextCursor: string | null;
       };
       const members = data.items
@@ -394,7 +407,11 @@ test("real director-only verified-email leadership transfer uses the bound succe
         )
         .toEqual(["", ...members.map((member) => member.id)]);
       await expect(leadership.locator('option:not([value=""])')).toHaveText(
-        members.map((member) => `${member.nickname} · ${member.id}`),
+        members.map((member) =>
+          member.roles.length
+            ? `${member.nickname} · ${member.roles.map((role) => roleLabels[role]).join(", ")}`
+            : member.nickname,
+        ),
       );
       return data.nextCursor;
     }
@@ -419,15 +436,18 @@ test("real director-only verified-email leadership transfer uses the bound succe
     await page.getByRole("button", { name: "Send bound transfer code", exact: true }).click();
     expect((await challengeResponse).status()).toBe(202);
     const mail = await privateMail(self.member.id, "succession");
-    await page.getByRole("button", { name: "Review successor and transfer", exact: true }).click();
-    await page
-      .getByRole("dialog")
-      .getByLabel("Code from your current verified email", { exact: true })
-      .fill(mail.code);
+    // The code is entered inline; the state read supplies the server's remaining attempts.
+    const code = page.getByLabel("Code from your current verified email", { exact: true });
+    await expect(code).toHaveAccessibleDescription(/Attempts left: 5/);
+    await code.fill(mail.code);
+    await leadership.getByRole("button", { name: "Transfer leadership…", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: /^(Access restricted|Доступ ограничен)$/, exact: true }),
     ).toBeVisible();
+    await expect(page.locator(".settings-transferred").getByRole("status")).toContainText(
+      successor.name,
+    );
     expect((await staff.get("/api/v1/admin/company-settings")).status()).toBe(403);
     expect(
       (
