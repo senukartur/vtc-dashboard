@@ -524,7 +524,10 @@ test("real rejection requires a reason and a later application retains the previ
     ).toBeDisabled();
     await page.getByLabel("Reason", { exact: true }).fill(reason);
     await confirm(page, "Reject application");
-    await expect(page.getByRole("heading", { name: "Decision", exact: true })).toBeVisible();
+    // The Decision heading is always present; the decided summary proves the rejection landed.
+    const decided = page.locator(".applications-decision");
+    await expect(decided.locator(".applications-summary")).toContainText("Rejected · ");
+    await expect(decided.locator(".applications-quote")).toHaveText(`«${reason}»`);
     expect((await submit(second)).status()).toBe(201);
     await page.goto("/account/admin/applications?status=submitted");
     await expect(

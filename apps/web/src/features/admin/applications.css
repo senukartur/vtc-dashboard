@@ -203,6 +203,10 @@
 .applications-page .applications-summary {
   font-weight: 600;
 }
+/* Reasons keep the applicant-facing line breaks the reviewer typed. */
+.applications-page :is(.applications-quote, .applications-reason-text) {
+  white-space: pre-line;
+}
 .applications-page .applications-quote {
   padding-left: 8px;
   border-left: 2px solid var(--border-strong);
@@ -237,6 +241,7 @@
   line-height: 1.6;
 }
 .dialog-content:has(.applications-dialog) .applications-quote {
+  white-space: pre-line;
   padding-left: 8px;
   border-left: 2px solid var(--border-strong);
 }

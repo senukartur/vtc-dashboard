@@ -258,6 +258,30 @@ test("A3 reject needs a non-blank reason and sends it untrimmed", async ({ page 
   await expect(decision(page)).toContainText("This reason was queued for email to the applicant.");
 });
 
+test("A3 a multi-line reason keeps its line breaks in the dialog, decision and history", async ({
+  page,
+}) => {
+  const state = await open(page);
+  await select(page, names.submitted);
+  await settledDetail(page, false);
+  const lines = ["Fictional first line", "Fictional second line"].join("\n");
+  await page.getByLabel("Reason", { exact: true }).fill(lines);
+  await decision(page).getByRole("button", { name: text.en.reject, exact: true }).click();
+  const dialog = page.getByRole("dialog"),
+    rendered = (locator: Locator) =>
+      locator.evaluate((element) => (element as HTMLElement).innerText);
+  expect(await rendered(dialog.locator(".applications-quote"))).toBe(lines);
+  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.commands[0]?.body).toBe(JSON.stringify({ decision: "reject", reason: lines }));
+  const quote = decision(page).locator(".applications-quote");
+  await expect(quote).toBeVisible();
+  expect(await rendered(quote)).toBe(`«${lines}»`);
+  const history = detail(page).locator(".applications-reason-text").first();
+  await expect(history).toContainText("Fictional second line");
+  expect(await rendered(history)).toBe(lines);
+});
+
 test("A3 an aborted approve keeps its key and body for Refresh", async ({ page }) => {
   const state = await open(page);
   state.commandOutcomes.push("abort");
@@ -570,6 +594,32 @@ test("A8 controls keep pointer-appropriate target sizes", async ({ page }, info)
     for (const control of await master(page).locator("tbody button").all())
       expect((await box(control)).height).toBeGreaterThanOrEqual(coarse ? 40 : 30);
   }
+});
+
+test("A8 invitation actions keep pointer-appropriate target sizes", async ({ page }) => {
+  const minimum = async () =>
+    (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) ? 40 : 24;
+  await open(page, {}, "approved");
+  await select(page, names.approved);
+  await settledDetail(page, true);
+  for (const name of [text.en.copy, "Send to email", text.en.reissue])
+    expect(
+      (await box(invitation(page).getByRole("button", { name, exact: true }))).height,
+    ).toBeGreaterThanOrEqual(await minimum());
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await open(
+    page,
+    {
+      invitation: { emailDelivery: "failed", deliveryId: ids.delivery },
+      delivery: { state: "failed" },
+    },
+    "approved",
+  );
+  await select(page, names.approved);
+  await settledDetail(page, true);
+  expect(
+    (await box(invitation(page).getByRole("button", { name: "Retry email", exact: true }))).height,
+  ).toBeGreaterThanOrEqual(await minimum());
 });
 
 test("A9 keyboard order follows the visual order", async ({ page }, info) => {

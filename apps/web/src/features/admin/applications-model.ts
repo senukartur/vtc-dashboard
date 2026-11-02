@@ -41,7 +41,8 @@ export function invitationView(
  * Send and Retry follow the original inline conditions. Send exists only while no email was
  * requested; Retry only after a known failure. A link that is no longer live hides both instead
  * of disabling them. `mailEnabled` is null while the runtime capability is unknown (loading or
- * unavailable): Send stays disabled, but the page does not claim that mail is turned off.
+ * unavailable): Send stays disabled, and the neutral help hint neither invites a send nor claims
+ * that mail is turned off.
  */
 export function mailActions(input: {
   emailDelivery: string;
@@ -65,9 +66,11 @@ export function mailActions(input: {
           : "enabled",
     retry: !failed || !input.live ? "hidden" : input.busy ? "disabled" : "enabled",
     hint: notRequested
-      ? input.mailEnabled === false
-        ? "disabled"
-        : "notRequested"
+      ? input.mailEnabled === null
+        ? "help"
+        : input.mailEnabled
+          ? "notRequested"
+          : "disabled"
       : failed
         ? "retry"
         : "help",

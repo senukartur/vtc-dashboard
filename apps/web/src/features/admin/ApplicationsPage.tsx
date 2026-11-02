@@ -1,4 +1,3 @@
-// biome-ignore-all lint/a11y/noRedundantRoles: explicit table roles survive the phone row layout (display: block/flex), where WebKit drops implicit table semantics.
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -390,7 +389,9 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
                     </Badge>
                   )}
                 </p>
-                <p className="muted">{previous.decisionReason ?? t("noReason")}</p>
+                <p className="muted applications-reason-text">
+                  {previous.decisionReason ?? t("noReason")}
+                </p>
               </div>
             ))}
             <Pager
@@ -429,8 +430,9 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
                     confirm={() => decide("approve")}
                   >
                     <div className="applications-dialog">
-                      <p className="applications-break">
-                        {app.fields.nickname} · {app.fields.email}
+                      <p>
+                        {app.fields.nickname} ·{" "}
+                        <span className="applications-break">{app.fields.email}</span>
                       </p>
                       <ul className="applications-points">
                         <li>{t("applicationsUi.approvePoint1")}</li>
@@ -515,7 +517,14 @@ function Applications() {
     `/admin/applications?status=${status}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
     "EnvelopeListApplication",
   );
-  const items = query.data?.data.data.items;
+  const items = query.data?.data.data.items,
+    columns = [
+      "colApplicant",
+      "colGames",
+      "colSubmitted",
+      "colStatus",
+      ...(status === "rejected" ? ["colDecided"] : []),
+    ];
   function page(next: string | null) {
     setSelected(null);
     setSearch({ status, ...(next ? { cursor: next } : {}) });
@@ -553,30 +562,24 @@ function Applications() {
           {items && items.length > 0 && (
             <Table size="xs" className="applications-table" role="table">
               <caption className="visually-hidden">{t("applicationsUi.listCaption")}</caption>
+              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
               <thead role="rowgroup">
+                {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
                 <tr role="row">
-                  <th scope="col" role="columnheader">
-                    {t("applicationsUi.colApplicant")}
-                  </th>
-                  <th scope="col" role="columnheader">
-                    {t("applicationsUi.colGames")}
-                  </th>
-                  <th scope="col" role="columnheader">
-                    {t("applicationsUi.colSubmitted")}
-                  </th>
-                  <th scope="col" role="columnheader">
-                    {t("applicationsUi.colStatus")}
-                  </th>
-                  {status === "rejected" && (
-                    <th scope="col" role="columnheader">
-                      {t("applicationsUi.colDecided")}
+                  {columns.map((column) => (
+                    // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                    <th key={column} scope="col" role="columnheader">
+                      {t(`applicationsUi.${column}`)}
                     </th>
-                  )}
+                  ))}
                 </tr>
               </thead>
+              {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
               <tbody role="rowgroup">
                 {items.map((app) => (
+                  // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
                   <tr key={app.id} role="row" data-selected={selected === app.id ? "" : undefined}>
+                    {/* biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers. */}
                     <th scope="row" role="rowheader">
                       <Button
                         variant="ghost"
@@ -588,22 +591,23 @@ function Applications() {
                         {app.fields.nickname}
                       </Button>
                     </th>
-                    <td role="cell">
-                      <span className="applications-games">
+                    {[
+                      <span key="games" className="applications-games">
                         {app.fields.games.map((game) => (
                           <Badge key={game} size="xs">
                             {t(`applicationsUi.gameShort.${game}`)}
                           </Badge>
                         ))}
-                      </span>
-                    </td>
-                    <td role="cell">{dates.format(app.submittedAt)}</td>
-                    <td role="cell">
-                      <StatusBadge status={app.status} />
-                    </td>
-                    {status === "rejected" && (
-                      <td role="cell">{dates.format(app.decision?.decidedAt)}</td>
-                    )}
+                      </span>,
+                      dates.format(app.submittedAt),
+                      <StatusBadge key="status" status={app.status} />,
+                      ...(status === "rejected" ? [dates.format(app.decision?.decidedAt)] : []),
+                    ].map((cell, index) => (
+                      // biome-ignore lint/a11y/noRedundantRoles: the phone layout changes table display, which drops implicit table semantics in browsers.
+                      <td key={columns[index + 1]} role="cell">
+                        {cell}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

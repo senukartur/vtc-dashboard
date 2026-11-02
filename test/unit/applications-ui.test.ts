@@ -106,9 +106,11 @@ describe("mailActions", () => {
               );
               expect(result.hint).toBe(
                 emailDelivery === "not_requested"
-                  ? mailEnabled === false
-                    ? "disabled"
-                    : "notRequested"
+                  ? mailEnabled === null
+                    ? "help"
+                    : mailEnabled
+                      ? "notRequested"
+                      : "disabled"
                   : retryShown
                     ? "retry"
                     : "help",
