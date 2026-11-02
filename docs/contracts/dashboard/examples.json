@@ -5684,12 +5684,12 @@
       "response": {
         "data": {
           "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
+          "version": 2,
           "applicationId": "41000000-0000-4000-8000-000000000001",
           "expiresAt": "2026-10-17T12:00:00.000Z",
           "state": "active",
           "emailDelivery": "queued",
-          "deliveryId": null
+          "deliveryId": "41000000-0000-4000-8000-000000000098"
         },
         "meta": {
           "requestId": "synthetic-request-001"

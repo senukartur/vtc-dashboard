@@ -355,7 +355,7 @@ test("public duplicates preserve immutable evidence and return only binding-owne
   expect(changedBinding.id).not.toBe(a.id);
   expect(await status(admissions.submit(scope, newId(), { ...raw, games: [] }))).toBe(422);
 });
-test("actual messaging approval/rejection enqueue atomically, preserves RU intent/history and reapplication", async () => {
+test("actual messaging rejection and explicit invitation email request enqueue atomically, preserve RU intent/history and reapplication", async () => {
   const app = await submitted(admissions, input(), "ru"),
     key = newId();
   const rejected = await admissions.decide(director, app.id, key, 1, {
