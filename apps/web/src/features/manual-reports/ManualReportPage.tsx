@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -8,7 +8,9 @@ import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { canonicalDecimal, type DTO, revisionFields, schema, validId } from "../trips/transport.js";
 import { EventSelect, EvidenceUpload, ManualCatalogField } from "./fields.js";
+import { missingRequirements } from "./model.js";
 import "../trips/trips.css";
+import "./manual-reports.css";
 export function ReportsPage() {
   const { t } = useTranslation("trips"),
     session = useSession(),
@@ -98,49 +100,62 @@ export function ManualReportPage({ kind }: { kind: "new" | "draft" | "report" })
     trip = useTripQuery(`/trips/${tripId}`, "EnvelopeTripView", !!tripId),
     view = trip.data?.data.data,
     summary = view?.view === "private" ? view.summary : view;
+  const title = t(kind === "report" ? "revise" : "newReport");
   if (!session.self?.capabilities.includes("trips.submit_own"))
     return (
-      <Card>
-        <p>{t("forbidden")}</p>
-      </Card>
+      <ReportFrame title={title}>
+        <Card>
+          <p>{t("forbidden")}</p>
+        </Card>
+      </ReportFrame>
     );
   if (!valid)
     return (
-      <Card>
-        <p>{t("notFound")}</p>
-      </Card>
+      <ReportFrame title={title}>
+        <Card>
+          <p>{t("notFound")}</p>
+        </Card>
+      </ReportFrame>
     );
   if (kind === "new") return <ManualEditor key="new" />;
   if (kind === "draft") {
     if (!draft.data)
       return (
-        <Card>
-          <State query={draft} />
-        </Card>
+        <ReportFrame title={title}>
+          <Card>
+            <State query={draft} />
+          </Card>
+        </ReportFrame>
       );
     if (draft.data.data.data.submittedReportId)
       return (
-        <Card>
-          <Button asChild>
-            <Link to={`/account/reports/${draft.data.data.data.submittedReportId}/edit`}>
-              {t("viewReport")}
-            </Link>
-          </Button>
-        </Card>
+        <ReportFrame title={title}>
+          <Card>
+            <Button asChild>
+              <Link to={`/account/reports/${draft.data.data.data.submittedReportId}/edit`}>
+                {t("viewReport")}
+              </Link>
+            </Button>
+          </Card>
+        </ReportFrame>
       );
     return <ManualEditor key={id} draft={draft.data.data.data} draftEtag={draft.data.etag} />;
   }
   if (!report.data || !summary)
     return (
-      <Card>
-        <State query={!report.data ? report : trip} />
-      </Card>
+      <ReportFrame title={title}>
+        <Card>
+          <State query={!report.data ? report : trip} />
+        </Card>
+      </ReportFrame>
     );
   if (summary.owner.id !== session.self.member.id)
     return (
-      <Card>
-        <p>{t("forbidden")}</p>
-      </Card>
+      <ReportFrame title={title}>
+        <Card>
+          <p>{t("forbidden")}</p>
+        </Card>
+      </ReportFrame>
     );
   return (
     <ManualEditor
@@ -150,6 +165,17 @@ export function ManualReportPage({ kind }: { kind: "new" | "draft" | "report" })
       tripVersion={summary.version}
       accepted={summary.decision === "accepted"}
     />
+  );
+}
+/** Shared page root and heading for the editor and every non-editor state. */
+function ReportFrame({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="stack trip-page manual-report">
+      <header className="manual-report-header">
+        <h1>{title}</h1>
+      </header>
+      {children}
+    </div>
   );
 }
 function ManualEditor({
@@ -250,12 +276,15 @@ function ManualEditor({
     tripVersion,
     accepted,
   ]);
+  const missing = complete ? [] : missingRequirements(submission, ready),
+    nextId = useId(),
+    missingId = useId();
   return (
-    <div className="stack trip-page">
-      <header>
+    <div className="stack trip-page manual-report">
+      <header className="manual-report-header">
         <h1>{t(report ? "revise" : "newReport")}</h1>
-        <p>{t("noDate")}</p>
-        {report && <p>{t("pendingEdit")}</p>}
+        <p className="muted">{t("noDate")}</p>
+        {report && <p className="muted">{t("pendingEdit")}</p>}
       </header>
       {accepted && report && (
         <Card className="stack">
@@ -265,11 +294,15 @@ function ManualEditor({
           </Button>
         </Card>
       )}
-      <form className="stack" onSubmit={(e) => e.preventDefault()} aria-label={t("report")}>
-        <fieldset disabled={accepted} className="trip-editor-body">
-          <Card className="stack">
-            <div className="trip-grid">
-              <div>
+      <div className="manual-report-layout">
+        <form
+          className="card manual-report-form"
+          onSubmit={(e) => e.preventDefault()}
+          aria-label={t("report")}
+        >
+          <fieldset disabled={accepted} className="trip-editor-body">
+            <div className="manual-report-section manual-report-context">
+              <div className="field">
                 <Label htmlFor="manual-game">{t("game")}</Label>
                 <select
                   id="manual-game"
@@ -291,7 +324,7 @@ function ManualEditor({
                   <option value="ats">ATS</option>
                 </select>
               </div>
-              <div>
+              <div className="field">
                 <Label htmlFor="manual-publication">{t("catalogRevision")}</Label>
                 <select
                   className="input"
@@ -310,9 +343,19 @@ function ManualEditor({
                   ))}
                 </select>
               </div>
+              {pub.isError && (
+                <p role="alert" className="manual-report-note">
+                  {t("unavailable")}{" "}
+                  <Button type="button" variant="outline" onClick={() => void pub.refetch()}>
+                    {t("refresh")}
+                  </Button>
+                </p>
+              )}
+              {pub.isSuccess && !publications.length && !pin && (
+                <p className="manual-report-note muted">{t("catalogNone")}</p>
+              )}
             </div>
-            {pub.isError && <p role="alert">{t("unavailable")}</p>}
-            <div className="trip-grid">
+            <div className="manual-report-section manual-report-fields">
               {(["origin", "destination", "cargo", "trailerType"] as const).map((name) => (
                 <ManualCatalogField
                   key={name}
@@ -331,14 +374,13 @@ function ManualEditor({
                   }}
                 />
               ))}
-            </div>
-            <div className="trip-grid">
               {(["cargoMassKg", "actualDistanceM"] as const).map((name) => (
                 <div key={name} className="field">
                   <Label htmlFor={name}>{t(name)}</Label>
                   <Input
                     id={name}
                     inputMode="decimal"
+                    aria-describedby={`${name}-help`}
                     value={fields[name] ?? ""}
                     maxLength={64}
                     onChange={(e) => {
@@ -351,178 +393,220 @@ function ManualEditor({
                         });
                     }}
                   />
+                  <p id={`${name}-help`} className="manual-report-hint">
+                    {t(name === "cargoMassKg" ? "cargoMassHelp" : "distanceHelp")}
+                  </p>
                 </div>
               ))}
+              <EventSelect
+                value={fields.eventId ?? null}
+                onChange={(eventId) => patch({ eventId })}
+                game={game}
+              />
+              <div className="field">
+                <Label htmlFor="manual-comment">{t("comment")}</Label>
+                <textarea
+                  className="input"
+                  id="manual-comment"
+                  maxLength={4000}
+                  value={fields.comment ?? ""}
+                  onChange={(e) => patch({ comment: e.target.value || null })}
+                />
+              </div>
             </div>
-            <EventSelect
-              value={fields.eventId ?? null}
-              onChange={(eventId) => patch({ eventId })}
-              game={game}
-            />
-            <Label htmlFor="manual-comment">{t("comment")}</Label>
-            <textarea
-              className="input"
-              id="manual-comment"
-              maxLength={4000}
-              value={fields.comment ?? ""}
-              onChange={(e) => patch({ comment: e.target.value || null })}
-            />
-          </Card>
-          <Card>
-            <EvidenceUpload
-              ids={fields.evidenceIds ?? []}
-              onChange={(update) => {
-                setFields((previous) => ({
-                  ...previous,
-                  evidenceIds: update(previous.evidenceIds ?? []),
-                }));
-                setInvalid(false);
-                setSaved(false);
-              }}
-              onReady={setReady}
-            />
-          </Card>
-          {!report && (
-            <Card className="stack">
-              <Label htmlFor="manual-target">{t("target")}</Label>
-              <p>{t("targetHelp")}</p>
-              <select
-                id="manual-target"
-                className="input"
-                value={target?.tripId ?? ""}
-                onChange={(e) => {
-                  const item = targets.data?.data.data.items.find((t) => t.id === e.target.value);
-                  setTarget(item ? { tripId: item.id, expectedVersion: item.version } : null);
+            <div className="manual-report-section manual-report-evidence">
+              <EvidenceUpload
+                ids={fields.evidenceIds ?? []}
+                onChange={(update) => {
+                  setFields((previous) => ({
+                    ...previous,
+                    evidenceIds: update(previous.evidenceIds ?? []),
+                  }));
+                  setInvalid(false);
+                  setSaved(false);
                 }}
-              >
-                <option value="">{t("noTarget")}</option>
-                {target && !targets.data?.data.data.items.some((t) => t.id === target.tripId) && (
-                  <option value={target.tripId}>
-                    {target.tripId} · v{target.expectedVersion}
-                  </option>
+                onReady={setReady}
+              />
+            </div>
+            {!report && (
+              <div className="manual-report-section manual-report-target">
+                <Label htmlFor="manual-target">{t("target")}</Label>
+                <p className="manual-report-hint">{t("targetHelp")}</p>
+                <div className="manual-report-target-row">
+                  <select
+                    id="manual-target"
+                    className="input"
+                    value={target?.tripId ?? ""}
+                    onChange={(e) => {
+                      const item = targets.data?.data.data.items.find(
+                        (t) => t.id === e.target.value,
+                      );
+                      setTarget(item ? { tripId: item.id, expectedVersion: item.version } : null);
+                    }}
+                  >
+                    <option value="">{t("noTarget")}</option>
+                    {target &&
+                      !targets.data?.data.data.items.some((t) => t.id === target.tripId) && (
+                        <option value={target.tripId}>
+                          {target.tripId} · v{target.expectedVersion}
+                        </option>
+                      )}
+                    {targets.data?.data.data.items
+                      .filter(
+                        (t) => t.sourceKinds.includes("ets2telemetry") && t.decision !== "accepted",
+                      )
+                      .map((trip) => (
+                        <option key={trip.id} value={trip.id}>
+                          {trip.origin?.label ?? t("unknown")} →{" "}
+                          {trip.destination?.label ?? t("unknown")} · {trip.id} · v{trip.version}
+                        </option>
+                      ))}
+                  </select>
+                  <div className="trip-actions">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setCursor(null);
+                        if (target)
+                          void selectedTarget.refetch().then((result) => {
+                            const view = result.data?.data.data,
+                              summary = view?.view === "private" ? view.summary : view;
+                            if (
+                              summary &&
+                              summary.owner.id === session.self?.member.id &&
+                              summary.game === game &&
+                              summary.sourceKinds.includes("ets2telemetry")
+                            )
+                              setTarget({ tripId: summary.id, expectedVersion: summary.version });
+                          });
+                        else void targets.refetch();
+                      }}
+                    >
+                      {t("targetRefresh")}
+                    </Button>
+                    {targets.data?.data.data.nextCursor && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setCursor(targets.data?.data.data.nextCursor ?? null)}
+                      >
+                        {t("next")}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {target && (
+                  <Fields
+                    values={{ target: target.tripId, targetVersion: target.expectedVersion }}
+                  />
                 )}
-                {targets.data?.data.data.items
-                  .filter(
-                    (t) => t.sourceKinds.includes("ets2telemetry") && t.decision !== "accepted",
-                  )
-                  .map((trip) => (
-                    <option key={trip.id} value={trip.id}>
-                      {trip.origin?.label ?? t("unknown")} →{" "}
-                      {trip.destination?.label ?? t("unknown")} · {trip.id} · v{trip.version}
-                    </option>
-                  ))}
-              </select>
-              {target && (
-                <Fields values={{ target: target.tripId, targetVersion: target.expectedVersion }} />
+                <State query={targets} />
+                {target && <State query={selectedTarget} />}
+                {targetSummary?.decision === "accepted" && (
+                  <p role="alert">
+                    {t("acceptedTarget")}{" "}
+                    <Link to={`/account/trips/${targetSummary.id}`}>{t("correction")}</Link>
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="manual-report-section manual-report-footer">
+              {targetNeedsSave && <p role="status">{t("draftTargetSave")}</p>}
+              {invalid && <p role="alert">{t("invalid")}</p>}
+              <Failure error={command.failure} seconds={command.seconds} />
+              {saved && <p role="status">{t("saved")}</p>}
+              {!complete && !accepted && (
+                <div className="manual-report-missing">
+                  <p id={missingId}>{t("reportMissing")}</p>
+                  <ul aria-labelledby={missingId}>
+                    {missing.map((item) => (
+                      <li key={item}>
+                        {t(
+                          item === "evidence"
+                            ? "missingEvidence"
+                            : item === "invalid"
+                              ? "missingInvalid"
+                              : item,
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
-              <State query={targets} />
-              {target && <State query={selectedTarget} />}
-              {targetSummary?.decision === "accepted" && (
-                <p role="alert">
-                  {t("acceptedTarget")}{" "}
-                  <Link to={`/account/trips/${targetSummary.id}`}>{t("correction")}</Link>
-                </p>
-              )}
-              <div className="trip-actions">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setCursor(null);
-                    if (target)
-                      void selectedTarget.refetch().then((result) => {
-                        const view = result.data?.data.data,
-                          summary = view?.view === "private" ? view.summary : view;
-                        if (
-                          summary &&
-                          summary.owner.id === session.self?.member.id &&
-                          summary.game === game &&
-                          summary.sourceKinds.includes("ets2telemetry")
-                        )
-                          setTarget({ tripId: summary.id, expectedVersion: summary.version });
-                      });
-                    else void targets.refetch();
-                  }}
-                >
-                  {t("targetRefresh")}
-                </Button>
-                {targets.data?.data.data.nextCursor && (
+              <div className="trip-actions manual-report-actions">
+                {!report && (
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setCursor(targets.data?.data.data.nextCursor ?? null)}
+                    disabled={command.pending || command.seconds > 0}
+                    onClick={() => void save()}
                   >
-                    {t("next")}
+                    {t("save")}
                   </Button>
                 )}
+                <Confirm
+                  label={t(report ? "revise" : "submit")}
+                  variant="default"
+                  guard={guard}
+                  pending={command.pending}
+                  failure={command.failure}
+                  disabled={
+                    accepted ||
+                    targetNeedsSave ||
+                    targetSummary?.decision === "accepted" ||
+                    !complete ||
+                    command.seconds > 0
+                  }
+                  onConfirm={async () => {
+                    if (targetNeedsSave) return;
+                    const body = report
+                      ? { fields: submission, expectedTripVersion: tripVersion }
+                      : draft
+                        ? { fields: submission }
+                        : { fields: submission, targetTrip: target };
+                    const path = report
+                      ? `/manual-reports/${report.id}/revisions`
+                      : draft
+                        ? `/me/manual-drafts/${draft.id}/submission`
+                        : "/manual-reports";
+                    const result = await command.run(
+                      path,
+                      body,
+                      "EnvelopeManualReport",
+                      reportEtag ?? draftEtag,
+                    );
+                    if (result) navigate(`/account/trips/${result.data.data.tripId}`);
+                    return result;
+                  }}
+                >
+                  <p>{t("submitReview")}</p>
+                  <Fields
+                    values={{
+                      game,
+                      version: report?.version ?? draft?.version ?? null,
+                      target: target?.tripId ?? t("noTarget"),
+                      targetVersion: target?.expectedVersion ?? null,
+                      reviewedRevisionId: report?.currentRevision.id ?? null,
+                    }}
+                  />
+                </Confirm>
+                <Button asChild variant="ghost">
+                  <Link to="/account/trips">{t("back")}</Link>
+                </Button>
               </div>
-            </Card>
-          )}
-          {targetNeedsSave && <p role="status">{t("draftTargetSave")}</p>}
-          {invalid && <p role="alert">{t("invalid")}</p>}
-          <Failure error={command.failure} seconds={command.seconds} />
-          {saved && <p role="status">{t("saved")}</p>}
-          <div className="trip-actions">
-            {!report && (
-              <Button
-                type="button"
-                disabled={command.pending || command.seconds > 0}
-                onClick={() => void save()}
-              >
-                {t("save")}
-              </Button>
-            )}
-            <Confirm
-              label={t(report ? "revise" : "submit")}
-              guard={guard}
-              pending={command.pending}
-              failure={command.failure}
-              disabled={
-                accepted ||
-                targetNeedsSave ||
-                targetSummary?.decision === "accepted" ||
-                !complete ||
-                command.seconds > 0
-              }
-              onConfirm={async () => {
-                if (targetNeedsSave) return;
-                const body = report
-                  ? { fields: submission, expectedTripVersion: tripVersion }
-                  : draft
-                    ? { fields: submission }
-                    : { fields: submission, targetTrip: target };
-                const path = report
-                  ? `/manual-reports/${report.id}/revisions`
-                  : draft
-                    ? `/me/manual-drafts/${draft.id}/submission`
-                    : "/manual-reports";
-                const result = await command.run(
-                  path,
-                  body,
-                  "EnvelopeManualReport",
-                  reportEtag ?? draftEtag,
-                );
-                if (result) navigate(`/account/trips/${result.data.data.tripId}`);
-                return result;
-              }}
-            >
-              <p>{t("submitReview")}</p>
-              <Fields
-                values={{
-                  game,
-                  version: report?.version ?? draft?.version ?? null,
-                  target: target?.tripId ?? t("noTarget"),
-                  targetVersion: target?.expectedVersion ?? null,
-                  reviewedRevisionId: report?.currentRevision.id ?? null,
-                }}
-              />
-            </Confirm>
-            <Button asChild variant="ghost">
-              <Link to="/account/trips">{t("back")}</Link>
-            </Button>
-          </div>
-        </fieldset>
-      </form>
+            </div>
+          </fieldset>
+        </form>
+        <aside className="card manual-report-aside" aria-labelledby={nextId}>
+          <h2 id={nextId}>{t("reportNextTitle")}</h2>
+          <ol>
+            {(["reportNext1", "reportNext2", "reportNext3", "reportNext4"] as const).map((key) => (
+              <li key={key}>{t(key)}</li>
+            ))}
+          </ol>
+        </aside>
+      </div>
     </div>
   );
 }

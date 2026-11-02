@@ -1,0 +1,251 @@
+/* Compact manual report form (VTC-060). Every rule is scoped to .manual-report; the portaled
+   Confirm dialog keeps the global trips.css rules. */
+.trip-page.manual-report {
+  /* trips.css breaks anywhere; Russian report copy wraps only between words. */
+  overflow-wrap: break-word;
+}
+.manual-report .manual-report-header {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.manual-report .manual-report-header h1,
+.manual-report .manual-report-header p {
+  margin: 0;
+}
+.manual-report .manual-report-header p {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+/* Non-editor state cards (loading, errors, submitted draft) keep a natural-width action. */
+.manual-report > .card > .button {
+  justify-self: start;
+}
+.manual-report .manual-report-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space);
+  align-items: flex-start;
+  min-width: 0;
+}
+.manual-report .card.manual-report-form {
+  flex: 999 1 560px;
+  min-width: 0;
+  gap: 0;
+  padding: 0;
+  container: manual-report-form / inline-size;
+}
+.manual-report .card.manual-report-aside {
+  flex: 1 1 280px;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.manual-report .manual-report-aside h2 {
+  margin: 0;
+  font-size: var(--font-body);
+}
+.manual-report .manual-report-aside ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: decimal;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.manual-report .manual-report-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.manual-report .manual-report-section + .manual-report-section {
+  border-top: 1px solid var(--border);
+}
+.manual-report .manual-report-section p {
+  margin: 0;
+}
+.manual-report .manual-report-form .label {
+  font-size: var(--font-small);
+}
+.manual-report .manual-report-form .field {
+  gap: 4px;
+}
+.manual-report .manual-report-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+/* Game and publication take full rows like every other field; two-column forms share one row. */
+.manual-report .manual-report-context > .field {
+  flex: 1 1 100%;
+}
+@container manual-report-form (min-width: 520px) {
+  .manual-report .manual-report-context > .field:first-child {
+    flex: 0 1 160px;
+  }
+  .manual-report .manual-report-context > .field:nth-child(2) {
+    flex: 1 1 240px;
+  }
+}
+.manual-report .manual-report-note {
+  flex: 1 1 100%;
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.manual-report .manual-report-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@container manual-report-form (min-width: 520px) {
+  .manual-report .manual-report-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.manual-report .manual-report-form fieldset.manual-catalog-field,
+.manual-report .manual-report-evidence fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.manual-report .manual-catalog-field,
+.manual-report .manual-report-form .catalog-selector,
+.manual-report .manual-event {
+  gap: 6px;
+}
+.manual-report .manual-catalog-field > legend {
+  margin-bottom: 2px;
+  padding: 0;
+  color: var(--foreground);
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.manual-report .manual-report-form .trip-check {
+  gap: 8px;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+}
+.manual-report .trip-evidence p {
+  font-size: var(--font-small);
+}
+.manual-report .trip-evidence small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.manual-report .manual-report-form .catalog-selection p {
+  margin: 0;
+}
+.manual-report .manual-report-form .catalog-selection small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.manual-report .manual-report-hint,
+.manual-report .manual-event-help,
+.manual-report .manual-upload-help,
+.manual-report .manual-upload-bounds,
+.manual-report .manual-retention {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.manual-report .manual-event .trip-actions {
+  gap: 8px;
+}
+.manual-report .manual-report-form textarea {
+  min-height: 72px;
+}
+.manual-report .manual-report-evidence fieldset {
+  gap: 8px;
+}
+.manual-report .manual-report-evidence legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.manual-report .manual-upload-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+.manual-report .manual-upload-picker > .label {
+  flex: 1 1 100%;
+}
+.manual-report .manual-upload-picker > .input {
+  flex: 1 1 220px;
+  width: auto;
+}
+.manual-report .manual-upload-picker > .button {
+  flex: 0 0 auto;
+}
+.manual-report .manual-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.manual-report .trip-evidence {
+  flex: 1 1 220px;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+.manual-report .trip-evidence strong {
+  overflow-wrap: anywhere;
+}
+.manual-report .manual-report-target-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.manual-report .manual-report-target-row > select {
+  flex: 1 1 260px;
+  width: auto;
+}
+.manual-report .manual-report-target-row > .trip-actions {
+  flex: 0 1 auto;
+  gap: 8px;
+}
+.manual-report .manual-report-missing {
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--pending);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.manual-report .manual-report-missing ul {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+.manual-report .manual-report-actions {
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .manual-report .manual-report-section {
+    padding: 12px;
+  }
+  .manual-report .manual-upload-picker > .button {
+    flex: 1 1 auto;
+  }
+}
