@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
-import { eq, membership, user, company } from "@vtc/db/identity-schema";
+import { eq, membership, user, company, roles as identityRoles } from "@vtc/db/identity-schema";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
 import { qualificationAssignments } from "@vtc/db/qualifications-schema";
+import { trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   beforeEach,
@@ -55,6 +56,7 @@ const cookies = (values: readonly string[]) =>
   values.map((value) => value.split(";", 1)[0]).join("; ");
 async function member(
   roles: ("driver" | "trainee" | "dispatcher" | "deputy_director")[] = ["driver"],
+  name = "Fictional Administration Member",
 ) {
   const id = newId(),
     email = `${id}@example.invalid`,
@@ -63,7 +65,7 @@ async function member(
     await composed.identity.insertWithCredential(tx, {
       userId: id,
       email,
-      name: "Fictional Administration Member",
+      name,
       roles,
       ...credential,
     });
@@ -188,6 +190,7 @@ test("member command journey preserves versions, idempotency and protected targe
       "accessEpoch",
       "email",
       "identityEpoch",
+      "lastAcceptedTripAt",
       "profile",
       "status",
       "version",
@@ -461,6 +464,535 @@ test("timezone settings remain partial without qualification setup and update re
       "trucky",
       "vtcbase",
     ]);
+  } finally {
+    await app.close();
+  }
+});
+
+// Identity admission charges every admin request per source; reset between phases of one test.
+const resetLimits = () => control.query("DELETE FROM identity_limits");
+async function csrfHeaders(app: Awaited<ReturnType<typeof createApp>>, cookie: string) {
+  const csrf = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie } });
+  expect(csrf.statusCode).toBe(200);
+  return { cookie, origin, "x-csrf-token": csrf.json().data.token as string };
+}
+async function memberRow(id: string) {
+  const [row] = await unit.run((tx) =>
+    unit.client(tx).select().from(membership).where(eq(membership.userId, id)),
+  );
+  if (!row) throw new Error("SYNTHETIC_MEMBER_REQUIRED");
+  return row;
+}
+async function explicitRoles(id: string) {
+  return (
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ role: identityRoles.role })
+        .from(identityRoles)
+        .where(eq(identityRoles.userId, id)),
+    )
+  )
+    .map((row) => row.role)
+    .sort();
+}
+async function assignmentRows(id: string) {
+  return unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(qualificationAssignments)
+      .where(eq(qualificationAssignments.userId, id))
+      .orderBy(qualificationAssignments.id),
+  );
+}
+async function membershipAudits(subjectId: string, actorId: string) {
+  const [rows] = await control.query<RowDataPacket[]>(
+    "SELECT COUNT(*) AS n FROM audit_entries WHERE operation = 'membership.changed' AND subject_id = ? AND actor_id = ?",
+    [subjectId, actorId],
+  );
+  return Number(rows[0]?.n);
+}
+
+test("direct membership change replaces only Trainee/Driver and keeps other roles, qualifications, sessions and credentials", async () => {
+  const telemetry = composed.telemetry;
+  if (!telemetry) throw new Error("SYNTHETIC_TELEMETRY_REQUIRED");
+  const deputy = await member(["deputy_director"]),
+    { app } = await browser();
+  try {
+    for (const actor of [
+      { id: director.userId, cookie: directorCookie },
+      { id: deputy.id, cookie: deputy.cookie },
+    ]) {
+      await resetLimits();
+      const target = await member(["driver", "dispatcher"]);
+      await linkSteam(target.id);
+      const issued = await telemetry.issue(target.actor, newId(), {
+        label: "Fictional membership",
+      });
+      const headers = await csrfHeaders(app, actor.cookie),
+        path = `/api/v1/admin/members/${target.id}/membership`,
+        detailPath = `/api/v1/admin/members/${target.id}`;
+      const before = await app.inject({ url: detailPath, headers: { cookie: actor.cookie } });
+      expect(before.statusCode).toBe(200);
+      expect(before.headers.etag).toBe('"v1"');
+      const rowBefore = await memberRow(target.id),
+        periodsBefore = await assignmentRows(target.id),
+        auditsBefore = await membershipAudits(target.id, actor.id);
+      let version = 1;
+      for (const [membershipRole, expected] of [
+        ["trainee", ["dispatcher", "trainee"]],
+        ["driver", ["dispatcher", "driver"]],
+      ] as const) {
+        const changed = await app.inject({
+          method: "PUT",
+          url: path,
+          headers: { ...headers, "idempotency-key": newId(), "if-match": `"v${version}"` },
+          payload: { membership: membershipRole, reason: "Fictional membership change" },
+        });
+        expect(changed.statusCode).toBe(200);
+        version += 1;
+        expect(changed.json().data).toEqual({ id: target.id, version });
+        expect(changed.headers.etag).toBe(`"v${version}"`);
+        const after = await app.inject({ url: detailPath, headers: { cookie: actor.cookie } });
+        expect(after.statusCode).toBe(200);
+        expect(after.headers.etag).toBe(`"v${version}"`);
+        expect(after.json().data.version).toBe(version);
+        expect(after.json().data.profile.member.roles).toEqual(expected);
+        expect(after.json().data.profile.qualifications).toEqual(
+          before.json().data.profile.qualifications,
+        );
+        expect(await explicitRoles(target.id)).toEqual(expected);
+      }
+      expect(await assignmentRows(target.id)).toEqual(periodsBefore);
+      const rowAfter = await memberRow(target.id);
+      expect(rowAfter.version).toBe(rowBefore.version + 2);
+      expect({
+        status: rowAfter.status,
+        accessEpoch: rowAfter.accessEpoch,
+        credentialEpoch: rowAfter.credentialEpoch,
+        identityEpoch: rowAfter.identityEpoch,
+      }).toEqual({
+        status: rowBefore.status,
+        accessEpoch: rowBefore.accessEpoch,
+        credentialEpoch: rowBefore.credentialEpoch,
+        identityEpoch: rowBefore.identityEpoch,
+      });
+      // The member's existing session and telemetry credential keep working.
+      expect(
+        (await composed.identity.authenticate(new Headers({ cookie: target.cookie }))).userId,
+      ).toBe(target.id);
+      expect(
+        (await app.inject({ url: "/api/v1/me", headers: { cookie: target.cookie } })).statusCode,
+      ).toBe(200);
+      const [tokens] = await control.query<RowDataPacket[]>(
+        "SELECT revoked_at FROM telemetry_tokens WHERE owner_id = ?",
+        [target.id],
+      );
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0]?.revoked_at).toBeNull();
+      await expect(
+        telemetry.connection(`Bearer ${issued.token}`, "127.0.0.1"),
+      ).resolves.toMatchObject({ accountId: target.id });
+      expect(await membershipAudits(target.id, actor.id)).toBe(auditsBefore + 2);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("direct membership change keeps idempotency, preconditions, authority and normalization guards", async () => {
+  const target = await member(["driver"]),
+    driver = await member(["driver"]),
+    dispatcher = await member(["dispatcher"]),
+    inactive = await member(["driver"]),
+    neither = await member(["dispatcher"]),
+    both = await member(["trainee", "driver"]),
+    { app } = await browser();
+  await composed.identity.administer(director, inactive.id, newId(), 1, { kind: "deactivate" });
+  try {
+    const headers = await csrfHeaders(app, directorCookie),
+      path = `/api/v1/admin/members/${target.id}/membership`,
+      payload = { membership: "trainee", reason: "Fictional membership change" },
+      key = newId();
+    const first = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "idempotency-key": key, "if-match": '"v1"' },
+      payload,
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().data).toEqual({ id: target.id, version: 2 });
+    const replay = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "idempotency-key": key, "if-match": '"v1"' },
+      payload,
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().data).toEqual(first.json().data);
+    const conflict = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "idempotency-key": key, "if-match": '"v1"' },
+      payload: { ...payload, membership: "driver" },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: path,
+          headers: { ...headers, "idempotency-key": newId() },
+          payload: { ...payload, membership: "driver" },
+        })
+      ).statusCode,
+    ).toBe(428);
+    const stale = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "idempotency-key": newId(), "if-match": '"v1"' },
+      payload: { ...payload, membership: "driver" },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe("VERSION_CONFLICT");
+    const { "x-csrf-token": _token, ...withoutCsrf } = headers;
+    for (const denied of [
+      { ...headers, origin: "https://other.example.invalid" },
+      withoutCsrf,
+      { ...headers, cookie: driver.cookie },
+      { ...headers, cookie: dispatcher.cookie },
+    ])
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: path,
+            headers: { ...denied, "idempotency-key": newId(), "if-match": '"v2"' },
+            payload: { ...payload, membership: "driver" },
+          })
+        ).statusCode,
+      ).toBe(403);
+    const unchanged = await app.inject({
+      method: "PUT",
+      url: path,
+      headers: { ...headers, "idempotency-key": newId(), "if-match": '"v2"' },
+      payload,
+    });
+    expect(unchanged.statusCode).toBe(409);
+    expect(unchanged.json().error.code).toBe("STATE_CONFLICT");
+    expect((await memberRow(target.id)).version).toBe(2);
+    expect(await explicitRoles(target.id)).toEqual(["trainee"]);
+    await resetLimits();
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/api/v1/admin/members/${inactive.id}/membership`,
+          headers: { ...headers, "idempotency-key": newId(), "if-match": '"v2"' },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(await memberRow(inactive.id)).toMatchObject({ status: "inactive", version: 2 });
+    expect(await explicitRoles(inactive.id)).toEqual([]);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/api/v1/admin/members/${newId()}/membership`,
+          headers: { ...headers, "idempotency-key": newId(), "if-match": '"v1"' },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(404);
+    for (const invalid of [
+      { membership: "director", reason: "Fictional" },
+      { membership: "dispatcher", reason: "Fictional" },
+      { membership: "driver" },
+      { membership: "driver", reason: "Fictional", roles: ["driver"] },
+    ])
+      expect(
+        (
+          await app.inject({
+            method: "PUT",
+            url: path,
+            headers: { ...headers, "idempotency-key": newId(), "if-match": '"v2"' },
+            payload: invalid,
+          })
+        ).statusCode,
+      ).toBe(422);
+    expect((await memberRow(target.id)).version).toBe(2);
+    for (const [subject, membershipRole, expected] of [
+      [neither, "driver", ["dispatcher", "driver"]],
+      [both, "driver", ["driver"]],
+    ] as const) {
+      const normalized = await app.inject({
+        method: "PUT",
+        url: `/api/v1/admin/members/${subject.id}/membership`,
+        headers: { ...headers, "idempotency-key": newId(), "if-match": '"v1"' },
+        payload: { membership: membershipRole, reason: "Fictional normalization" },
+      });
+      expect(normalized.statusCode).toBe(200);
+      expect(normalized.json().data).toEqual({ id: subject.id, version: 2 });
+      expect(await explicitRoles(subject.id)).toEqual(expected);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("director and deputy cannot change the serving director's roles, membership or status", async () => {
+  const deputy = await member(["deputy_director"]),
+    { app } = await browser();
+  async function directorState() {
+    const [current] = await unit.run((tx) => unit.client(tx).select().from(company));
+    const row = await memberRow(director.userId);
+    return {
+      pointer: current?.directorUserId,
+      status: row.status,
+      version: row.version,
+      accessEpoch: row.accessEpoch,
+      credentialEpoch: row.credentialEpoch,
+      identityEpoch: row.identityEpoch,
+      roles: await explicitRoles(director.userId),
+    };
+  }
+  try {
+    const before = await directorState();
+    expect(before.pointer).toBe(director.userId);
+    const base = `/api/v1/admin/members/${director.userId}`,
+      reason = "Fictional protected change",
+      operations = [
+        { method: "PUT", url: `${base}/roles`, payload: { roles: ["trainee"], reason } },
+        { method: "PUT", url: `${base}/membership`, payload: { membership: "trainee", reason } },
+        { method: "POST", url: `${base}/deactivation`, payload: { reason } },
+        {
+          method: "POST",
+          url: `${base}/reinstatement`,
+          payload: {
+            roles: ["driver"],
+            assignments: [
+              {
+                game: "ets2",
+                levelId: structuralLevels.ets2[0],
+                purpose: "reinstatement",
+                reason,
+              },
+            ],
+            reason,
+          },
+        },
+      ] as const;
+    for (const cookie of [directorCookie, deputy.cookie]) {
+      await resetLimits();
+      const headers = await csrfHeaders(app, cookie);
+      for (const operation of operations) {
+        const denied = await app.inject({
+          ...operation,
+          headers: {
+            ...headers,
+            "idempotency-key": newId(),
+            "if-match": `"v${before.version}"`,
+          },
+        });
+        expect(denied.statusCode, `${operation.method} ${operation.url}`).toBe(403);
+        expect(await directorState()).toEqual(before);
+      }
+    }
+  } finally {
+    await app.close();
+  }
+});
+
+test("member administration reports the latest accepted canonical trip without per-row reads", async () => {
+  const latest = await member(["driver"]),
+    undated = await member(["trainee"]),
+    idle = await member(["driver"]),
+    former = await member(["driver"]);
+  const trip = (
+    ownerId: string,
+    decision: "unassessed" | "pending_review" | "accepted" | "rejected",
+    reportingAt: string | null,
+    aliasOf: string | null = null,
+  ) => ({
+    id: newId(),
+    ownerId,
+    game: "ets2" as const,
+    aliasOf,
+    version: 1,
+    outcome: "delivered" as const,
+    recording: "complete" as const,
+    decision,
+    assessmentPending: decision === "unassessed",
+    correctionPending: false,
+    reviewHold: false,
+    reviewReasons: [],
+    actualDistanceM: "100000",
+    reportingAt,
+    createdAt: "2026-10-01T00:00:00.000Z",
+  });
+  const older = trip(latest.id, "accepted", "2026-09-10T08:00:00.000Z");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values([
+        older,
+        trip(latest.id, "accepted", "2026-10-12T19:45:30.123Z"),
+        trip(latest.id, "accepted", null),
+        trip(latest.id, "pending_review", "2026-10-20T10:00:00.000Z"),
+        trip(latest.id, "rejected", "2026-10-21T10:00:00.000Z"),
+        trip(latest.id, "unassessed", "2026-10-22T10:00:00.000Z"),
+        trip(latest.id, "accepted", "2026-10-25T10:00:00.000Z", older.id),
+        trip(undated.id, "accepted", null),
+        trip(undated.id, "pending_review", "2026-10-20T10:00:00.000Z"),
+        trip(former.id, "accepted", "2026-08-01T00:00:00.000Z"),
+      ]),
+  );
+  await composed.identity.administer(director, former.id, newId(), 1, { kind: "deactivate" });
+  const { app, headers } = await browser();
+  try {
+    for (const [subject, expected] of [
+      [latest, "2026-10-12T19:45:30.123Z"],
+      [undated, null],
+      [idle, null],
+      [former, "2026-08-01T00:00:00.000Z"],
+    ] as const) {
+      const detail = await app.inject({ url: `/api/v1/admin/members/${subject.id}`, headers });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().data.lastAcceptedTripAt).toBe(expected);
+    }
+    const lists = new Map<string, unknown>();
+    for (const status of ["active", "inactive"]) {
+      const list = await app.inject({
+        url: `/api/v1/admin/members?status=${status}&limit=100`,
+        headers,
+      });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().data.nextCursor).toBeNull();
+      for (const item of list.json().data.items as {
+        status: string;
+        lastAcceptedTripAt: string | null;
+        profile: { member: { id: string } };
+      }[]) {
+        expect(item.status).toBe(status);
+        lists.set(item.profile.member.id, item.lastAcceptedTripAt);
+      }
+    }
+    expect(lists.get(latest.id)).toBe("2026-10-12T19:45:30.123Z");
+    expect(lists.get(undated.id)).toBeNull();
+    expect(lists.get(idle.id)).toBeNull();
+    expect(lists.get(former.id)).toBe("2026-08-01T00:00:00.000Z");
+    const inactive = await composed.administration.members(director, {
+      status: "inactive",
+      limit: 100,
+    });
+    expect(inactive.items.map((item) => item.profile.member.id)).toContain(former.id);
+    // Diagnostic plan on synthetic rows: the bounded aggregate can use an owner-prefixed index.
+    const [plan] = await control.query<RowDataPacket[]>(
+      "EXPLAIN SELECT owner_id, MAX(reporting_at) FROM trips WHERE owner_id IN (?, ?) AND decision = 'accepted' AND alias_of IS NULL AND reporting_at IS NOT NULL GROUP BY owner_id",
+      [latest.id, former.id],
+    );
+    const access = plan.find((row) => row.table === "trips");
+    expect(String(access?.possible_keys ?? "")).toMatch(/trip_match_owner|trip_owner_page/);
+    console.log(
+      JSON.stringify({
+        event: "administration_trip_activity_plan",
+        type: access?.type,
+        key: access?.key,
+      }),
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("member list role and search filters run in SQL and bind the cursor", async () => {
+  const dispatcher = await member(["driver", "dispatcher"], "Fictional Filter Kestrel Dispatcher"),
+    trainee = await member(["trainee"], "Fictional Filter Kestrel Trainee"),
+    cyrillic = await member(["driver"], "Вымышленный Сокол"),
+    literal = await member(["driver"], "Fictional 100%_Literal"),
+    decoy = await member(["driver"], "Fictional 100xxLiteral"),
+    formerKestrel = await member(["dispatcher"], "Fictional Filter Kestrel Former");
+  await composed.identity.administer(director, formerKestrel.id, newId(), 1, {
+    kind: "deactivate",
+  });
+  const { app, headers } = await browser();
+  type Row = { status: string; profile: { member: { id: string; roles: string[] } } };
+  async function list(query: string) {
+    const response = await app.inject({ url: `/api/v1/admin/members?limit=100&${query}`, headers });
+    expect(response.statusCode, query).toBe(200);
+    expect(response.json().data.nextCursor).toBeNull();
+    return response.json().data.items as Row[];
+  }
+  const ids = (rows: Row[]) => rows.map((row) => row.profile.member.id).sort();
+  try {
+    const dispatchers = await list("role=dispatcher");
+    expect(ids(dispatchers)).toContain(dispatcher.id);
+    expect(ids(dispatchers)).not.toContain(trainee.id);
+    for (const row of dispatchers) expect(row.profile.member.roles).toContain("dispatcher");
+    const trainees = await list("role=trainee");
+    expect(ids(trainees)).toContain(trainee.id);
+    expect(ids(trainees)).not.toContain(dispatcher.id);
+    for (const row of trainees) expect(row.profile.member.roles).toContain("trainee");
+    const directors = await list("role=director");
+    expect(ids(directors)).toEqual([director.userId]);
+    expect(directors[0]?.profile.member.roles).toContain("director");
+    expect(ids(await list("search=kestrel&status=active"))).toEqual(
+      [dispatcher.id, trainee.id].sort(),
+    );
+    expect(ids(await list(`search=${encodeURIComponent("  KESTREL ")}`))).toEqual(
+      [dispatcher.id, trainee.id, formerKestrel.id].sort(),
+    );
+    expect(ids(await list(`search=${encodeURIComponent("сокол")}`))).toEqual([cyrillic.id]);
+    expect(ids(await list(`search=${encodeURIComponent("100%_")}`))).toEqual([literal.id]);
+    expect(ids(await list(`search=${encodeURIComponent("100")}`))).toEqual(
+      [literal.id, decoy.id].sort(),
+    );
+    expect(ids(await list("role=dispatcher&search=Kestrel&status=active"))).toEqual([
+      dispatcher.id,
+    ]);
+    expect(ids(await list("search=Kestrel&status=inactive"))).toEqual([formerKestrel.id]);
+    expect(ids(await list("role=dispatcher&search=Kestrel&status=inactive"))).toEqual([]);
+    await resetLimits();
+    const blank = await app.inject({
+      url: `/api/v1/admin/members?search=${encodeURIComponent("   ")}`,
+      headers,
+    });
+    expect(blank.statusCode).toBe(422);
+    for (const query of ["role=director_general", `search=${"x".repeat(129)}`])
+      expect(
+        (await app.inject({ url: `/api/v1/admin/members?${query}`, headers })).statusCode,
+      ).toBe(422);
+    const first = await app.inject({
+      url: "/api/v1/admin/members?limit=1&role=driver&search=Fictional",
+      headers,
+    });
+    expect(first.statusCode).toBe(200);
+    const cursor = encodeURIComponent(first.json().data.nextCursor as string);
+    expect(
+      (
+        await app.inject({
+          url: `/api/v1/admin/members?limit=1&role=driver&search=Fictional&cursor=${cursor}`,
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200);
+    for (const changed of [
+      "role=trainee&search=Fictional",
+      "search=Fictional",
+      "role=driver&search=Kestrel",
+      "role=driver",
+    ]) {
+      const reused = await app.inject({
+        url: `/api/v1/admin/members?limit=1&${changed}&cursor=${cursor}`,
+        headers,
+      });
+      expect(reused.statusCode, changed).toBe(409);
+      expect(reused.json().error.code).toBe("VERSION_CONFLICT");
+    }
   } finally {
     await app.close();
   }

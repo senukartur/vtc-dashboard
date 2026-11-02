@@ -874,6 +874,18 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991
+        },
+        "lastAcceptedTripAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -882,7 +894,8 @@
         "status",
         "accessEpoch",
         "identityEpoch",
-        "version"
+        "version",
+        "lastAcceptedTripAt"
       ],
       "additionalProperties": false
     },
@@ -910,6 +923,28 @@
       },
       "required": [
         "roles",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "MembershipInput": {
+      "type": "object",
+      "properties": {
+        "membership": {
+          "type": "string",
+          "enum": [
+            "trainee",
+            "driver"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "membership",
         "reason"
       ],
       "additionalProperties": false
