@@ -1,0 +1,339 @@
+/* Compact company settings and leadership transfer (VTC-065). Page selectors are scoped to
+   .settings-page; portaled dialogs are reached through .dialog-content:has(.settings-dialog), and
+   the post-transfer notice (rendered outside the restricted page) through .settings-transferred.
+   The shared tables break anywhere; text here wraps only between words, and only
+   .settings-break (IDs) may break anywhere. */
+.settings-page .settings-heading {
+  display: grid;
+  gap: 4px;
+}
+.settings-page .settings-heading .page-heading {
+  padding-bottom: 0;
+}
+.settings-page .card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+.settings-page .muted {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.settings-page,
+.settings-page .admin-detail,
+.settings-page .admin-safe-table :is(th, td) {
+  overflow-wrap: break-word;
+}
+.settings-page .settings-break {
+  overflow-wrap: anywhere;
+}
+
+/* Main column and the leadership panel: side by side when both fit, the panel below otherwise. */
+.settings-page .settings-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+.settings-page .settings-main {
+  flex: 2 1 560px;
+  min-width: 0;
+  gap: 12px;
+}
+.settings-page .settings-leadership {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+/* Headings inside header rows keep the card heading accent. */
+.settings-page :is(.settings-title-line, .settings-section-head) h2 {
+  border-left: 3px solid var(--focus);
+  padding-left: 10px;
+}
+.settings-page .settings-title-line,
+.settings-page .settings-section-head,
+.settings-page .settings-audit-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.settings-page .settings-section-head,
+.settings-page .settings-audit-foot {
+  justify-content: space-between;
+}
+
+/* Status tones always pair a symbol or word with the colour. */
+.settings-page .badge {
+  gap: 4px;
+}
+.settings-page .badge.settings-tone-accepted {
+  background: var(--accepted-surface);
+}
+.settings-page .badge.settings-tone-pending {
+  background: var(--pending-surface);
+}
+.settings-page .badge.settings-tone-neutral {
+  background: var(--surface-active);
+  color: var(--secondary);
+}
+.settings-page .settings-tone-accepted {
+  color: var(--accepted);
+}
+.settings-page .settings-tone-pending {
+  color: var(--pending);
+}
+
+/* Readiness banner. */
+.settings-page .settings-readiness {
+  gap: 6px;
+}
+.settings-page .settings-readiness-pending {
+  border-color: var(--pending-surface);
+  background:
+    linear-gradient(var(--pending-surface), var(--pending-surface)) left / 3px 100% no-repeat,
+    var(--surface);
+}
+.settings-page .settings-readiness-ready {
+  background:
+    linear-gradient(var(--accepted-surface), var(--accepted-surface)) left / 3px 100% no-repeat,
+    var(--surface);
+}
+.settings-page .settings-readiness h2 {
+  font-size: var(--font-body);
+  font-weight: 650;
+}
+.settings-page .settings-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-page .settings-checks li {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.settings-page .settings-checks li > span {
+  font-weight: 700;
+}
+
+/* Reporting and source rows: text on the left, control on the right when there is room. */
+.settings-page .settings-row,
+.settings-page .settings-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.settings-page .settings-row + .settings-row,
+.settings-page .settings-source + .settings-source {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.settings-page .settings-row-text {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 2px;
+  min-width: 0;
+}
+.settings-page .settings-row-title {
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.settings-page .settings-row-control {
+  display: flex;
+  flex: 0 1 300px;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.settings-page .settings-row-control .input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.settings-page .settings-row-wide {
+  flex: 1 1 100%;
+}
+.settings-page .settings-row-control > a {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+.settings-page .settings-source-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-page .settings-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Audit: fixed columns so IDs wrap inside the scroll region instead of widening it. */
+.settings-page .settings-audit-table {
+  min-width: 36rem;
+  table-layout: fixed;
+}
+.settings-page .settings-audit-table th:nth-child(1) {
+  width: 22%;
+}
+.settings-page .settings-audit-table th:nth-child(2),
+.settings-page .settings-audit-table th:nth-child(4) {
+  width: 24%;
+}
+.settings-page .settings-audit-table th:nth-child(3) {
+  width: 30%;
+}
+.settings-page .settings-audit-table :is(th, td) {
+  padding: 6px 8px;
+  vertical-align: top;
+}
+.settings-page .settings-audit-table td:first-child {
+  white-space: normal;
+}
+.settings-page .settings-audit-table th {
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+
+/* Leadership panel. */
+.settings-page .settings-leadership {
+  align-content: start;
+}
+.settings-page .settings-leadership-head {
+  display: grid;
+  gap: 4px;
+}
+.settings-page .settings-steps {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-page .settings-steps li {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  color: var(--muted);
+  font-size: var(--font-small);
+  text-align: center;
+}
+.settings-page .settings-steps li[aria-current="step"] {
+  border-color: var(--selection-border);
+  background: var(--accent-soft);
+  color: var(--foreground);
+  font-weight: 650;
+}
+.settings-page .settings-step {
+  gap: 10px;
+}
+.settings-page .settings-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.settings-page .settings-field :is(.select, .input) {
+  width: 100%;
+}
+.settings-page .settings-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  list-style: disc;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.settings-page .settings-timing:focus-visible {
+  outline-offset: 2px;
+}
+.settings-page .settings-wide-button {
+  width: 100%;
+  white-space: normal;
+}
+.settings-page .admin-actions .button {
+  white-space: normal;
+}
+.settings-page .settings-danger:not(:disabled) {
+  background: var(--rejected-surface);
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+.settings-page .settings-footer {
+  gap: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.settings-page .settings-link {
+  justify-self: start;
+  min-height: var(--target-min);
+  padding-inline: 0;
+  color: var(--focus);
+  white-space: normal;
+}
+
+/* Portaled dialogs (timezone save, leadership confirmation). */
+.dialog-content:has(.settings-dialog) {
+  overflow-wrap: break-word;
+}
+.dialog-content:has(.settings-dialog) .settings-dialog {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.dialog-content:has(.settings-dialog) .settings-break {
+  overflow-wrap: anywhere;
+}
+.dialog-content:has(.settings-dialog) .settings-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  list-style: disc;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.dialog-content:has(.settings-dialog) .button {
+  white-space: normal;
+}
+/* No solid danger/on-danger token pair exists; the confirm uses the rejected-state tokens. */
+.dialog-content:has(.settings-dialog) .settings-danger-solid:not(:disabled) {
+  border-color: var(--destructive);
+  background: var(--rejected-surface);
+  color: var(--destructive);
+  font-weight: 700;
+}
+.dialog-content:has(.settings-dialog) .settings-danger-solid:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+/* Notice after a successful transfer, shown above the restricted-access card. */
+.settings-transferred {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  border-color: var(--accepted-surface);
+  overflow-wrap: break-word;
+}
+.settings-transferred p {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--accepted);
+}
+.settings-page .button-row:empty {
+  display: none;
+}
