@@ -999,6 +999,68 @@
       ],
       "additionalProperties": false
     },
+    "PendingLeadershipChallenge": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "successor": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "attemptsRemaining": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        }
+      },
+      "required": [
+        "id",
+        "successor",
+        "expiresAt",
+        "attemptsRemaining"
+      ],
+      "additionalProperties": false
+    },
+    "LeadershipChallengeState": {
+      "type": "object",
+      "properties": {
+        "pending": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PendingLeadershipChallenge"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resendAvailableAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "pending",
+        "resendAvailableAt"
+      ],
+      "additionalProperties": false
+    },
     "Identity": {
       "type": "object",
       "properties": {
@@ -5615,6 +5677,22 @@
       "properties": {
         "data": {
           "$ref": "#/$defs/Challenge"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeLeadershipChallengeState": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/LeadershipChallengeState"
         },
         "meta": {
           "$ref": "#/$defs/Meta"

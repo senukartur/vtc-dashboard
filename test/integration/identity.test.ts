@@ -761,6 +761,8 @@ test("serving director alone can succeed another active member; binding, epoch, 
   ).rejects.toMatchObject({ statusCode: 409 });
   await safe(identity.requestSuccession(director.actor, successor.id, newId()));
   const replaced = await latestChallenge(director.actor.userId, "succession");
+  // Each replacement waits out the 60-second resend cooldown; the clock never moves back.
+  instant += 60001;
   await safe(identity.requestSuccession(director.actor, other.id, newId()));
   await expect(
     safe(
@@ -772,7 +774,6 @@ test("serving director alone can succeed another active member; binding, epoch, 
   await expect(
     safe(identity.confirmSuccession(director.actor, other.id, expired.id, expired.code, newId())),
   ).rejects.toMatchObject({ statusCode: 401 });
-  instant -= 600000;
   await safe(identity.requestSuccession(director.actor, successor.id, newId()));
   const staleEpoch = await latestChallenge(director.actor.userId, "succession");
   await safe(
@@ -795,6 +796,7 @@ test("serving director alone can succeed another active member; binding, epoch, 
       ),
     ),
   ).rejects.toMatchObject({ statusCode: 401 });
+  instant += 60001;
   await safe(identity.requestSuccession(director.actor, successor.id, newId()));
   const challenge = await latestChallenge(director.actor.userId, "succession");
   await expect(
@@ -837,6 +839,116 @@ test("serving director alone can succeed another active member; binding, epoch, 
   const next = await signIn(successor.email);
   expect(next.data.member.roles.includes("director")).toBe(true);
   expect(await unit.run((tx) => unit.client(tx).select().from(company))).toHaveLength(1);
+});
+
+test("succession codes enforce the 60-second resend cooldown and five codes per 60 minutes; the safe state read tracks attempts", async () => {
+  const [c] = await unit.run((tx) => unit.client(tx).select().from(company));
+  const [u] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(user)
+      .where(eq(user.id, c?.directorUserId ?? newId())),
+  );
+  const director = await signIn(u?.email ?? "");
+  await verify(director);
+  const successor = await addMember(),
+    other = await addMember(),
+    deputy = await signIn((await addMember(["deputy_director"])).email);
+  const state = () => safe(identity.leadershipChallengeState(director.actor));
+  const request = (successorId: string, key = newId()) =>
+    identity.requestSuccession(director.actor, successorId, key);
+  const confirm = (successorId: string, id: string, code: string) =>
+    safe(identity.confirmSuccession(director.actor, successorId, id, code, newId()));
+  await expect(safe(identity.leadershipChallengeState(deputy.actor))).rejects.toMatchObject({
+    statusCode: 403,
+  });
+  expect(await state()).toEqual({ pending: null, resendAvailableAt: null });
+
+  const start = instant,
+    firstKey = newId();
+  const first = await safe(request(successor.id, firstKey)),
+    firstId = String(first.id);
+  const firstCode = await latestChallenge(director.actor.userId, "succession");
+  const issued = await state();
+  expect(issued).toEqual({
+    pending: {
+      id: first.id,
+      successor: {
+        id: successor.id,
+        nickname: "Synthetic Member",
+        formerMember: false,
+        roles: ["driver"],
+      },
+      expiresAt: new Date(start + 600000).toISOString(),
+      attemptsRemaining: 5,
+    },
+    resendAvailableAt: new Date(start + 60000).toISOString(),
+  });
+  const serialized = JSON.stringify(issued);
+  for (const secret of [firstCode.code, firstCode.email, successor.email])
+    expect(serialized.includes(secret)).toBe(false);
+  await expect(confirm(successor.id, firstId, "invalid")).rejects.toMatchObject({
+    statusCode: 401,
+  });
+  expect((await state()).pending?.attemptsRemaining).toBe(4);
+
+  instant = start + 1000;
+  await expect(request(successor.id)).rejects.toMatchObject({ statusCode: 429, retryAfter: 59 });
+  // An exact same-key retry of the committed request replays it inside the cooldown.
+  expect(await safe(request(successor.id, firstKey))).toEqual(first);
+  instant = start + 59999;
+  await expect(request(successor.id)).rejects.toMatchObject({ statusCode: 429, retryAfter: 1 });
+  instant = start + 60000;
+  const second = await safe(request(successor.id));
+  expect(second.id).not.toBe(first.id);
+  // The replaced first code is retained only as consumed history and never authorizes.
+  await expect(confirm(successor.id, firstId, firstCode.code)).rejects.toMatchObject({
+    statusCode: 401,
+  });
+  const [retained] = await control.query<RowDataPacket[]>(
+    "SELECT consumed FROM identity_challenges WHERE id = ?",
+    [firstId],
+  );
+  expect(Number(retained[0]?.consumed)).toBe(1);
+
+  instant = start + 120000;
+  const racing = await Promise.allSettled([request(successor.id), request(successor.id)]);
+  expect(racing.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  const refused = racing.find((result) => result.status === "rejected");
+  expect(refused?.status === "rejected" && refused.reason).toMatchObject({
+    statusCode: 429,
+    retryAfter: 60,
+  });
+
+  instant = start + 180000;
+  await safe(request(successor.id));
+  instant = start + 240000;
+  const fifth = await safe(request(other.id));
+  expect((await state()).pending?.successor.id).toBe(other.id);
+  expect((await state()).pending?.id).toBe(fifth.id);
+  instant = start + 300000;
+  await expect(request(successor.id)).rejects.toMatchObject({ statusCode: 429, retryAfter: 3300 });
+  expect((await state()).resendAvailableAt).toBe(new Date(start + 3600000).toISOString());
+  instant = start + 3599999;
+  await expect(request(successor.id)).rejects.toMatchObject({ statusCode: 429, retryAfter: 1 });
+  instant = start + 3600000;
+  const sixthId = String((await safe(request(successor.id))).id);
+  const sixthCode = await latestChallenge(director.actor.userId, "succession");
+  expect(sixthCode.id).toBe(sixthId);
+  for (let attempt = 0; attempt < 5; attempt++)
+    await expect(confirm(successor.id, sixthId, "invalid")).rejects.toMatchObject({
+      statusCode: 401,
+    });
+  await expect(confirm(successor.id, sixthId, sixthCode.code)).rejects.toMatchObject({
+    statusCode: 401,
+  });
+  expect(await state()).toEqual({
+    pending: null,
+    resendAvailableAt: new Date(start + 3660000).toISOString(),
+  });
+  const [current] = await unit.run((tx) => unit.client(tx).select().from(company));
+  expect(current?.directorUserId).toBe(director.actor.userId);
 });
 
 test("missing mail/events refuse effects, event failure rolls back mutation and database FK restricts director deletion", async () => {

@@ -123,7 +123,18 @@ export async function createApp(options: AppOptions) {
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");
-    if (status === 429) reply.header("Retry-After", "60");
+    // A policy limiter may report its exact remaining wait; fixed-window limits keep 60 seconds.
+    const retryAfter = "retryAfter" in httpError ? httpError.retryAfter : undefined;
+    if (status === 429)
+      reply.header(
+        "Retry-After",
+        typeof retryAfter === "number" &&
+          Number.isSafeInteger(retryAfter) &&
+          retryAfter >= 1 &&
+          retryAfter <= 3600
+          ? String(retryAfter)
+          : "60",
+      );
     if (status === 503) reply.header("Retry-After", "1");
     if (status >= 500)
       console.error(JSON.stringify({ event: "request_failed", requestId: request.id, code }));

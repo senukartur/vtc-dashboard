@@ -29,6 +29,19 @@ export async function resetAccountLimits() {
     await connection.end();
   }
 }
+// Desktop/tablet/mobile projects reuse one staff director, whose retained succession
+// history would otherwise hold the next project's leadership request in the resend limits.
+export async function resetSuccessionChallenges(userId: string) {
+  const connection = await testConnection();
+  try {
+    await connection.execute(
+      "DELETE FROM identity_challenges WHERE user_id=? AND purpose='succession'",
+      [userId],
+    );
+  } finally {
+    await connection.end();
+  }
+}
 export async function csrf(context: APIRequestContext) {
   const response = await context.get("/api/v1/auth/csrf");
   if (response.status() !== 200) throw new Error("ACCOUNT_FIXTURE_CSRF_FAILED");

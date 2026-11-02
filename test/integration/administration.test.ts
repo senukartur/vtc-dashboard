@@ -466,6 +466,110 @@ test("timezone settings remain partial without qualification setup and update re
   }
 });
 
+test("leadership code state is director-only, no-store and safe, and an early resend returns its exact Retry-After", async () => {
+  const successor = await member(),
+    deputy = await member(["deputy_director"]),
+    deliveries: PrivateChallenge[] = [],
+    url = "/api/v1/admin/leadership/challenge";
+  await unit.run((tx) =>
+    unit.client(tx).update(user).set({ emailVerified: true }).where(eq(user.id, director.userId)),
+  );
+  const identity = createIdentity(unit, cfg, {
+      accessEvents: identityAccessEvents(unit),
+      delivery: {
+        enqueue: async (_tx, value) => {
+          deliveries.push(value);
+        },
+      },
+    }),
+    administration = createAdministration(unit, identity, enabled),
+    app = await createApp({ identity, administration, checkReadiness: async () => true });
+  try {
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    expect((await app.inject({ url, headers: { cookie: deputy.cookie } })).statusCode).toBe(403);
+    const empty = await app.inject({ url, headers: { cookie: directorCookie } });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.headers["cache-control"]).toBe("no-store");
+    expect(empty.json().data).toEqual({ pending: null, resendAvailableAt: null });
+    const csrf = await app.inject({
+      url: "/api/v1/auth/csrf",
+      headers: { cookie: directorCookie },
+    });
+    const headers = {
+      cookie: directorCookie,
+      origin,
+      "x-csrf-token": csrf.json().data.token,
+      "idempotency-key": newId(),
+    };
+    const issued = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/leadership/challenges",
+      headers,
+      payload: { successorId: successor.id },
+    });
+    expect(issued.statusCode).toBe(202);
+    const challenge = issued.json().data;
+    const read = await app.inject({ url, headers: { cookie: directorCookie } });
+    expect(read.statusCode).toBe(200);
+    expect(read.headers["cache-control"]).toBe("no-store");
+    const state = read.json().data;
+    expect(state.pending).toEqual({
+      id: challenge.id,
+      successor: {
+        id: successor.id,
+        nickname: "Fictional Administration Member",
+        formerMember: false,
+        roles: ["driver"],
+      },
+      expiresAt: challenge.expiresAt,
+      attemptsRemaining: 5,
+    });
+    // Issued + 60 s equals the ten-minute expiry minus nine minutes.
+    expect(Date.parse(state.resendAvailableAt)).toBe(Date.parse(challenge.expiresAt) - 540000);
+    const code = deliveries.at(-1)?.code;
+    if (!code) throw new Error("SYNTHETIC_CHALLENGE_REQUIRED");
+    for (const secret of [code, "administration-director@example.invalid", successor.email])
+      expect(read.body.includes(secret)).toBe(false);
+    const before = Date.now();
+    const limited = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/leadership/challenges",
+      headers: { ...headers, "idempotency-key": newId() },
+      payload: { successorId: successor.id },
+    });
+    const after = Date.now();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json().error.code).toBe("RATE_LIMITED");
+    const retryAfter = Number(limited.headers["retry-after"]);
+    expect(Number.isInteger(retryAfter)).toBe(true);
+    expect(retryAfter).toBeGreaterThanOrEqual(
+      Math.max(1, Math.ceil((Date.parse(state.resendAvailableAt) - after) / 1000)),
+    );
+    expect(retryAfter).toBeLessThanOrEqual(
+      Math.ceil((Date.parse(state.resendAvailableAt) - before) / 1000),
+    );
+    expect(retryAfter).toBeLessThanOrEqual(60);
+    expect(deliveries).toHaveLength(1);
+    // The committed request replays under its own key without a new code.
+    const replay = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/leadership/challenges",
+      headers,
+      payload: { successorId: successor.id },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json().data).toEqual(challenge);
+    expect(deliveries).toHaveLength(1);
+  } finally {
+    // Retained succession history would otherwise hold later tests in the cooldown.
+    await control.query(
+      "DELETE FROM identity_challenges WHERE user_id = ? AND purpose = 'succession'",
+      [director.userId],
+    );
+    await app.close();
+  }
+});
+
 test("bound succession HTTP accepts only challenge/code and preserves singleton leadership under concurrent confirmation", async () => {
   const setupStarted = performance.now();
   let successor: Awaited<ReturnType<typeof member>>;

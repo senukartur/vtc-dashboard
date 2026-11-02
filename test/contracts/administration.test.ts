@@ -22,3 +22,55 @@ test("leadership confirmation cannot supply a successor and safe audit rejects p
     false,
   );
 });
+test("leadership challenge state exposes only bounded safe pending fields and resend time", () => {
+  const id = "06500000-0000-4000-8000-000000000001",
+    successor = {
+      id: "06500000-0000-4000-8000-000000000002",
+      nickname: "Fictional Successor",
+      formerMember: false,
+      roles: ["driver"],
+    },
+    pending = {
+      id,
+      successor,
+      expiresAt: "2026-10-26T12:10:00.000Z",
+      attemptsRemaining: 5,
+    },
+    state = valid("LeadershipChallengeState");
+  expect(valid("MemberSummary")(successor)).toBe(true);
+  for (const attemptsRemaining of [1, 2, 3, 4, 5])
+    expect(
+      state({
+        pending: { ...pending, attemptsRemaining },
+        resendAvailableAt: "2026-10-26T12:01:00.000Z",
+      }),
+    ).toBe(true);
+  expect(state({ pending: null, resendAvailableAt: null })).toBe(true);
+  expect(state({ pending: null, resendAvailableAt: "2026-10-26T13:00:00.000Z" })).toBe(true);
+  for (const attemptsRemaining of [0, 6, 2.5])
+    expect(state({ pending: { ...pending, attemptsRemaining }, resendAvailableAt: null })).toBe(
+      false,
+    );
+  for (const field of ["code", "secretHash", "email", "successorId", "emailEpoch"])
+    expect(
+      state({ pending: { ...pending, [field]: "PRIVATE_PLACEHOLDER" }, resendAvailableAt: null }),
+    ).toBe(false);
+  expect(state({ pending, resendAvailableAt: null, successorId: successor.id })).toBe(false);
+  expect(
+    state({ pending: { ...pending, successor: { id: successor.id } }, resendAvailableAt: null }),
+  ).toBe(false);
+  expect(state({ pending })).toBe(false);
+  expect(state({ pending, resendAvailableAt: "2026-10-26 12:01" })).toBe(false);
+  // The shared email-flow Challenge shape is unchanged.
+  expect(valid("Challenge")({ id, expiresAt: "2026-10-26T12:10:00.000Z", state: "pending" })).toBe(
+    true,
+  );
+  expect(
+    valid("Challenge")({
+      id,
+      expiresAt: "2026-10-26T12:10:00.000Z",
+      state: "pending",
+      attemptsRemaining: 5,
+    }),
+  ).toBe(false);
+});

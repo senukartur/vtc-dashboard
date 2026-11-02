@@ -784,6 +784,104 @@
       }
     },
     {
+      "id": "getLeadershipChallengeState:success",
+      "operationId": "getLeadershipChallengeState",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "successor": {
+              "id": "41000000-0000-4000-8000-000000000002",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ]
+            },
+            "expiresAt": "2026-10-17T12:10:00.000Z",
+            "attemptsRemaining": 5
+          },
+          "resendAvailableAt": "2026-10-17T12:01:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getLeadershipChallengeState:pending",
+      "operationId": "getLeadershipChallengeState",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "successor": {
+              "id": "41000000-0000-4000-8000-000000000002",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": [
+                "driver"
+              ]
+            },
+            "expiresAt": "2026-10-17T12:10:00.000Z",
+            "attemptsRemaining": 4
+          },
+          "resendAvailableAt": "2026-10-17T12:01:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getLeadershipChallengeState:none",
+      "operationId": "getLeadershipChallengeState",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": null,
+          "resendAvailableAt": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getLeadershipChallengeState:cooldown",
+      "operationId": "getLeadershipChallengeState",
+      "status": 200,
+      "response": {
+        "data": {
+          "pending": null,
+          "resendAvailableAt": "2026-10-17T13:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "requestLeadershipChallenge:cooldown",
+      "operationId": "requestLeadershipChallenge",
+      "status": 429,
+      "request": {
+        "successorId": "41000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "error": {
+          "code": "RATE_LIMITED",
+          "messageKey": "errors.rate_limited",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-003"
+        }
+      }
+    },
+    {
       "id": "listApplications:success",
       "operationId": "listApplications",
       "status": 200,

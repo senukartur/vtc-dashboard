@@ -427,6 +427,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/leadership/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the serving director's usable pending transfer code and when a new code may be requested */
+        get: operations["getLeadershipChallengeState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/leadership/challenges": {
         parameters: {
             query?: never;
@@ -2900,6 +2917,10 @@ export interface components {
             data: components["schemas"]["InvitationLink"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeLeadershipChallengeState: {
+            data: components["schemas"]["LeadershipChallengeState"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListApplication: {
             data: components["schemas"]["ListApplication"];
             meta: components["schemas"]["Meta"];
@@ -3314,6 +3335,10 @@ export interface components {
         LeadershipChallengeInput: {
             /** Format: uuid */
             successorId: string;
+        };
+        LeadershipChallengeState: {
+            pending: components["schemas"]["PendingLeadershipChallenge"] | null;
+            resendAvailableAt: string | null;
         };
         LeadershipConfirmInput: {
             /** Format: uuid */
@@ -3785,6 +3810,14 @@ export interface components {
             proposedEmail: string;
             /** @enum {string} */
             stage: "current_email" | "proposed_email";
+        };
+        PendingLeadershipChallenge: {
+            attemptsRemaining: number;
+            /** Format: date-time */
+            expiresAt: string;
+            /** Format: uuid */
+            id: string;
+            successor: components["schemas"]["MemberSummary"];
         };
         PersonalConnectionCapabilities: {
             externalIdentities: boolean;
@@ -5042,6 +5075,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeInvitation"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getLeadershipChallengeState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeLeadershipChallengeState"];
                 };
             };
             default: components["responses"]["Error"];
