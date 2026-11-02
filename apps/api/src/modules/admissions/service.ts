@@ -329,22 +329,8 @@ export function createAdmissions(
       .update(applications)
       .set({ invitationId: id })
       .where(eq(applications.id, app.id));
-    if (ports.mail) {
-      row.deliveryId = await ports.mail.enqueue(tx, {
-        owner: "admissions",
-        generationId: id,
-        userId: null,
-        kind: "invitation",
-        locale: app.locale,
-        recipient: app.email,
-        expiresAt,
-        link: crypto.link(token),
-      });
-      await client(tx)
-        .update(invitations)
-        .set({ deliveryId: row.deliveryId })
-        .where(eq(invitations.id, id));
-    }
+    // Approval and reissue only create the generation; invitation email is enqueued solely
+    // by the explicit requestEmail command.
     return row;
   }
   async function purge() {
