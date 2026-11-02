@@ -7,10 +7,14 @@ import {
   notificationPreferences,
 } from "../../apps/web/src/features/notifications/fixtures.ts";
 import {
+  badgeText,
   commandAttempt,
+  dayGroup,
+  groupByDay,
   messageName,
   messages,
   notificationTarget,
+  notificationVisual,
   observeFeed,
   notificationAccountPath,
   preferenceNames,
@@ -338,4 +342,61 @@ test("notification browser failures are accepted only through closed diagnostic 
         status: "failed",
       }),
     ).toMatchObject({ file });
+});
+test("day groups follow the display timezone calendar, not UTC or 24-hour windows", () => {
+  const now = Date.parse("2026-10-30T12:00:00.000Z");
+  expect(dayGroup("2026-10-30T00:30:00.000Z", now, "UTC")).toBe("today");
+  expect(dayGroup("2026-10-29T23:59:00.000Z", now, "UTC")).toBe("yesterday");
+  expect(dayGroup("2026-10-29T00:00:00.000Z", now, "UTC")).toBe("yesterday");
+  expect(dayGroup("2026-10-28T23:59:00.000Z", now, "UTC")).toBe("earlier");
+  // 23:30Z on the 29th is already 00:30 on the 30th in Warsaw (UTC+1 after the DST change).
+  expect(dayGroup("2026-10-29T23:30:00.000Z", now, "Europe/Warsaw")).toBe("today");
+  expect(dayGroup("2026-10-29T23:30:00.000Z", now, "UTC")).toBe("yesterday");
+  // Across the 25 October DST change, "yesterday" is still one calendar day back.
+  const afterDst = Date.parse("2026-10-26T06:00:00.000Z");
+  expect(dayGroup("2026-10-24T22:30:00.000Z", afterDst, "Europe/Warsaw")).toBe("yesterday");
+  expect(dayGroup("2026-10-24T21:30:00.000Z", afterDst, "Europe/Warsaw")).toBe("earlier");
+  expect(dayGroup("not-a-date", now, "UTC")).toBe("earlier");
+  expect(dayGroup("2026-10-30T11:00:00.000Z", now, "Invalid/Zone")).toBe("today");
+});
+test("grouping keeps item order inside fixed sections and drops empty sections", () => {
+  const now = Date.parse("2026-10-30T12:00:00.000Z");
+  const items = [
+    { id: "a", occurredAt: "2026-10-30T11:00:00.000Z" },
+    { id: "b", occurredAt: "2026-10-30T09:00:00.000Z" },
+    { id: "c", occurredAt: "2026-10-20T09:00:00.000Z" },
+    { id: "d", occurredAt: "2026-10-19T09:00:00.000Z" },
+  ];
+  expect(groupByDay(items, now, "UTC")).toEqual([
+    { key: "today", items: [items[0], items[1]] },
+    { key: "earlier", items: [items[2], items[3]] },
+  ]);
+  expect(groupByDay([], now, "UTC")).toEqual([]);
+});
+test("bell badge hides unknown and zero counts, marks failures and caps at 99+", () => {
+  expect(badgeText(undefined, false)).toBeNull();
+  expect(badgeText(undefined, true)).toBe("?");
+  expect(badgeText(0, false)).toBeNull();
+  expect(badgeText(7, false)).toBe("7");
+  expect(badgeText(99, false)).toBe("99");
+  expect(badgeText(100, false)).toBe("99+");
+});
+test("every registered message has a closed visual; unknown keys fall back to a neutral dot", () => {
+  const icons = new Set<string>();
+  for (const message of messages) {
+    const visual = notificationVisual(
+      notificationFixture({ messageKey: `notifications.${message}` }),
+    );
+    expect(visual.icon).not.toBe("dot");
+    expect(["info", "accepted", "rejected", "pending", "neutral"]).toContain(visual.tone);
+    expect(visual.kind).not.toBe("Other");
+    icons.add(visual.icon);
+  }
+  expect(icons.size).toBeGreaterThan(8);
+  expect(
+    notificationVisual(notificationFixture({ messageKey: "notifications.trip.unregistered" })),
+  ).toEqual({ icon: "dot", tone: "neutral", kind: "Other" });
+  expect(
+    notificationVisual(notificationFixture({ messageKey: "notifications.trip.rejected" })),
+  ).toEqual({ icon: "cross", tone: "rejected", kind: "Trip" });
 });
