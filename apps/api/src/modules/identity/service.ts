@@ -475,8 +475,8 @@ export function createIdentity(
       .set({ consumed: true })
       .where(and(eq(challenges.userId, member.userId), eq(challenges.purpose, purpose)));
     // Bound retained generations per account/purpose; result retries contain only safe IDs.
-    // Consumed succession rows are kept while their issuance is inside the hourly
-    // window: they are the issuance history for the resend limits and never
+    // Consumed succession rows are deleted here only once their issuance has left the
+    // hourly window (until the next issuance they stay as resend-limit history); they never
     // authorize anything (consume() and deliveryValid() reject consumed rows).
     await client(tx)
       .delete(challenges)
