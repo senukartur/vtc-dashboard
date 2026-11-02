@@ -1,20 +1,43 @@
-import { useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { formatQuantity } from "../../shared/formatting.js";
+import { Badge, Card, Label } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import { progressPercent } from "../dashboard/model.js";
 import { AssignmentEditor } from "./assignments.js";
-import { ActionActor, Fact, PageNav, RuleHistory, RulesView, State, Time } from "./components.js";
-import { LevelEditor } from "./editor.js";
+import { ActionActor, Fact, PageNav, RulesView, State, Time } from "./components.js";
+import { LevelPanel, LevelsTable } from "./levels.js";
+import { defaultLevelId, sortLevels, unconfiguredCount } from "./model.js";
 import { useQualificationQuery } from "./queries.js";
-import { type DTO, type Game, levelOrder, QualificationFailure } from "./transport.js";
+import { type DTO, type Game, QualificationFailure } from "./transport.js";
 import "./qualifications.css";
 
+const games = [
+  { value: "ets2", label: "ETS2" },
+  { value: "ats", label: "ATS" },
+] as const;
+
+/** Gate: without company.read no workspace query hook mounts, so nothing is requested. */
 export function QualificationsPage() {
   const session = useSession(),
     { t } = useTranslation("qualifications"),
     [params, setParams] = useSearchParams(),
     game: Game = params.get("game") === "ats" ? "ats" : "ets2";
+  if (!session.self?.capabilities.includes("company.read"))
+    return (
+      <div className="qualification-workspace stack">
+        <header className="qualification-header">
+          <div className="qualification-title">
+            <h1>{t("title")}</h1>
+          </div>
+        </header>
+        <Card>
+          <p>{t("forbidden")}</p>
+        </Card>
+      </div>
+    );
   const scope = [
     session.generation,
     session.self?.member.id,
@@ -23,23 +46,19 @@ export function QualificationsPage() {
   ].join(":");
   return (
     <div className="qualification-workspace stack">
-      <header>
-        <h1>{t("title")}</h1>
-        <p>{t("intro")}</p>
-        <p>{t("roles")}</p>
-      </header>
-      <div>
-        <Label htmlFor="qualification-game">{t("game")}</Label>
-        <select
-          className="input"
-          id="qualification-game"
+      <header className="qualification-header">
+        <div className="qualification-title">
+          <h1>{t("title")}</h1>
+          <p className="qualification-intro">{t("intro")}</p>
+          <p className="qualification-roles">{t("roles")}</p>
+        </div>
+        <SegmentedControl
+          aria-label={t("game")}
           value={game}
-          onChange={(e) => setParams({ game: e.target.value })}
-        >
-          <option value="ets2">ETS2</option>
-          <option value="ats">ATS</option>
-        </select>
-      </div>
+          options={games}
+          onValueChange={(value) => setParams({ game: value })}
+        />
+      </header>
       <Workspace key={`${scope}:${game}`} game={game} />
     </div>
   );
@@ -48,36 +67,78 @@ function Workspace({ game }: { game: Game }) {
   const session = useSession(),
     { t } = useTranslation("qualifications"),
     manage = !!session.self?.capabilities.includes("qualifications.manage"),
-    [target, setTarget] = useState<DTO["MemberSummary"] | null>(null);
+    headingId = useId(),
+    [target, setTarget] = useState<DTO["MemberSummary"] | null>(null),
+    [selected, setSelected] = useState<string | null>(null),
+    [editing, setEditing] = useState<ReadonlySet<string>>(() => new Set());
   const levels = useQualificationQuery(
       `/qualification-levels?game=${game}&limit=25`,
       "EnvelopeListQualificationLevel",
     ),
-    items = levels.data?.data.data.items ?? [];
+    items = levels.data?.data.data.items ?? [],
+    sorted = sortLevels(items),
+    // Derived during render: a level missing from the latest list falls back to the first row.
+    selectedId = sorted.some((level) => level.id === selected) ? selected : defaultLevelId(sorted),
+    missing = unconfiguredCount(sorted);
+  const setEditingLevel = (id: string, open: boolean) =>
+    setEditing((previous) => {
+      const next = new Set(previous);
+      if (open) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   return (
     <>
-      <State query={levels} />
-      <MemberQualification
-        key={target?.id ?? "self"}
-        game={game}
-        levels={items}
-        target={target}
-        manage={manage}
-      />
-      {manage && (
-        <Card className="stack">
-          <h2>{t("staff")}</h2>
-          <TargetPicker selected={target} onChange={setTarget} />
-        </Card>
+      {levels.data && missing > 0 && (
+        <div role="status" className="qualification-banner">
+          {t("unconfigured", { count: missing, total: sorted.length, game: game.toUpperCase() })}
+        </div>
       )}
-      <section className="stack">
-        <h2>{t("levels")}</h2>
-        {[...items]
-          .sort((a, b) => levelOrder.indexOf(a.code) - levelOrder.indexOf(b.code))
-          .map((level) => (
-            <Level key={level.id} level={level} manage={manage} />
+      <div className="qualification-layout">
+        <div className="qualification-main stack">
+          <Card className="qualification-levels-card" aria-labelledby={headingId}>
+            <h2 id={headingId}>{t("levels")}</h2>
+            <State query={levels} />
+            {levels.data &&
+              (sorted.length ? (
+                <LevelsTable
+                  levels={sorted}
+                  selectedId={selectedId}
+                  editing={editing}
+                  onSelect={setSelected}
+                  headingId={headingId}
+                />
+              ) : (
+                <p>{t("emptyLevels")}</p>
+              ))}
+          </Card>
+          {sorted.map((level) => (
+            <LevelPanel
+              key={level.id}
+              level={level}
+              manage={manage}
+              selected={level.id === selectedId}
+              editing={editing.has(level.id)}
+              onEditingChange={setEditingLevel}
+            />
           ))}
-      </section>
+        </div>
+        <div className="qualification-aside stack">
+          {manage && (
+            <Card className="stack">
+              <h2>{t("staff")}</h2>
+              <TargetPicker selected={target} onChange={setTarget} />
+            </Card>
+          )}
+          <MemberQualification
+            key={target?.id ?? "self"}
+            game={game}
+            levels={items}
+            target={target}
+            manage={manage}
+          />
+        </div>
+      </div>
     </>
   );
 }
@@ -153,7 +214,8 @@ function MemberQualification({
   target: DTO["MemberSummary"] | null;
   manage: boolean;
 }) {
-  const { t } = useTranslation("qualifications"),
+  const { t, i18n } = useTranslation("qualifications"),
+    locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     session = useSession(),
     id = target?.id ?? session.self?.member.id ?? "",
     base = manage ? `/admin/members/${id}` : "/me",
@@ -195,14 +257,39 @@ function MemberQualification({
             <p>
               {t("currentInterval")}: <Time value={p.assignment.assignedAt} />
             </p>
-            {p.reviewRequired && <p role="alert">{t("review")}</p>}
-            <h3>{t("progress")}</h3>
-            <dl className="qualification-facts">
+            {p.reviewRequired && (
+              <div role="alert" className="qualification-callout">
+                <strong>{t("decisionNeeded")}</strong>
+                <p>{t("review")}</p>
+                <p>{t("levelKept")}</p>
+              </div>
+            )}
+            <div className="qualification-progress-heading">
+              <h3>{t("progress")}</h3>
+              {p.eligibleForConfirmation && level?.code !== "driver_i" && (
+                <Badge size="xs" className="badge-accepted">
+                  {t("ready")}
+                </Badge>
+              )}
+            </div>
+            <dl className="qualification-facts qualification-progress">
               <Fact label={t("trips")}>
-                {p.acceptedTrips} / {p.requiredTrips ?? t("unset")}
+                <ProgressValue
+                  percent={progressPercent(
+                    String(p.acceptedTrips),
+                    p.requiredTrips === null ? null : String(p.requiredTrips),
+                  )}
+                >
+                  {p.acceptedTrips} / {p.requiredTrips ?? t("unset")}
+                </ProgressValue>
               </Fact>
               <Fact label={t("distance")}>
-                {p.actualDistanceM} / {p.requiredDistanceM ?? t("unset")}
+                <ProgressValue percent={progressPercent(p.actualDistanceM, p.requiredDistanceM)}>
+                  {formatQuantity(p.actualDistanceM, "km", locale)} /{" "}
+                  {p.requiredDistanceM === null
+                    ? t("unset")
+                    : formatQuantity(p.requiredDistanceM, "km", locale)}
+                </ProgressValue>
               </Fact>
             </dl>
             <p>
@@ -228,6 +315,18 @@ function MemberQualification({
           </>
         )}
       </Card>
+      {manage && (
+        <AssignmentEditor
+          game={game}
+          memberId={id}
+          memberName={target?.nickname ?? session.self?.member.nickname ?? t("own")}
+          levels={levels}
+          progress={p}
+          etag={progress.data?.etag ?? history.data?.etag ?? null}
+          former={target?.formerMember ?? false}
+          onRefresh={() => setCursors([])}
+        />
+      )}
       <Card className="stack">
         <h2>{t("history")}</h2>
         <p>{t(manage ? "staffHistoryHelp" : "immutable")}</p>
@@ -281,59 +380,19 @@ function MemberQualification({
           onPrevious={() => setCursors((prev) => prev.slice(0, -1))}
         />
       </Card>
-      {manage && (
-        <AssignmentEditor
-          game={game}
-          memberId={id}
-          memberName={target?.nickname ?? session.self?.member.nickname ?? t("own")}
-          levels={levels}
-          progress={p}
-          etag={progress.data?.etag ?? history.data?.etag ?? null}
-          former={target?.formerMember ?? false}
-          onRefresh={() => setCursors([])}
-        />
-      )}
     </>
   );
 }
-function Level({ level, manage }: { level: DTO["QualificationLevel"]; manage: boolean }) {
-  const { t } = useTranslation("qualifications"),
-    [edit, setEdit] = useState(false),
-    rules = useQualificationQuery(
-      `/qualification-levels/${level.id}/rule-versions/${level.ruleVersionId}`,
-      "EnvelopeQualificationRuleVersion",
-      !!level.ruleVersionId,
-    );
+/** Exact value text with a decorative bar; no bar when the requirement is unset. */
+function ProgressValue({ percent, children }: { percent: number | null; children: ReactNode }) {
   return (
-    <Card className="stack">
-      <h3>
-        {level.name} · {level.game.toUpperCase()}
-      </h3>
-      <p>
-        {t("version")}: {level.version}
-      </p>
-      {level.ruleVersionId ? (
-        <>
-          <State query={rules} />
-          {rules.data && <RulesView rules={rules.data.data.data.rules} game={level.game} />}
-        </>
-      ) : (
-        <p>{t("noRules")}</p>
+    <>
+      <span className="qualification-progress-value">{children}</span>
+      {percent !== null && (
+        <span className="qualification-bar" aria-hidden="true">
+          <span style={{ width: `${percent}%` }} />
+        </span>
       )}
-      <RuleHistory key={`${level.id}:${level.version}`} level={level} manage={manage} />
-      {manage && (
-        <>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setEdit(!edit)}
-            disabled={!edit && !!level.ruleVersionId && !rules.data}
-          >
-            {t(edit ? "close" : "edit")}
-          </Button>
-          {edit && <LevelEditor level={level} current={rules.data?.data.data} />}
-        </>
-      )}
-    </Card>
+    </>
   );
 }

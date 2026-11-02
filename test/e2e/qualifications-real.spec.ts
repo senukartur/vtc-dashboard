@@ -115,12 +115,20 @@ test("real four configured levels publish and assign within the unchanged shared
       page.getByText("No current assignment is recorded for this game.", { exact: true }),
     ).toBeVisible();
     phase = "PUBLISH";
-    const otherCard = page
-      .getByRole("heading", { name: "Driver III · ETS2", exact: true })
-      .locator("..");
+    // Only the selected level's panel is shown; row selection switches panels without reads.
+    const levelRow = (name: string) =>
+      page
+        .getByRole("table", { name: "Levels and effective rules", exact: true })
+        .getByRole("button", { name, exact: true });
+    await levelRow("Driver III").click();
+    const otherCard = page.locator(`#qualification-level-${structuralLevels.ets2[1]}`);
+    await expect(
+      otherCard.getByRole("heading", { name: "Driver III · ETS2", exact: true }),
+    ).toBeVisible();
     await otherCard.getByRole("button", { name: "Edit rules", exact: true }).click();
     const otherDraft = otherCard.locator("section").last();
     await otherDraft.locator('[id^="reason-"]').fill("Fictional unrelated preserved draft");
+    await levelRow("Trainee").click();
     const card = page.getByRole("heading", { name: "Trainee · ETS2", exact: true }).locator("..");
     await card.getByText("Rule version history", { exact: true }).click();
     await card.getByRole("button", { name: "Edit rules", exact: true }).click();
@@ -134,9 +142,11 @@ test("real four configured levels publish and assign within the unchanged shared
     ).toBeVisible();
     await confirm(page, "Publish rule version", editor);
     await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional normal publication");
+    await levelRow("Driver III").click();
     await expect(otherDraft.locator('[id^="reason-"]')).toHaveValue(
       "Fictional unrelated preserved draft",
     );
+    await levelRow("Trainee").click();
     await card.getByText("Rule version history", { exact: true }).click();
     const published = (await q.levels(fixture.staff, "ets2")).items.find(
       (level) => level.id === structuralLevels.ets2[0],
@@ -159,6 +169,7 @@ test("real four configured levels publish and assign within the unchanged shared
     await expect(
       page.getByRole("heading", { name: "Qualification administration", exact: true }),
     ).toBeVisible();
+    await levelRow("Driver III").click();
     await expect(otherDraft.locator('[id^="reason-"]')).toHaveValue(
       "Fictional unrelated preserved draft",
     );
@@ -514,7 +525,10 @@ test("real named target rule preview publication assignment accepted contributio
         })
       ).status(),
     ).toBe(403);
-    await page.getByLabel("Game", { exact: true }).selectOption("ats");
+    await page
+      .getByRole("group", { name: "Game", exact: true })
+      .getByRole("button", { name: "ATS", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", { name: "Current qualification · ATS", exact: true }),
     ).toBeVisible();
