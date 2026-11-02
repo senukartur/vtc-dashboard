@@ -1,0 +1,674 @@
+/* Compact driver profile. Scoped to the page and built from shared tokens only. */
+.driver-profile-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  min-width: 0;
+}
+.driver-profile-page .card {
+  gap: 8px;
+  padding: 12px 14px;
+}
+.driver-profile-page .driver-muted,
+.driver-profile-page .driver-note,
+.driver-profile-page .driver-footnote,
+.driver-profile-page .driver-since,
+.driver-profile-page .driver-block-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.driver-profile-page .driver-note,
+.driver-profile-page .driver-footnote,
+.driver-profile-page .driver-since {
+  font-size: var(--font-badge);
+}
+.driver-profile-page .driver-back,
+.driver-profile-page .driver-head-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  justify-self: start;
+  min-height: var(--target-min);
+  font-size: var(--font-small);
+  text-decoration: none;
+}
+.driver-profile-page .driver-back {
+  margin-block: -4px;
+  color: var(--secondary);
+}
+.driver-profile-page .driver-back:hover,
+.driver-profile-page .driver-head-link:hover {
+  text-decoration: underline;
+}
+
+/* Identity header: avatar, nickname with badges and level chips; the game control wraps below. */
+.driver-profile-page .driver-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.driver-profile-page .driver-avatar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: 18px;
+  font-weight: 700;
+}
+.driver-profile-page .driver-identity {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.driver-profile-page .driver-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+.driver-profile-page .driver-title-row h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.driver-profile-page .driver-title-row h1:focus {
+  outline: none;
+}
+.driver-profile-page .driver-title-row h1:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.driver-profile-page .badge {
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-active {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.driver-profile-page .driver-former {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.driver-profile-page .driver-self {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.driver-profile-page .driver-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+.driver-profile-page .driver-level-chip {
+  padding: 1px 7px;
+  border-radius: var(--radius-badge);
+  font-size: var(--font-small);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-level-chip[data-game="ets2"],
+.driver-profile-page .driver-game[data-game="ets2"] {
+  background: var(--accent-soft);
+  color: var(--focus);
+}
+.driver-profile-page .driver-level-chip[data-game="ats"],
+.driver-profile-page .driver-game[data-game="ats"] {
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--secondary);
+}
+.driver-profile-page .driver-game {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: var(--radius-badge);
+  font-size: var(--font-badge);
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+/* KPI strip: one bordered row; inset shadows draw dividers only between cells. */
+.driver-profile-page .driver-kpis {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.driver-profile-page .driver-kpis:focus {
+  outline: none;
+}
+.driver-profile-page .driver-kpis:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.driver-profile-page .driver-kpis dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+.driver-profile-page .driver-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 10px 14px;
+  box-shadow:
+    -1px 0 0 var(--border),
+    0 -1px 0 var(--border);
+}
+.driver-profile-page .driver-kpi dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-kpi dd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+.driver-profile-page .driver-kpi-value {
+  min-height: 26px;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-kpi-sub {
+  color: var(--muted);
+  font-size: var(--font-badge);
+  overflow-wrap: break-word;
+}
+
+/* Static placeholders (no animation); the status line carries the loading announcement. */
+.driver-profile-page .driver-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--radius-badge);
+  background: var(--surface-active);
+}
+.driver-profile-page .driver-kpi .driver-skeleton,
+.driver-profile-page .driver-skeleton-inline {
+  display: inline-block;
+  width: 7em;
+  max-width: 100%;
+  height: 0.8em;
+  vertical-align: middle;
+}
+.driver-profile-page .driver-skeleton.driver-avatar {
+  height: 44px;
+  border-radius: 50%;
+}
+.driver-profile-page .driver-skeleton-rows {
+  display: grid;
+  gap: 10px;
+  padding-block: 4px;
+}
+.driver-profile-page .driver-skeleton-rows .driver-skeleton {
+  height: 22px;
+}
+.driver-profile-page .driver-skeleton-block {
+  height: 320px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Layout: trips | qualification + chart from 1200px; one column below in DOM order. */
+.driver-profile-page .driver-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space);
+  align-items: start;
+}
+.driver-profile-page .driver-main,
+.driver-profile-page .driver-side {
+  display: grid;
+  gap: var(--space);
+  align-content: start;
+  min-width: 0;
+}
+/* The side column stays at its 300px minimum until there is room, so the trips table keeps
+   whole Russian words at 1200px with the sidebar expanded. */
+@media (min-width: 1200px) {
+  .driver-profile-page .driver-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+@media (min-width: 1360px) {
+  .driver-profile-page .driver-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+}
+
+/* Card heading row; deliberately not `.card > h2`, so no accent bar. */
+.driver-profile-page .driver-card-head,
+.driver-profile-page .driver-qualification-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.driver-profile-page .driver-card-head h2,
+.driver-profile-page .driver-qualification-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.driver-profile-page .driver-card-head h2:focus {
+  outline: none;
+}
+.driver-profile-page .driver-card-head h2:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.driver-profile-page .driver-qualification-head h2 {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin-right: auto;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-chart .driver-card-head {
+  align-items: center;
+}
+.driver-profile-page .driver-chart .driver-card-head h2 {
+  margin-right: auto;
+}
+.driver-profile-page .driver-timezone {
+  margin-left: auto;
+}
+.driver-profile-page .driver-block-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.driver-profile-page .driver-block-error p,
+.driver-profile-page .driver-error p {
+  margin: 0;
+  color: var(--destructive);
+}
+.driver-profile-page .driver-kpis > .driver-block-note,
+.driver-profile-page .driver-kpis > .driver-block-error {
+  padding: 10px 14px;
+}
+.driver-profile-page .driver-error {
+  justify-items: start;
+}
+.driver-profile-page .driver-notice {
+  justify-items: start;
+}
+.driver-profile-page .driver-notice p {
+  margin: 0;
+  color: var(--secondary);
+}
+.driver-profile-page .driver-empty {
+  margin: 0;
+  padding-block: 8px;
+  color: var(--secondary);
+}
+
+/* Trips: whole-word wrapping (the shared table breaks anywhere) with automatic column widths. */
+.driver-profile-page .driver-trips-area {
+  position: relative;
+  min-width: 0;
+}
+.driver-profile-page .driver-trips-table {
+  table-layout: auto;
+}
+.driver-profile-page .driver-trips-table th,
+.driver-profile-page .driver-trips-table td {
+  padding: 6px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+}
+.driver-profile-page .driver-trips-table td {
+  vertical-align: middle;
+}
+.driver-profile-page .driver-trips-table th:first-child,
+.driver-profile-page .driver-trips-table td:first-child {
+  padding-left: 0;
+}
+.driver-profile-page .driver-trips-table th:last-child,
+.driver-profile-page .driver-trips-table td:last-child {
+  padding-right: 0;
+}
+.driver-profile-page .driver-trip-distance,
+.driver-profile-page .driver-nowrap {
+  white-space: nowrap;
+}
+.driver-profile-page .driver-trip-time,
+.driver-profile-page .driver-trip-distance {
+  font-variant-numeric: tabular-nums;
+}
+.driver-profile-page .driver-trip-time,
+.driver-profile-page .driver-trip-cargo,
+.driver-profile-page .driver-trip-source {
+  color: var(--secondary);
+}
+.driver-profile-page .driver-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.driver-profile-page .driver-cell-label {
+  display: none;
+}
+/* The route link is the row's only control. Its overlay fills the route cell in the table
+   and the whole card on phones. */
+.driver-profile-page .driver-trips-table td.driver-trip-route {
+  position: relative;
+}
+.driver-profile-page .driver-route-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.driver-profile-page .driver-trip-link {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--target-min);
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: none;
+}
+.driver-profile-page .driver-trip-link:focus-visible {
+  outline-offset: 2px;
+}
+.driver-profile-page .driver-trip-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+@media (hover: hover) {
+  .driver-profile-page .driver-trip-link:hover {
+    color: var(--focus);
+  }
+}
+.driver-profile-page .driver-fallback {
+  color: var(--pending);
+  font-size: var(--font-badge);
+  font-weight: 400;
+}
+.driver-profile-page .driver-trips .driver-head-link {
+  align-self: start;
+}
+
+/* Qualification cards */
+.driver-profile-page .driver-next {
+  color: var(--muted);
+  font-size: var(--font-small);
+  overflow-wrap: break-word;
+}
+/* Static progression, not a control: plain text steps joined by decorative arrows; the current
+   step is a soft highlight (with aria-current), so nothing looks pressable. */
+.driver-profile-page .driver-ladder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  cursor: default;
+}
+.driver-profile-page .driver-ladder li {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--font-badge);
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-ladder-arrow {
+  color: var(--border-strong);
+}
+.driver-profile-page .driver-ladder-name {
+  padding: 1px 6px;
+  border-radius: var(--radius-badge);
+}
+.driver-profile-page .driver-ladder li[data-state="passed"] .driver-ladder-name {
+  color: var(--secondary);
+}
+.driver-profile-page .driver-ladder li[data-state="current"] .driver-ladder-name {
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-weight: 700;
+}
+.driver-profile-page .driver-ladder li[data-state="upcoming"] .driver-ladder-name {
+  color: var(--muted);
+}
+.driver-profile-page .driver-progress {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+/* The label and the value share the first line; the decorative bar inside dd spans below. */
+.driver-profile-page .driver-progress > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  font-size: var(--font-small);
+}
+.driver-profile-page .driver-progress dt,
+.driver-profile-page .driver-progress dd {
+  grid-area: 1 / 1;
+}
+.driver-profile-page .driver-progress dt {
+  color: var(--muted);
+}
+.driver-profile-page .driver-progress dd {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+.driver-profile-page .driver-progress-value {
+  justify-self: end;
+  /* Leaves room for the label on the shared first line. */
+  padding-left: 6em;
+  color: var(--foreground);
+  font-weight: 500;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
+}
+.driver-profile-page .driver-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-active);
+}
+.driver-profile-page .driver-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--focus);
+}
+.driver-profile-page .driver-eligible {
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--accepted);
+  border-radius: var(--radius-control);
+  background: var(--accepted-surface);
+  color: var(--accepted);
+  font-size: var(--font-small);
+  overflow-wrap: break-word;
+}
+
+/* Distance by month: the body keeps one height in every view and state. */
+.driver-profile-page .driver-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.driver-profile-page .driver-meta strong {
+  color: var(--secondary);
+  font-weight: 600;
+}
+.driver-profile-page .driver-chart-body {
+  height: 196px;
+  min-width: 0;
+  margin: 0;
+}
+.driver-profile-page .driver-chart-figure {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+.driver-profile-page .driver-chart-figure .chart {
+  height: 100%;
+}
+.driver-profile-page .driver-chart-caption {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.driver-profile-page .driver-chart-skeleton {
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+.driver-profile-page .driver-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--font-small);
+  text-align: center;
+}
+.driver-profile-page .driver-chart-empty p {
+  margin: 0;
+}
+.driver-profile-page .driver-table-scroll {
+  max-height: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.driver-profile-page .driver-table-scroll:focus-visible {
+  outline-offset: 2px;
+}
+.driver-profile-page .driver-table-scroll .table {
+  table-layout: auto;
+}
+.driver-profile-page .driver-table-scroll .table caption {
+  caption-side: top;
+  padding: 6px 10px;
+}
+.driver-profile-page .driver-table-scroll .table th,
+.driver-profile-page .driver-table-scroll .table td {
+  padding-inline: 10px;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.driver-profile-page .driver-table-scroll .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--inset);
+}
+.driver-profile-page .driver-table-scroll .table tbody th {
+  color: var(--foreground);
+  font-weight: 400;
+}
+.driver-profile-page .driver-table-scroll .table td {
+  white-space: nowrap;
+}
+
+/* Phone cards: same table semantics, block layout with visible per-cell labels. */
+@media (max-width: 760px) {
+  .driver-profile-page .driver-game-filter {
+    flex-basis: 100%;
+  }
+  .driver-profile-page .driver-trips-table,
+  .driver-profile-page .driver-trips-table tbody,
+  .driver-profile-page .driver-trips-table td {
+    display: block;
+  }
+  .driver-profile-page .driver-trips-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .driver-profile-page .driver-trips-table tr.driver-trip-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+    margin-bottom: 8px;
+    padding: 8px 10px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--inset);
+  }
+  .driver-profile-page .driver-trips-table td,
+  .driver-profile-page .driver-trips-table td:first-child,
+  .driver-profile-page .driver-trips-table td:last-child {
+    padding: 0;
+    border: 0;
+    /* Last resort only: a single word wider than its card column breaks instead of overlapping. */
+    overflow-wrap: break-word;
+  }
+  .driver-profile-page .driver-trips-table td.driver-trip-time,
+  .driver-profile-page .driver-trips-table td.driver-trip-route {
+    grid-column: 1 / -1;
+  }
+  .driver-profile-page .driver-trips-table td.driver-trip-route {
+    position: static;
+  }
+  .driver-profile-page .driver-trips-table .driver-num {
+    text-align: left;
+  }
+  .driver-profile-page .driver-trips-table td.driver-trip-distance {
+    white-space: normal;
+  }
+  .driver-profile-page .driver-cell-label {
+    display: block;
+    color: var(--muted);
+    font-size: var(--font-badge);
+  }
+  .driver-profile-page .driver-timezone {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}
