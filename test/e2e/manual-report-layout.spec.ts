@@ -124,11 +124,19 @@ for (const locale of ["en", "ru"] as const)
       expect(asideBox.x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
       expect(Math.abs(asideBox.y - formBox.y)).toBeLessThanOrEqual(1);
     } else expect(asideBox.y).toBeGreaterThanOrEqual(formBox.y + formBox.height);
+    const game = await box(page.locator("#manual-game")),
+      publication = await box(page.locator("#manual-publication"));
     if (info.project.name === "mobile-chromium") {
+      // One-column forms give game and publication full rows, like every other field.
+      expect(publication.y).toBeGreaterThanOrEqual(game.y + game.height);
+      expect(Math.abs(game.width - publication.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(game.width - origin.width)).toBeLessThanOrEqual(1);
       expect(destination.y).toBeGreaterThanOrEqual(origin.y + origin.height);
       expect(Math.abs(destination.x - origin.x)).toBeLessThanOrEqual(1);
       expect(distance.y).toBeGreaterThan(mass.y);
     } else {
+      expect(Math.abs(publication.y - game.y)).toBeLessThanOrEqual(1);
+      expect(game.width).toBeLessThan(publication.width);
       expect(Math.abs(destination.y - origin.y)).toBeLessThanOrEqual(1);
       expect(destination.x).toBeGreaterThan(origin.x + origin.width);
       expect(cargo.y).toBeGreaterThan(origin.y);

@@ -79,16 +79,16 @@
   align-items: flex-end;
   gap: 8px 12px;
 }
-.manual-report .manual-report-context > .field:first-child {
-  flex: 0 1 160px;
+/* Game and publication take full rows like every other field; two-column forms share one row. */
+.manual-report .manual-report-context > .field {
+  flex: 1 1 100%;
 }
-.manual-report .manual-report-context > .field:nth-child(2) {
-  flex: 1 1 240px;
-}
-/* One-column forms stack game and publication at full width, like every other field. */
-@container manual-report-form (max-width: 519px) {
-  .manual-report .manual-report-context > .field {
-    flex-basis: 100%;
+@container manual-report-form (min-width: 520px) {
+  .manual-report .manual-report-context > .field:first-child {
+    flex: 0 1 160px;
+  }
+  .manual-report .manual-report-context > .field:nth-child(2) {
+    flex: 1 1 240px;
   }
 }
 .manual-report .manual-report-note {
