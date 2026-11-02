@@ -41,6 +41,7 @@ import {
   type Role,
   requireCapability,
 } from "./permissions.js";
+import { SUCCESSION_WINDOW_MS, successionWindow } from "./succession-limits.js";
 
 type Self = components["schemas"]["Self"];
 type Member = typeof membership.$inferSelect;
@@ -54,7 +55,7 @@ const company = mysqlTable("identity_company", {
 type Company = typeof company.$inferSelect;
 type Purpose = typeof challenges.$inferSelect.purpose;
 type SafeResult = Record<string, unknown>;
-type Failed = { failure: number };
+type Failed = { failure: number; retryAfter?: number };
 export interface Actor {
   userId: string;
   sessionId: string;
@@ -112,12 +113,16 @@ export interface IdentityPorts {
     ): Promise<void>;
   };
 }
-export function identityError(statusCode: number, publicCode?: string): Error {
+export function identityError(statusCode: number, publicCode?: string, retryAfter?: number): Error {
   return Object.assign(new Error("IDENTITY_OPERATION_DENIED"), {
     statusCode,
     ...(publicCode ? { publicCode } : {}),
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
   });
 }
+// Every emailed challenge expires exactly ten minutes after issuance. Rows do not
+// store their issuance instant, so it is derived as `expiresAt - CHALLENGE_TTL_MS`.
+const CHALLENGE_TTL_MS = 600000;
 const canonical = (input: unknown): string =>
   JSON.stringify(input, (_key, value: unknown) =>
     value && typeof value === "object" && !Array.isArray(value)
@@ -446,7 +451,7 @@ export function createIdentity(
     return result;
   }
   const unwrap = <T extends SafeResult>(result: T): T => {
-    if (isFailure(result)) throw identityError(result.failure);
+    if (isFailure(result)) throw identityError(result.failure, undefined, result.retryAfter);
     return result;
   };
   async function issue(
@@ -463,13 +468,16 @@ export function createIdentity(
       return { failure: 401 };
     const secret = randomBytes(32).toString("base64url"),
       id = newId(),
-      expiresAt = new Date(now().getTime() + 600000);
+      expiresAt = new Date(now().getTime() + CHALLENGE_TTL_MS);
     await ports.delivery.invalidate?.(tx, { userId: member.userId, purpose });
     await client(tx)
       .update(challenges)
       .set({ consumed: true })
       .where(and(eq(challenges.userId, member.userId), eq(challenges.purpose, purpose)));
     // Bound retained generations per account/purpose; result retries contain only safe IDs.
+    // Consumed succession rows are kept while their issuance is inside the hourly
+    // window: they are the issuance history for the resend limits and never
+    // authorize anything (consume() and deliveryValid() reject consumed rows).
     await client(tx)
       .delete(challenges)
       .where(
@@ -477,6 +485,12 @@ export function createIdentity(
           eq(challenges.userId, member.userId),
           eq(challenges.purpose, purpose),
           eq(challenges.consumed, true),
+          purpose === "succession"
+            ? lt(
+                challenges.expiresAt,
+                new Date(now().getTime() - SUCCESSION_WINDOW_MS + CHALLENGE_TTL_MS),
+              )
+            : undefined,
         ),
       );
     await client(tx)
@@ -553,6 +567,19 @@ export function createIdentity(
     if (!valid) return null;
     await client(tx).update(challenges).set({ consumed: true }).where(eq(challenges.id, id));
     return challenge;
+  }
+  // Callers hold the company lock first, so concurrent requests serialize. The
+  // locking read sees the latest committed issuances under REPEATABLE READ.
+  async function successionLimit(tx: TxContext, userId: string) {
+    const issued = await client(tx)
+      .select({ expiresAt: challenges.expiresAt })
+      .from(challenges)
+      .where(and(eq(challenges.userId, userId), eq(challenges.purpose, "succession")))
+      .for("update");
+    return successionWindow(
+      issued.map((row) => new Date(row.expiresAt.getTime() - CHALLENGE_TTL_MS)),
+      now(),
+    );
   }
 
   async function queryQualificationMembers(tx: TxContext, after: string | null, limit: number) {
@@ -1373,9 +1400,20 @@ export function createIdentity(
           requireCapability(actor, "leadership.transfer");
           if (actor.userId === successorId || locked.get(successorId)?.status !== "active")
             throw identityError(409);
-          return once(tx, `${actor.userId}:succession-request`, key, { successorId }, () =>
-            issue(tx, row, "succession", successorId),
-          );
+          // An exact same-key retry replays its committed result before this
+          // callback runs, so only new requests are subject to the resend limits.
+          return once(tx, `${actor.userId}:succession-request`, key, { successorId }, async () => {
+            const limit = await successionLimit(tx, actor.userId);
+            if (limit.resendAvailableAt)
+              return {
+                failure: 429,
+                retryAfter: Math.max(
+                  1,
+                  Math.ceil((limit.resendAvailableAt.getTime() - now().getTime()) / 1000),
+                ),
+              };
+            return issue(tx, row, "succession", successorId);
+          });
         }),
       );
     },
@@ -1430,6 +1468,58 @@ export function createIdentity(
           );
         }),
       );
+    },
+    // Safe pending-code state for the serving director: never the code, hash, email or epochs.
+    async leadershipChallengeState(actor: Actor) {
+      return run(async (tx) => {
+        const current = await lockCompany(tx),
+          row = await checkActor(tx, actor, current);
+        requireCapability(actor, "leadership.transfer");
+        const [pending] = await client(tx)
+          .select()
+          .from(challenges)
+          .where(
+            and(
+              eq(challenges.userId, actor.userId),
+              eq(challenges.purpose, "succession"),
+              eq(challenges.consumed, false),
+            ),
+          );
+        let summary: components["schemas"]["PendingLeadershipChallenge"] | null = null;
+        if (
+          pending?.successorId &&
+          pending.expiresAt > now() &&
+          pending.attempts < 5 &&
+          pending.emailEpoch === row.emailEpoch &&
+          pending.identityEpoch === row.identityEpoch &&
+          pending.accessEpoch === row.accessEpoch &&
+          pending.credentialEpoch === row.credentialEpoch
+        ) {
+          const successorId = pending.successorId;
+          const [successor] = await client(tx)
+            .select({ nickname: user.name, status: membership.status })
+            .from(user)
+            .innerJoin(membership, eq(membership.userId, user.id))
+            .where(eq(user.id, successorId));
+          if (successor?.status === "active")
+            summary = {
+              id: pending.id,
+              successor: {
+                id: successorId,
+                nickname: successor.nickname,
+                formerMember: false,
+                roles: await memberRoles(tx, successorId, current),
+              },
+              expiresAt: pending.expiresAt.toISOString(),
+              attemptsRemaining: 5 - pending.attempts,
+            };
+        }
+        const limit = await successionLimit(tx, actor.userId);
+        return {
+          pending: summary,
+          resendAvailableAt: limit.resendAvailableAt?.toISOString() ?? null,
+        } satisfies components["schemas"]["LeadershipChallengeState"];
+      });
     },
     // The wire command cannot choose a different successor than the emailed challenge.
     async confirmBoundSuccession(actor: Actor, challengeId: string, code: string, key: string) {

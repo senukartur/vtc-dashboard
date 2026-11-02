@@ -38,6 +38,7 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `POST /api/v1/admin/members/{memberId}/reinstatement` | `reinstateMember` | `members.manage` | VTC-038 |
 | `POST /api/v1/admin/members/{memberId}/steam-replacement` | `replaceSteam` | `members.manage` | VTC-018 |
 | `POST /api/v1/admin/leadership/challenges` | `requestLeadershipChallenge` | `leadership.transfer` | VTC-038 |
+| `GET /api/v1/admin/leadership/challenge` | `getLeadershipChallengeState` | `leadership.transfer` | VTC-065A |
 | `POST /api/v1/admin/leadership/transfers` | `confirmLeadershipTransfer` | `leadership.transfer` | VTC-038 |
 | `GET /api/v1/admin/applications` | `listApplications` | `applications.manage` | VTC-015 |
 | `GET /api/v1/admin/applications/{applicationId}` | `getApplication` | `applications.manage` | VTC-015 |

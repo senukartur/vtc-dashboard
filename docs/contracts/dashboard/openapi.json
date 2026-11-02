@@ -1624,7 +1624,9 @@
         "x-guards": [
           "serving_director",
           "existing_verified_email",
-          "ten_minute_bound_code"
+          "ten_minute_bound_code",
+          "sixty_second_resend_cooldown",
+          "five_codes_per_hour"
         ],
         "responses": {
           "202": {
@@ -1658,6 +1660,41 @@
         }
       }
     },
+    "/api/v1/admin/leadership/challenge": {
+      "get": {
+        "operationId": "getLeadershipChallengeState",
+        "tags": [
+          "identity"
+        ],
+        "summary": "Read the serving director's usable pending transfer code and when a new code may be requested",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-065A",
+        "x-capability": "leadership.transfer",
+        "x-guards": [
+          "serving_director"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeLeadershipChallengeState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/api/v1/admin/leadership/transfers": {
       "post": {
         "operationId": "confirmLeadershipTransfer",
@@ -1677,7 +1714,8 @@
         "x-guards": [
           "serving_director",
           "consume_bound_code",
-          "singleton_atomic_transfer"
+          "singleton_atomic_transfer",
+          "five_entry_attempts"
         ],
         "responses": {
           "200": {
@@ -10136,6 +10174,68 @@
         ],
         "additionalProperties": false
       },
+      "PendingLeadershipChallenge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "successor": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "attemptsRemaining": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          }
+        },
+        "required": [
+          "id",
+          "successor",
+          "expiresAt",
+          "attemptsRemaining"
+        ],
+        "additionalProperties": false
+      },
+      "LeadershipChallengeState": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PendingLeadershipChallenge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resendAvailableAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pending",
+          "resendAvailableAt"
+        ],
+        "additionalProperties": false
+      },
       "Identity": {
         "type": "object",
         "properties": {
@@ -14752,6 +14852,22 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Challenge"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeLeadershipChallengeState": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/LeadershipChallengeState"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

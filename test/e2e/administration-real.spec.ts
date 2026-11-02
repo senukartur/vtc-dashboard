@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import type { APIRequestContext, Page, Response, TestInfo } from "@playwright/test";
 import { testConnection } from "../persistence/support.ts";
-import { privateMail, resetAccountLimits, staffContext, write } from "./support/account.ts";
+import {
+  privateMail,
+  resetAccountLimits,
+  resetSuccessionChallenges,
+  staffContext,
+  write,
+} from "./support/account.ts";
 import {
   administrationMember,
   approveWithMailDisabled,
@@ -404,6 +410,7 @@ test("real director-only verified-email leadership transfer uses the bound succe
       nextCursor = await settledSuccessors(await nextPage);
     }
     await expect(leadership.locator(`option[value="${successor.userId}"]`)).toHaveCount(1);
+    await resetSuccessionChallenges(self.member.id);
     await page.getByLabel("Active successor", { exact: true }).selectOption(successor.userId);
     const challengeResponse = page.waitForResponse(
       (r) =>

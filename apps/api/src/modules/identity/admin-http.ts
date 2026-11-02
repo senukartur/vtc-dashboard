@@ -44,6 +44,7 @@ export async function registerAdministrationRoutes(
       "/api/v1/admin/company-settings",
       "/api/v1/admin/audit",
       "/api/v1/admin/source-capabilities",
+      "/api/v1/admin/leadership/challenge",
       "/api/v1/admin/leadership/challenges",
       "/api/v1/admin/leadership/transfers",
     ].includes(path);
@@ -234,6 +235,11 @@ export async function registerAdministrationRoutes(
     "/api/v1/admin/source-capabilities",
     { schema: { response: { 200: ref("EnvelopeSourceCapabilities") } } },
     async (r) => envelope(await administration.sources(await actor(r)), r),
+  );
+  app.get(
+    "/api/v1/admin/leadership/challenge",
+    { schema: { response: { 200: ref("EnvelopeLeadershipChallengeState") } } },
+    async (r) => envelope(await identity.leadershipChallengeState(await actor(r)), r),
   );
   app.post<{ Body: S["LeadershipChallengeInput"] }>(
     "/api/v1/admin/leadership/challenges",
