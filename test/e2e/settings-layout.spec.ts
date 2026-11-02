@@ -46,6 +46,8 @@ async function box(locator: Locator) {
 const main = (page: Page) => page.locator(".settings-main");
 const panel = (page: Page, locale: "en" | "ru" = "en") =>
   page.getByRole("complementary", { name: text[locale].transfer, exact: true });
+/** The post-transfer notice; the shell can show its own transient statuses meanwhile. */
+const notice = (page: Page) => page.locator(".settings-transferred").getByRole("status");
 const codeInput = (page: Page, locale: "en" | "ru" = "en") =>
   page.getByLabel(text[locale].code, { exact: true });
 async function open(page: Page, options: SettingsOptions = {}, locale: "en" | "ru" = "en") {
@@ -356,6 +358,13 @@ test("L2 a wrong code closes the dialog, keeps it and shows the server's attempt
     "This code can no longer be used. Request a new code.",
   );
   await expect(trigger).toBeDisabled();
+  // Focus does not fall to the page when the trigger becomes disabled.
+  await expect(
+    panel(page).getByRole("button", { name: text.en.resend, exact: true }),
+  ).toBeFocused();
+  await expect(panel(page)).toContainText(
+    "Requesting a code for another successor cancels this code.",
+  );
   await expect(page.getByText(sentinel)).toHaveCount(0);
 });
 
@@ -393,10 +402,10 @@ test("L4 a confirmed transfer leaves the restricted card and a notice", async ({
   await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
-  await expect(page.getByRole("status")).toHaveText(
+  await expect(notice(page)).toHaveText(
     `✓ Leadership transferred to ${names.volga}. You are now a driver; the audit log records the transfer.`,
   );
-  await expect(page.getByRole("status")).toBeFocused();
+  await expect(notice(page)).toBeFocused();
   expect(
     state.commands.filter((command) => command.path === "/admin/leadership/transfers"),
   ).toEqual([
@@ -405,8 +414,22 @@ test("L4 a confirmed transfer leaves the restricted card and a notice", async ({
     }),
   ]);
   await expect(page.getByLabel(text.en.code)).toHaveCount(0);
+  // The notice is shown once: it is no longer in history, so a reload does not repeat it.
+  expect(await page.evaluate(() => history.state?.usr ?? null)).toBeNull();
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
+  await expect(page.locator(".settings-transferred")).toHaveCount(0);
+});
+
+test("L4 the transfer notice can be dismissed", async ({ page }) => {
+  await open(page, { pending: true });
+  await settled(page);
+  await codeInput(page).fill(correctCode);
+  await panel(page).getByRole("button", { name: text.en.transferButton, exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(notice(page)).toContainText(names.volga);
   await page.getByRole("button", { name: "Dismiss", exact: true }).click();
-  await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(notice(page)).toHaveCount(0);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Access restricted");
 });
 
@@ -417,6 +440,8 @@ test("L5 changing the successor clears the code and requests for the new one", a
   await panel(page).getByRole("button", { name: text.en.change, exact: true }).click();
   await expect(codeInput(page)).toHaveCount(0);
   await expect(panel(page).locator('[aria-current="step"]')).toHaveText("1 · Successor");
+  // The pressed button leaves with the code step; focus continues at the successor choice.
+  await expect(page.getByLabel(text.en.successor, { exact: true })).toBeFocused();
   await requestCode(page, ids.kestrel);
   await expect(codeInput(page)).toHaveValue("");
   await expect(panel(page)).toContainText(`bound to ${names.kestrel}.`);
@@ -436,9 +461,11 @@ test("L6 a reload resumes the code step from the server state", async ({ page })
 
 test("L7 an expired code cannot be submitted", async ({ page }) => {
   await page.clock.install({ time: base });
-  await open(page, { pending: true, base });
+  // A new code is still minutes away when this one expires.
+  await open(page, { pending: true, resendIn: 900, base });
   await settled(page);
   await codeInput(page).fill("fictional-typed-code");
+  await expect(codeInput(page)).toBeFocused();
   const trigger = panel(page).getByRole("button", { name: text.en.transferButton, exact: true });
   await expect(trigger).toBeEnabled();
   await page.clock.fastForward(601_000);
@@ -446,6 +473,12 @@ test("L7 an expired code cannot be submitted", async ({ page }) => {
     "This code has expired. Request a new code.",
   );
   await expect(trigger).toBeDisabled();
+  await expect(codeInput(page)).toBeDisabled();
+  // Send a new code is still waiting, so focus moves from the disabled input to the explanation.
+  await expect(
+    panel(page).getByRole("button", { name: text.en.resend, exact: true }),
+  ).toBeDisabled();
+  await expect(page.locator("#leadership-code-timing")).toBeFocused();
 });
 
 test("A-states settings, source, audit and leadership read errors offer Refresh", async ({

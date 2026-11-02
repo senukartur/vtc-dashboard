@@ -351,7 +351,13 @@ function TransferFlow() {
     [open, setOpen] = useState(false),
     [seenRefusal, setSeenRefusal] = useState(false),
     [focusCode, setFocusCode] = useState(0),
+    [focusSuccessor, setFocusSuccessor] = useState(0),
     codeInput = useRef<HTMLInputElement>(null),
+    successorSelect = useRef<HTMLSelectElement>(null),
+    codeStep = useRef<HTMLDivElement>(null),
+    resendButton = useRef<HTMLButtonElement>(null),
+    timingText = useRef<HTMLParagraphElement>(null),
+    usable = useRef(false),
     state = useWorkspaceQuery("/admin/leadership/challenge", "EnvelopeLeadershipChallengeState"),
     members = useWorkspaceQuery(
       `/admin/members?status=active&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
@@ -381,6 +387,24 @@ function TransferFlow() {
   useEffect(() => {
     if (focusCode) codeInput.current?.focus();
   }, [focusCode]);
+  useEffect(() => {
+    if (focusSuccessor) successorSelect.current?.focus();
+  }, [focusSuccessor]);
+  // When the code stops being usable (used up, gone or expired) its input and Transfer button are
+  // disabled. If focus was in the code step (or was lost with them), move it to Send a new code,
+  // or to the explanation while a new code must still wait. Focus elsewhere is left alone.
+  useEffect(() => {
+    const was = usable.current;
+    usable.current = view.codeUsable;
+    if (!was || view.codeUsable || view.step !== "code") return;
+    const active = document.activeElement;
+    if (active && active !== document.body && !codeStep.current?.contains(active)) return;
+    recoverFocus();
+  });
+  function recoverFocus() {
+    if (resendButton.current && !resendButton.current.disabled) resendButton.current.focus();
+    else timingText.current?.focus();
+  }
   const items =
     members.data?.data.data.items
       .map((row) => row.profile.member)
@@ -463,6 +487,7 @@ function TransferFlow() {
               <div className="settings-field">
                 <Label htmlFor="leadership-successor">{t("successor")}</Label>
                 <Select
+                  ref={successorSelect}
                   id="leadership-successor"
                   value={successorId}
                   disabled={busy}
@@ -510,7 +535,7 @@ function TransferFlow() {
               <LeadershipFeedback command={request} />
             </div>
           ) : (
-            <div className="settings-step stack">
+            <div ref={codeStep} className="settings-step stack">
               <p>{t("settingsUi.codeIntro", { nickname: current.successor.nickname })}</p>
               <div className="settings-field">
                 <Label htmlFor="leadership-code">{t("transferCode")}</Label>
@@ -525,7 +550,12 @@ function TransferFlow() {
                   aria-describedby="leadership-code-timing"
                   onChange={(e) => setCode(e.target.value)}
                 />
-                <p id="leadership-code-timing" className="muted">
+                <p
+                  ref={timingText}
+                  id="leadership-code-timing"
+                  className="muted settings-timing"
+                  tabIndex={-1}
+                >
                   {timing}
                 </p>
               </div>
@@ -547,7 +577,14 @@ function TransferFlow() {
                       {t("settingsUi.transferButton")}
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent
+                    onCloseAutoFocus={(event) => {
+                      // A trigger disabled meanwhile (expired or used-up code) cannot take focus.
+                      if (view.codeUsable) return;
+                      event.preventDefault();
+                      recoverFocus();
+                    }}
+                  >
                     <div className="settings-dialog">
                       <DialogTitle>
                         {t("settingsUi.dialogTitle", { nickname: current.successor.nickname })}
@@ -578,6 +615,7 @@ function TransferFlow() {
                   </DialogContent>
                 </Dialog>
                 <Button
+                  ref={resendButton}
                   variant="outline"
                   disabled={busy || !view.canRequest}
                   aria-describedby={resendDescription ? "leadership-resend" : undefined}
@@ -594,6 +632,8 @@ function TransferFlow() {
                     setCode("");
                     setSuccessorId("");
                     setChanging(true);
+                    // This button leaves with the code step; continue at the successor choice.
+                    setFocusSuccessor((value) => value + 1);
                   }}
                 >
                   {t("settingsUi.changeSuccessor")}
@@ -716,9 +756,20 @@ export function SettingsPage() {
   const { t } = useTranslation("administration"),
     location = useLocation(),
     navigate = useNavigate(),
-    nickname = transferredTo(location.state),
+    incoming = transferredTo(location.state),
+    [nickname, setNickname] = useState(incoming),
     notice = useRef<HTMLParagraphElement>(null);
-  // The transfer ends this member's access; the notice survives the session remount.
+  if (incoming && incoming !== nickname) setNickname(incoming);
+  // The transfer ends this member's access, so the notice arrives through router state and
+  // survives the session remount. It is shown once: the state is cleared from history so a reload
+  // or Back does not repeat it.
+  useEffect(() => {
+    if (!incoming) return;
+    navigate(
+      { pathname: location.pathname, search: location.search, hash: location.hash },
+      { replace: true, state: null },
+    );
+  }, [incoming, navigate, location.pathname, location.search, location.hash]);
   useEffect(() => {
     if (nickname) notice.current?.focus();
   }, [nickname]);
@@ -730,15 +781,7 @@ export function SettingsPage() {
             <span aria-hidden="true">✓ </span>
             {t("settingsUi.transferred", { nickname })}
           </p>
-          <Button
-            variant="outline"
-            onClick={() =>
-              navigate(
-                { pathname: location.pathname, search: location.search, hash: location.hash },
-                { replace: true, state: null },
-              )
-            }
-          >
+          <Button variant="outline" onClick={() => setNickname(null)}>
             {t("settingsUi.dismiss")}
           </Button>
         </div>

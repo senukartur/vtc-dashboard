@@ -312,7 +312,7 @@ export const administrationTranslations = {
       resend: "Send a new code",
       changeSuccessor: "Change successor",
       policy:
-        "Changing the successor cancels this code. After 5 wrong entries the code stops working; at most 5 codes per hour.",
+        "Requesting a code for another successor cancels this code. After 5 wrong entries the code stops working; at most 5 codes per hour.",
       codeGone: "This code can no longer be used. Request a new code.",
       codeExpired: "This code has expired. Request a new code.",
       codeRejected: "The code was not accepted. Check it, or request a new code.",
@@ -657,7 +657,7 @@ export const administrationTranslations = {
       resend: "Отправить новый код",
       changeSuccessor: "Сменить преемника",
       policy:
-        "Смена преемника отменяет этот код. После 5 неверных вводов код перестаёт действовать; не больше 5 кодов в час.",
+        "Запрос кода для другого преемника отменяет этот код. После 5 неверных вводов код перестаёт действовать; не больше 5 кодов в час.",
       codeGone: "Этот код больше нельзя использовать. Запросите новый код.",
       codeExpired: "Срок действия кода истёк. Запросите новый код.",
       codeRejected: "Код не принят. Проверьте его или запросите новый код.",

@@ -61,9 +61,6 @@
 .settings-page .settings-audit-foot {
   justify-content: space-between;
 }
-.settings-page .settings-audit-foot .button-row:empty {
-  display: none;
-}
 
 /* Status tones always pair a symbol or word with the colour. */
 .settings-page .badge {
@@ -258,6 +255,9 @@
   font-size: var(--font-small);
   line-height: 1.5;
 }
+.settings-page .settings-timing:focus-visible {
+  outline-offset: 2px;
+}
 .settings-page .settings-wide-button {
   width: 100%;
   white-space: normal;
@@ -307,12 +307,15 @@
 .dialog-content:has(.settings-dialog) .button {
   white-space: normal;
 }
+/* No solid danger/on-danger token pair exists; the confirm uses the rejected-state tokens. */
 .dialog-content:has(.settings-dialog) .settings-danger-solid:not(:disabled) {
-  background: #b91c1c;
-  color: #ffffff;
+  border-color: var(--destructive);
+  background: var(--rejected-surface);
+  color: var(--destructive);
+  font-weight: 700;
 }
 .dialog-content:has(.settings-dialog) .settings-danger-solid:hover:not(:disabled) {
-  background: #991b1b;
+  background: var(--surface-active);
 }
 
 /* Notice after a successful transfer, shown above the restricted-access card. */
