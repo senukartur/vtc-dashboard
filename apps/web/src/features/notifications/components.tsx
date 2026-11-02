@@ -362,7 +362,13 @@ export function NotificationBell() {
           )}
         </Button>
       </Popover.Trigger>
-      <span className="visually-hidden notification-announcement" role="status">
+      {/* A bare live region, not role="status": the shell is on every page, and pages own
+          their single status message. */}
+      <span
+        className="visually-hidden notification-announcement"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {announcement}
       </span>
       <Popover.Portal>

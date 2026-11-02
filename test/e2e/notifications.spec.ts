@@ -874,6 +874,8 @@ test("bell count and badge follow the authoritative feed and announce only later
     badge = page.locator(".notification-badge");
   await expect(badge).toHaveText("1");
   await expect(region).toHaveText("");
+  await expect(region).toHaveAttribute("aria-live", "polite");
+  await expect(region).not.toHaveAttribute("role", /./);
   state.items.push(notificationFixture({ id: nextId, liveToastEligible: false }));
   state.unread = 2;
   state.cursor = "synthetic-poll-2";
