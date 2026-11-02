@@ -3286,7 +3286,7 @@ export interface components {
             applicationId: string;
             deliveryId: string | null;
             /**
-             * @description Current safe delivery state from the messaging owner; not_requested means mail was disabled, unavailable means its adapter is not currently configured. Provider acceptance or local simulation never means inbox delivery.
+             * @description Current safe delivery state from the messaging owner; not_requested means no email has been requested for this generation, including when mail is disabled; unavailable means its adapter is not currently configured. Provider acceptance or local simulation never means inbox delivery.
              * @enum {string}
              */
             emailDelivery: "queued" | "attempting" | "retryable" | "accepted" | "simulated" | "suppressed" | "failed" | "ambiguous" | "not_requested" | "unavailable";
