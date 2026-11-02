@@ -1,14 +1,29 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { AccountFailure } from "../account/transport.js";
 import { EventFailure } from "../events/transport.js";
-import { FeedState, NotificationFailure, NotificationRow } from "./components.js";
-import { useNotificationCommand, useNotifications } from "./controller.js";
-import { preferenceNames, type DTO } from "./model.js";
+import {
+  FeedState,
+  NotificationFailure,
+  NotificationRow,
+  UnreadSummary,
+  useMinuteNow,
+  useOnline,
+  useTimeDisplay,
+} from "./components.js";
+import { useNotificationCommand, useNotifications, useReadThrough } from "./controller.js";
+import {
+  groupByDay,
+  preferenceNames,
+  type DayGroup,
+  type DTO,
+  type Notification,
+} from "./model.js";
 import { notificationRead } from "./transport.js";
 class HistoryCursorFailure extends AccountFailure {
   constructor() {
@@ -22,17 +37,22 @@ export function NotificationsPage() {
   return session.self?.capabilities.includes("company.read") ? (
     <History />
   ) : (
-    <Card>
-      <h1>{t("title")}</h1>
-      <p>{t("forbidden")}</p>
-    </Card>
+    <div className="notifications-page">
+      <Card className="notifications-forbidden">
+        <h1>{t("title")}</h1>
+        <p>{t("forbidden")}</p>
+      </Card>
+    </div>
   );
 }
 function History() {
   const context = useNotifications(),
     { t } = useTranslation("notifications"),
     [params, setParams] = useSearchParams(),
-    command = useNotificationCommand();
+    readThrough = useReadThrough(),
+    online = useOnline(),
+    now = useMinuteNow(),
+    { timezone } = useTimeDisplay();
   const unread = params.get("filter") === "unread";
   const query = useInfiniteQuery({
     queryKey: ["notifications-history", context.scope],
@@ -82,73 +102,109 @@ function History() {
             (query.data?.pages.flatMap((page) => page.items) ?? []).map((item) => [item.id, item]),
           ).values(),
         ].filter((item) => !unread || !item.readAt);
-  const checkpoint = context.checkpoint();
+  const groups = groupByDay(items, now, timezone);
   return (
-    <div className="stack notifications-page">
-      <div>
-        <h1>{t("title")}</h1>
-        <p>{t("delivery")}</p>
-      </div>
-      <Card className="stack">
-        <div className="notification-toolbar">
-          <h2>{t("history")}</h2>
-          <Button
-            variant="outline"
-            disabled={context.blocked || !checkpoint || command.pending || command.seconds > 0}
-            onClick={() => {
-              const cursor = context.checkpoint();
-              if (cursor)
-                void command.run(
-                  "/notifications/read-all",
-                  { throughCursor: cursor },
-                  "EnvelopeCommandResult",
-                );
-            }}
-          >
-            {t("readAll")}
-          </Button>
+    <div className="notifications-page">
+      <div className="notifications-header">
+        <div className="notifications-heading">
+          <h1>{t("title")}</h1>
+          <p className="notifications-subtitle">{t("subtitle")}</p>
+          <UnreadSummary className="notifications-summary" />
         </div>
-        <FeedState />
-        <NotificationFailure error={command.error} seconds={command.seconds} />
-        <fieldset className="notification-filters">
-          <legend className="sr-only">{t("history")}</legend>
-          <Button variant="outline" aria-pressed={!unread} onClick={() => setParams({})}>
-            {t("all")}
-          </Button>
-          <Button
-            variant="outline"
-            aria-pressed={unread}
-            onClick={() => setParams({ filter: "unread" })}
-          >
-            {t("unread")}
-          </Button>
-        </fieldset>
-        <p className="muted">{t("subset")}</p>
-        {query.isPending && !context.blocked && <p role="status">{t("loading")}</p>}
+        <Button
+          variant="outline"
+          className="notifications-read-all"
+          disabled={readThrough.disabled}
+          onClick={readThrough.start}
+        >
+          {t("readAll")}
+        </Button>
+        <div className="notifications-status">
+          <FeedState offline={!online} showEmpty={false} />
+          <NotificationFailure error={readThrough.error} seconds={readThrough.seconds} />
+        </div>
+      </div>
+      <div className="notifications-main">
+        <div className="notifications-toolbar">
+          <SegmentedControl
+            aria-label={t("filter")}
+            value={unread ? "unread" : "all"}
+            onValueChange={(value) => setParams(value === "unread" ? { filter: "unread" } : {})}
+            options={[
+              { value: "all", label: t("all") },
+              { value: "unread", label: t("unread") },
+            ]}
+          />
+          <p className="notifications-note">{t("subset")}</p>
+        </div>
+        {query.isPending && !context.blocked && (
+          <p role="status" className="notifications-placeholder">
+            {t("loading")}
+          </p>
+        )}
         <NotificationFailure error={context.blocked ? null : query.error} />
         {query.isError && !context.blocked && (
-          <Button onClick={() => void query.refetch()}>{t("retry")}</Button>
-        )}
-        <ul className="notification-list">
-          {items.map((item) => (
-            <NotificationRow key={item.id} item={item} />
-          ))}
-        </ul>
-        {!context.blocked && query.data && items.length === 0 && (
-          <p>{t(unread ? "emptyUnread" : "empty")}</p>
-        )}
-        {query.hasNextPage && !context.blocked && (
-          <Button
-            variant="outline"
-            disabled={query.isFetching}
-            onClick={() => void query.fetchNextPage()}
-          >
-            {t(query.isFetching ? "loading" : "more")}
+          <Button variant="outline" onClick={() => void query.refetch()}>
+            {t("retry")}
           </Button>
         )}
-      </Card>
-      {!context.blocked && <Preferences />}
+        {groups.map((group) => (
+          <DaySection key={group.key} group={group.key} items={group.items} now={now} />
+        ))}
+        {!context.blocked && query.data && items.length === 0 && (
+          <p className="notifications-empty">{t(unread ? "emptyUnread" : "empty")}</p>
+        )}
+        {query.hasNextPage && !context.blocked && (
+          <div className="notifications-more">
+            <Button
+              variant="outline"
+              disabled={query.isFetching}
+              onClick={() => void query.fetchNextPage()}
+            >
+              {t(query.isFetching ? "loading" : "more")}
+            </Button>
+          </div>
+        )}
+      </div>
+      <aside className="notifications-aside" aria-label={t("howTitle")}>
+        <Card className="notifications-how">
+          <h2>{t("howTitle")}</h2>
+          <ul>
+            {(["how1", "how2", "how3", "how4", "how5"] as const).map((key) => (
+              <li key={key}>{t(key)}</li>
+            ))}
+          </ul>
+        </Card>
+        {!context.blocked && <Preferences />}
+      </aside>
     </div>
+  );
+}
+const groupTitles = {
+  today: "groupToday",
+  yesterday: "groupYesterday",
+  earlier: "groupEarlier",
+} as const;
+function DaySection({
+  group,
+  items,
+  now,
+}: {
+  group: DayGroup;
+  items: Notification[];
+  now: number;
+}) {
+  const { t } = useTranslation("notifications"),
+    id = useId();
+  return (
+    <section className="notifications-day" aria-labelledby={id}>
+      <h2 id={id}>{t(groupTitles[group])}</h2>
+      <ul className="notification-list">
+        {items.map((item) => (
+          <NotificationRow key={item.id} item={item} now={now} />
+        ))}
+      </ul>
+    </section>
   );
 }
 function Preferences() {
@@ -186,9 +242,9 @@ function Preferences() {
   const conflict =
     command.error instanceof AccountFailure && command.error.kind === "conflict" && !reloaded;
   return (
-    <Card className="stack">
+    <Card className="notifications-preferences">
       <h2>{t("preferences")}</h2>
-      <p>{t("preferenceHelp")}</p>
+      <p className="notifications-help">{t("preferenceHelp")}</p>
       {query.isPending && <p role="status">{t("loading")}</p>}
       <NotificationFailure error={query.error} />
       <NotificationFailure
@@ -198,6 +254,8 @@ function Preferences() {
       />
       <Button
         variant="ghost"
+        size="xs"
+        className="notifications-reload"
         disabled={query.isFetching || command.pending}
         onClick={async () => {
           const result = await query.refetch();
@@ -214,7 +272,7 @@ function Preferences() {
       </Button>
       {preferences && !query.isError && (
         <form
-          className="stack"
+          className="notifications-preference-form"
           aria-label={t("preferences")}
           onSubmit={async (event) => {
             event.preventDefault();
