@@ -149,6 +149,28 @@ export async function registerEventRoutes(
     },
     async (r) => envelope(r, await events.participants(await actor(r), r.params.eventId, r.query)),
   );
+  app.get<{ Params: { eventId: string }; Querystring: Page }>(
+    "/api/v1/events/:eventId/decliners",
+    {
+      schema: {
+        params,
+        querystring: object(page),
+        response: { 200: ref("EnvelopeListParticipant") },
+      },
+    },
+    async (r) => envelope(r, await events.decliners(await actor(r), r.params.eventId, r.query)),
+  );
+  app.get<{ Params: { eventId: string } }>(
+    "/api/v1/events/:eventId/response-counts",
+    {
+      schema: {
+        params,
+        querystring: object({}),
+        response: { 200: ref("EnvelopeEventResponseCounts") },
+      },
+    },
+    async (r) => envelope(r, await events.responseCounts(await actor(r), r.params.eventId)),
+  );
   app.post<{ Body: S["EventInput"] }>(
     "/api/v1/admin/events",
     { schema: { body: ref("EventInput"), response: { 201: ref("EnvelopeEventMember") } } },

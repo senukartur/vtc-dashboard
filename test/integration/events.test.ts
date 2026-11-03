@@ -658,6 +658,8 @@ test("validation rejects blank reasons, invalid UTC/calendar/decimal and unavail
   ).rejects.toMatchObject({ statusCode: 422 });
 });
 test("HTTP actual composition enforces auth, CSRF, strong separate ETags and closed responses", async () => {
+  // All tests share one fixed clock window; start this request budget from zero.
+  await control.query("DELETE FROM identity_limits");
   const app = await createApp({ identity, events: service, checkReadiness: async () => true });
   try {
     expect((await app.inject({ url: "/api/v1/events" })).statusCode).toBe(401);
@@ -712,6 +714,45 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
       headers: { cookie: traineeCookie },
     });
     expect(evt.headers.etag).toBe('"v1"');
+    await service.respond(driver, id, newId(), 1, {
+      response: "declined",
+      reason: "Fictional HTTP decliner reason",
+    });
+    for (const path of ["decliners", "response-counts"]) {
+      expect((await app.inject({ url: `/api/v1/events/${id}/${path}` })).statusCode).toBe(401);
+      expect((await app.inject({ url: `/api/v1/public/events/${id}/${path}` })).statusCode).toBe(
+        404,
+      );
+    }
+    const decliners = await app.inject({
+      url: `/api/v1/events/${id}/decliners`,
+      headers: { cookie: traineeCookie },
+    });
+    expect(decliners.statusCode).toBe(200);
+    expect(decliners.headers.etag).toBeUndefined();
+    expect(decliners.json().data).toEqual({
+      items: [{ member: expect.objectContaining({ id: driver.userId }) }],
+      nextCursor: null,
+    });
+    const counts = await app.inject({
+      url: `/api/v1/events/${id}/response-counts`,
+      headers: { cookie: traineeCookie },
+    });
+    expect(counts.statusCode).toBe(200);
+    expect(counts.headers.etag).toBeUndefined();
+    expect(counts.json().data).toEqual({ participating: 1, declined: 1 });
+    for (const body of [decliners.body, counts.body]) {
+      expect(body).not.toContain("Fictional HTTP decliner reason");
+      expect(body).not.toContain("declineReason");
+    }
+    expect(
+      (
+        await app.inject({
+          url: `/api/v1/events/${id}/response-counts?unanswered=1`,
+          headers: { cookie: traineeCookie },
+        })
+      ).statusCode,
+    ).toBe(422);
   } finally {
     await app.close();
   }
@@ -1207,4 +1248,71 @@ test("representative mixed event histories expose an ordered selective public-pa
       estimatedRows: row?.rows,
     }),
   );
+});
+test("members read decliners and response counts without reasons or unanswered members", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const staff = (await member(["deputy_director", "driver"])).actor,
+    quiet = (await member(["trainee"])).actor,
+    id = (await create()).data.event.id,
+    other = (await create()).data.event.id,
+    reasons = ["Fictional private decliner reason", "Fictional staff decliner reason"] as const;
+  await service.respond(trainee, id, newId(), 1, { response: "declined", reason: reasons[0] });
+  await service.respond(driver, id, newId(), 1, { response: "participating" });
+  await service.respond(staff, id, newId(), 1, { response: "declined", reason: reasons[1] });
+  await service.respond(quiet, id, newId(), 1, { response: "participating" });
+  await service.respond(quiet, id, newId(), 2, { response: "unanswered" });
+  await service.respond(driver, other, newId(), 1, {
+    response: "declined",
+    reason: "Fictional other event reason",
+  });
+  const ids = (list: { items: { member: { id: string } }[] }) => list.items.map((p) => p.member.id);
+  const declined = [trainee.userId, staff.userId].sort();
+  for (const viewer of [driver, dispatcher]) {
+    const list = await service.decliners(viewer, id);
+    expect(ids(list)).toEqual(declined);
+    expect(list.nextCursor).toBeNull();
+    expect(list.items.every((p) => Object.keys(p).join() === "member")).toBe(true);
+    const counts = await service.responseCounts(viewer, id);
+    expect(counts).toEqual({ participating: 1, declined: 2 });
+    for (const body of [JSON.stringify(list), JSON.stringify(counts)]) {
+      for (const reason of reasons) expect(body).not.toContain(reason);
+      expect(body).not.toContain("declineReason");
+      expect(body).not.toContain(quiet.userId);
+    }
+  }
+  expect(ids(await service.participants(dispatcher, id))).toEqual([driver.userId]);
+  expect(ids(await service.decliners(dispatcher, other))).toEqual([driver.userId]);
+  expect(await service.responseCounts(dispatcher, other)).toEqual({
+    participating: 0,
+    declined: 1,
+  });
+  const first = await service.decliners(dispatcher, id, { limit: 1 });
+  expect(ids(first)).toEqual([declined[0]]);
+  const cursor = first.nextCursor as string;
+  expect(cursor).toBeTruthy();
+  const second = await service.decliners(dispatcher, id, { limit: 1, cursor });
+  expect(ids(second)).toEqual([declined[1]]);
+  expect(second.nextCursor).toBeNull();
+  await expect(service.participants(dispatcher, id, { cursor })).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  await expect(service.decliners(dispatcher, other, { cursor })).rejects.toMatchObject({
+    statusCode: 409,
+  });
+  await service.respond(trainee, id, newId(), 2, { response: "participating" });
+  expect(ids(await service.decliners(driver, id))).toEqual([staff.userId]);
+  expect(await service.responseCounts(driver, id)).toEqual({ participating: 2, declined: 1 });
+  const participating = await service.participants(dispatcher, id, { limit: 1 });
+  expect(participating.nextCursor).toBeTruthy();
+  await expect(
+    service.decliners(dispatcher, id, { cursor: participating.nextCursor as string }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  const unknown = newId();
+  await expect(service.decliners(driver, unknown)).rejects.toMatchObject({ statusCode: 404 });
+  await expect(service.responseCounts(driver, unknown)).rejects.toMatchObject({
+    statusCode: 404,
+  });
+  await service.cancel(director, id, newId(), 1, "Fictional cancellation note");
+  expect(ids(await service.decliners(driver, id))).toEqual([staff.userId]);
+  expect(await service.responseCounts(driver, id)).toEqual({ participating: 2, declined: 1 });
 });

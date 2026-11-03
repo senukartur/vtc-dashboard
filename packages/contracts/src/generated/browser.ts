@@ -1059,6 +1059,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/events/{eventId}/decliners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** listEventDecliners */
+        get: operations["listEventDecliners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events/{eventId}/my-response": {
         parameters: {
             query?: never;
@@ -1086,6 +1103,23 @@ export interface paths {
         };
         /** listEventParticipants */
         get: operations["listEventParticipants"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events/{eventId}/response-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** getEventResponseCounts */
+        get: operations["getEventResponseCounts"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2914,6 +2948,10 @@ export interface components {
             data: components["schemas"]["EventPublic"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeEventResponseCounts: {
+            data: components["schemas"]["EventResponseCounts"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeEvidence: {
             data: components["schemas"]["Evidence"];
             meta: components["schemas"]["Meta"];
@@ -3272,6 +3310,10 @@ export interface components {
             status: "scheduled" | "cancelled" | "completed";
             title: string;
             version: number;
+        };
+        EventResponseCounts: {
+            declined: number;
+            participating: number;
         };
         /** @description Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed. */
         Evidence: {
@@ -6176,6 +6218,32 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listEventDecliners: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeListParticipant"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     getEventResponse: {
         parameters: {
             query?: never;
@@ -6254,6 +6322,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeListParticipant"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getEventResponseCounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeEventResponseCounts"];
                 };
             };
             default: components["responses"]["Error"];

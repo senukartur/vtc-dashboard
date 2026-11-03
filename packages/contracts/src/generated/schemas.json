@@ -7059,6 +7059,42 @@
       ],
       "additionalProperties": false
     },
+    "EventResponseCounts": {
+      "type": "object",
+      "properties": {
+        "participating": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "declined": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "participating",
+        "declined"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeEventResponseCounts": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventResponseCounts"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
     "EnvelopeOptionalEvent": {
       "type": "object",
       "properties": {
