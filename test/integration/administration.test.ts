@@ -51,7 +51,6 @@ const enabled = {
   externalIdentities: true,
   admissions: true,
   mail: false,
-  trips: true,
 };
 const cookies = (values: readonly string[]) =>
   values.map((value) => value.split(";", 1)[0]).join("; ");
@@ -162,6 +161,19 @@ test("new HTTP read families enforce current roles and bounded private projectio
           .statusCode,
       ).toBe(200);
     }
+    const sources = await app.inject({
+      url: "/api/v1/admin/source-capabilities",
+      headers: { cookie: deputy.cookie },
+    });
+    expect(Object.keys(sources.json().data).sort()).toEqual([
+      "admissions",
+      "externalIdentities",
+      "mail",
+      "manual",
+      "qualifications",
+      "sources",
+      "telemetry",
+    ]);
   } finally {
     await app.close();
   }

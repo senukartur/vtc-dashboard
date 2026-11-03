@@ -14,12 +14,13 @@ export function createAdministration(
     externalIdentities: boolean;
     admissions: boolean;
     mail: boolean;
-    trips: boolean;
   },
+  // Kept apart from `enabled`, which is returned as the SourceCapabilities contract.
+  tripsEnabled = false,
 ) {
   const qualifications = createQualificationInitialization(unit),
     // The runtime database role can read trips only where the Trips module is configured.
-    activity = enabled.trips ? createTripActivity(unit) : undefined,
+    activity = tripsEnabled ? createTripActivity(unit) : undefined,
     audit = createAudit(unit),
     page = pagination(identity.config.secret, "administration");
   async function settings(actor: Actor) {
