@@ -60,12 +60,18 @@ export function EventFailureView({ error, seconds = 0 }: { error: unknown; secon
     </>
   );
 }
+/**
+ * `focusTarget` receives focus when Try again / Start from first page is used: without data the
+ * refetch replaces the button with the loading status, so focus would otherwise fall to the body.
+ */
 export function EventState({
   query,
   reset,
+  focusTarget,
 }: {
   query: { isPending: boolean; isError: boolean; error: unknown; refetch: () => unknown };
   reset?: (() => void) | undefined;
+  focusTarget?: (() => void) | undefined;
 }) {
   const { t } = useTranslation("events");
   return query.isPending ? (
@@ -73,7 +79,13 @@ export function EventState({
   ) : query.isError ? (
     <>
       <EventFailureView error={query.error} />
-      <Button variant="outline" onClick={() => void (reset ?? query.refetch)()}>
+      <Button
+        variant="outline"
+        onClick={() => {
+          void (reset ?? query.refetch)();
+          focusTarget?.();
+        }}
+      >
         {t(reset ? "reset" : "retry")}
       </Button>
     </>

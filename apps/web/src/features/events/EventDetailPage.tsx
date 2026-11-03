@@ -56,11 +56,12 @@ function BackLink({ to }: { to: string }) {
 /** Public detail reads only the public event: no lists, counts, responses or attendance. */
 function PublicDetail({ id }: { id: string }) {
   const query = useEventQuery(`/public/events/${encodeURIComponent(id)}`, "EnvelopeEventPublic"),
-    event = query.data?.data.data;
+    event = query.data?.data.data,
+    root = useRef<HTMLDivElement>(null);
   return (
-    <div className="events-page events-detail stack">
+    <div className="events-page events-detail stack" ref={root} tabIndex={-1}>
       <BackLink to="/events" />
-      <EventState query={query} />
+      <EventState query={query} focusTarget={() => root.current?.focus()} />
       {event && (
         <Card className="events-header">
           <EventHeading event={event} />
@@ -168,15 +169,16 @@ function MemberDetail({ id }: { id: string }) {
   const now = useEventClock(event?.startsAt ?? null),
     phase = event ? eventPhase(event, now) : "open";
   const [editing, setEditing] = useState(false),
-    [attendance, setAttendance] = useState(false);
+    [attendance, setAttendance] = useState(false),
+    root = useRef<HTMLDivElement>(null);
   return (
-    <div className="events-page events-detail stack">
+    <div className="events-page events-detail stack" ref={root} tabIndex={-1}>
       <BackLink to="/account/events" />
       {!allowed ? (
         <p>{t("forbidden")}</p>
       ) : (
         <>
-          <EventState query={query} />
+          <EventState query={query} focusTarget={() => root.current?.focus()} />
           {member && event && (
             <div className="events-detail-layout">
               <div className="events-main stack">
@@ -218,9 +220,7 @@ function MemberDetail({ id }: { id: string }) {
                     </Link>
                   )}
                 </Card>
-                {(respond || phase !== "open") && (
-                  <ResponseSection member={member} phase={phase} respond={respond} />
-                )}
+                {respond && <ResponseSection member={member} phase={phase} />}
               </div>
               <div className="events-side stack">
                 <Participants
@@ -278,15 +278,8 @@ function PrescribedLoad({ member }: { member: DTO["EventMember"] }) {
     </section>
   );
 }
-function ResponseSection({
-  member,
-  phase,
-  respond,
-}: {
-  member: DTO["EventMember"];
-  phase: EventPhase;
-  respond: boolean;
-}) {
+/** Own response for members with events.respond: the form while open, a summary afterwards. */
+function ResponseSection({ member, phase }: { member: DTO["EventMember"]; phase: EventPhase }) {
   const { t } = useTranslation("events"),
     headingId = useId(),
     heading = useRef<HTMLHeadingElement>(null);
@@ -295,7 +288,7 @@ function ResponseSection({
       <h2 id={headingId} ref={heading} tabIndex={-1}>
         {t("response")}
       </h2>
-      {phase === "open" && respond ? (
+      {phase === "open" ? (
         <OpenResponse event={member.event} heading={heading} />
       ) : (
         <ClosedResponse member={member} phase={phase} />
@@ -323,7 +316,7 @@ function OpenResponse({
   }, [heading]);
   return (
     <div className="stack events-response-body" ref={body}>
-      <EventState query={query} />
+      <EventState query={query} focusTarget={() => heading.current?.focus()} />
       {query.data && (
         <ResponseForm event={event} response={query.data.data.data} etag={query.data.etag} />
       )}
@@ -434,7 +427,7 @@ function ResponseForm({
       )}
       <div className="events-form-actions">
         <Button aria-disabled={blocked || undefined}>
-          {t(command.pending ? "loading" : "respond")}
+          {t(command.pending ? "savingResponse" : "respond")}
         </Button>
       </div>
     </form>
@@ -484,6 +477,7 @@ function Participants({
 }) {
   const { t } = useTranslation("events"),
     headingId = useId(),
+    heading = useRef<HTMLHeadingElement>(null),
     counts = useEventQuery(`/events/${id}/response-counts`, "EnvelopeEventResponseCounts"),
     view = countsView({
       isPending: counts.isPending,
@@ -492,7 +486,9 @@ function Participants({
     });
   return (
     <Card className="events-participants" aria-labelledby={headingId}>
-      <h2 id={headingId}>{t("participantsTitle")}</h2>
+      <h2 id={headingId} ref={heading} tabIndex={-1}>
+        {t("participantsTitle")}
+      </h2>
       {view.state === "ready" ? (
         <p className="events-counts">
           <span className="events-tone-participating">
@@ -504,9 +500,23 @@ function Participants({
           </span>
         </p>
       ) : (
-        <p className="muted events-counts">
-          {t(view.state === "loading" ? "countsLoading" : "countsUnavailable")}
-        </p>
+        <div className="events-counts-row">
+          <p className="muted events-counts">
+            {t(view.state === "loading" ? "countsLoading" : "countsUnavailable")}
+          </p>
+          {view.state === "unavailable" && (
+            // The refetch replaces this button with the loading text; focus stays in the section.
+            <Button
+              variant="outline"
+              onClick={() => {
+                void counts.refetch();
+                heading.current?.focus();
+              }}
+            >
+              {t("retryCounts")}
+            </Button>
+          )}
+        </div>
       )}
       {/* A committed own response re-keys the lists so they restart from the current first page. */}
       <MemberList key={`participants:${version}`} id={id} kind="participants" selfId={selfId} />
@@ -543,7 +553,11 @@ function MemberList({
       <h3 id={headingId} ref={heading} tabIndex={-1}>
         {t(kind === "participants" ? "signedUp" : "cantAttend")}
       </h3>
-      <EventState query={query} reset={cursor ? () => page(null) : undefined} />
+      <EventState
+        query={query}
+        reset={cursor ? () => page(null) : undefined}
+        focusTarget={() => heading.current?.focus()}
+      />
       {data && (
         <>
           {data.items.length ? (
@@ -655,6 +669,7 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
     signature: string;
   } | null>(null);
   const { t } = useTranslation("events"),
+    heading = useRef<HTMLHeadingElement>(null),
     [cursor, setCursor] = useState<string | null>(null),
     [changes, setChanges] = useState<Record<string, Draft>>({}),
     [needsReview, setNeedsReview] = useState(false),
@@ -728,7 +743,9 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
         }
       }}
     >
-      <h2>{t("attendance")}</h2>
+      <h2 ref={heading} tabIndex={-1}>
+        {t("attendance")}
+      </h2>
       <p>{t("attendanceHelp")}</p>
       {Object.keys(changes).length > 0 && (
         <section className="stack" aria-label={t("attendanceDrafts")}>
@@ -759,7 +776,11 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
           ))}
         </section>
       )}
-      <EventState query={query} {...(cursor ? { reset: () => recoverCursor() } : {})} />
+      <EventState
+        query={query}
+        focusTarget={() => heading.current?.focus()}
+        {...(cursor ? { reset: () => recoverCursor() } : {})}
+      />
       {data?.items.map((row) => (
         <fieldset className="stack event-attendance-row" key={row.member.id}>
           <legend>{row.member.nickname}</legend>

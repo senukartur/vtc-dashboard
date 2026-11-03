@@ -12,6 +12,10 @@
 .events-page .events-break {
   overflow-wrap: anywhere;
 }
+/* The page root only receives programmatic focus when a failed read is retried. */
+.events-page:focus {
+  outline: none;
+}
 .events-page .card {
   gap: 10px;
   padding: 12px 14px;
@@ -256,6 +260,12 @@
   gap: 4px 16px;
   font-size: var(--font-small);
   font-weight: 600;
+}
+.events-page .events-counts-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
 }
 .events-page .events-members {
   display: grid;

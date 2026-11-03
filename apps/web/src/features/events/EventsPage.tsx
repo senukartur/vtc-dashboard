@@ -67,7 +67,11 @@ export function EventsPage({ publicView = false }: { publicView?: boolean }) {
             onValueChange={(p) => setSearch({ period: p })}
             options={(["upcoming", "past"] as const).map((p) => ({ value: p, label: t(p) }))}
           />
-          <EventState query={query} {...(cursor ? { reset: () => page(null) } : {})} />
+          <EventState
+            query={query}
+            focusTarget={() => heading.current?.focus()}
+            {...(cursor ? { reset: () => page(null) } : {})}
+          />
           {data && (
             <>
               <Card className="events-list-card">

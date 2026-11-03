@@ -302,7 +302,7 @@ test("L3 declining keeps focus, pending Save keeps focus and one saved status fo
   await save.focus();
   await page.keyboard.press("Enter");
   await expect.poll(() => state.commands.length).toBe(1);
-  const pending = page.getByRole("button", { name: "Loading events…", exact: true });
+  const pending = page.getByRole("button", { name: "Saving response…", exact: true });
   await expect(pending).toBeFocused();
   await expect(pending).toHaveAttribute("aria-disabled", "true");
   // A second activation and a choice change are ignored while the command is pending.
@@ -381,7 +381,20 @@ test("L4 a manager sees the roster before the start with recording unavailable",
   await expect(record).toBeDisabled();
   await expect(record).toHaveAccessibleDescription("Available after the event starts");
   await expect(roster.locator(`#attendance-${fixtureId}`)).toBeDisabled();
+  // A regressed guard would first read /auth/csrf, so wait (bounded) for that request not to occur.
+  const csrf = page
+    .waitForRequest((request) => new URL(request.url()).pathname === "/api/v1/auth/csrf", {
+      timeout: 2000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
   await record.click({ force: true });
+  await expect(record).toBeFocused();
+  await page.keyboard.press("Enter");
+  expect(await csrf).toBe(false);
+  expect(state.requests.filter((r) => r === "GET /auth/csrf")).toEqual([]);
   expect(state.commands).toEqual([]);
   await noOverflow(page);
   expect(await brokenWords(workspace(page))).toEqual([]);
@@ -418,7 +431,7 @@ test("L5 a cancelled event closes responses and hides organizer actions", async 
 test("L6 counts and list failures stay in their section and are never shown as zero", async ({
   page,
 }, info) => {
-  await openDetail(page, "en", (s) => {
+  const state = await openDetail(page, "en", (s) => {
     s.countsStatus = 503;
     s.declinersStatus = 503;
   });
@@ -433,7 +446,72 @@ test("L6 counts and list failures stay in their section and are never shown as z
   await expect(signedUp).toContainText("No members have signed up.");
   await noOverflow(page);
   await capture(page, info, "events-section-failures");
+  // Retrying from the keyboard keeps focus in the section (the button is replaced while loading).
+  const retry = decliners.getByRole("button", { name: "Try again", exact: true });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
+  await expect(decliners.getByRole("alert")).toBeVisible();
+  state.declinersStatus = 200;
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
+  await expect(decliners).toContainText("No one has declined.");
+  const counts = participants.getByRole("button", { name: "Load counts again", exact: true });
+  await counts.focus();
+  await page.keyboard.press("Enter");
+  await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
+  await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
+  state.countsStatus = 200;
+  await counts.focus();
+  await page.keyboard.press("Enter");
+  await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
+  await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
+  await expect(counts).toHaveCount(0);
+  await quiet(page);
 });
+
+test("L6 a failed list read retried from the keyboard focuses the page heading", async ({
+  page,
+}) => {
+  const state = await mockEvents(page);
+  state.listStatus = 503;
+  await page.goto("/account/events");
+  const retry = workspace(page).getByRole("button", { name: "Try again", exact: true });
+  await retry.focus();
+  state.listStatus = 200;
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  await expect(workspace(page).locator(".events-row")).toHaveCount(1);
+  await quiet(page);
+});
+
+for (const phase of ["started", "cancelled"] as const)
+  test(`L4 a ${phase} event shows no own-response section without events.respond`, async ({
+    page,
+  }) => {
+    const state = await openDetail(
+      page,
+      "en",
+      (s) => {
+        s.capabilities = ["company.read", "events.manage"];
+        if (phase === "cancelled") s.event.status = "cancelled";
+        else {
+          s.event.startsAt = "2020-10-25T13:00:00.000Z";
+          s.event.meetingAt = "2020-10-25T12:00:00.000Z";
+        }
+      },
+      true,
+    );
+    await settledDetail(page);
+    await expect(page.getByRole("region", { name: text.en.response, exact: true })).toHaveCount(0);
+    await expect(workspace(page)).not.toContainText("Your response before the start");
+    await expect(
+      page.getByRole("region", { name: text.en.participants, exact: true }),
+    ).toBeVisible();
+    expect(state.requests.filter((r) => r.includes("/my-response"))).toEqual([]);
+    await quiet(page);
+  });
 
 test("L6 an empty decliner list says so", async ({ page }) => {
   await openDetail(page);

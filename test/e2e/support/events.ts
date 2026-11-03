@@ -100,6 +100,8 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     declinersStatus: 200,
     countsStatus: 200,
     countsGate: null as Promise<void> | null,
+    /** Replaces the session capabilities when set. */
+    capabilities: null as string[] | null,
   };
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
@@ -119,6 +121,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     if (p === "/me") {
       const self = accountFixture(locale).data;
       if (staff) self.capabilities.push("events.manage");
+      if (state.capabilities) self.capabilities = [...state.capabilities];
       self.preferences.displayTimezone = "Europe/Warsaw";
       return state.session
         ? reply(self)

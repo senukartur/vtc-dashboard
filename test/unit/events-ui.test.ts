@@ -42,16 +42,20 @@ test("the date tile uses the display timezone across a day boundary and a DST ch
   expect(dateTile("2026-10-25T22:30:00.000Z", "en", "Europe/Warsaw").day).toBe("25");
 });
 
+// ICU versions differ in the space before AM/PM (U+202F or U+0020); compare normalized text.
+const spaced = (value: string) => value.replace(/\s+/g, " ");
 test("compact times and the timezone label carry the offset at that instant", () => {
   expect(timezoneOffset("2026-10-25T00:30:00.000Z", "Europe/Warsaw")).toBe("GMT+02:00");
   expect(timezoneOffset("2026-10-25T01:30:00.000Z", "Europe/Warsaw")).toBe("GMT+01:00");
-  expect(compactTime("2026-10-25T00:30:00.000Z", "en", "Europe/Warsaw")).toMatch(
+  expect(spaced(compactTime("2026-10-25T00:30:00.000Z", "en", "Europe/Warsaw"))).toMatch(
     /^Sun, Oct 25, 2026, 02:30 AM · GMT\+02:00$/,
   );
-  expect(compactTime("2026-10-25T01:30:00.000Z", "en", "Europe/Warsaw")).toMatch(
+  expect(spaced(compactTime("2026-10-25T01:30:00.000Z", "en", "Europe/Warsaw"))).toMatch(
     /^Sun, Oct 25, 2026, 02:30 AM · GMT\+01:00$/,
   );
-  expect(compactTime(start, "ru", "Europe/Moscow")).toMatch(/4 нояб.*2026.*20:00 · GMT\+03:00$/);
+  expect(spaced(compactTime(start, "ru", "Europe/Moscow"))).toMatch(
+    /4 нояб.*2026.*20:00 · GMT\+03:00$/,
+  );
   expect(timezoneLabel("Europe/Moscow", start)).toBe("Europe/Moscow (GMT+03:00)");
   expect(timezoneLabel("Europe/Warsaw", "2026-07-01T12:00:00.000Z")).toBe(
     "Europe/Warsaw (GMT+02:00)",

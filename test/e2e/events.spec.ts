@@ -504,7 +504,7 @@ test("RSVP prevents duplicates, retains decline input on stale and clears privat
   });
   await page.getByRole("button", { name: "Save response", exact: true }).click();
   await expect.poll(() => state.commands.length).toBe(2);
-  await expect(page.getByRole("button", { name: "Loading events…", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Saving response…", exact: true })).toBeDisabled();
   for (const locale of ["en", "ru"] as const) {
     await catalogLanguage(page, locale);
     await viewportCapture(page, info, `decline-pending-${locale}`);
