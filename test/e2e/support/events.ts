@@ -90,6 +90,18 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     attendanceReceipts: new Map<string, { fingerprint: string; version: number }>(),
     participantPages: false,
     participantCursors: [] as string[],
+    /** Extra first-page rows besides the current member (fictional names only). */
+    extraParticipants: [] as S["Participant"][],
+    extraDecliners: [] as S["Participant"][],
+    declinerPages: false,
+    declinerCursors: [] as string[],
+    /** Non-200 statuses injected for the member list and count reads. */
+    participantsStatus: 200,
+    declinersStatus: 200,
+    countsStatus: 200,
+    countsGate: null as Promise<void> | null,
+    /** Replaces the session capabilities when set. */
+    capabilities: null as string[] | null,
   };
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
@@ -109,6 +121,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     if (p === "/me") {
       const self = accountFixture(locale).data;
       if (staff) self.capabilities.push("events.manage");
+      if (state.capabilities) self.capabilities = [...state.capabilities];
       self.preferences.displayTimezone = "Europe/Warsaw";
       return state.session
         ? reply(self)
@@ -243,6 +256,44 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
             json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
           });
     if (p.endsWith("/my-response")) return reply(state.response, 200, state.response.version);
+    const unavailable = (status: number) =>
+      route.fulfill({ status, json: { error: { code: "UNAVAILABLE", message: "Unavailable" } } });
+    const self = (response: S["Rsvp"]["response"]) =>
+      state.response.response === response ? [{ member: accountFixture().data.member }] : [];
+    if (p.endsWith("/response-counts")) {
+      if (state.countsGate) await state.countsGate;
+      if (state.countsStatus !== 200) return unavailable(state.countsStatus);
+      return reply({
+        participating:
+          self("participating").length +
+          state.extraParticipants.length +
+          (state.participantPages ? 25 : 0),
+        declined:
+          self("declined").length + state.extraDecliners.length + (state.declinerPages ? 25 : 0),
+      });
+    }
+    if (p.endsWith("/decliners")) {
+      if (state.declinersStatus !== 200) return unavailable(state.declinersStatus);
+      const cursor = url.searchParams.get("cursor") ?? "";
+      state.declinerCursors.push(cursor);
+      if (state.declinerPages)
+        return reply({
+          items: cursor
+            ? self("declined")
+            : Array.from({ length: 25 }, (_, i) => ({
+                member: {
+                  id: `e0581000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+                  nickname: `Fictional decliner ${i + 1}`,
+                  roles: ["driver" as const],
+                  formerMember: i === 1,
+                },
+              })),
+          nextCursor: cursor ? null : "synthetic-decliner-page-2",
+        });
+      return reply({ items: [...state.extraDecliners, ...self("declined")], nextCursor: null });
+    }
+    if (p.endsWith("/participants") && state.participantsStatus !== 200)
+      return unavailable(state.participantsStatus);
     if (p.endsWith("/participants") && state.participantPages) {
       const cursor = url.searchParams.get("cursor") ?? "";
       state.participantCursors.push(cursor);
@@ -265,10 +316,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     }
     if (p.endsWith("/participants"))
       return reply({
-        items:
-          state.response.response === "participating"
-            ? [{ member: accountFixture().data.member }]
-            : [],
+        items: [...state.extraParticipants, ...self("participating")],
         nextCursor: null,
       });
     if (p.endsWith("/attendance")) {
