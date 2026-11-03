@@ -51,6 +51,7 @@ const enabled = {
   externalIdentities: true,
   admissions: true,
   mail: false,
+  trips: true,
 };
 const cookies = (values: readonly string[]) =>
   values.map((value) => value.split(";", 1)[0]).join("; ");

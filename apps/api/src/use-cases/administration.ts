@@ -14,10 +14,12 @@ export function createAdministration(
     externalIdentities: boolean;
     admissions: boolean;
     mail: boolean;
+    trips: boolean;
   },
 ) {
   const qualifications = createQualificationInitialization(unit),
-    activity = createTripActivity(unit),
+    // The runtime database role can read trips only where the Trips module is configured.
+    activity = enabled.trips ? createTripActivity(unit) : undefined,
     audit = createAudit(unit),
     page = pagination(identity.config.secret, "administration");
   async function settings(actor: Actor) {
@@ -78,7 +80,9 @@ export function createAdministration(
           ids = selected.map((row) => row.id);
         // Lock order: company -> sorted members (share) -> qualifications -> plain trips read.
         const assignments = await qualifications.administrationProjection(tx, ids);
-        const lastAccepted = await activity.lastAcceptedInTransaction(tx, ids);
+        const lastAccepted = activity
+          ? await activity.lastAcceptedInTransaction(tx, ids)
+          : new Map<string, string>();
         const items = selected.map(({ id, nickname, roles, ...row }) => ({
           ...row,
           lastAcceptedTripAt: lastAccepted.get(id) ?? null,

@@ -309,6 +309,7 @@ export function composeIdentity(
       externalIdentities: externalEnabled,
       admissions: !!admissionsConfig,
       mail: !!mail,
+      trips: !!tripsConfig,
     }),
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
