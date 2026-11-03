@@ -59,13 +59,35 @@ export function validProject(value) {
   return browserProjects.includes(value);
 }
 
-const localFoci = ["all", ...selectableLanes, "failure-reporting", "selected"];
+// A shard is "<index>/<total>" with 1 <= index <= total <= 8.
+export function validShard(value) {
+  const match = /^([1-8])\/([1-8])$/.exec(value ?? "");
+  return !!match && Number(match[1]) <= Number(match[2]);
+}
 
-// pnpm test:local [focus] [--probe] [--skip-check] [--project <name>] [--] [lane|file ...]
+// CI groups split the aggregate into parallel jobs; together they run every stage of "all".
+export const ciGroups = {
+  core: ["isolation", "unit", "contracts", "failure-reporting"],
+  integration: ["integration"],
+  "persistence-recovery": ["persistence", "recovery"],
+  e2e: ["e2e"],
+};
+
+const localFoci = [
+  "all",
+  ...selectableLanes,
+  "failure-reporting",
+  "selected",
+  "core",
+  "persistence-recovery",
+];
+
+// pnpm test:local [focus] [--probe] [--skip-check] [--project <name>] [--shard <i/n>]
+//   [--] [lane|file ...]
 export function parseLocalArguments(argv) {
   const [focus = "all", ...rest] = argv;
   if (!localFoci.includes(focus)) throw new Error("INVALID_TEST_LANE");
-  const options = { focus, probe: false, skipCheck: false, project: "", tokens: [] };
+  const options = { focus, probe: false, skipCheck: false, project: "", shard: "", tokens: [] };
   for (let index = 0; index < rest.length; index += 1) {
     const value = rest[index];
     if (value === "--") continue;
@@ -75,14 +97,21 @@ export function parseLocalArguments(argv) {
       options.project = rest[index + 1] ?? "";
       index += 1;
       if (!validProject(options.project)) throw new Error("INVALID_TEST_PROJECT");
+    } else if (value === "--shard") {
+      options.shard = rest[index + 1] ?? "";
+      index += 1;
+      if (!validShard(options.shard)) throw new Error("INVALID_TEST_SHARD");
     } else if (!value.startsWith("-")) options.tokens.push(value.replaceAll("\\", "/"));
     else throw new Error("INVALID_TEST_ARGUMENTS");
   }
   if (options.probe) {
     if (!["unit", "integration", "e2e"].includes(focus)) throw new Error("INVALID_PROBE_LANE");
-    if (options.skipCheck || options.project || options.tokens.length)
+    if (options.skipCheck || options.project || options.shard || options.tokens.length)
       throw new Error("INVALID_TEST_ARGUMENTS");
   }
+  // The core group owns the check stage, so it may never skip it.
+  if (options.skipCheck && focus === "core") throw new Error("INVALID_TEST_ARGUMENTS");
+  if (options.shard && focus !== "e2e") throw new Error("INVALID_TEST_ARGUMENTS");
   if ((focus === "selected") !== options.tokens.length > 0)
     throw new Error("INVALID_TEST_ARGUMENTS");
   if (options.skipCheck && ["all", "failure-reporting"].includes(focus))

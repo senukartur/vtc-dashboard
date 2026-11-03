@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   affectedTests,
+  ciGroups,
   groupSelection,
   laneOf,
   listTestFiles,
@@ -9,6 +10,7 @@ import {
   parseSelection,
   selectableLanes,
   serializeSelection,
+  validShard,
 } from "../../scripts/test-selection.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -92,6 +94,7 @@ describe("launcher arguments", () => {
       probe: false,
       skipCheck: true,
       project: "desktop-chromium",
+      shard: "",
       tokens: ["test/e2e/events.spec.ts"],
     });
     expect(parseLocalArguments(["e2e", "--project", "mobile-chromium"]).project).toBe(
@@ -110,8 +113,39 @@ describe("launcher arguments", () => {
       ["integration", "--project", "desktop-chromium"],
       ["e2e", "--project", "firefox"],
       ["e2e", "--grep", "x"],
+      ["core", "--skip-check"],
+      ["integration", "--shard", "1/4"],
+      ["e2e", "--shard", "5/4"],
+      ["e2e", "--shard", "0/4"],
+      ["e2e", "--shard", "1/9"],
+      ["e2e", "--probe", "--shard", "1/4"],
     ])
       expect(() => parseLocalArguments(argv), argv.join(" ")).toThrow();
+  });
+});
+
+describe("CI groups", () => {
+  test("together run every stage of the aggregate exactly once", () => {
+    const stages = Object.values(ciGroups).flat();
+    expect(stages.toSorted()).toEqual(
+      ["isolation", ...selectableLanes, "failure-reporting"].toSorted(),
+    );
+    expect(new Set(stages).size).toBe(stages.length);
+  });
+
+  test("accept a shard for the browser group only", () => {
+    expect(parseLocalArguments(["e2e", "--skip-check", "--shard", "2/4"])).toMatchObject({
+      focus: "e2e",
+      skipCheck: true,
+      shard: "2/4",
+    });
+    expect(parseLocalArguments(["persistence-recovery", "--skip-check"]).focus).toBe(
+      "persistence-recovery",
+    );
+    expect(parseLocalArguments(["core"])).toMatchObject({ focus: "core", skipCheck: false });
+    for (const value of ["1/1", "4/4", "8/8"]) expect(validShard(value)).toBe(true);
+    for (const value of ["", "4", "2/1", "1/4/4", " 1/4", undefined])
+      expect(validShard(value)).toBe(false);
   });
 });
 

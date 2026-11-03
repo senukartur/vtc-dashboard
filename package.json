@@ -36,6 +36,8 @@
     "test:e2e": "node --import tsx scripts/test-lanes.ts e2e",
     "test:failure-reporting": "node --import tsx scripts/test-lanes.ts failure-reporting",
     "test:all": "node --import tsx scripts/test-lanes.ts all",
+    "test:core": "node --import tsx scripts/test-lanes.ts core",
+    "test:persistence-recovery": "node --import tsx scripts/test-lanes.ts persistence-recovery",
     "test:selected": "node --import tsx scripts/test-lanes.ts selected",
     "test:local": "node scripts/test-local.mjs",
     "test:affected": "node scripts/test-affected.mjs"

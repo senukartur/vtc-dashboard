@@ -15,9 +15,22 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality suite
+    # Each leg runs its own isolated stack; together the legs run every stage of the aggregate.
+    # needs.quality.result is success only when every leg succeeds.
+    name: Quality suite (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: core, group: core, shard: "" }
+          - { name: integration, group: integration, shard: "" }
+          - { name: persistence-recovery, group: persistence-recovery, shard: "" }
+          - { name: e2e 1-4, group: e2e, shard: 1/4 }
+          - { name: e2e 2-4, group: e2e, shard: 2/4 }
+          - { name: e2e 3-4, group: e2e, shard: 3/4 }
+          - { name: e2e 4-4, group: e2e, shard: 4/4 }
     steps:
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,14 +40,17 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.0
-      - name: Run isolated quality suite
-        timeout-minutes: 65
-        run: node scripts/test-ci.mjs
+      - name: Run isolated quality group
+        timeout-minutes: 35
+        env:
+          QUALITY_GROUP: ${{ matrix.group }}
+          QUALITY_SHARD: ${{ matrix.shard }}
+        run: node scripts/test-ci.mjs --group "$QUALITY_GROUP" ${QUALITY_SHARD:+--shard "$QUALITY_SHARD"}
       - name: Upload safe structured result
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: quality-${{ github.run_id }}-${{ github.run_attempt }}
+          name: quality-${{ matrix.group }}-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .local/ci/quality.json
           include-hidden-files: true
           if-no-files-found: error
