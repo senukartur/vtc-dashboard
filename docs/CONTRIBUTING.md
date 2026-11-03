@@ -84,6 +84,7 @@ The [development deployment runbook](operations/development.md) covers reviewed 
 | `pnpm check` | Generated-file, format, lint, type and scaffold checks |
 | `node scripts/test-ci.mjs` | Safe structured CI wrapper around the same isolated suite; [CI gates and negative probes](development/ci.md) |
 | `pnpm test:local` | Owned isolated Docker stack: check/build, Vitest unit/contract/real-MySQL lanes, separate persistence/recovery, desktop/mobile Playwright and failure-reporting proof; see [testing](development/testing.md) |
+| `pnpm test:affected` / `pnpm test:local selected` | Dry-run or execute only the tests covering the change, or explicit lanes/files, in the same isolated stack; see [focused runs](development/testing.md#focused-local-runs) |
 | `pnpm test:unit` / `pnpm test:contracts` | Native database-independent Vitest lanes after `pnpm build:packages`; Docker remains the network-isolated path |
 | `pnpm db:check` | Real authenticated MySQL baseline probe; nonzero on failure |
 | `pnpm db:generate` | Sole migration integrator generates/reviews Drizzle SQL/journal and formats metadata |
