@@ -1,0 +1,509 @@
+import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
+import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
+import { catalogLanguage } from "./support/catalogs.ts";
+import { eventFixture, eventId, mockEvents } from "./support/events.ts";
+import { expect, test } from "./support/fixtures.ts";
+
+type S = components["schemas"];
+const text = {
+  en: {
+    title: "Company events",
+    response: "Your response",
+    participating: "Participating",
+    declined: "Can't attend",
+    unanswered: "No answer",
+    signedUp: "Signed up",
+    cantAttend: "Can't attend",
+    participants: "Participants",
+    save: "Save response",
+    reason: "Private decline reason",
+  },
+  ru: {
+    title: "События компании",
+    response: "Ваш ответ",
+    participating: "Участвую",
+    declined: "Не смогу",
+    unanswered: "Без ответа",
+    signedUp: "Записались",
+    cantAttend: "Не смогут",
+    participants: "Участники",
+    save: "Сохранить ответ",
+    reason: "Личная причина отказа",
+  },
+} as const;
+const slogan = /Достаточно суров|Юкон\?|Yukon\?/;
+const privateReads = /participants|decliners|response-counts|my-response|attendance/;
+const longNames = [
+  "Фиктивный_Дальнобойщик_Северного_Маршрута",
+  "Фиктивная Водительница Ночного Конвоя",
+  "Fictional_Long_Haul_Night_Convoy_Driver",
+];
+const person = (index: number, nickname: string): S["Participant"] => ({
+  member: {
+    id: `e0582000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    nickname,
+    formerMember: index === 3,
+    roles: ["driver"],
+  },
+});
+
+async function box(locator: Locator) {
+  const value = await locator.boundingBox();
+  if (!value) throw new Error("ELEMENT_NOT_RENDERED");
+  return value;
+}
+const workspace = (page: Page) => page.locator(".events-page");
+/**
+ * Words that wrap mid-word (a word whose text range spans several lines). Only .events-break
+ * (IDs and exact masses) may break anywhere; options of a closed select have no visible lines.
+ */
+async function brokenWords(root: Locator) {
+  return root.evaluate((element) => {
+    const broken: string[] = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement?.closest(".events-break, select")) continue;
+      for (const match of (node.textContent ?? "").matchAll(/[^\s-]+/g)) {
+        const range = document.createRange();
+        range.setStart(node, match.index);
+        range.setEnd(node, match.index + match[0].length);
+        const lines = new Set(Array.from(range.getClientRects(), (rect) => Math.round(rect.top)));
+        if (lines.size > 1) broken.push(match[0]);
+      }
+    }
+    return broken;
+  });
+}
+async function noOverflow(page: Page) {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+async function capture(page: Page, info: TestInfo, name: string) {
+  await page.evaluate(() => document.fonts.ready);
+  await noOverflow(page);
+  await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
+}
+/** Interactive targets inside the workspace are at least 30px tall (40px on coarse pointers). */
+async function smallTargets(root: Locator) {
+  return root.evaluate((element) =>
+    Array.from(element.querySelectorAll<HTMLElement>("a, button, textarea, select, input"))
+      .filter((node) => node.getClientRects().length > 0)
+      .filter((node) => node.getBoundingClientRect().height < 30)
+      .map((node) => node.textContent?.trim() || node.tagName),
+  );
+}
+/** No live region remains in the workspace; shell statuses such as the event chip are outside. */
+async function quiet(page: Page) {
+  await expect(workspace(page).getByRole("status")).toHaveCount(0);
+  await expect(workspace(page).getByRole("alert")).toHaveCount(0);
+  await expect(workspace(page).locator("[aria-live]")).toHaveCount(0);
+}
+async function openDetail(
+  page: Page,
+  locale: "en" | "ru" = "en",
+  setup: (state: Awaited<ReturnType<typeof mockEvents>>) => void = () => {},
+  staff = false,
+) {
+  const state = await mockEvents(page, staff, locale);
+  setup(state);
+  await page.goto(`/account/events/${eventId}`);
+  if (locale !== "en") await catalogLanguage(page, locale);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
+  return state;
+}
+async function settledDetail(page: Page, locale: "en" | "ru" = "en") {
+  const participants = page.getByRole("region", { name: text[locale].participants, exact: true });
+  await expect(participants.locator(".events-counts")).not.toContainText(/…/);
+  for (const name of [text[locale].signedUp, text[locale].cantAttend])
+    await expect(
+      participants.getByRole("region", { name, exact: true }).getByRole("status"),
+    ).toHaveCount(0);
+  return participants;
+}
+
+function listItems(locale: "en" | "ru"): S["EventPublic"][] {
+  const base = eventFixture();
+  return [
+    {
+      ...base,
+      title:
+        locale === "ru"
+          ? "Фиктивный вечерний конвой по длинному северному маршруту"
+          : "Fictional evening convoy along the long northern route",
+    },
+    {
+      ...base,
+      id: "e0582000-0000-4000-8000-000000000101",
+      game: "ats",
+      title: locale === "ru" ? "Фиктивный ночной рейс" : "Fictional night run",
+      startsAt: "2099-10-25T23:30:00.000Z",
+      meetingAt: "2099-10-25T23:00:00.000Z",
+    },
+    {
+      ...base,
+      id: "e0582000-0000-4000-8000-000000000102",
+      title: locale === "ru" ? "Фиктивный отменённый конвой" : "Fictional cancelled convoy",
+      status: "cancelled",
+    },
+  ];
+}
+
+for (const locale of ["en", "ru"] as const)
+  test(`L1 ${locale} list rows keep the date tile left of the body and fit`, async ({
+    page,
+  }, info) => {
+    await mockEvents(page, false, locale);
+    const items = listItems(locale);
+    await page.route("**/api/v1/events?*", (route) =>
+      route.fulfill({
+        json: { data: { items, nextCursor: null }, meta: { requestId: "synthetic-events-list" } },
+      }),
+    );
+    await page.goto("/account/events");
+    if (locale !== "en") await catalogLanguage(page, locale);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(text[locale].title);
+    const rows = workspace(page).locator(".events-row");
+    await expect(rows).toHaveCount(3);
+    await expect(workspace(page)).toContainText(/Europe\/Warsaw \(GMT\+0[12]:00\)/);
+    await expect(
+      workspace(page).getByRole("heading", { level: 2, name: items[0]?.title ?? "", exact: true }),
+    ).toBeVisible();
+    await expect(rows.nth(2).locator(".events-status")).toHaveText(
+      locale === "en" ? "Cancelled" : "Отменено",
+    );
+    // 23:30 UTC on 25 October 2099 is 00:30 on the 26th in Warsaw (UTC+1 after summer time):
+    // the tile follows the display timezone, not UTC.
+    await expect(rows.nth(1).locator(".events-tile-day")).toHaveText("26");
+    await expect(rows.nth(1)).toContainText("ATS");
+    for (let index = 0; index < 3; index++) {
+      const tile = await box(rows.nth(index).locator(".events-tile")),
+        body = await box(rows.nth(index).locator(".events-row-body"));
+      expect(tile.x + tile.width).toBeLessThanOrEqual(body.x);
+    }
+    await expect(page.getByRole("button", { name: "Event details" })).toHaveCount(0);
+    await expect(
+      page.getByRole("group", { name: locale === "en" ? "Period" : "Период", exact: true }),
+    ).toBeVisible();
+    await noOverflow(page);
+    expect(await brokenWords(workspace(page))).toEqual([]);
+    expect(await smallTargets(workspace(page))).toEqual([]);
+    await quiet(page);
+    await expect(page.locator("body")).not.toContainText(slogan);
+    await capture(page, info, `events-list-${locale}`);
+  });
+
+for (const locale of ["en", "ru"] as const)
+  test(`L2 ${locale} upcoming detail places participants by width and keeps names whole`, async ({
+    page,
+  }, info) => {
+    const state = await openDetail(page, locale, (s) => {
+      s.response = { response: "participating", declineReason: null, version: 2 };
+      s.extraParticipants = longNames.map((name, index) => person(index + 1, name));
+      s.extraDecliners = [person(4, "Фиктивный_Отказавшийся_Водитель_Колонны")];
+      s.event.description =
+        locale === "ru"
+          ? "Фиктивный сбор в гавани.\nВторая строка описания."
+          : "Fictional harbour meeting.\nSecond description line.";
+      s.prescribedMassKg = "21000.000000000000000001";
+      s.prescribedCargoId = "e0350000-0000-4000-8000-000000000002";
+    });
+    const participants = await settledDetail(page, locale);
+    const main = await box(workspace(page).locator(".events-main")),
+      side = await box(workspace(page).locator(".events-side"));
+    if (info.project.name === "desktop-chromium")
+      expect(side.x).toBeGreaterThanOrEqual(main.x + main.width);
+    else expect(side.y).toBeGreaterThanOrEqual(main.y + main.height);
+    const counts = participants.locator(".events-counts");
+    await expect(counts).toContainText(locale === "en" ? "✓ Participating: 4" : "✓ Участвуют: 4");
+    await expect(counts).toContainText(locale === "en" ? "✕ Can't attend: 1" : "✕ Не смогут: 1");
+    const signedUp = participants.getByRole("region", { name: text[locale].signedUp, exact: true });
+    for (const name of longNames)
+      await expect(signedUp.getByRole("link", { name, exact: true })).toBeVisible();
+    await expect(signedUp).toContainText(locale === "en" ? "(you)" : "(вы)");
+    await expect(signedUp).toContainText(locale === "en" ? "former member" : "бывший участник");
+    // The segmented options stay inside the response card at every width.
+    const group = page.getByRole("group", { name: text[locale].response, exact: true }),
+      card = await box(page.getByRole("region", { name: text[locale].response, exact: true }));
+    for (const name of [
+      text[locale].participating,
+      text[locale].declined,
+      text[locale].unanswered,
+    ]) {
+      const option = await box(group.getByRole("button", { name, exact: true }));
+      expect(option.x).toBeGreaterThanOrEqual(card.x);
+      expect(option.x + option.width).toBeLessThanOrEqual(card.x + card.width);
+    }
+    await expect(group.getByRole("button", { name: text[locale].participating })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // The description keeps its line break; the prescribed mass is the only breakable value.
+    expect(
+      await workspace(page)
+        .locator(".events-description")
+        .evaluate((node) => getComputedStyle(node).whiteSpace),
+    ).toBe("pre-wrap");
+    await expect(workspace(page).locator(".events-break").first()).toHaveText(
+      state.prescribedMassKg as string,
+    );
+    await expect(workspace(page).locator(".events-exception")).toBeVisible();
+    await noOverflow(page);
+    expect(await brokenWords(workspace(page))).toEqual([]);
+    expect(await smallTargets(workspace(page))).toEqual([]);
+    await quiet(page);
+    await expect(page.locator("body")).not.toContainText(slogan);
+    await capture(page, info, `events-detail-${locale}`);
+  });
+
+test("L2 ru keeps whole words at the narrowest two-column width", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium", "The narrow two-column band is one check.");
+  await openDetail(page, "ru", (s) => {
+    s.extraParticipants = longNames.map((name, index) => person(index + 1, name));
+  });
+  await settledDetail(page, "ru");
+  let side = false;
+  for (let width = 900; width <= 1400 && !side; width += 10) {
+    await page.setViewportSize({ width, height: 900 });
+    const main = await box(workspace(page).locator(".events-main")),
+      right = await box(workspace(page).locator(".events-side"));
+    side = right.x >= main.x + main.width;
+  }
+  expect(side).toBe(true);
+  await noOverflow(page);
+  expect(await brokenWords(workspace(page))).toEqual([]);
+  await capture(page, info, "events-detail-ru-narrow-two-column");
+});
+
+test("L3 declining keeps focus, pending Save keeps focus and one saved status follows", async ({
+  page,
+}, info) => {
+  const state = await openDetail(page);
+  await settledDetail(page);
+  await quiet(page);
+  const group = page.getByRole("group", { name: text.en.response, exact: true }),
+    declined = group.getByRole("button", { name: text.en.declined, exact: true }),
+    save = page.getByRole("button", { name: text.en.save, exact: true });
+  await declined.click();
+  await expect(declined).toBeFocused();
+  await expect(declined).toHaveAttribute("aria-pressed", "true");
+  const reason = page.getByRole("textbox", { name: text.en.reason, exact: true });
+  await expect(reason).toBeVisible();
+  await expect(reason).toHaveAccessibleDescription(/Only you, the director and deputies/);
+  await reason.fill("Fictional night shift\nSecond line");
+  // Switching away and back keeps the typed reason.
+  await group.getByRole("button", { name: text.en.unanswered, exact: true }).click();
+  await expect(reason).toHaveCount(0);
+  await declined.click();
+  await expect(reason).toHaveValue("Fictional night shift\nSecond line");
+  let release = () => {};
+  state.gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await save.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => state.commands.length).toBe(1);
+  const pending = page.getByRole("button", { name: "Loading events…", exact: true });
+  await expect(pending).toBeFocused();
+  await expect(pending).toHaveAttribute("aria-disabled", "true");
+  // A second activation and a choice change are ignored while the command is pending.
+  await page.keyboard.press("Enter");
+  // dispatchEvent clicks without moving focus, so the focus assertion below stays meaningful.
+  await group
+    .getByRole("button", { name: text.en.participating, exact: true })
+    .dispatchEvent("click");
+  await expect(declined).toHaveAttribute("aria-pressed", "true");
+  await expect(pending).toBeFocused();
+  await capture(page, info, "events-decline-pending");
+  release();
+  await expect(workspace(page).getByRole("status")).toHaveText("Response saved.");
+  await expect(workspace(page).getByRole("status")).toHaveCount(1);
+  await expect(save).toBeFocused();
+  expect(state.commands).toHaveLength(1);
+  expect(state.commands[0]?.body).toEqual({
+    response: "declined",
+    reason: "Fictional night shift\nSecond line",
+  });
+  await expect(workspace(page).getByRole("alert")).toHaveCount(0);
+  const counts = page
+    .getByRole("region", { name: text.en.participants, exact: true })
+    .locator(".events-counts");
+  await expect(counts).toContainText("✕ Can't attend: 1");
+  await expect(counts).not.toHaveAttribute("role", /.+/);
+  await expect(workspace(page).locator("[aria-live]")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: text.en.cantAttend, exact: true }).getByRole("link", {
+      name: "Fictional Yukon Member",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(workspace(page).locator(".events-state")).toContainText("You can't attend.");
+});
+
+for (const locale of ["en", "ru"] as const)
+  test(`L4 ${locale} a started event shows the closed summary without reading my-response`, async ({
+    page,
+  }, info) => {
+    const state = await openDetail(page, locale, (s) => {
+      s.event.startsAt = "2020-10-25T13:00:00.000Z";
+      s.event.meetingAt = "2020-10-25T12:00:00.000Z";
+      s.response = { response: "declined", declineReason: "Fictional own reason", version: 2 };
+      s.ownAttendance = "attended";
+    });
+    await settledDetail(page, locale);
+    const section = page.getByRole("region", { name: text[locale].response, exact: true });
+    await expect(section).toContainText(
+      locale === "en" ? "Your response before the start" : "Ваш ответ до начала",
+    );
+    await expect(section).toContainText(`✕ ${text[locale].declined}`);
+    await expect(section).toContainText("Fictional own reason");
+    await expect(section).toContainText(locale === "en" ? "Attended" : "Участвовал");
+    await expect(page.getByRole("group", { name: text[locale].response })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: text[locale].save })).toHaveCount(0);
+    expect(state.requests.filter((r) => r.includes("/my-response"))).toEqual([]);
+    await noOverflow(page);
+    expect(await brokenWords(workspace(page))).toEqual([]);
+    await quiet(page);
+    await capture(page, info, `events-started-${locale}`);
+  });
+
+test("L4 a manager sees the roster before the start with recording unavailable", async ({
+  page,
+}, info) => {
+  const state = await openDetail(page, "en", () => {}, true);
+  await settledDetail(page);
+  await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+  const roster = workspace(page).locator(".events-roster");
+  await expect(roster.locator(".event-attendance-row")).toHaveCount(1);
+  await expect(roster).toContainText("✕ Can't attend");
+  await expect(roster).toContainText("Fictional private RSVP reason");
+  await expect(roster.getByText("Available after the event starts", { exact: true })).toBeVisible();
+  const record = roster.getByRole("button", { name: "Record attendance", exact: true });
+  await expect(record).toBeDisabled();
+  await expect(record).toHaveAccessibleDescription("Available after the event starts");
+  await expect(roster.locator(`#attendance-${fixtureId}`)).toBeDisabled();
+  await record.click({ force: true });
+  expect(state.commands).toEqual([]);
+  await noOverflow(page);
+  expect(await brokenWords(workspace(page))).toEqual([]);
+  await capture(page, info, "events-manager-upcoming");
+});
+
+test("L5 a cancelled event closes responses and hides organizer actions", async ({
+  page,
+}, info) => {
+  const state = await openDetail(
+    page,
+    "en",
+    (s) => {
+      s.event.status = "cancelled";
+      s.response = { response: "participating", declineReason: null, version: 2 };
+    },
+    true,
+  );
+  await settledDetail(page);
+  const section = page.getByRole("region", { name: text.en.response, exact: true });
+  await expect(section).toContainText("Responses are closed: the event was cancelled.");
+  await expect(section).toContainText("✓ Participating");
+  await expect(section).not.toContainText("records attendance after the start");
+  await expect(workspace(page).locator(".events-header .events-status")).toHaveText("Cancelled");
+  await expect(page.getByRole("button", { name: "Edit event" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Cancel event" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: text.en.response })).toHaveCount(0);
+  expect(state.requests.filter((r) => r.includes("/my-response"))).toEqual([]);
+  await noOverflow(page);
+  await quiet(page);
+  await capture(page, info, "events-cancelled");
+});
+
+test("L6 counts and list failures stay in their section and are never shown as zero", async ({
+  page,
+}, info) => {
+  await openDetail(page, "en", (s) => {
+    s.countsStatus = 503;
+    s.declinersStatus = 503;
+  });
+  const participants = page.getByRole("region", { name: text.en.participants, exact: true }),
+    decliners = participants.getByRole("region", { name: text.en.cantAttend, exact: true }),
+    signedUp = participants.getByRole("region", { name: text.en.signedUp, exact: true });
+  await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
+  await expect(participants.locator(".events-counts")).not.toContainText(/\d/);
+  await expect(decliners.getByRole("alert")).toBeVisible();
+  await expect(decliners.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+  await expect(workspace(page).getByRole("alert")).toHaveCount(1);
+  await expect(signedUp).toContainText("No members have signed up.");
+  await noOverflow(page);
+  await capture(page, info, "events-section-failures");
+});
+
+test("L6 an empty decliner list says so", async ({ page }) => {
+  await openDetail(page);
+  await settledDetail(page);
+  await expect(page.getByRole("region", { name: text.en.cantAttend, exact: true })).toContainText(
+    "No one has declined.",
+  );
+  await quiet(page);
+});
+
+test("L6 last-page paging moves focus to the list heading", async ({ page }) => {
+  const declining = await openDetail(page, "en", (s) => {
+    s.declinerPages = true;
+    s.response = { response: "declined", declineReason: "Fictional reason", version: 2 };
+  });
+  const decliners = page.getByRole("region", { name: text.en.cantAttend, exact: true });
+  await expect(decliners.getByRole("link")).toHaveCount(25);
+  await expect(decliners).toContainText("former member");
+  await decliners.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
+  await expect(decliners.getByRole("link", { name: "Fictional Yukon Member" })).toBeVisible();
+  await expect(decliners.getByRole("button", { name: "Next page" })).toHaveCount(0);
+  await decliners.getByRole("button", { name: "First page", exact: true }).click();
+  await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
+  await expect(decliners.getByRole("link")).toHaveCount(25);
+  expect(declining.declinerCursors).toEqual(["", "synthetic-decliner-page-2", ""]);
+  await expect(decliners).not.toContainText("Fictional reason");
+});
+
+test("L7 the public detail on a phone in Russian makes no private reads", async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== "mobile-chromium", "The public phone layout is one check.");
+  const state = await mockEvents(page, false, "ru");
+  state.event.title = "Фиктивный открытый конвой по длинному северному маршруту";
+  state.event.description = "Фиктивный сбор.\nВторая строка.";
+  await page.goto(`/events/${eventId}`);
+  await catalogLanguage(page, "ru");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
+  await expect(workspace(page).locator(".events-facts")).toBeVisible();
+  await expect(page.getByRole("region", { name: text.ru.participants })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: text.ru.response })).toHaveCount(0);
+  expect(state.requests.filter((r) => privateReads.test(r))).toEqual([]);
+  await noOverflow(page);
+  expect(await brokenWords(workspace(page))).toEqual([]);
+  await quiet(page);
+  await capture(page, info, "events-public-ru");
+});
+
+test("L8 the form closes at the start and focus moves to the response heading", async ({
+  page,
+}, info) => {
+  await page.clock.install({ time: new Date("2026-11-04T16:59:00.000Z") });
+  const state = await openDetail(page, "en", (s) => {
+    s.event.meetingAt = "2026-11-04T16:30:00.000Z";
+    s.event.startsAt = "2026-11-04T17:00:00.000Z";
+  });
+  await settledDetail(page);
+  const participating = page
+    .getByRole("group", { name: text.en.response, exact: true })
+    .getByRole("button", { name: text.en.participating, exact: true });
+  await participating.focus();
+  await expect(participating).toBeFocused();
+  const reads = state.requests.filter((r) => r.includes("/my-response")).length;
+  await page.clock.fastForward(61000);
+  const section = page.getByRole("region", { name: text.en.response, exact: true });
+  await expect(section).toContainText("Your response before the start");
+  await expect(section.getByRole("heading", { level: 2, name: text.en.response })).toBeFocused();
+  await expect(page.getByRole("group", { name: text.en.response })).toHaveCount(0);
+  expect(state.requests.filter((r) => r.includes("/my-response")).length).toBe(reads);
+  await quiet(page);
+  await capture(page, info, "events-closed-at-start");
+});

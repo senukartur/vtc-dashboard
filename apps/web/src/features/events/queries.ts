@@ -94,6 +94,8 @@ export function useEventCommand(onFailure?: (failure: AccountFailure) => void) {
             `/events/${target}`,
             `/events/${target}/my-response`,
             `/events/${target}/participants`,
+            `/events/${target}/decliners`,
+            `/events/${target}/response-counts`,
           ].includes(url.pathname)
         );
       if (attendanceChange)
@@ -136,7 +138,7 @@ export function useEventCommand(onFailure?: (failure: AccountFailure) => void) {
             result &&
             !replay &&
             responseChange &&
-            !String(q.queryKey.at(-2)).includes("/participants")
+            !/\/(?:participants|decliners|response-counts)(?:\?|$)/.test(String(q.queryKey.at(-2)))
           ) &&
           !q.queryKey.some((v) => typeof v === "string" && v.includes("cursor=")),
       },
