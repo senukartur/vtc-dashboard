@@ -1,28 +1,25 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eventLine } from "./ci-result.mjs";
 import { runTestProcess } from "./test-process.mjs";
+import { groupSelection, parseLocalArguments, serializeSelection } from "./test-selection.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const focus = process.argv[2] ?? "all";
-const probe = process.argv[3] === "--probe";
-if (probe && !["unit", "integration", "e2e"].includes(focus)) throw new Error("INVALID_PROBE_LANE");
-if (
-  ![
-    "all",
-    "unit",
-    "contracts",
-    "integration",
-    "persistence",
-    "recovery",
-    "e2e",
-    "failure-reporting",
-  ].includes(focus)
-) {
-  throw new Error("INVALID_TEST_LANE");
-}
+const options = parseLocalArguments(process.argv.slice(2));
+const { focus, probe, skipCheck } = options;
+const browserProject = options.project;
+// Validate before allocating anything; the runner validates the same selection again.
+const groups = options.tokens.length
+  ? groupSelection(options.tokens, (path) => existsSync(resolve(root, path)))
+  : [];
+const selection = serializeSelection(
+  groups.flatMap(({ lane, files }) => (files.length ? files : [lane])),
+);
+if (browserProject && focus === "selected" && !groups.some(({ lane }) => lane === "e2e"))
+  throw new Error("INVALID_TEST_ARGUMENTS");
 const run = randomBytes(8).toString("hex");
 const project = `vtc008-${run}`;
 const directory = resolve(root, ".local/testing", run);
@@ -36,6 +33,9 @@ await writeFile(
     `VTC_TEST_RUN=${run}`,
     `VTC_TEST_FOCUS=${focus}`,
     `VTC_TEST_PROBE=${probe ? "assertion" : ""}`,
+    `VTC_TEST_SELECTION=${selection}`,
+    `VTC_TEST_PROJECT=${browserProject}`,
+    `VTC_TEST_SKIP_CHECK=${skipCheck ? "1" : ""}`,
     `VTC_TEST_UID=${process.getuid?.() ?? 1000}`,
     `VTC_TEST_GID=${process.getgid?.() ?? 1000}`,
     `VTC_TEST_OUTPUT=${output.replaceAll("\\", "/")}`,
@@ -77,6 +77,9 @@ async function docker(tail, timeout) {
       VTC_TEST_RUN: run,
       VTC_TEST_FOCUS: focus,
       VTC_TEST_PROBE: probe ? "assertion" : "",
+      VTC_TEST_SELECTION: selection,
+      VTC_TEST_PROJECT: browserProject,
+      VTC_TEST_SKIP_CHECK: skipCheck ? "1" : "",
       VTC_TEST_UID: String(process.getuid?.() ?? 1000),
       VTC_TEST_GID: String(process.getgid?.() ?? 1000),
       VTC_TEST_OUTPUT: output.replaceAll("\\", "/"),

@@ -21,11 +21,17 @@ import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proo
 import { browserFailureLine, browserPreparationLine } from "./browser-diagnostics.mjs";
 import { eventLine } from "./ci-result.mjs";
 import { runTestProcess } from "./test-process.mjs";
+import { groupSelection, parseSelection, validProject } from "./test-selection.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
-if (!lane || ![...lanes, "all", "failure-reporting"].includes(lane))
+if (!lane || ![...lanes, "all", "failure-reporting", "selected"].includes(lane))
   throw new Error("INVALID_TEST_LANE");
+// Focused local runs only: the aggregate and probes never receive a browser project filter.
+const browserProject =
+  !["all", "failure-reporting"].includes(lane) && validProject(process.env.VTC_TEST_PROJECT)
+    ? process.env.VTC_TEST_PROJECT
+    : undefined;
 const cli = (name: string) => resolve(`node_modules/${name}`);
 let active: ReturnType<typeof spawn> | undefined;
 let interrupted = false;
@@ -53,7 +59,13 @@ async function child(args: string[], env: NodeJS.ProcessEnv, capture = false) {
   return { code, output };
 }
 
-async function execute(name: string, probe = false, capture = false, guardFailure = false) {
+async function execute(
+  name: string,
+  probe = false,
+  capture = false,
+  guardFailure = false,
+  files: string[] = [],
+) {
   const started = Date.now();
   const env: NodeJS.ProcessEnv = {
     ...safeChildEnvironment(),
@@ -71,9 +83,16 @@ async function execute(name: string, probe = false, capture = false, guardFailur
       await writeFile(path, JSON.stringify(allocation));
     }
     const args = ["unit", "contracts", "integration"].includes(name)
-      ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts"]
+      ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts", ...files]
       : name === "e2e"
-        ? [cli("@playwright/test/cli.js"), "test", "--config", "playwright.config.ts"]
+        ? [
+            cli("@playwright/test/cli.js"),
+            "test",
+            "--config",
+            "playwright.config.ts",
+            ...(browserProject && !probe ? [`--project=${browserProject}`] : []),
+            ...files,
+          ]
         : [
             "--import",
             "tsx",
@@ -476,6 +495,15 @@ try {
       const started = Date.now();
       await proveFailures();
       console.log(eventLine("failure-reporting", 0, Date.now() - started));
+    }
+  } else if (lane === "selected") {
+    // Every selected lane runs, so one failure does not hide results from the others.
+    for (const { lane: name, files } of groupSelection(
+      parseSelection(process.env.VTC_TEST_SELECTION),
+    )) {
+      const result = await execute(name, false, false, false, files);
+      if (result.code !== 0) process.exitCode = result.code;
+      if (interrupted) break;
     }
   } else process.exitCode = (await execute(lane)).code;
 } catch (error) {
