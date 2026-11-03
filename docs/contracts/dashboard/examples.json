@@ -2792,6 +2792,59 @@
       }
     },
     {
+      "id": "listEventDecliners:success",
+      "operationId": "listEventDecliners",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "member": {
+                "id": "41000000-0000-4000-8000-000000000002",
+                "nickname": "Fixture Trainee",
+                "formerMember": false,
+                "roles": [
+                  "trainee"
+                ]
+              }
+            }
+          ],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listEventDecliners:empty",
+      "operationId": "listEventDecliners",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getEventResponseCounts:success",
+      "operationId": "getEventResponseCounts",
+      "status": 200,
+      "response": {
+        "data": {
+          "participating": 1,
+          "declined": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
       "id": "getUpcomingEvent:success",
       "operationId": "getUpcomingEvent",
       "status": 200,

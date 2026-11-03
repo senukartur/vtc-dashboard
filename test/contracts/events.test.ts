@@ -70,3 +70,30 @@ test("RSVP and attendance contract separate decline reason and actual confirmati
     }),
   ).toBe(true);
 });
+test("event response counts expose only participating/declined totals", () => {
+  expect(valid("EventResponseCounts")({ participating: 0, declined: 0 })).toBe(true);
+  expect(valid("EventResponseCounts")({ participating: 3, declined: 2 })).toBe(true);
+  for (const value of [
+    { participating: 1 },
+    { declined: 1 },
+    { participating: 1, declined: 1, unanswered: 4 },
+    { participating: 1, declined: 1, names: ["Fictional member"] },
+    { participating: 1, declined: 1, declineReason: "Fictional private reason" },
+    { participating: -1, declined: 0 },
+    { participating: 0, declined: 1.5 },
+    { participating: "1", declined: 0 },
+  ])
+    expect(valid("EventResponseCounts")(value)).toBe(false);
+  const decliner = {
+    member: {
+      id: "10000000-0000-4000-8000-000000000002",
+      nickname: "Fictional decliner",
+      formerMember: false,
+      roles: ["trainee"],
+    },
+  };
+  expect(valid("Participant")(decliner)).toBe(true);
+  expect(valid("Participant")({ ...decliner, declineReason: "Fictional private reason" })).toBe(
+    false,
+  );
+});
