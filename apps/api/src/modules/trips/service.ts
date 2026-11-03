@@ -88,6 +88,11 @@ export interface TripsPorts {
   ) => Promise<
     Map<string, { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }>
   >;
+  // Review queue only: current manual revision number/time per trip, without evidence reads.
+  manualRevisions?: (
+    tx: TxContext,
+    tripIds: string[],
+  ) => Promise<Map<string, { number: number; submittedAt: string }>>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export interface SourceContext {
@@ -987,9 +992,9 @@ export function createTrips(
         }
         const items = await summaries(tx, page, current.locale);
         if (scope !== "review") return { items, nextCursor };
-        // One batched manual projection per page (at most 100 trips), never one read per row.
+        // One batched revision read per page (at most 100 trips), never one read per row.
         const manual = page.length
-          ? await ports.manualProjection?.(
+          ? await ports.manualRevisions?.(
               tx,
               page.map((row) => row.id),
             )
@@ -997,7 +1002,7 @@ export function createTrips(
         return {
           items: items.map((item, index) => {
             const row = page[index] as Trip,
-              revision = manual?.get(row.id)?.manualRevision ?? null;
+              revision = manual?.get(row.id) ?? null;
             return {
               ...item,
               review: {

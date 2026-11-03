@@ -1317,18 +1317,14 @@ test("review queue filters hold and order, binds them to cursors and projects ma
     config,
     {
       identity,
-      manualProjection: async (_tx, ids) => {
+      // The queue must never build evidence DTOs; only the narrow revision port is read.
+      manualProjection: async () => {
+        throw new Error("SYNTHETIC_QUEUE_MUST_NOT_PROJECT_EVIDENCE");
+      },
+      manualRevisions: async (_tx, ids) => {
         calls.push([...ids]);
         return new Map(
-          ids
-            .filter((id) => id === third)
-            .map((id) => [
-              id,
-              {
-                manualRevision: { number: 2, submittedAt } as never,
-                evidence: [],
-              },
-            ]),
+          ids.filter((id) => id === third).map((id) => [id, { number: 2, submittedAt }]),
         );
       },
     },

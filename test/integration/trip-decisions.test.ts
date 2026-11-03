@@ -193,6 +193,7 @@ beforeAll(async () => {
       manualEvidence: (tx, owner, payload, id) =>
         manual.validateSourceInTransaction(tx, owner, payload, id),
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
+      manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
       decisionProjection: (tx, id, actor) => service.privateProjectionInTransaction(tx, id, actor),
       correctionRequested: (tx, id, requestId, actor, reason) =>
         service.correctionRequestedInTransaction(tx, id, requestId, actor, reason),
@@ -3354,6 +3355,19 @@ test("review queue items carry hold, reasons, queue time and the current manual 
     manualRevision: null,
   });
   expect(await queueEntry(dispatcher, r.tripId, { hold: false })).toBeUndefined();
+  // Evidence being deleted must not fail the queue page: it reads only revision summaries.
+  const evidenceIds = r.currentRevision.fields.evidenceIds;
+  await control.query("UPDATE manual_evidence SET state='deleting' WHERE id IN (?)", [evidenceIds]);
+  try {
+    expect(
+      (await queueEntry(dispatcher, r.tripId, { hold: true }))?.review?.manualRevision,
+    ).toEqual({
+      number: 1,
+      submittedAt: r.currentRevision.submittedAt,
+    });
+  } finally {
+    await control.query("UPDATE manual_evidence SET state='ready' WHERE id IN (?)", [evidenceIds]);
+  }
   for (const item of (await tripsService.list(owner, { scope: "mine", limit: 5 })).items)
     expect(item).not.toHaveProperty("review");
 });

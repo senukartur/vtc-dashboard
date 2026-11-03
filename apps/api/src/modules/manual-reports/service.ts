@@ -1930,6 +1930,17 @@ export function createManualReports(
     },
     validateSourceInTransaction: validateSource,
     projectionInTransaction: projection,
+    // Queue reads need only the current revision number/time, never evidence: an evidence row
+    // being deleted must not fail a whole review page.
+    async revisionSummariesInTransaction(tx: TxContext, tripIds: string[]) {
+      if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
+      const result = new Map<string, { number: number; submittedAt: string }>();
+      if (!tripIds.length) return result;
+      for (const [tripId, revision] of (await currentRevisions(tx, tripIds)).current)
+        if (revision)
+          result.set(tripId, { number: revision.number, submittedAt: revision.submittedAt });
+      return result;
+    },
     async reconciliationGuardInTransaction(tx: TxContext, tripIds: string[], actorId?: string) {
       const members = await ports.trips.groups.members(tx, tripIds, true),
         ids = members.map((t) => t.id);
@@ -2118,13 +2129,8 @@ export function createManualReports(
     if (canonicalJson(expected) !== canonicalJson(actual)) throw manualError(403);
     await evidenceGate(tx, ownerId, expected.evidenceIds, true);
   }
-  async function projection(tx: TxContext, tripIds: string[]) {
-    if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
-    const result = new Map<
-      string,
-      { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
-    >();
-    if (!tripIds.length) return result;
+  // Current revision per requested trip across its canonical group, newest report first.
+  async function currentRevisions(tx: TxContext, tripIds: string[]) {
     const members = await ports.trips.groups.members(tx, tripIds, "share");
     const group = new Map(members.map((t) => [t.id, t.aliasOf ?? t.id]));
     const originalIds = members.map((t) => t.id);
@@ -2141,16 +2147,33 @@ export function createManualReports(
             .from(manualRevisions)
             .where(inArray(manualRevisions.id, ids))
             .for("share")
-        : [],
-      refs = await c(tx)
-        .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
-        .from(manualEvidenceReferences)
-        .innerJoin(manualEvidence, eq(manualEvidence.id, manualEvidenceReferences.evidenceId))
-        .where(inArray(manualEvidenceReferences.tripId, originalIds))
-        .for("share");
+        : [];
+    const current = new Map<string, Revision | null>();
     for (const tripId of tripIds) {
-      const report = reports.find((r) => group.get(r.tripId) === group.get(tripId)),
-        revision = report ? revisions.find((r) => r.id === report.currentRevisionId) : null;
+      const report = reports.find((r) => group.get(r.tripId) === group.get(tripId));
+      current.set(
+        tripId,
+        (report && revisions.find((r) => r.id === report.currentRevisionId)) ?? null,
+      );
+    }
+    return { group, originalIds, current };
+  }
+  async function projection(tx: TxContext, tripIds: string[]) {
+    if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
+    const result = new Map<
+      string,
+      { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
+    >();
+    if (!tripIds.length) return result;
+    const { group, originalIds, current } = await currentRevisions(tx, tripIds);
+    const refs = await c(tx)
+      .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
+      .from(manualEvidenceReferences)
+      .innerJoin(manualEvidence, eq(manualEvidence.id, manualEvidenceReferences.evidenceId))
+      .where(inArray(manualEvidenceReferences.tripId, originalIds))
+      .for("share");
+    for (const tripId of tripIds) {
+      const revision = current.get(tripId) ?? null;
       const unique = new Map(
         refs
           .filter((r) => group.get(r.tripId) === group.get(tripId))
