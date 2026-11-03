@@ -126,8 +126,14 @@ function LevelText({ cell }: { cell: LevelCell }) {
         <span className="visually-hidden">{t("membersUi.levelLoading")}</span>
       </>
     );
-  // Two short words fit the narrow level columns; the list alert explains the failed label read.
-  if (cell === "unavailable") return <>{t("membersUi.levelNoLabel")}</>;
+  // Two short words fit the narrow level columns; the spoken text says the label read failed.
+  if (cell === "unavailable")
+    return (
+      <>
+        <span aria-hidden="true">{t("membersUi.levelNoLabel")}</span>
+        <span className="visually-hidden">{t("levelLabelUnavailable")}</span>
+      </>
+    );
   return <>{cell.name}</>;
 }
 function ReasonField({

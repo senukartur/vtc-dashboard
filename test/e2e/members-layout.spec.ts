@@ -331,9 +331,13 @@ test("M2 words, dates and badges fit at the narrowest side-by-side width", async
     await expect(rows(page).first()).toBeVisible();
     if (options !== 200)
       await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText(
-        `ETS2${locale === "ru" ? "Нет метки" : "No label"}`,
+        locale === "ru"
+          ? "ETS2Нет меткиНазвание квалификации недоступно"
+          : "ETS2No labelQualification label unavailable",
       );
-    else if (status === "inactive")
+    else if (status === "active")
+      await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText("ETS2Driver I");
+    else
       await expect(rows(page).first()).toContainText(
         locale === "ru" ? "Бывший участник" : "Former member",
       );
@@ -784,7 +788,9 @@ test("M6 a level options failure marks cells unavailable with a scoped alert", a
   await page.goto("/account/admin/members");
   await expect(rows(page)).toHaveCount(5);
   await expect(master(page).getByRole("alert")).toContainText("This information is unavailable.");
-  await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText("ETS2No label");
+  await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText(
+    "ETS2No labelQualification label unavailable",
+  );
   await expect(page.getByText(sentinel)).toHaveCount(0);
   state.optionsStatus = 200;
   await master(page).getByRole("alert").getByRole("button", { name: "Refresh" }).click();
