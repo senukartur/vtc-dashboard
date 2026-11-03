@@ -1,0 +1,394 @@
+/* Compact members table and administration panel (VTC-064). Every selector is scoped to
+   .members-page; portaled confirmation dialogs are reached through .dialog-content:has(.members-dialog).
+   The shared .table and .admin-detail break anywhere; text here wraps only between words, and
+   only .members-break (email, Steam URLs, IDs) may break anywhere. */
+.members-page .members-heading {
+  display: grid;
+  gap: 4px;
+}
+.members-page .members-heading .page-heading {
+  padding-bottom: 0;
+}
+.members-page .card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+.members-page .muted {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.members-page .admin-detail,
+.members-page .members-table :is(th, td),
+.members-page .members-row-button,
+.members-page .badge {
+  overflow-wrap: break-word;
+}
+.members-page .members-break {
+  overflow-wrap: anywhere;
+}
+.members-page .badge {
+  white-space: normal;
+}
+
+/* Filters: nickname search and the role segmented control. */
+.members-page .members-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.members-page .members-search {
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+.members-page .members-search .input {
+  width: 100%;
+}
+.members-page .members-role-filter .segmented-item {
+  min-height: max(var(--control-h-xs), var(--target-min));
+}
+
+/* Side by side only above the shared 700px master/detail toggle, so its display:block and
+   display:none rules keep winning on phones. At 768 the detail wraps below the list. The list's
+   600px basis is the narrowest list that fits all six columns with room to spare. */
+@media (min-width: 701px) {
+  .members-page .admin-workbench {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .members-page .admin-workbench > .admin-master {
+    flex: 1.6 1 600px;
+    min-width: 0;
+  }
+  .members-page .admin-workbench > .admin-detail {
+    flex: 1 1 360px;
+    min-width: 0;
+  }
+}
+.members-page .members-master:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.members-page .members-empty {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+/* Members table: fixed column shares keep the layout independent of long names. At the narrowest
+   side-by-side width (a list of about 570px) each column keeps several pixels beyond its longest
+   expected word, date or badge (a badge does not wrap below its longest word plus its symbol), so
+   font rendering differences between platforms neither break words nor push badges out. */
+.members-page .members-table {
+  table-layout: fixed;
+}
+.members-page .members-table thead th:nth-child(1) {
+  width: 23%;
+}
+.members-page .members-table thead th:nth-child(2) {
+  width: 18%;
+}
+.members-page .members-table thead th:nth-child(3),
+.members-page .members-table thead th:nth-child(4) {
+  width: 11.5%;
+}
+.members-page .members-table thead th:nth-child(5) {
+  width: 20%;
+}
+.members-page .members-table thead th:nth-child(6) {
+  width: 16%;
+}
+/* A short date stays on one line (RU appends a separate year abbreviation). */
+.members-page .members-table time {
+  white-space: nowrap;
+}
+.members-page .members-table :is(th, td) {
+  vertical-align: middle;
+}
+.members-page .members-table tbody th {
+  padding-block: 2px;
+}
+.members-page .members-table tr[data-selected] > * {
+  background: var(--accent-soft);
+}
+.members-page .members-table tr[data-selected] > th {
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+.members-page .members-row-button {
+  width: 100%;
+  min-height: var(--target-min);
+  justify-content: flex-start;
+  color: var(--foreground);
+  font-weight: 600;
+  text-align: left;
+  white-space: normal;
+}
+.members-page .members-row-button:focus-visible {
+  outline-offset: -3px;
+}
+.members-page .members-role-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.members-page .members-role-director {
+  background: var(--accent);
+  color: white;
+}
+.members-page .members-role-deputy_director {
+  background: var(--accent-soft);
+  color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--selection-border);
+}
+.members-page .members-status-active {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.members-page .members-cell-label {
+  display: none;
+}
+
+/* Detail card. */
+.members-page .members-detail {
+  container: members-detail / inline-size;
+}
+.members-page .members-detail > .admin-mobile-back {
+  justify-self: start;
+}
+.members-page .members-head {
+  display: grid;
+  gap: 2px;
+}
+.members-page .members-title,
+.members-page .members-unsaved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.members-page .members-title h2 {
+  min-width: 0;
+  font-size: 16px;
+}
+.members-page .members-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+.members-page .members-facts > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  align-content: start;
+}
+.members-page .members-facts dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.members-page .members-facts dd {
+  margin: 0;
+}
+@container members-detail (max-width: 359px) {
+  .members-page .members-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.members-page .members-section {
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.members-page .members-section h3 {
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.members-page .members-group {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.members-page .members-group legend {
+  padding: 0;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.members-page .members-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+}
+.members-page .members-options-column {
+  display: grid;
+  gap: 2px;
+}
+.members-page .members-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target-min);
+}
+.members-page .members-option input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.members-page .members-check > .muted {
+  margin-top: -4px;
+  padding-left: 28px;
+}
+.members-page .members-unsaved p {
+  color: var(--pending);
+  font-size: var(--font-small);
+}
+.members-page .members-field {
+  display: grid;
+  gap: 4px;
+}
+.members-page .members-proof {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+.members-page .members-proof .admin-actions {
+  margin-top: 6px;
+}
+.members-page .members-danger:not(:disabled) {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+.members-page .members-protected {
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--pending-surface);
+}
+.members-page .members-protected-title {
+  color: var(--pending);
+  font-weight: 600;
+}
+.members-page .members-feedback:empty {
+  display: none;
+}
+.members-page .members-feedback {
+  gap: 6px;
+}
+/* The held retry stays focusable while busy; it looks like a disabled button. */
+.members-page .members-retry[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--muted);
+  background: var(--surface-active);
+  border-color: var(--border-strong);
+}
+
+/* Portaled confirmation dialogs (membership, roles, Steam, deactivate, restore). */
+.dialog-content:has(.members-dialog) {
+  overflow-wrap: break-word;
+}
+.dialog-content:has(.members-dialog) .members-dialog {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.dialog-content:has(.members-dialog) .members-break {
+  overflow-wrap: anywhere;
+}
+.dialog-content:has(.members-dialog) .members-points {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.1rem;
+  list-style: disc;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.dialog-content:has(.members-dialog) .members-field {
+  display: grid;
+  gap: 4px;
+}
+.dialog-content:has(.members-dialog) .members-field textarea {
+  width: 100%;
+  min-height: 0;
+  padding-block: 6px;
+  resize: vertical;
+}
+.dialog-content:has(.members-dialog) .muted {
+  font-size: var(--font-small);
+}
+
+/* Phones: the shared toggle shows the list or the detail; each member row becomes a block with
+   the name, then roles, levels, last accepted trip and status. The header row stays available to
+   assistive technology only, and visible cell labels are hidden from it. */
+@media (max-width: 700px) {
+  .members-page .members-search {
+    flex: 1 1 100%;
+  }
+  .members-page .members-table,
+  .members-page .members-table tbody,
+  .members-page .members-table tr {
+    display: block;
+    width: 100%;
+  }
+  .members-page .members-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .members-page .members-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .members-page .members-table tbody :is(th, td) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: auto;
+    padding: 0;
+    border-bottom: 0;
+  }
+  .members-page .members-table tbody th {
+    flex: 1 1 100%;
+  }
+  .members-page .members-row-button {
+    padding-inline: 0;
+  }
+  .members-page .members-cell-label {
+    display: inline;
+    color: var(--muted);
+  }
+  /* The separator ends the previous item, so a wrapped item never starts with it. */
+  .members-page .members-table tbody td:not(:last-child)::after {
+    content: "·" / "";
+    color: var(--muted);
+  }
+  .members-page .members-table tr[data-selected] > :is(th, td) {
+    background: transparent;
+    box-shadow: none;
+  }
+  .members-page .members-table tbody tr[data-selected] {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--focus);
+  }
+}

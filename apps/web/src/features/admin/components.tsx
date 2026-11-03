@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import {
@@ -86,6 +86,9 @@ export function Confirmation({
   confirm,
   variant = "outline",
   triggerClassName,
+  title,
+  confirmDisabled = false,
+  restoreFocus,
 }: {
   label: string;
   description: string;
@@ -96,10 +99,20 @@ export function Confirmation({
   /** Trigger style; existing callers keep the outline default. */
   variant?: "default" | "outline";
   triggerClassName?: string;
+  /** Dialog title; defaults to the trigger label. */
+  title?: string;
+  /** Disables only the dialog's Confirm button, for example while a required reason is blank. */
+  confirmDisabled?: boolean;
+  /**
+   * Focus target when the dialog closes while its trigger can no longer take focus (disconnected,
+   * hidden or disabled). Without it the dialog keeps the default return to the trigger.
+   */
+  restoreFocus?: () => HTMLElement | null;
 }) {
   const { t } = useTranslation("administration"),
     [open, setOpen] = useState(false),
-    [failed, setFailed] = useState(false);
+    [failed, setFailed] = useState(false),
+    trigger = useRef<HTMLButtonElement>(null);
   return (
     <Dialog
       open={open}
@@ -111,18 +124,36 @@ export function Confirmation({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant={variant} className={triggerClassName} disabled={disabled || busy}>
+        <Button
+          ref={trigger}
+          variant={variant}
+          className={triggerClassName}
+          disabled={disabled || busy}
+        >
           {label}
         </Button>
       </DialogTrigger>
-      <DialogContent>
-        <DialogTitle>{label}</DialogTitle>
+      <DialogContent
+        onCloseAutoFocus={(event) => {
+          if (!restoreFocus) return;
+          const target = trigger.current;
+          if (
+            target?.isConnected &&
+            target.getClientRects().length > 0 &&
+            !target.matches(":disabled, [aria-disabled=true]")
+          )
+            return;
+          event.preventDefault();
+          restoreFocus()?.focus();
+        }}
+      >
+        <DialogTitle>{title ?? label}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
         {children}
         {failed && <p role="alert">{t("confirmationFailed")}</p>}
         <div className="button-row">
           <Button
-            disabled={busy}
+            disabled={busy || confirmDisabled}
             onClick={() =>
               void confirm().then((done) => {
                 if (done) setOpen(false);
