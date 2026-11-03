@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import type { APIRequestContext, Page, Response, TestInfo } from "@playwright/test";
+import {
+  type APIRequestContext,
+  type Page,
+  type Response,
+  request,
+  type TestInfo,
+} from "@playwright/test";
 import { testConnection } from "../persistence/support.ts";
 import {
+  origin,
   privateMail,
   resetAccountLimits,
   resetSuccessionChallenges,
@@ -30,6 +37,14 @@ async function confirm(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+}
+/** Member commands take their required reason inside the confirmation dialog. */
+async function confirmWithReason(page: Page, label: string, reason: string) {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Reason", { exact: true }).fill(reason);
+  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 }
 async function safeStateCapture(page: Page, info: TestInfo, filename: string) {
   // Call only for empty/error/session-ended views after private content is hidden.
@@ -63,8 +78,8 @@ async function chooseMember(page: Page, name: string, waitForDetail = true) {
     await next.click();
     const received = await response;
     expect(received.status()).toBe(200);
-    const firstId = (await received.json()).data.items[0]?.profile.member.id;
-    if (firstId) await expect(master.getByText(firstId, { exact: true })).toBeVisible();
+    const first = (await received.json()).data.items[0]?.profile.member.nickname;
+    if (first) await expect(master.getByRole("button", { name: first, exact: true })).toBeVisible();
     else await expect(master.locator("tbody tr")).toHaveCount(0);
   }
   throw new Error("SYNTHETIC_ADMIN_MEMBER_NOT_FOUND");
@@ -157,35 +172,111 @@ test("real additive roles, deactivate and explicit same-identity reinstatement",
       page.getByRole("region", { name: "Per-game qualifications", exact: true }),
     ).toContainText("Trainee");
     await page.getByLabel("Dispatcher", { exact: true }).check();
-    await page.getByLabel("Reason", { exact: true }).first().fill("Fictional additive assignment");
-    await confirm(page, "Save selected roles");
+    await confirmWithReason(page, "Save roles…", "Fictional additive assignment");
     await expect(page.getByLabel("Dispatcher", { exact: true })).toBeChecked();
     await expect(page.getByLabel("Driver", { exact: true })).toBeChecked();
     // Assignment, departure and later return are separate administrative fixture phases,
     // not a combined source-throughput measurement. Domain and session state remain real.
     await resetAccountLimits();
-    await page.getByLabel("Reason", { exact: true }).first().fill("Fictional departure");
-    await confirm(page, "Deactivate member");
-    await expect(
-      page.getByRole("button", { name: "Reinstate same member", exact: true }),
-    ).toBeVisible();
+    await confirmWithReason(page, "Deactivate…", "Fictional departure");
+    await expect(page.getByRole("button", { name: "Restore…", exact: true })).toBeVisible();
     await resetAccountLimits();
     await page.getByLabel("Driver", { exact: true }).check();
     await page.getByLabel("Euro Truck Simulator 2", { exact: true }).selectOption({ index: 1 });
     const selectedLabel = await page.locator("#reinstate-ets2 option:checked").textContent();
     if (!selectedLabel) throw new Error("SYNTHETIC_QUALIFICATION_LABEL_REQUIRED");
-    await page.getByLabel("Reason", { exact: true }).first().fill("Fictional explicit return");
-    await page.getByRole("button", { name: "Reinstate same member", exact: true }).click();
+    await page.getByRole("button", { name: "Restore…", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText(selectedLabel);
     await expect(page.getByRole("dialog")).toContainText("Euro Truck Simulator 2");
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+    await page
+      .getByRole("dialog")
+      .getByLabel("Reason", { exact: true })
+      .fill("Fictional explicit return");
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Deactivate…", exact: true })).toBeVisible();
+  } finally {
+    await staff.dispose();
+  }
+});
+
+test("real membership switch keeps the member signed in with other roles and qualifications", async ({
+  page,
+}) => {
+  const member = await administrationMember(["driver", "dispatcher"]),
+    staff = await staffContext(),
+    session = await request.newContext({ baseURL: origin });
+  try {
+    expect(
+      (
+        await write(session, "/auth/login", { email: member.email, password: member.password })
+      ).status(),
+    ).toBe(200);
+    const before = (await (await staff.get(`/api/v1/admin/members/${member.userId}`)).json()).data;
+    // Member sign-in and the staff journey are separate fixture phases, not a shared-IP load test.
+    await resetAccountLimits();
+    await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
+    await chooseMember(page, member.name);
+    await expect(page.getByLabel("Driver", { exact: true })).toBeChecked();
+    await page.getByLabel("Trainee", { exact: true }).check();
+    await page.getByRole("button", { name: "Change membership…", exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText("Membership: Driver → Trainee");
+    await page.keyboard.press("Escape");
+    await confirmWithReason(page, "Change membership…", "Fictional direct membership change");
+    await expect(page.getByLabel("Trainee", { exact: true })).toBeChecked();
+    await expect(page.getByLabel("Dispatcher", { exact: true })).toBeChecked();
+    const after = (await (await staff.get(`/api/v1/admin/members/${member.userId}`)).json()).data;
+    expect([...after.profile.member.roles].sort()).toEqual(["dispatcher", "trainee"]);
+    expect(after.version).toBe(before.version + 1);
+    expect(JSON.stringify(after.profile.qualifications)).toBe(
+      JSON.stringify(before.profile.qualifications),
+    );
+    const self = await session.get("/api/v1/me");
+    expect(self.status()).toBe(200);
+    expect([...(await self.json()).data.member.roles].sort()).toEqual(["dispatcher", "trainee"]);
+  } finally {
+    await session.dispose();
+    await staff.dispose();
+  }
+});
+
+test("real serving director's own row shows membership, roles and deactivation unavailable", async ({
+  page,
+}) => {
+  const staff = await staffContext();
+  try {
+    const self = (await (await staff.get("/api/v1/me")).json()).data;
+    expect(self.member.roles).toContain("director");
+    const before = (await (await staff.get(`/api/v1/admin/members/${self.member.id}`)).json()).data;
+    const writes: string[] = [];
+    page.on("request", (sent) => {
+      if (
+        sent.method() !== "GET" &&
+        new URL(sent.url()).pathname.startsWith("/api/v1/admin/members")
+      )
+        writes.push(sent.method());
+    });
+    await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
+    await chooseMember(page, self.member.nickname);
+    const detail = page.locator(".admin-detail");
+    await expect(detail.locator("#members-protected-note")).toBeVisible();
+    for (const label of ["Trainee", "Driver", "Dispatcher", "Deputy Director"])
+      await expect(detail.getByLabel(label, { exact: true })).toBeDisabled();
+    const deactivate = detail.getByRole("button", { name: "Deactivate…", exact: true });
+    await expect(deactivate).toBeDisabled();
+    await expect(deactivate).toHaveAccessibleDescription(/serving Director/);
+    for (const name of ["Change membership…", "Save roles…"])
+      await expect(detail.getByRole("button", { name, exact: true })).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Deactivate member", exact: true }),
-    ).toBeVisible();
+      detail.getByRole("link", { name: "Open leadership transfer", exact: true }),
+    ).toHaveAttribute("href", "/account/admin/settings");
+    expect(writes).toEqual([]);
+    const after = (await (await staff.get(`/api/v1/admin/members/${self.member.id}`)).json()).data;
+    expect(after.version).toBe(before.version);
+    expect(after.profile.member.roles).toEqual(before.profile.member.roles);
   } finally {
     await staff.dispose();
   }
@@ -776,19 +867,15 @@ test("real staff Steam replacement applies only verified proof and invalidates t
     await staffPage(page, staff, "/account/admin/members", /^(Members|Участники)$/);
     await chooseMember(page, member.name);
     await expect(
-      page.getByRole("button", { name: "Apply verified Steam replacement", exact: true }),
+      page.getByRole("button", { name: "Apply replacement…", exact: true }),
     ).toBeVisible();
-    await page
-      .getByLabel("Reason", { exact: true })
-      .last()
-      .fill("Fictional verified identity replacement");
-    await confirm(page, "Apply verified Steam replacement");
+    await confirmWithReason(page, "Apply replacement…", "Fictional verified identity replacement");
     await expect(
       page.getByRole("link", { name: proof.candidateSteamProfileUrl, exact: true }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Apply verified Steam replacement", exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Apply replacement…", exact: true })).toHaveCount(
+      0,
+    );
     const after = (await (await staff.get(`/api/v1/admin/members/${member.userId}`)).json()).data;
     expect(after.identityEpoch).toBe(before.identityEpoch + 1);
     expect(

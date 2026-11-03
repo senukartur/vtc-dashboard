@@ -29,6 +29,7 @@ export const browserFiles = {
   "test/e2e/readiness-states.spec.ts": "readiness-states",
   "test/e2e/smoke.spec.ts": "smoke",
   "test/e2e/settings-layout.spec.ts": "settings-layout",
+  "test/e2e/members-layout.spec.ts": "members-layout",
   "test/probes/browser.spec.ts": "assertion-probe",
 };
 export const browserProjects = ["desktop-chromium", "tablet-chromium", "mobile-chromium"];
