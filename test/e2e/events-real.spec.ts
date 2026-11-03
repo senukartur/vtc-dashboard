@@ -298,18 +298,24 @@ test("real voluntary RSVP changes preserve safe signed-up names and private decl
       member = await s.actor({ email: s.fixture.email, password: s.fixture.password });
     await member.goto(`/account/events/${e.id}`);
     await catalogLanguage(member);
-    const response = member.getByRole("combobox", { name: "Your response", exact: true }),
+    const response = member.getByRole("group", { name: "Your response", exact: true }),
+      choice = (name: string) => response.getByRole("button", { name, exact: true }),
       save = member.getByRole("button", { name: "Save response", exact: true });
-    await response.selectOption("participating");
+    await choice("Participating").click();
     await save.click();
     await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
     const other = await s.actor(await s.fixture.newMember());
     await other.goto(`/account/events/${e.id}`);
     await catalogLanguage(other);
+    const signedUp = other.getByRole("region", { name: "Signed up", exact: true }),
+      cantAttend = other.getByRole("region", { name: "Can't attend", exact: true }),
+      counts = other.getByRole("region", { name: "Participants", exact: true });
     await expect(
-      other.getByRole("link", { name: "Fictional Trip Browser Driver", exact: true }),
+      signedUp.getByRole("link", { name: "Fictional Trip Browser Driver", exact: true }),
     ).toBeVisible();
-    await response.selectOption("declined");
+    await expect(counts).toContainText("Participating: 1");
+    await expect(counts).toContainText("Can't attend: 0");
+    await choice("Can't attend").click();
     const reason = member.getByLabel("Private decline reason", { exact: true });
     await reason.fill("   ");
     await save.click();
@@ -321,8 +327,21 @@ test("real voluntary RSVP changes preserve safe signed-up names and private decl
     expect(safe.status()).toBe(200);
     expect(JSON.stringify((await safe.json()).data)).not.toContain("Fictional private RSVP reason");
     expect((await other.request.get(`/api/v1/admin/events/${e.id}/attendance`)).status()).toBe(403);
+    await other.reload();
+    await catalogLanguage(other);
+    await expect(
+      cantAttend.getByRole("link", { name: "Fictional Trip Browser Driver", exact: true }),
+    ).toBeVisible();
+    await expect(
+      signedUp.getByRole("link", { name: "Fictional Trip Browser Driver", exact: true }),
+    ).toHaveCount(0);
+    await expect(counts).toContainText("Participating: 0");
+    await expect(counts).toContainText("Can't attend: 1");
+    const decliners = await other.request.get(`/api/v1/events/${e.id}/decliners`);
+    expect(decliners.status()).toBe(200);
+    expect(await decliners.text()).not.toContain("Fictional private RSVP reason");
     await expect(other.getByText("Fictional private RSVP reason", { exact: false })).toHaveCount(0);
-    await response.selectOption("unanswered");
+    await choice("No answer").click();
     await save.click();
     await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
   } finally {
@@ -369,6 +388,14 @@ test("real director and deputy privately inspect responses while dispatcher has 
     }
     await dispatcher.goto(`/account/events/${e.id}`);
     await catalogLanguage(dispatcher);
+    await expect(
+      dispatcher
+        .getByRole("region", { name: "Can't attend", exact: true })
+        .getByRole("link", { name: "Fictional Trip Browser Driver", exact: true }),
+    ).toBeVisible();
+    await expect(
+      dispatcher.getByText("Fictional private manager reason", { exact: false }),
+    ).toHaveCount(0);
     await expect(dispatcher.getByRole("button", { name: "Edit event", exact: true })).toHaveCount(
       0,
     );
@@ -406,12 +433,11 @@ test("real reschedule preserves RSVP at revised cutoff and cancellation removes 
     const member = await s.actor({ email: s.fixture.email, password: s.fixture.password });
     await member.goto(`/account/events/${e.id}`);
     await catalogLanguage(member);
-    await expect(member.getByRole("combobox", { name: "Your response", exact: true })).toHaveValue(
-      "participating",
-    );
-    await member
-      .getByRole("combobox", { name: "Your response", exact: true })
-      .selectOption("unanswered");
+    const response = member.getByRole("group", { name: "Your response", exact: true });
+    await expect(
+      response.getByRole("button", { name: "Participating", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await response.getByRole("button", { name: "No answer", exact: true }).click();
     await member.getByRole("button", { name: "Save response", exact: true }).click();
     await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
     await manager.getByRole("button", { name: "Cancel event", exact: true }).click();

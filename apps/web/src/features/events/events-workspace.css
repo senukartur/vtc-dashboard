@@ -1,0 +1,333 @@
+/* Compact events list and event detail (VTC-058). Every selector is scoped to .events-page, which
+   only the list and detail pages render; events.css keeps the shell chip, editor and dialogs.
+   Text wraps only between words; only .events-break (IDs, exact masses) may break anywhere. */
+.events-page {
+  container: events / inline-size;
+  max-width: 74rem;
+  width: 100%;
+  margin: 0 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.events-page .events-break {
+  overflow-wrap: anywhere;
+}
+/* The page root only receives programmatic focus when a failed read is retried. */
+.events-page:focus {
+  outline: none;
+}
+.events-page .card {
+  gap: 10px;
+  padding: 12px 14px;
+}
+.events-page .muted {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.events-page :is(.events-back, .events-report-link, .events-row-title a, .events-chips a) {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+}
+.events-page :is(.events-back, .events-report-link) {
+  gap: 6px;
+  width: fit-content;
+}
+
+/* Page heading: title and timezone note, primary action on the right when it fits. */
+.events-page .events-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.events-page .events-heading-text {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Game chip and status badges: text always carries the meaning, colour only supports it. */
+.events-page .events-game {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--radius-badge);
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 700;
+  line-height: 1.6;
+}
+.events-page .events-status-cancelled {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.events-page .events-status-completed {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.events-page .events-tone-participating {
+  color: var(--accepted);
+}
+.events-page .events-tone-declined {
+  color: var(--destructive);
+}
+.events-page .events-tone-unanswered {
+  color: var(--secondary);
+}
+
+/* List: one card of rows, a date tile on the left of each row. */
+.events-page .events-list-card {
+  padding: 0;
+}
+.events-page .events-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.events-page .events-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 14px;
+}
+.events-page .events-row + .events-row {
+  border-top: 1px solid var(--border);
+}
+.events-page .events-tile {
+  display: grid;
+  flex: none;
+  place-content: center;
+  width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  text-align: center;
+}
+.events-page .events-tile-day {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.events-page .events-tile-month {
+  color: var(--muted);
+  font-size: var(--font-badge);
+  line-height: 1.3;
+}
+.events-page .events-row-body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+.events-page .events-row-title {
+  font-size: var(--font-body);
+}
+.events-page .events-row-title a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+.events-page :is(.events-row-meta, .events-header-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.events-page .events-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Detail: one column; side by side (participants beside the main column) from 960px. */
+.events-page .events-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.events-page :is(.events-main, .events-side) {
+  gap: 12px;
+}
+@container events (min-width: 960px) {
+  .events-page .events-detail-layout {
+    grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  }
+  .events-page .events-roster {
+    grid-column: 1 / -1;
+  }
+}
+.events-page .events-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.events-page .events-header-text {
+  display: grid;
+  flex: 1 1 280px;
+  gap: 4px;
+  min-width: 0;
+}
+.events-page .events-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.events-page .events-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.events-page .events-facts > div {
+  min-width: 0;
+}
+.events-page :is(.events-facts, .events-summary) dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.events-page :is(.events-facts, .events-summary) dd {
+  margin: 2px 0 0;
+}
+.events-page .events-fact-note {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.events-page :is(.events-description, .events-reason) {
+  white-space: pre-wrap;
+}
+.events-page .events-load {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.events-page .events-exception {
+  padding: 8px 10px;
+  border: 1px solid var(--pending-surface);
+  border-radius: var(--radius-control);
+  background: var(--pending-surface);
+  color: var(--pending);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+
+/* Response: segmented choice, optional reason, explicit Save. */
+.events-page .events-choice {
+  max-width: 100%;
+}
+.events-page .events-state {
+  font-size: var(--font-small);
+}
+.events-page .events-response textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+.events-page .events-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Unavailable actions stay focusable (aria-disabled) so focus is not lost while pending. */
+.events-page .button[aria-disabled="true"],
+.events-page .button[aria-disabled="true"]:hover {
+  cursor: not-allowed;
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--muted);
+}
+.events-page .events-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+/* Participants: counters, then name chips per list. */
+.events-page .events-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.events-page .events-counts-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.events-page .events-members {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.events-page .events-members h3 {
+  color: var(--secondary);
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.events-page .events-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.events-page .events-chips li {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--inset);
+  font-size: var(--font-small);
+}
+.events-page .events-chips a {
+  color: var(--foreground);
+}
+
+/* Manager roster: compact rows; the ids/classes used by the real journeys stay unchanged. */
+.events-page .event-attendance-row {
+  gap: 6px;
+  margin: 0;
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.events-page .event-attendance-row legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: 600;
+}
+.events-page .events-roster-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  font-size: var(--font-small);
+}
+.events-page .event-attendance-row .events-reason {
+  font-size: var(--font-small);
+}
+
+@media (max-width: 640px) {
+  .events-page .events-pager > .button,
+  .events-page .events-form-actions > .button {
+    flex: 1 1 100%;
+  }
+}

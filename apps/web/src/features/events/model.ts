@@ -20,8 +20,16 @@ export function responseInput(
       : undefined
     : { response };
 }
+/** The timezone's offset at `value`, such as "GMT+02:00" ("GMT" for UTC itself). */
+export function timezoneOffset(value: string | number, timezone: string): string {
+  return (
+    new Intl.DateTimeFormat("en", { timeZone: timezone, timeZoneName: "longOffset" })
+      .formatToParts(new Date(value))
+      .find((p) => p.type === "timeZoneName")?.value ?? "UTC"
+  );
+}
 export function eventTime(value: string, locale: string, timezone: string): string {
-  return `${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(new Date(value))} · ${timezone} · ${new Intl.DateTimeFormat("en", { timeZone: timezone, timeZoneName: "longOffset" }).formatToParts(new Date(value)).find((p) => p.type === "timeZoneName")?.value ?? "UTC"}`;
+  return `${new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: timezone }).format(new Date(value))} · ${timezone} · ${timezoneOffset(value, timezone)}`;
 }
 export type Attempt = { fingerprint: string; key: string };
 export function commandAttempt(

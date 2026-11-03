@@ -178,30 +178,65 @@ test("changing own RSVP from participants page two resets to the current first p
   state.response = { response: "participating", declineReason: null, version: 2 };
   state.participantPages = true;
   await page.goto(`/account/events/${eventId}`);
-  const participants = page
-    .getByRole("heading", { name: "Signed-up members", exact: true })
-    .locator("..");
+  const participants = page.getByRole("region", { name: "Signed up", exact: true });
   await participants.getByRole("button", { name: "Next page", exact: true }).click();
   await expect(
     participants.getByRole("link", { name: "Fictional Yukon Member", exact: true }),
   ).toBeVisible();
-  await page.getByRole("combobox", { name: "Your response", exact: true }).selectOption("declined");
+  await page
+    .getByRole("group", { name: "Your response", exact: true })
+    .getByRole("button", { name: "Can't attend", exact: true })
+    .click();
   await page
     .getByLabel("Private decline reason", { exact: true })
     .fill("Fictional change from page two");
   await page.getByRole("button", { name: "Save response", exact: true }).click();
   await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
-  const current = page
-    .getByRole("heading", { name: "Signed-up members", exact: true })
-    .locator("..");
   await expect(
-    current.getByRole("link", { name: "Fictional participant 1", exact: true }),
+    participants.getByRole("link", { name: "Fictional participant 1", exact: true }),
   ).toBeVisible();
   await expect(
-    current.getByRole("link", { name: "Fictional Yukon Member", exact: true }),
+    participants.getByRole("link", { name: "Fictional Yukon Member", exact: true }),
   ).toHaveCount(0);
-  await expect(current.getByRole("button", { name: "First page", exact: true })).toHaveCount(0);
+  await expect(participants.getByRole("button", { name: "First page", exact: true })).toHaveCount(
+    0,
+  );
   expect(state.participantCursors).toEqual(["", "synthetic-participant-page-2", ""]);
+});
+test("changing own RSVP from decliners page two resets to the current first page", async ({
+  page,
+}) => {
+  const state = await mockEvents(page);
+  state.response = { response: "declined", declineReason: "Fictional old reason", version: 2 };
+  state.declinerPages = true;
+  await page.goto(`/account/events/${eventId}`);
+  const decliners = page.getByRole("region", { name: "Can't attend", exact: true });
+  await decliners.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect(
+    decliners.getByRole("link", { name: "Fictional Yukon Member", exact: true }),
+  ).toBeVisible();
+  await expect(decliners).toContainText("(you)");
+  await expect(decliners).not.toContainText("Fictional old reason");
+  await page
+    .getByRole("group", { name: "Your response", exact: true })
+    .getByRole("button", { name: "Participating", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Save response", exact: true }).click();
+  await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
+  await expect(
+    decliners.getByRole("link", { name: "Fictional decliner 1", exact: true }),
+  ).toBeVisible();
+  await expect(
+    decliners.getByRole("link", { name: "Fictional Yukon Member", exact: true }),
+  ).toHaveCount(0);
+  await expect(decliners.getByRole("button", { name: "First page", exact: true })).toHaveCount(0);
+  expect(state.declinerCursors).toEqual(["", "synthetic-decliner-page-2", ""]);
+  await expect(
+    page.getByRole("region", { name: "Signed up", exact: true }).getByRole("link", {
+      name: "Fictional Yukon Member",
+      exact: true,
+    }),
+  ).toBeVisible();
 });
 async function viewportCapture(page: Page, info: TestInfo, name: string) {
   const observation = await page.evaluate(() => {
@@ -371,7 +406,11 @@ for (const locale of ["en", "ru"] as const) {
     await catalogLanguage(page, locale);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
     await expect(page.getByText("Europe/Warsaw")).toHaveCount(0);
-    expect(state.requests.some((r) => /participants|attendance|my-response/.test(r))).toBe(false);
+    expect(
+      state.requests.some((r) =>
+        /participants|decliners|response-counts|attendance|my-response/.test(r),
+      ),
+    ).toBe(false);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -383,7 +422,7 @@ for (const locale of ["en", "ru"] as const) {
     await page.goto(`/account/events/${eventId}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
     await expect(
-      page.getByRole("combobox", {
+      page.getByRole("group", {
         name: locale === "en" ? "Your response" : "Ваш ответ",
         exact: true,
       }),
@@ -440,8 +479,10 @@ test("RSVP prevents duplicates, retains decline input on stale and clears privat
 }, info) => {
   const state = await mockEvents(page);
   await page.goto(`/account/events/${eventId}`);
-  const response = page.getByRole("combobox", { name: "Your response", exact: true });
-  await response.selectOption("declined");
+  await page
+    .getByRole("group", { name: "Your response", exact: true })
+    .getByRole("button", { name: "Can't attend", exact: true })
+    .click();
   const reason = page.getByRole("textbox", { name: "Private decline reason", exact: true });
   await reason.fill("   ");
   await page.getByRole("button", { name: "Save response", exact: true }).click();
@@ -463,7 +504,7 @@ test("RSVP prevents duplicates, retains decline input on stale and clears privat
   });
   await page.getByRole("button", { name: "Save response", exact: true }).click();
   await expect.poll(() => state.commands.length).toBe(2);
-  await expect(page.getByRole("button", { name: "Loading events…", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Saving response…", exact: true })).toBeDisabled();
   for (const locale of ["en", "ru"] as const) {
     await catalogLanguage(page, locale);
     await viewportCapture(page, info, `decline-pending-${locale}`);
