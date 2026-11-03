@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.2
       - id: authorize
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.2
       - name: Revalidate eligibility and artifact before accessing SSH secrets
         env:
           GITHUB_TOKEN: ${{ github.token }}

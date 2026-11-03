@@ -4,7 +4,7 @@
 
 ## Run locally
 
-Use Node **24.22.0**, pnpm **12.14.0** and Docker Linux containers. The authoritative path creates its own stack, checks/builds this checkout, and runs every lane:
+Use Node **24.22.2**, pnpm **12.14.0** and Docker Linux containers. The authoritative path creates its own stack, checks/builds this checkout, and runs every lane:
 
 ```sh
 pnpm install --frozen-lockfile
