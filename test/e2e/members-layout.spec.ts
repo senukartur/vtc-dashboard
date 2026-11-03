@@ -1,6 +1,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
+import { chooseMember } from "./support/member-picker.ts";
 import {
   ids,
   levelId,
@@ -79,6 +80,8 @@ async function settledDetail(page: Page) {
  * no visible lines to check.
  */
 async function brokenWords(root: Locator) {
+  // Measure the design font: the Cyrillic subset loads only once Russian text renders.
+  await root.page().evaluate(() => document.fonts.ready);
   return root.evaluate((element) => {
     const broken: string[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -98,8 +101,57 @@ async function brokenWords(root: Locator) {
     return broken;
   });
 }
+/**
+ * Table words (and whole single-line dates) with less than `margin` pixels to spare in their cell,
+ * after the padding and borders around them. Near-zero spare room breaks words on platforms whose
+ * font rendering is slightly wider.
+ */
+async function tightWords(root: Locator, margin: number) {
+  await root.page().evaluate(() => document.fonts.ready);
+  return root.locator("table").evaluate((table, need) => {
+    const tight: string[] = [];
+    const px = (value: string) => Number.parseFloat(value) || 0;
+    const padding = (element: Element) => {
+      const style = getComputedStyle(element);
+      return px(style.paddingLeft) + px(style.paddingRight);
+    };
+    const sides = (element: Element) => {
+      const style = getComputedStyle(element);
+      return padding(element) + px(style.borderLeftWidth) + px(style.borderRightWidth);
+    };
+    for (const cell of Array.from(table.querySelectorAll<HTMLElement>("th, td"))) {
+      if (cell.getBoundingClientRect().height <= 1) continue;
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest(".visually-hidden, .members-break")) continue;
+        // clientWidth already excludes the cell's own borders.
+        let room = cell.clientWidth - padding(cell);
+        for (let up: Element | null = parent; up && up !== cell; up = up.parentElement)
+          room -= sides(up);
+        const text = node.textContent ?? "",
+          tokens = parent.closest("time")
+            ? [{ index: 0, value: text.trim() }]
+            : Array.from(text.matchAll(/\S+/g), (match) => ({
+                index: match.index,
+                value: match[0],
+              }));
+        for (const { index, value } of tokens) {
+          if (!value) continue;
+          const range = document.createRange();
+          range.setStart(node, text.indexOf(value, index));
+          range.setEnd(node, text.indexOf(value, index) + value.length);
+          const spare = room - range.getBoundingClientRect().width;
+          if (spare < need) tight.push(`${value} (${spare.toFixed(1)}px)`);
+        }
+      }
+    }
+    return tight;
+  }, margin);
+}
 /** Single-line dates must stay inside their table cell. */
 async function datesFit(root: Locator) {
+  await root.page().evaluate(() => document.fonts.ready);
   return root.locator("tbody time").evaluateAll((elements) =>
     elements
       .filter((element) => {
@@ -224,6 +276,7 @@ test("M2 ru keeps whole words at the narrowest side-by-side width", async ({ pag
   await noOverflow(page);
   expect(await brokenWords(master(page))).toEqual([]);
   expect(await datesFit(master(page))).toEqual([]);
+  expect(await tightWords(master(page), 4)).toEqual([]);
   expect(await brokenWords(detail(page))).toEqual([]);
   await capture(page, info, "members-ru-narrow-two-column");
 });
@@ -510,6 +563,43 @@ test("M4 a Steam retry that fails again keeps focus and the frozen request", asy
     Array(3).fill(JSON.stringify({ verificationId: ids.proof, reason: "Fictional steam" })),
   );
   await expect(heading(page, names.kestrel)).toBeFocused();
+});
+
+test("M12 paging past repeated nicknames opens a member, commits, then opens another", async ({
+  page,
+}, info) => {
+  // Two per page: page 2 starts with two members sharing one nickname; Kestrel is on page 3.
+  const state = await open(page, { pageSize: 2, repeatedNicknames: 3 });
+  await chooseMember(page, names.kestrel);
+  await expect(page).toHaveURL(/\?status=active&cursor=4$/);
+  await settledDetail(page);
+  const roles = detail(page).locator(".members-roles");
+  await roles.getByLabel("Deputy Director", { exact: true }).check();
+  await confirmWith(
+    page,
+    roles.getByRole("button", { name: text.en.saveRoles, exact: true }),
+    "Fictional roles",
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(roles.getByLabel("Deputy Director", { exact: true })).toBeChecked();
+  expect(state.commands).toMatchObject([
+    {
+      method: "PUT",
+      path: `/admin/members/${ids.kestrel}/roles`,
+      body: '{"roles":["driver","dispatcher","deputy_director"],"reason":"Fictional roles"}',
+      ifMatch: '"m-1"',
+    },
+  ]);
+  if (phone(info)) {
+    await expect(master(page)).toBeHidden();
+    await detail(page).getByRole("button", { name: text.en.back, exact: true }).click();
+  } else await expect(heading(page, names.kestrel)).toBeFocused();
+  await expect(master(page)).toBeVisible();
+  await chooseMember(page, names.trainee);
+  await expect(page).toHaveURL(/\?status=active&cursor=6$/);
+  await expect(heading(page, names.trainee)).toBeVisible();
+  expect(state.reads).toContain(`/admin/members/${ids.trainee}`);
+  await noOverflow(page);
 });
 
 test("M4 a conflicting deactivation explains it and re-reads the member", async ({ page }) => {

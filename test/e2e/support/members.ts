@@ -22,6 +22,8 @@ export const names = {
   trainee: "Fictional Frost Bite",
   long: "Вымышленный Северный Караванщик Долгой Дороги",
   former: "Fictional Old Ford",
+  /** Shared by every `repeatedNicknames` member, like the reused account fixture nickname. */
+  repeated: "Fictional Account Member",
 } as const;
 /** Error bodies carry this placeholder; it must never render. */
 export const sentinel = "PRIVATE_SENTINEL";
@@ -89,6 +91,8 @@ export type MembersOptions = {
   capabilities?: string[];
   displayTimezone?: string;
   pageSize?: number;
+  /** Members sharing `names.repeated`, listed between the deputy and Fictional Kestrel. */
+  repeatedNicknames?: number;
 };
 /**
  * Synthetic members API: a deputy (or the serving director) session with members.manage, six
@@ -151,6 +155,19 @@ export async function mockMembers(page: Page, options: MembersOptions = {}) {
     commands: [] as Command[],
     reads: [] as string[],
   };
+  state.members.splice(
+    2,
+    0,
+    ...Array.from({ length: options.repeatedNicknames ?? 0 }, (_, index) =>
+      member(
+        `a6400000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`,
+        names.repeated,
+        ["driver"],
+        { ets2: "trainee" },
+        null,
+      ),
+    ),
+  );
   const find = (id: string) => state.members.find((row) => row.profile.member.id === id);
   const etag = (row: S["MemberAdmin"]) => ({ ETag: `"m-${row.version}"` });
   await page.route("**/api/v1/**", async (route: Route) => {

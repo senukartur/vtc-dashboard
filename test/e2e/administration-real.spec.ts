@@ -24,6 +24,7 @@ import {
 } from "./support/administration.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
+import { chooseMember } from "./support/member-picker.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
 test.beforeEach(resetAccountLimits);
@@ -57,32 +58,6 @@ async function safeStateCapture(page: Page, info: TestInfo, filename: string) {
   );
   await mkdir(info.outputPath("safe"), { recursive: true });
   await page.screenshot({ path: info.outputPath("safe", filename), fullPage: true });
-}
-async function chooseMember(page: Page, name: string, waitForDetail = true) {
-  const master = page.locator(".admin-master");
-  await expect(master.locator("tbody tr").first()).toBeVisible();
-  for (let index = 0; index < 30; index++) {
-    const target = master.getByRole("button", { name, exact: true });
-    if (await target.count()) {
-      await target.click();
-      if (waitForDetail)
-        await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
-      return;
-    }
-    const next = master.getByRole("button", { name: "Next page", exact: true });
-    if (!(await next.count())) break;
-    const response = page.waitForResponse(
-      (r) =>
-        r.url().includes("/api/v1/admin/members?status=active") && r.request().method() === "GET",
-    );
-    await next.click();
-    const received = await response;
-    expect(received.status()).toBe(200);
-    const first = (await received.json()).data.items[0]?.profile.member.nickname;
-    if (first) await expect(master.getByRole("button", { name: first, exact: true })).toBeVisible();
-    else await expect(master.locator("tbody tr")).toHaveCount(0);
-  }
-  throw new Error("SYNTHETIC_ADMIN_MEMBER_NOT_FOUND");
 }
 async function steamAssertion(context: APIRequestContext, verificationUrl: string) {
   const returned = new URL(new URL(verificationUrl).searchParams.get("openid.return_to") ?? ""),
