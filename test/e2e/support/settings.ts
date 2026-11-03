@@ -236,6 +236,7 @@ export async function mockSettings(page: Page, options: SettingsOptions = {}) {
             accessEpoch: 1,
             email: `${member.id}@example.invalid`,
             identityEpoch: 1,
+            lastAcceptedTripAt: null,
             profile: { member, qualifications: [] },
             status: "active",
             version: 1,

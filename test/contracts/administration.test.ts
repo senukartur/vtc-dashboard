@@ -74,3 +74,46 @@ test("leadership challenge state exposes only bounded safe pending fields and re
     }),
   ).toBe(false);
 });
+test("direct membership input accepts only Trainee/Driver with a bounded reason", () => {
+  const input = valid("MembershipInput");
+  for (const membership of ["trainee", "driver"])
+    expect(input({ membership, reason: "Fictional membership change" })).toBe(true);
+  for (const membership of ["director", "dispatcher", "deputy_director", "", null])
+    expect(input({ membership, reason: "Fictional membership change" })).toBe(false);
+  expect(input({ membership: "driver" })).toBe(false);
+  expect(input({ membership: "driver", reason: "" })).toBe(false);
+  expect(input({ membership: "driver", reason: "x".repeat(2049) })).toBe(false);
+  expect(input({ reason: "Fictional membership change" })).toBe(false);
+  for (const extra of [{ roles: ["driver"] }, { qualifications: [] }, { director: true }])
+    expect(input({ membership: "driver", reason: "Fictional", ...extra })).toBe(false);
+});
+test("member administration rows require a nullable millisecond UTC last accepted trip", () => {
+  const id = "06400000-0000-4000-8000-000000000001",
+    row = {
+      profile: {
+        member: { id, nickname: "Fictional Driver", formerMember: false, roles: ["driver"] },
+        qualifications: [],
+      },
+      email: "fictional-driver@example.invalid",
+      status: "active",
+      accessEpoch: 1,
+      identityEpoch: 1,
+      version: 1,
+    },
+    member = valid("MemberAdmin");
+  expect(member(row)).toBe(false);
+  expect(member({ ...row, lastAcceptedTripAt: null })).toBe(true);
+  expect(member({ ...row, lastAcceptedTripAt: "2026-10-20T18:30:00.000Z" })).toBe(true);
+  for (const lastAcceptedTripAt of [
+    "2026-10-20T18:30:00Z",
+    "2026-10-20T18:30:00.000+03:00",
+    "2026-10-20 18:30:00.000",
+    "2026-10-20",
+    "",
+    0,
+  ])
+    expect(member({ ...row, lastAcceptedTripAt })).toBe(false);
+  expect(
+    valid("ListMemberAdmin")({ items: [{ ...row, lastAcceptedTripAt: null }], nextCursor: null }),
+  ).toBe(true);
+});

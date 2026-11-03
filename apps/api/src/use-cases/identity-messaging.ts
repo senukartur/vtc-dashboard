@@ -302,14 +302,19 @@ export function composeIdentity(
   return {
     identity,
     ...(notifications ? { notifications } : {}),
-    administration: createAdministration(unit, identity, {
-      telemetry: !!telemetryConfig,
-      manual: !!manualConfig,
-      qualifications: !!qualificationsConfig,
-      externalIdentities: externalEnabled,
-      admissions: !!admissionsConfig,
-      mail: !!mail,
-    }),
+    administration: createAdministration(
+      unit,
+      identity,
+      {
+        telemetry: !!telemetryConfig,
+        manual: !!manualConfig,
+        qualifications: !!qualificationsConfig,
+        externalIdentities: externalEnabled,
+        admissions: !!admissionsConfig,
+        mail: !!mail,
+      },
+      !!tripsConfig,
+    ),
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events } : {}),

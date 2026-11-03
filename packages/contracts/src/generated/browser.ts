@@ -546,6 +546,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/members/{memberId}/membership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** setMembership */
+        put: operations["setMembership"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/members/{memberId}/promotions": {
         parameters: {
             query?: never;
@@ -3690,6 +3707,7 @@ export interface components {
             /** Format: email */
             email: string;
             identityEpoch: number;
+            lastAcceptedTripAt: string | null;
             profile: components["schemas"]["MemberProfile"];
             /** @enum {string} */
             status: "active" | "inactive";
@@ -3698,6 +3716,11 @@ export interface components {
         MemberProfile: {
             member: components["schemas"]["MemberSummary"];
             qualifications: components["schemas"]["Assignment"][];
+        };
+        MembershipInput: {
+            /** @enum {string} */
+            membership: "trainee" | "driver";
+            reason: string;
         };
         MemberSummary: {
             formerMember: boolean;
@@ -5160,6 +5183,10 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
+                /** @description Current role. Director matches only the serving director pointer. Filters before pagination; bound into the signed cursor. */
+                role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+                /** @description Case-insensitive nickname substring; surrounding whitespace is ignored and a blank term is rejected. Filters before pagination; bound into the signed cursor. */
+                search?: string;
                 status?: "active" | "inactive";
             };
             header?: never;
@@ -5255,6 +5282,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeIdentity"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    setMembership: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MembershipInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Strong authoritative aggregate version, for the next command. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCommandResult"];
                 };
             };
             default: components["responses"]["Error"];
