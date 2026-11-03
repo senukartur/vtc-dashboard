@@ -542,7 +542,6 @@ function MemberList({
       "EnvelopeListParticipant",
     ),
     data = query.data?.data.data;
-  /** The page (and its pager) is replaced while it loads, so focus moves to the list heading. */
   function page(next: string | null) {
     setCursor(next);
   }

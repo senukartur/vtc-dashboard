@@ -63,12 +63,14 @@ export function EventFailureView({ error, seconds = 0 }: { error: unknown; secon
 /**
  * A button that hands focus to `focusTarget` only when it is removed while focused, for example
  * when a refetch without data replaces it with a loading state or paging replaces its list.
- * While it stays mounted (a failed refetch of cached data), focus stays on it.
+ * While it stays mounted (a failed refetch of cached data), focus stays on it. It defaults to
+ * `type="button"` so a retry inside a form (the attendance roster) never submits that form.
  */
 export function KeepFocusButton({
   focusTarget,
+  type = "button",
   ...props
-}: ComponentProps<typeof Button> & { focusTarget?: (() => void) | undefined }) {
+}: Omit<ComponentProps<typeof Button>, "ref"> & { focusTarget?: (() => void) | undefined }) {
   const button = useRef<HTMLButtonElement>(null),
     target = useRef(focusTarget);
   useLayoutEffect(() => {
@@ -85,7 +87,7 @@ export function KeepFocusButton({
       });
     };
   }, []);
-  return <Button ref={button} {...props} />;
+  return <Button ref={button} type={type} {...props} />;
 }
 /** `focusTarget` receives focus if the focused Try again / Start from first page button unmounts. */
 export function EventState({
