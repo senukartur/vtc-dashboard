@@ -339,6 +339,7 @@ export const administrationTranslations = {
       noQualification: "No qualification",
       levelLoading: "Loading",
       levelUnavailable: "Unavailable",
+      levelNoLabel: "No label",
       noTrips: "None recorded",
       status: { active: "Active", inactive: "Former member" },
       roleShort: {
@@ -780,6 +781,7 @@ export const administrationTranslations = {
       noQualification: "Нет квалификации",
       levelLoading: "Загрузка",
       levelUnavailable: "Недоступно",
+      levelNoLabel: "Нет метки",
       noTrips: "Нет данных",
       status: { active: "Активен", inactive: "Бывший участник" },
       roleShort: {

@@ -66,10 +66,10 @@ function member(
       qualifications: (["ets2", "ats"] as const)
         .filter((game) => levels[game])
         .map((game, index) => ({
-          id: `d6400000-0000-4000-8000-00000000${id.slice(-2)}0${index}`,
+          id: `d6400000-0000-4000-8000-0000000${id.slice(-3)}0${index}`,
           game,
           levelId: levelId(game, levels[game] ?? "trainee"),
-          periodId: `e6400000-0000-4000-8000-00000000${id.slice(-2)}0${index}`,
+          periodId: `e6400000-0000-4000-8000-0000000${id.slice(-3)}0${index}`,
           assignedAt: "2026-03-14T10:00:00.000Z",
         })),
     },

@@ -124,7 +124,8 @@ async function tightWords(root: Locator, margin: number) {
       const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const parent = node.parentElement;
-        if (!parent || parent.closest(".visually-hidden, .members-break")) continue;
+        // Badge words are measured by badgesFit with the badge's symbol, gap and padding.
+        if (!parent || parent.closest(".visually-hidden, .members-break, .badge")) continue;
         // clientWidth already excludes the cell's own borders.
         let room = cell.clientWidth - padding(cell);
         for (let up: Element | null = parent; up && up !== cell; up = up.parentElement)
@@ -148,6 +149,37 @@ async function tightWords(root: Locator, margin: number) {
     }
     return tight;
   }, margin);
+}
+/**
+ * Table badges whose narrowest layout (min-content: longest word, symbol, gap and padding) leaves
+ * less than `margin` pixels in the cell's content box, or that stick out of it. A badge does not
+ * wrap below its min-content width, so a long status word overflows the cell instead.
+ */
+async function badgesFit(root: Locator, margin: number) {
+  await root.page().evaluate(() => document.fonts.ready);
+  return root.locator("tbody .badge").evaluateAll(
+    (badges, need) =>
+      badges.flatMap((badge) => {
+        const cell = badge.closest("td, th");
+        if (!cell) return [`${badge.textContent} (no cell)`];
+        const px = (value: string) => Number.parseFloat(value) || 0,
+          style = getComputedStyle(cell),
+          rect = cell.getBoundingClientRect(),
+          left = rect.left + px(style.borderLeftWidth) + px(style.paddingLeft),
+          right = rect.right - px(style.borderRightWidth) - px(style.paddingRight),
+          own = badge.getBoundingClientRect(),
+          element = badge as HTMLElement,
+          width = element.style.width;
+        element.style.width = "min-content";
+        const narrowest = element.getBoundingClientRect().width;
+        element.style.width = width;
+        const spare = right - left - narrowest;
+        return spare < need || own.right > right + 0.5 || own.left < left - 0.5
+          ? [`${badge.textContent} (${spare.toFixed(1)}px)`]
+          : [];
+      }),
+    margin,
+  );
 }
 /** Single-line dates must stay inside their table cell. */
 async function datesFit(root: Locator) {
@@ -260,13 +292,15 @@ for (const locale of ["en", "ru"] as const)
     await capture(page, info, `members-restore-${locale}`);
   });
 
-test("M2 ru keeps whole words at the narrowest side-by-side width", async ({ page }, info) => {
+test("M2 words, dates and badges fit at the narrowest side-by-side width", async ({
+  page,
+}, info) => {
   test.skip(info.project.name !== "desktop-chromium", "The narrow two-column band is one check.");
-  await open(page, {}, "ru");
+  const state = await open(page, {}, "ru");
   await select(page, names.kestrel);
   await settledDetail(page);
   let side = false;
-  for (let width = 900; width <= 1500 && !side; width += 10) {
+  for (let width = 900; width <= 1500 && !side; width += 2) {
     await page.setViewportSize({ width, height: 900 });
     const list = await box(master(page)),
       other = await box(detail(page));
@@ -277,8 +311,38 @@ test("M2 ru keeps whole words at the narrowest side-by-side width", async ({ pag
   expect(await brokenWords(master(page))).toEqual([]);
   expect(await datesFit(master(page))).toEqual([]);
   expect(await tightWords(master(page), 4)).toEqual([]);
+  expect(await badgesFit(master(page), 4)).toEqual([]);
   expect(await brokenWords(detail(page))).toEqual([]);
   await capture(page, info, "members-ru-narrow-two-column");
+  // Every list state at the same width: both tabs in both languages and the level fallback.
+  const cases = [
+    ["ru", "inactive", 200],
+    ["en", "active", 200],
+    ["en", "inactive", 200],
+    ["ru", "active", 503],
+    ["en", "active", 503],
+  ] as const;
+  for (const [locale, status, options] of cases) {
+    const where = `${locale} ${status} options ${options}`;
+    state.optionsStatus = options;
+    await page.goto(`/account/admin/members?status=${status}`);
+    await catalogLanguage(page, locale);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(text[locale].title);
+    await expect(rows(page).first()).toBeVisible();
+    if (options !== 200)
+      await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText(
+        `ETS2${locale === "ru" ? "Нет метки" : "No label"}`,
+      );
+    else if (status === "inactive")
+      await expect(rows(page).first()).toContainText(
+        locale === "ru" ? "Бывший участник" : "Former member",
+      );
+    await noOverflow(page);
+    expect(await brokenWords(master(page)), where).toEqual([]);
+    expect(await datesFit(master(page)), where).toEqual([]);
+    expect(await tightWords(master(page), 4), where).toEqual([]);
+    expect(await badgesFit(master(page), 4), where).toEqual([]);
+  }
 });
 
 test("M3 list reads carry status first, the role filter and the debounced search", async ({
@@ -720,7 +784,7 @@ test("M6 a level options failure marks cells unavailable with a scoped alert", a
   await page.goto("/account/admin/members");
   await expect(rows(page)).toHaveCount(5);
   await expect(master(page).getByRole("alert")).toContainText("This information is unavailable.");
-  await expect(rows(page).first().getByRole("cell").nth(1)).toContainText("Unavailable");
+  await expect(rows(page).first().getByRole("cell").nth(1)).toHaveText("ETS2No label");
   await expect(page.getByText(sentinel)).toHaveCount(0);
   state.optionsStatus = 200;
   await master(page).getByRole("alert").getByRole("button", { name: "Refresh" }).click();

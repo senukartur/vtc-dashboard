@@ -53,7 +53,8 @@
 }
 
 /* Side by side only above the shared 700px master/detail toggle, so its display:block and
-   display:none rules keep winning on phones. At 768 the detail wraps below the list. */
+   display:none rules keep winning on phones. At 768 the detail wraps below the list. The list's
+   600px basis is the narrowest list that fits all six columns with room to spare. */
 @media (min-width: 701px) {
   .members-page .admin-workbench {
     display: flex;
@@ -62,7 +63,7 @@
     align-items: flex-start;
   }
   .members-page .admin-workbench > .admin-master {
-    flex: 1.6 1 560px;
+    flex: 1.6 1 600px;
     min-width: 0;
   }
   .members-page .admin-workbench > .admin-detail {
@@ -81,8 +82,9 @@
 }
 
 /* Members table: fixed column shares keep the layout independent of long names. At the narrowest
-   side-by-side width (a list of about 530px) each column keeps several pixels beyond its longest
-   expected word or date, so font rendering differences between platforms do not break words. */
+   side-by-side width (a list of about 570px) each column keeps several pixels beyond its longest
+   expected word, date or badge (a badge does not wrap below its longest word plus its symbol), so
+   font rendering differences between platforms neither break words nor push badges out. */
 .members-page .members-table {
   table-layout: fixed;
 }
@@ -90,17 +92,17 @@
   width: 23%;
 }
 .members-page .members-table thead th:nth-child(2) {
-  width: 19%;
+  width: 18%;
 }
 .members-page .members-table thead th:nth-child(3),
 .members-page .members-table thead th:nth-child(4) {
-  width: 12%;
+  width: 11.5%;
 }
 .members-page .members-table thead th:nth-child(5) {
-  width: 21%;
+  width: 20%;
 }
 .members-page .members-table thead th:nth-child(6) {
-  width: 13%;
+  width: 16%;
 }
 /* A short date stays on one line (RU appends a separate year abbreviation). */
 .members-page .members-table time {
