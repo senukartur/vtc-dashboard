@@ -13,7 +13,7 @@ done
 chmod 755 /opt/vtc-development/receive.sh
 docker run --rm --network none --user 0 \
   --mount type=bind,source=/opt/vtc-development,target=/configuration \
-  node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 \
+  node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c \
   node /configuration/setup.mjs /configuration
 install -d -m 700 -o root -g root /opt/vtc-development/state
 useradd --system --create-home --shell /bin/sh vtc-deploy

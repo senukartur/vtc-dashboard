@@ -11,7 +11,7 @@ Review this package independently before provisioning. Keep the completed worksh
 | Budget | Separate owner-operated account; actual recurring total including tax, domain, VM backup and independent-copy costs no more than USD 20/month |
 | Initial measured trial | Basic Regular 1 CPU / 1 GiB / 25 GiB: public USD 6/month plus 20% weekly backup (USD 1.20), USD 7.20 before tax/extras; verify actual checkout |
 | Fallback | If actual OOM, sustained swapping, latency or recovery peaks fail acceptance, review 2 GiB / 1 CPU at public USD 12 + USD 2.40 backups before tax/extras, within the ceiling; export first and prefer RAM/CPU-only resize preserving disk |
-| Runtime | Supported Ubuntu LTS with Python 3.11+, maintained updates, Docker Engine/Compose, CA certificates/sudo; images retain Node 24.22.0 / pnpm 12.14.0 / MySQL 8.4.11 |
+| Runtime | Supported Ubuntu LTS with Python 3.11+, maintained updates, Docker Engine/Compose, CA certificates/sudo; images retain Node 24.22.2 / pnpm 12.14.0 / MySQL 8.4.11 |
 | Image store | Complete [image-store steps 1–4](#image-store-compatibility-before-first-release) before enabling delivery; validate the current classic CI artifact against classic `overlay2` staging in post-enable step 5 |
 | DNS/TLS | Owner-controlled subdomain resolves to the new VM; public TCP 80/443 only at proxy; independently verify ACME HTTPS |
 | Access | Separate root/operator channel; deploy key restricted to fixed receiver, exact sudo entry, no Docker group/forwarding/PTY; independently compare host-key fingerprint through provider console before storing known_hosts |

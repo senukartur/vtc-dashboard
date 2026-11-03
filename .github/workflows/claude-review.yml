@@ -60,7 +60,7 @@ jobs:
           ref: ${{ steps.target.outputs.base_sha }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
+      - uses: anthropics/claude-code-action@6d5ae526d25ce88daa2200be073e1a373167f064 # v1.0.265
         id: review
         if: steps.target.outputs.eligible == 'true'
         with:
@@ -278,7 +278,7 @@ jobs:
           ref: ${{ steps.target.outputs.base_sha }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
+      - uses: anthropics/claude-code-action@6d5ae526d25ce88daa2200be073e1a373167f064 # v1.0.265
         id: review
         if: steps.target.outputs.eligible == 'true'
         with:

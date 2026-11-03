@@ -19,7 +19,7 @@
 
 ## Concrete dependency decision
 
-Core Node/Fastify/React/Vite/mysql2 versions follow VTC-005. The root compiler is **TypeScript 5.9.3**, replacing the research-only 7.0.2 CLI candidate: selected `openapi-typescript` 7.13.0 declares a `^5.x` peer. The root installs with strict peer checks rather than ignoring that conflict. VTC-005's isolated probe remains historical evidence and is not silently rewritten. VTC-012 still owns shadcn/ui, full form/chart/design integration; VTC-007 owns Drizzle schema/migrations and VTC-013 owns Better Auth integration.
+Core Fastify/React/Vite/mysql2 versions follow VTC-005; the current runtime pins are Node **24.22.2**, pnpm **12.14.0** and MySQL **8.4.11** in `config/runtime.json`. The root compiler is **TypeScript 5.9.3**, replacing the research-only 7.0.2 CLI candidate: selected `openapi-typescript` 7.13.0 declares a `^5.x` peer. The root installs with strict peer checks rather than ignoring that conflict. VTC-005's isolated probe remains historical evidence and is not silently rewritten. VTC-012 still owns shadcn/ui, full form/chart/design integration; VTC-007 owns Drizzle schema/migrations and VTC-013 owns Better Auth integration.
 
 pnpm **12.14.0** has a native executable. Normal npm installation needs its own lifecycle scripts enabled so Windows command shims point to that executable; blocking pnpm's installation scripts leaves the shell placeholder unsuitable for nested Windows scripts. Workspace dependency builds permit only the explicitly reviewed esbuild installer. pnpm's release-age exclusion is limited to the exact ADR-selected `react-i18next@17.0.21`; strict age policy prevents silently extending it to newly resolved packages. This is not a dependency vulnerability audit.
 

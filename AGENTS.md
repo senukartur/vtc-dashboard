@@ -1,6 +1,6 @@
 # Agent Instructions
 
-VTCDashboard: web dashboard for one ETS2/ATS virtual trucking company (RU/EN, responsive). pnpm monorepo: Fastify API (`apps/api`), React/Vite SPA (`apps/web`), shared `packages/`; MySQL 8.4, Node.js 24.22.0, pnpm 12.14.0.
+VTCDashboard: web dashboard for one ETS2/ATS virtual trucking company (RU/EN, responsive). pnpm monorepo: Fastify API (`apps/api`), React/Vite SPA (`apps/web`), shared `packages/`; MySQL 8.4, Node.js 24.22.2, pnpm 12.14.0.
 
 - Idea and features: [CONCEPT.MD](docs/CONCEPT.MD); detailed rules: [policies](docs/product/mvp-policies.md), read only relevant sections. Cards: [Trello](https://trello.com/b/NwhwurSM/vtcdashboard).
 - Commands: [CONTRIBUTING.md](docs/CONTRIBUTING.md). For code changes run `pnpm check` and `pnpm build`.

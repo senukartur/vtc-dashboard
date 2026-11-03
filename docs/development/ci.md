@@ -6,7 +6,7 @@ VTC-011 extends this baseline with a separate deployment rehearsal on PR/main an
 
 ## Execution and trust
 
-`node scripts/test-ci.mjs` wraps the authoritative [isolated launcher](testing.md). It runs that checkout's check/build, allocation and wrong-baseline proof, all six lanes (unit, contracts, real MySQL integration, persistence, recovery, desktop/mobile built-app Playwright smoke), and existing assertion/failure-reporting proofs. It propagates the actual suite/cleanup exit code, without a second database bootstrap or migration changes. Node 24.22.0 / pnpm 12.14.0 / MySQL 8.4.11 images and strict SQL baseline remain pinned.
+`node scripts/test-ci.mjs` wraps the authoritative [isolated launcher](testing.md). It runs that checkout's check/build, allocation and wrong-baseline proof, all six lanes (unit, contracts, real MySQL integration, persistence, recovery, desktop/mobile built-app Playwright smoke), and existing assertion/failure-reporting proofs. It propagates the actual suite/cleanup exit code, without a second database bootstrap or migration changes. Node 24.22.2 / pnpm 12.14.0 / MySQL 8.4.11 images and strict SQL baseline remain pinned.
 
 GitHub uses `ubuntu-24.04`, a 70-minute quality job budget and a 65-minute suite step budget, retaining a five-minute outer gap for bounded cleanup and reporting. PR/ref concurrency cancels obsolete runs. Hard cancellation, runner loss or Docker engine loss can interrupt cleanup; ephemeral hosted runners limit persistence but do not prove cleanup completed. Local interrupted runs may require the launcher's explicit owned-project recovery. Existing development resources are never reused.
 
