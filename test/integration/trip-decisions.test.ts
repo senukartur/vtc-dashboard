@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import type { components } from "@vtc/contracts";
 import {
   createUnitOfWork,
@@ -39,12 +39,17 @@ import {
   createReconciliation,
   type Reconciliation,
 } from "../../apps/api/src/modules/reconciliation/service.ts";
+import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import {
   createTripDecisions,
   type TripDecisions,
 } from "../../apps/api/src/modules/trip-decisions/service.ts";
-import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
+import {
+  createTrips,
+  type ListOptions,
+  type Trips,
+} from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
@@ -145,6 +150,12 @@ beforeAll(async () => {
     entity("fixture_south"),
     entity("fixture_crates", { kind: "cargo" }),
     entity("fixture_trailer", { kind: "trailer_type" }),
+    // Over-limit fixtures: a second trailer type and cargo with allowed or blocked ADR classes.
+    entity("fixture_flatbed", { kind: "trailer_type" }),
+    entity("fixture_adr_allowed", { kind: "adr_category" }),
+    entity("fixture_adr_blocked", { kind: "adr_category" }),
+    entity("fixture_gas", { kind: "cargo", adrCategoryKey: "fixture_adr_allowed" }),
+    entity("fixture_hazard", { kind: "cargo", adrCategoryKey: "fixture_adr_blocked" }),
   ].map((e) => ({
     ...e,
     mapNamespace: "official",
@@ -166,7 +177,7 @@ beforeAll(async () => {
     expectedPublicationVersion: r.publicationVersion,
     reason: "Fictional reviewed catalog",
   });
-  for (const kind of ["city", "cargo", "trailer_type"])
+  for (const kind of ["city", "cargo", "trailer_type", "adr_category"])
     for (const row of (await catalogs.entities(director, { revisionId, kind, locale: "en" })).items)
       ids.set(row.display.label.replace("Fictional ", ""), row.id);
   tripsService = createTrips(
@@ -284,7 +295,17 @@ async function credit(id: string) {
       )[0],
   );
 }
-async function report(who = owner, target = manual) {
+async function report(
+  who = owner,
+  target = manual,
+  load: {
+    cargoMassKg?: string;
+    cargo?: string;
+    trailerType?: string;
+    origin?: S["ManualCatalogSelection"];
+    eventId?: string;
+  } = {},
+) {
   const id = newId();
   await unit.run((tx) =>
     unit
@@ -313,13 +334,14 @@ async function report(who = owner, target = manual) {
   return target.submitReport(who, newId(), {
     fields: {
       game: "ets2",
-      origin: pin("fixture_north"),
+      origin: load.origin ?? pin("fixture_north"),
       destination: pin("fixture_south"),
-      cargo: pin("fixture_crates"),
-      trailerType: pin("fixture_trailer"),
-      cargoMassKg: "18000",
+      cargo: pin(load.cargo ?? "fixture_crates"),
+      trailerType: pin(load.trailerType ?? "fixture_trailer"),
+      cargoMassKg: load.cargoMassKg ?? "18000",
       actualDistanceM: "123400",
       evidenceIds: [id],
+      ...(load.eventId ? { eventId: load.eventId } : {}),
     },
   });
 }
@@ -337,6 +359,30 @@ async function decide(
     proposalId: null,
     reason: "Fictional evidence review",
   });
+}
+async function overLimitDecide(
+  id: string,
+  confirmOverLimits: boolean | undefined,
+  actor = dispatcher,
+  commandKey = newId(),
+  decision: "accept" | "reject" = "accept",
+) {
+  const review = await service.review(actor, id);
+  return service.decide(actor, id, commandKey, review.version, {
+    decision,
+    reviewedRevisionId: review.data.trip.manualRevision?.id ?? review.data.factRevisionId,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional over-limit review",
+    ...(confirmOverLimits === undefined ? {} : { confirmOverLimits }),
+  });
+}
+async function audits(tripId: string) {
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT operation, CAST(actor_id AS CHAR) actor, reason FROM audit_entries WHERE subject_id=? AND operation IN ('report.reviewed','report.accepted_over_limits') ORDER BY occurred_at, operation",
+    [tripId],
+  );
+  return rows.map((r) => ({ operation: r.operation, actor: r.actor, reason: r.reason }));
 }
 async function decideProposal(...args: Parameters<TripDecisions["proposalDecision"]>) {
   const result = await service.proposalDecision(...args);
@@ -1236,6 +1282,12 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
       },
     );
     expect(accepted.data.outcome).toBe("accepted");
+    // An event exception is an ordinary acceptance, never an over-limit override.
+    expect(accepted.data).toMatchObject({
+      acceptedOverLimits: false,
+      reviewer: { id: dispatcher.userId },
+    });
+    expect(accepted.data.reasonCodes).not.toContain("accepted_over_limits");
     expect(accepted.data.basis.eventId).toBe(eventId);
     expect((await credit(r.tripId))?.credited).toBe(true);
     const mismatch = payload();
@@ -2744,4 +2796,590 @@ test("production candidate reads revalidate assessment-only versions without mut
   await put(correction, sourceOnly);
   expect(await visible()).toBe(false);
   expect(await credit(source.tripId)).toEqual(beforeCredit);
+});
+
+async function queueEntry(actor: Actor, id: string, options: Omit<ListOptions, "cursor"> = {}) {
+  let cursor: string | undefined;
+  for (let page = 0; page < 50; page++) {
+    const result = await tripsService.list(actor, {
+      scope: "review",
+      limit: 100,
+      ...options,
+      ...(cursor ? { cursor } : {}),
+    });
+    const found = result.items.find((item) => item.id === id);
+    if (found) return found;
+    if (!result.nextCursor) return undefined;
+    cursor = result.nextCursor;
+  }
+  throw new Error("SYNTHETIC_REVIEW_QUEUE_TOO_LONG");
+}
+const overweight = () => {
+  const p = payload();
+  if (p.snapshot.job.cargoMass.available) p.snapshot.job.cargoMass.value = 21000;
+  return p;
+};
+test("scenario 46: a different reviewer accepts an over-mass manual report only with explicit confirmation and is recorded", async () => {
+  const r = await report(owner, manual, { cargoMassKg: "21000" }),
+    id = r.tripId;
+  expect((await state(id))?.decision).toBe("pending_review");
+  const review = await service.review(dispatcher, id);
+  expect(review.data.canDecide).toBe(true);
+  expect(review.data.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
+  expect(review.data.qualificationCheck).toEqual({
+    status: "resolved",
+    reasonCode: null,
+    rules: [
+      {
+        ruleType: "max_mass",
+        outcome: "fail",
+        reasonCode: "rule_mass_exceeded",
+        bypassedByEvent: false,
+        observedMassKg: "21000",
+        limitMassKg: "20000",
+        entityIds: [],
+      },
+    ],
+  });
+  const before = await state(id);
+  for (const flag of [undefined, false])
+    await expect(overLimitDecide(id, flag)).rejects.toMatchObject({
+      statusCode: 409,
+      publicCode: "RESOLUTION_REQUIRED",
+    });
+  expect(await state(id)).toEqual(before);
+  expect(await credit(id)).toBeUndefined();
+  expect(await audits(id)).toEqual([]);
+  const [untouched] = await control.execute<RowDataPacket[]>(
+    "SELECT (SELECT COUNT(*) FROM trip_decisions WHERE trip_id=?) decisions,(SELECT COUNT(*) FROM outbox_events WHERE type='trip.decision_changed' AND aggregate_id=?) events",
+    [id, id],
+  );
+  expect(Number(untouched[0]?.decisions)).toBe(0);
+  expect(Number(untouched[0]?.events)).toBe(0);
+  const result = await overLimitDecide(id, true);
+  expect(result.data).toMatchObject({
+    outcome: "accepted",
+    acceptedOverLimits: true,
+    reviewerId: dispatcher.userId,
+    reviewer: {
+      id: dispatcher.userId,
+      nickname: "Fictional Decision Member",
+      formerMember: false,
+      roles: ["dispatcher"],
+    },
+    reasonCodes: ["rule_mass_exceeded", "accepted_over_limits"],
+    reason: "Fictional over-limit review",
+    reviewedRevisionId: r.currentRevision.id,
+  });
+  expect(result.data.basis.attributionBasis).toBe("manual_confirmation");
+  expect(await audits(id)).toEqual([
+    { operation: "report.accepted_over_limits", actor: dispatcher.userId, reason: "staff_review" },
+    { operation: "report.reviewed", actor: dispatcher.userId, reason: "staff_review" },
+  ]);
+  expect(await state(id)).toMatchObject({ decision: "accepted", reviewHold: false });
+  expect((await credit(id))?.credited).toBe(true);
+  const [events] = await control.execute<RowDataPacket[]>(
+    "SELECT COUNT(*) n FROM outbox_events WHERE type='trip.decision_changed' AND aggregate_id=?",
+    [id],
+  );
+  expect(Number(events[0]?.n)).toBe(1);
+});
+test("HTTP over-limit review, decision, replay and history serialize the strict contract", async () => {
+  const r = await report(owner, manual, { cargoMassKg: "21000" }),
+    id = r.tripId,
+    token = csrfProtection(identity.config).issue({ cookie: directorCookie }, director).token,
+    login = await identity.login(`${owner.userId}@example.invalid`, password),
+    ownerCookie = login.cookies.map((c) => c.split(";", 1)[0]).join("; "),
+    app = await createApp({
+      identity,
+      trips: tripsService,
+      tripDecisions: service,
+      checkReadiness: async () => true,
+    });
+  try {
+    const read = await app.inject({
+      url: `/api/v1/trips/${id}/review`,
+      headers: { cookie: directorCookie },
+    });
+    expect(read.statusCode).toBe(200);
+    const review = read.json().data as S["Review"];
+    expect(review.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
+    expect(review.qualificationCheck.rules[0]).toMatchObject({
+      outcome: "fail",
+      observedMassKg: "21000",
+      limitMassKg: "20000",
+    });
+    const commandKey = newId(),
+      body = {
+        decision: "accept",
+        reviewedRevisionId: review.trip.manualRevision?.id,
+        factRevisionId: review.factRevisionId,
+        proposalId: null,
+        reason: "Fictional HTTP over-limit review",
+      };
+    const post = (payload: object, key = commandKey) =>
+      app.inject({
+        method: "POST",
+        url: `/api/v1/trips/${id}/decisions`,
+        headers: {
+          cookie: directorCookie,
+          origin,
+          "content-type": "application/json",
+          "x-csrf-token": token,
+          "idempotency-key": key,
+          "if-match": read.headers.etag as string,
+        },
+        payload,
+      });
+    for (const invalid of [
+      { ...body, confirmOverLimits: "true" },
+      { ...body, decision: "reject", confirmOverLimits: true },
+      { ...body, proposalId: newId(), confirmOverLimits: true },
+    ])
+      expect((await post(invalid, newId())).statusCode).toBe(422);
+    expect((await post(body, newId())).statusCode).toBe(409);
+    expect(await audits(id)).toEqual([]);
+    const accepted = await post({ ...body, confirmOverLimits: true });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().data).toMatchObject({
+      outcome: "accepted",
+      acceptedOverLimits: true,
+      reviewerId: director.userId,
+      reviewer: {
+        id: director.userId,
+        nickname: "Fictional Decision Director",
+        formerMember: false,
+      },
+      reasonCodes: ["rule_mass_exceeded", "accepted_over_limits"],
+    });
+    const replay = await post({ ...body, confirmOverLimits: true });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().data).toEqual(accepted.json().data);
+    expect(replay.headers.etag).toBe(accepted.headers.etag);
+    expect((await post(body)).statusCode).toBe(409);
+    expect(await audits(id)).toEqual([
+      { operation: "report.accepted_over_limits", actor: director.userId, reason: "staff_review" },
+      { operation: "report.reviewed", actor: director.userId, reason: "staff_review" },
+    ]);
+    const detail = await app.inject({
+      url: `/api/v1/trips/${id}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().data.decisions).toEqual([accepted.json().data]);
+    const queue = await app.inject({
+      url: "/api/v1/trips?scope=review&hold=true&order=asc&limit=5",
+      headers: { cookie: directorCookie },
+    });
+    expect(queue.statusCode).toBe(200);
+    for (const item of queue.json().data.items) expect(item.review.hold).toBe(true);
+    for (const query of ["scope=company&hold=true", "scope=review&hold=maybe", "order=asc"])
+      expect(
+        (await app.inject({ url: `/api/v1/trips?${query}`, headers: { cookie: directorCookie } }))
+          .statusCode,
+      ).toBe(422);
+  } finally {
+    await app.close();
+  }
+});
+test("an absent or false flag keeps the existing receipt fingerprint; a stale flag on an ordinary pass is refused", async () => {
+  const r = await report(),
+    review = await service.review(dispatcher, r.tripId),
+    commandKey = newId(),
+    body = {
+      decision: "accept" as const,
+      reviewedRevisionId: r.currentRevision.id,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional ordinary review",
+    };
+  expect(review.data.acceptance).toEqual({ mode: "ordinary", blockedReasonCodes: [] });
+  const first = await service.decide(dispatcher, r.tripId, commandKey, review.version, body);
+  expect(first.data).toMatchObject({
+    acceptedOverLimits: false,
+    reasonCodes: ["supported_rules_passed"],
+    reviewer: { id: dispatcher.userId },
+  });
+  expect(
+    await service.decide(dispatcher, r.tripId, commandKey, review.version, {
+      ...body,
+      confirmOverLimits: false,
+    }),
+  ).toEqual(first);
+  await expect(
+    service.decide(dispatcher, r.tripId, commandKey, review.version, {
+      ...body,
+      confirmOverLimits: true,
+    }),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "IDEMPOTENCY_CONFLICT" });
+  const [rows] = await control.execute<RowDataPacket[]>(
+    "SELECT fingerprint FROM trip_decision_commands WHERE actor_id=? AND `key`=?",
+    [dispatcher.userId, commandKey],
+  );
+  const expected = createHmac("sha256", Buffer.from(service.config.key, "hex"))
+    .update("trip-decisions/command/v1\0")
+    .update(canonicalJson({ id: r.tripId, version: review.version, value: body }))
+    .digest();
+  expect(Buffer.from(rows[0]?.fingerprint).equals(expected)).toBe(true);
+  expect((await audits(r.tripId)).map((a) => a.operation)).toEqual(["report.reviewed"]);
+  const other = await report();
+  await expect(overLimitDecide(other.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+  await expect(
+    overLimitDecide(other.tripId, true, dispatcher, newId(), "reject"),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  expect(await audits(other.tripId)).toEqual([]);
+});
+test("over-limit replay returns the same marked DTO and reviewer without a second audit or credit", async () => {
+  const r = await report(owner, manual, { cargoMassKg: "21000" }),
+    review = await service.review(dispatcher, r.tripId),
+    commandKey = newId(),
+    version = review.version,
+    value = {
+      decision: "accept" as const,
+      reviewedRevisionId: r.currentRevision.id,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: "Fictional over-limit review",
+    };
+  const first = await service.decide(dispatcher, r.tripId, commandKey, version, {
+      ...value,
+      confirmOverLimits: true,
+    }),
+    credited = await credit(r.tripId);
+  expect(first.data.acceptedOverLimits).toBe(true);
+  expect(credited?.credited).toBe(true);
+  expect(
+    await service.decide(dispatcher, r.tripId, commandKey, version, {
+      ...value,
+      confirmOverLimits: true,
+    }),
+  ).toEqual(first);
+  await expect(
+    service.decide(dispatcher, r.tripId, commandKey, version, value),
+  ).rejects.toMatchObject({ statusCode: 409, publicCode: "IDEMPOTENCY_CONFLICT" });
+  expect(await credit(r.tripId)).toEqual(credited);
+  expect((await audits(r.tripId)).map((a) => a.operation)).toEqual([
+    "report.accepted_over_limits",
+    "report.reviewed",
+  ]);
+});
+test("telemetry anywhere in the canonical group blocks over-limit acceptance, including auto-rejected telemetry", async () => {
+  const t = await receive(overweight());
+  expect((await state(t.tripId))?.decision).toBe("rejected");
+  expect((await service.review(dispatcher, t.tripId)).data.acceptance).toEqual({
+    mode: "unavailable",
+    blockedReasonCodes: ["telemetry_source_present"],
+  });
+  await expect(overLimitDecide(t.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+  expect((await state(t.tripId))?.decision).toBe("rejected");
+  const r = await report(owner, manual, { cargoMassKg: "21000" });
+  await receive(overweight(), owner, {
+    tripId: r.tripId,
+    expectedVersion: (await state(r.tripId))?.version as number,
+  });
+  expect((await state(r.tripId))?.decision).toBe("pending_review");
+  const mixed = await service.review(dispatcher, r.tripId);
+  expect(mixed.data.acceptance.mode).toBe("unavailable");
+  expect(mixed.data.acceptance.blockedReasonCodes).toContain("telemetry_source_present");
+  for (const flag of [true, undefined])
+    await expect(overLimitDecide(r.tripId, flag)).rejects.toMatchObject({ statusCode: 409 });
+  expect(await credit(r.tripId)).toBeUndefined();
+  expect(await audits(r.tripId)).toEqual([]);
+});
+test("matching late telemetry confirming the breach holds the override; only rejection recalculates credit", async () => {
+  const r = await report(owner, manual, { cargoMassKg: "21000" }),
+    accepted = await overLimitDecide(r.tripId, true),
+    before = await credit(r.tripId);
+  expect(before?.credited).toBe(true);
+  instant += 1000;
+  await receive(overweight(), owner, {
+    tripId: r.tripId,
+    expectedVersion: (await state(r.tripId))?.version as number,
+  });
+  const held = await state(r.tripId);
+  expect(held).toMatchObject({ decision: "accepted", reviewHold: true, correctionPending: true });
+  expect(held?.reviewReasons).toContain("confirmed_facts_require_review");
+  expect(await credit(r.tripId)).toEqual(before);
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.acceptance.mode).toBe("unavailable");
+  expect(review.data.acceptance.blockedReasonCodes).toContain("telemetry_source_present");
+  for (const flag of [true, undefined])
+    await expect(overLimitDecide(r.tripId, flag)).rejects.toMatchObject({ statusCode: 409 });
+  expect(await credit(r.tripId)).toEqual(before);
+  const rejected = await overLimitDecide(r.tripId, undefined, dispatcher, newId(), "reject");
+  expect(rejected.data).toMatchObject({ outcome: "rejected", acceptedOverLimits: false });
+  expect((await credit(r.tripId))?.credited).toBe(false);
+  const history = await tripsService.detail(owner, r.tripId);
+  if (history.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(history.decisions.map((d) => [d.id, d.outcome, d.acceptedOverLimits])).toEqual([
+    [rejected.data.id, "rejected", false],
+    [accepted.data.id, "accepted", true],
+  ]);
+  expect(history.decisions[1]?.reviewer?.id).toBe(dispatcher.userId);
+});
+test("no author can accept their own over-limit report, including the Director and a merged alias author", async () => {
+  const own = await report(director, manual, { cargoMassKg: "21000" });
+  await expect(overLimitDecide(own.tripId, true, director)).rejects.toMatchObject({
+    statusCode: 403,
+    publicCode: "SELF_REVIEW_FORBIDDEN",
+  });
+  const author = await member(["driver", "dispatcher"]),
+    manualTrip = await report(author, manual, { cargoMassKg: "21000" }),
+    primary = await receive(payload(), author),
+    a = await state(primary.tripId),
+    b = await state(manualTrip.tripId);
+  await reconciliation.merge(director, newId(), {
+    primaryTripId: primary.tripId,
+    secondaryTripId: manualTrip.tripId,
+    primaryVersion: a?.version as number,
+    secondaryVersion: b?.version as number,
+    reason: "Fictional over-limit alias authorship proof",
+  });
+  expect((await service.review(author, primary.tripId)).data.canDecide).toBe(false);
+  await expect(overLimitDecide(primary.tripId, true, author)).rejects.toMatchObject({
+    statusCode: 403,
+    publicCode: "SELF_REVIEW_FORBIDDEN",
+  });
+  expect(await audits(own.tripId)).toEqual([]);
+});
+test("missing facts beside a proven breach make over-limit acceptance unavailable", async () => {
+  const r = await report(owner, manual, {
+    cargoMassKg: "21000",
+    origin: {
+      status: "unresolved",
+      label: "Fictional unlisted city",
+      reasonCode: "not_listed",
+      locale: "en",
+      context: null,
+    },
+  });
+  expect((await service.review(dispatcher, r.tripId)).data.acceptance).toEqual({
+    mode: "unavailable",
+    blockedReasonCodes: ["origin_unknown"],
+  });
+  for (const flag of [true, undefined])
+    await expect(overLimitDecide(r.tripId, flag)).rejects.toMatchObject({ statusCode: 409 });
+  expect(await credit(r.tripId)).toBeUndefined();
+});
+test("restrictive historical rules list every exceeded limit and block overrides for unknown rules and partial event exceptions", async () => {
+  const time = instant,
+    levelId = structuralLevels.ets2[0];
+  const publish = async (rules: S["Rule"][], reason: string) => {
+    const level = (await qualifications.levels(director, "ets2")).items.find(
+      (v) => v.id === levelId,
+    );
+    if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
+    await qualifications.publish(director, levelId, newId(), level.version, {
+      rules,
+      requiredTrips: 1,
+      requiredDistanceM: "100",
+      reason,
+    });
+  };
+  // A far-future window keeps this rule version out of every other test's historical lookup.
+  instant = Date.parse("2029-06-01T12:00:00.000Z");
+  try {
+    await publish(
+      [
+        { type: "max_mass", maxKg: "20000" },
+        { type: "allowed_trailer_types", entityIds: [ids.get("fixture_flatbed") as string] },
+        { type: "allowed_adr_categories", entityIds: [ids.get("fixture_adr_allowed") as string] },
+      ],
+      "Fictional restrictive rule window",
+    );
+    const who = await member();
+    const all = await report(who, manual, { cargoMassKg: "21000", cargo: "fixture_hazard" }),
+      review = await service.review(dispatcher, all.tripId);
+    expect(review.data.acceptance).toEqual({ mode: "over_limits", blockedReasonCodes: [] });
+    expect(
+      review.data.qualificationCheck.rules.map((r) => [
+        r.ruleType,
+        r.outcome,
+        r.reasonCode,
+        r.entityIds,
+      ]),
+    ).toEqual([
+      ["max_mass", "fail", "rule_mass_exceeded", []],
+      [
+        "allowed_trailer_types",
+        "fail",
+        "rule_trailer_type_disallowed",
+        [ids.get("fixture_trailer")],
+      ],
+      [
+        "allowed_adr_categories",
+        "fail",
+        "rule_adr_category_disallowed",
+        [ids.get("fixture_adr_blocked")],
+      ],
+    ]);
+    expect((await overLimitDecide(all.tripId, true)).data.reasonCodes).toEqual([
+      "rule_adr_category_disallowed",
+      "rule_mass_exceeded",
+      "rule_trailer_type_disallowed",
+      "accepted_over_limits",
+    ]);
+    // Cargo without a catalog ADR class leaves the ADR rule unknown beside the mass breach.
+    const unknown = await report(who, manual, {
+      cargoMassKg: "21000",
+      trailerType: "fixture_flatbed",
+    });
+    expect((await service.review(dispatcher, unknown.tripId)).data.acceptance).toEqual({
+      mode: "unavailable",
+      blockedReasonCodes: ["rule_adr_category_unknown"],
+    });
+    await expect(overLimitDecide(unknown.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+    const eventInput: S["EventInput"] = {
+      title: "Fictional over-limit event",
+      description: "Fictional prescribed heavy load",
+      game: "ets2",
+      server: "Synthetic",
+      organizer: "Fictional company",
+      route: "Synthetic route",
+      meetingLocation: "Synthetic place",
+      meetingAt: new Date(instant + 1800000).toISOString(),
+      startsAt: new Date(instant + 3600000).toISOString(),
+      endsAt: null,
+      visibility: "members",
+      originCityId: null,
+      destinationCityId: null,
+      prescribedCargoId: null,
+      prescribedMassKg: "21000",
+      prescribedTrailerTypeId: null,
+    };
+    const eventId = (await events.create(director, newId(), eventInput)).data.event.id;
+    await events.respond(who, eventId, newId(), 1, { response: "participating" });
+    instant += 3600000;
+    await events.setAttendance(director, eventId, newId(), 1, {
+      members: [{ memberId: who.userId, attendance: "attended", note: null }],
+    });
+    // The report names the attended event, so assessment pins the association before review.
+    const full = await report(who, manual, {
+      cargoMassKg: "21000",
+      cargo: "fixture_gas",
+      trailerType: "fixture_flatbed",
+      eventId,
+    });
+    expect((await state(full.tripId))?.decision).toBe("pending_review");
+    const fullReview = await service.review(dispatcher, full.tripId);
+    expect(fullReview.data.acceptance).toEqual({ mode: "ordinary", blockedReasonCodes: [] });
+    expect(fullReview.data.qualificationCheck.rules[0]).toEqual({
+      ruleType: "max_mass",
+      outcome: "pass",
+      reasonCode: "event_prescribed_load_bypass",
+      bypassedByEvent: true,
+      observedMassKg: "21000",
+      limitMassKg: "20000",
+      entityIds: [],
+    });
+    await expect(overLimitDecide(full.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
+    const ordinary = await overLimitDecide(full.tripId, undefined);
+    expect(ordinary.data).toMatchObject({ outcome: "accepted", acceptedOverLimits: false });
+    expect(ordinary.data.reasonCodes).not.toContain("accepted_over_limits");
+    expect(ordinary.data.basis.eventId).toBe(eventId);
+    expect((await audits(full.tripId)).map((a) => a.operation)).toEqual(["report.reviewed"]);
+    // Mass is bypassed by the event but the trailer limit still fails: no override (decision 1).
+    const partial = await report(who, manual, {
+      cargoMassKg: "21000",
+      cargo: "fixture_gas",
+      eventId,
+    });
+    const partialReview = await service.review(dispatcher, partial.tripId);
+    expect(partialReview.data.acceptance).toEqual({
+      mode: "unavailable",
+      blockedReasonCodes: ["event_exception_applied"],
+    });
+    expect(partialReview.data.qualificationCheck.rules.map((r) => r.bypassedByEvent)).toEqual([
+      true,
+      false,
+      false,
+    ]);
+    for (const flag of [true, undefined])
+      await expect(overLimitDecide(partial.tripId, flag)).rejects.toMatchObject({
+        statusCode: 409,
+      });
+    expect(await credit(partial.tripId)).toBeUndefined();
+  } finally {
+    instant = Date.parse("2029-06-01T15:00:00.000Z");
+    await publish([{ type: "max_mass", maxKg: "20000" }], "Fictional restored launch rules");
+    instant = time;
+  }
+});
+test("private trip history names staff reviewers and leaves system decisions unattributed", async () => {
+  const t = await receive(),
+    system = await tripsService.detail(owner, t.tripId);
+  if (system.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(system.decisions).toHaveLength(1);
+  expect(system.decisions[0]).toMatchObject({
+    outcome: "accepted",
+    reviewerId: null,
+    reviewer: null,
+    acceptedOverLimits: false,
+  });
+  const r = await report(),
+    decided = await decide(r.tripId),
+    staffView = await tripsService.detail(owner, r.tripId);
+  if (staffView.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(decided.data).toMatchObject({
+    acceptedOverLimits: false,
+    reviewer: {
+      id: dispatcher.userId,
+      nickname: "Fictional Decision Member",
+      formerMember: false,
+      roles: ["dispatcher"],
+    },
+  });
+  expect(staffView.decisions).toEqual([decided.data]);
+});
+test("review queue items carry hold, reasons, queue time and the current manual revision", async () => {
+  const r = await report(owner, manual, { cargoMassKg: "21000" }),
+    t = await receive(payload("closed-partial")),
+    manualRow = await state(r.tripId),
+    telemetryRow = await state(t.tripId);
+  expect(manualRow?.reviewHold).toBe(true);
+  expect(telemetryRow?.reviewHold).toBe(true);
+  expect((await queueEntry(dispatcher, r.tripId, { hold: true, order: "asc" }))?.review).toEqual({
+    hold: true,
+    reasonCodes: manualRow?.reviewReasons,
+    createdAt: manualRow?.createdAt,
+    manualRevision: { number: 1, submittedAt: r.currentRevision.submittedAt },
+  });
+  expect((await queueEntry(dispatcher, t.tripId, { hold: true }))?.review).toMatchObject({
+    hold: true,
+    manualRevision: null,
+  });
+  expect(await queueEntry(dispatcher, r.tripId, { hold: false })).toBeUndefined();
+  for (const item of (await tripsService.list(owner, { scope: "mine", limit: 5 })).items)
+    expect(item).not.toHaveProperty("review");
+});
+test("concurrent over-limit decisions, member directory reads and reviewer history reads complete without deadlock", async () => {
+  for (let n = 0; n < 3; n++) {
+    const r = await report(owner, manual, { cargoMassKg: "21000" }),
+      review = await service.review(dispatcher, r.tripId);
+    const results = await Promise.allSettled([
+      service.decide(dispatcher, r.tripId, newId(), review.version, {
+        decision: "accept",
+        reviewedRevisionId: r.currentRevision.id,
+        factRevisionId: review.data.factRevisionId,
+        proposalId: null,
+        reason: "Fictional concurrent override",
+        confirmOverLimits: true,
+      }),
+      identity.listMembers(director, { limit: 100 }),
+      tripsService.detail(deputy, r.tripId),
+      tripsService.detail(owner, r.tripId),
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      "fulfilled",
+      "fulfilled",
+      "fulfilled",
+      "fulfilled",
+    ]);
+    const view = await tripsService.detail(owner, r.tripId);
+    if (view.view !== "private") throw Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+    expect(view.decisions[0]).toMatchObject({
+      acceptedOverLimits: true,
+      reviewer: { id: dispatcher.userId },
+    });
+  }
 });

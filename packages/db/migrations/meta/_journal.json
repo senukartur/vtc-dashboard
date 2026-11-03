@@ -127,6 +127,13 @@
       "when": 1793218102210,
       "tag": "0017_event_notification_material",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1793732836521,
+      "tag": "0018_daily_jocasta",
+      "breakpoints": true
     }
   ]
 }

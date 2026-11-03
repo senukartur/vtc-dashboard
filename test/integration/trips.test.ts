@@ -1291,7 +1291,112 @@ test("manual internal adapter uses published canonical selections, evidence port
   });
   expect((await state(unknown.tripId))?.decision).toBe("unassessed");
 });
-test("representative mixed history uses bounded ordered company and owner indexes", async () => {
+test("review queue filters hold and order, binds them to cursors and projects manual revisions once per page", async () => {
+  const created: string[] = [];
+  for (let n = 0; n < 4; n++) {
+    const p = fixture();
+    p.eventId = newId();
+    p.source.tripId = newId();
+    created.push((await receive(p)).tripId);
+    instant += 1000;
+  }
+  const [first, second, third, fourth] = created as [string, string, string, string];
+  await unit.run(async (tx) => {
+    for (const [id, hold] of [
+      [first, true],
+      [second, false],
+      [third, true],
+      [fourth, false],
+    ] as const)
+      await unit.client(tx).update(trips).set({ reviewHold: hold }).where(eq(trips.id, id));
+  });
+  const calls: string[][] = [],
+    submittedAt = "2026-10-20T11:00:00.000Z";
+  const queue = createTrips(
+    unit,
+    config,
+    {
+      identity,
+      manualProjection: async (_tx, ids) => {
+        calls.push([...ids]);
+        return new Map(
+          ids
+            .filter((id) => id === third)
+            .map((id) => [
+              id,
+              {
+                manualRevision: { number: 2, submittedAt } as never,
+                evidence: [],
+              },
+            ]),
+        );
+      },
+    },
+    now,
+  );
+  const held = await queue.list(staff, { scope: "review", hold: true, order: "asc", limit: 1 });
+  expect(held.items.map((item) => item.id)).toEqual([first]);
+  expect(held.items[0]?.review).toEqual({
+    hold: true,
+    reasonCodes: (await state(first))?.reviewReasons,
+    createdAt: (await state(first))?.createdAt,
+    manualRevision: null,
+  });
+  expect(held.nextCursor).not.toBeNull();
+  const next = await queue.list(staff, {
+    scope: "review",
+    hold: true,
+    order: "asc",
+    limit: 1,
+    cursor: held.nextCursor as string,
+  });
+  expect(next.items.map((item) => item.id)).toEqual([third]);
+  expect(next.items[0]?.review?.manualRevision).toEqual({ number: 2, submittedAt });
+  expect(next.nextCursor).toBeNull();
+  // One batched projection call per page, never one per row.
+  expect(calls).toEqual([[first], [third]]);
+  const newest = await queue.list(staff, { scope: "review", hold: true, limit: 5 });
+  expect(newest.items.map((item) => item.id)).toEqual([third, first]);
+  expect(calls.at(-1)).toEqual([third, first]);
+  const clear = await queue.list(staff, { scope: "review", hold: false, order: "asc" });
+  expect(clear.items.map((item) => [item.id, item.review?.hold])).toEqual([
+    [second, false],
+    [fourth, false],
+  ]);
+  const all = await queue.list(staff, { scope: "review", limit: 5 });
+  expect(all.items.map((item) => item.id)).toEqual([fourth, third, second, first]);
+  // The filters are part of the cursor binding: changing hold or order invalidates the cursor.
+  for (const options of [
+    { hold: false, order: "asc" as const },
+    { hold: true, order: "desc" as const },
+    { order: "asc" as const },
+    { hold: true },
+  ])
+    await expect(
+      queue.list(staff, {
+        scope: "review",
+        limit: 1,
+        cursor: held.nextCursor as string,
+        ...options,
+      }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+  for (const options of [
+    { scope: "company" as const, hold: true },
+    { scope: "mine" as const, order: "asc" as const },
+    { scope: "review" as const, hold: "true" as unknown as boolean },
+    { scope: "review" as const, order: "up" as unknown as "asc" },
+  ])
+    await expect(queue.list(staff, options)).rejects.toMatchObject({ statusCode: 422 });
+  calls.length = 0;
+  await unit.run((tx) =>
+    unit.client(tx).update(trips).set({ decision: "accepted" }).where(eq(trips.id, third)),
+  );
+  for (const scope of ["company", "mine"] as const)
+    for (const item of (await queue.list(scope === "mine" ? owner : staff, { scope })).items)
+      expect(item).not.toHaveProperty("review");
+  expect(calls).toEqual([]);
+});
+test("representative mixed history uses bounded ordered company, owner and review queue indexes", async () => {
   const rows = Array.from({ length: 600 }, (_, i) => ({
     id: newId(),
     ownerId: i < 15 ? owner.userId : other.userId,
@@ -1300,6 +1405,7 @@ test("representative mixed history uses bounded ordered company and owner indexe
     outcome: "delivered" as const,
     recording: "partial" as const,
     decision: i < 30 ? ("accepted" as const) : ("unassessed" as const),
+    reviewHold: i >= 570,
     reviewReasons: [],
     createdAt: new Date(instant + i).toISOString(),
   }));
@@ -1312,10 +1418,15 @@ test("representative mixed history uses bounded ordered company and owner indexe
     "EXPLAIN SELECT id FROM trips WHERE owner_id=? ORDER BY created_at DESC,id DESC LIMIT 25",
     [owner.userId],
   );
+  const [queue] = await control.query<RowDataPacket[]>(
+    "EXPLAIN SELECT id FROM trips WHERE review_hold=1 AND alias_of IS NULL ORDER BY created_at,id LIMIT 26",
+  );
   expect(company[0]?.key).toBe("trip_company_page");
   expect(mine[0]?.key).toBe("trip_owner_page");
+  expect(queue[0]?.key).toBe("trip_review_queue");
   expect(Number(company[0]?.rows)).toBeLessThan(600);
   expect(Number(mine[0]?.rows)).toBeLessThan(600);
+  expect(Number(queue[0]?.rows)).toBeLessThan(600);
 });
 
 test("private normalized telemetry facts retain supported actual timing, zero, planned distance and unknown completeness", async () => {

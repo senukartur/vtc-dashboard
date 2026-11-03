@@ -2601,6 +2601,9 @@
             "unknown"
           ],
           "description": "Derived by the server from the persisted effective fact and reporting timestamp, never the collection of source kinds."
+        },
+        "review": {
+          "$ref": "#/$defs/TripReviewQueueEntry"
         }
       },
       "required": [
@@ -2830,6 +2833,21 @@
             }
           ]
         },
+        "reviewer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemberSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Reviewer summary for a staff decision (also shown for former members); null for system decisions."
+        },
+        "acceptedOverLimits": {
+          "type": "boolean",
+          "description": "True only for a staff acceptance that waived qualification limits with explicit confirmation; reasonCodes then list the exceeded limits plus accepted_over_limits."
+        },
         "reviewedRevisionId": {
           "anyOf": [
             {
@@ -2853,6 +2871,8 @@
         "reason",
         "decidedAt",
         "reviewerId",
+        "reviewer",
+        "acceptedOverLimits",
         "reviewedRevisionId",
         "basis"
       ],
@@ -3076,6 +3096,12 @@
         "evaluation": {
           "$ref": "#/$defs/EvaluationSnapshot"
         },
+        "qualificationCheck": {
+          "$ref": "#/$defs/QualificationCheck"
+        },
+        "acceptance": {
+          "$ref": "#/$defs/ReviewAcceptance"
+        },
         "canDecide": {
           "type": "boolean"
         },
@@ -3093,6 +3119,8 @@
         "factRevisionId",
         "facts",
         "evaluation",
+        "qualificationCheck",
+        "acceptance",
         "canDecide",
         "blockedReasonCodes"
       ],
@@ -3134,6 +3162,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "confirmOverLimits": {
+          "type": "boolean",
+          "description": "Optional, false when omitted. Explicit reviewer confirmation to accept a manual report over qualification limits. Only valid with decision accept and a null proposalId (422 otherwise). Required when the review acceptance mode is over_limits and rejected with 409 when it is ordinary or unavailable."
         }
       },
       "required": [
@@ -9518,6 +9550,197 @@
         "meta"
       ],
       "additionalProperties": false
+    },
+    "QualificationRuleCheck": {
+      "type": "object",
+      "properties": {
+        "ruleType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ]
+        },
+        "reasonCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "bypassedByEvent": {
+          "type": "boolean"
+        },
+        "observedMassKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limitMassKg": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "maxItems": 10
+        }
+      },
+      "required": [
+        "ruleType",
+        "outcome",
+        "reasonCode",
+        "bypassedByEvent",
+        "observedMassKg",
+        "limitMassKg",
+        "entityIds"
+      ],
+      "additionalProperties": false,
+      "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 catalog entities that broke a trailer or ADR rule. Unknown values are null, never zero."
+    },
+    "QualificationCheck": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "resolved",
+            "unresolved"
+          ]
+        },
+        "reasonCode": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QualificationRuleCheck"
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "status",
+        "reasonCode",
+        "rules"
+      ],
+      "additionalProperties": false,
+      "description": "Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules."
+    },
+    "ReviewAcceptance": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "ordinary",
+            "over_limits",
+            "unavailable"
+          ]
+        },
+        "blockedReasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "maxItems": 32
+        }
+      },
+      "required": [
+        "mode",
+        "blockedReasonCodes"
+      ],
+      "additionalProperties": false,
+      "description": "ordinary: accept without confirmOverLimits. over_limits: only qualification limits failed, the group has no telemetry source and no event exception; accept requires confirmOverLimits true. unavailable: accept returns 409; blockedReasonCodes explain why. Rejection is not limited by this mode, and self-review is reported separately by canDecide."
+    },
+    "TripReviewRevision": {
+      "type": "object",
+      "properties": {
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        }
+      },
+      "required": [
+        "number",
+        "submittedAt"
+      ],
+      "additionalProperties": false
+    },
+    "TripReviewQueueEntry": {
+      "type": "object",
+      "properties": {
+        "hold": {
+          "type": "boolean"
+        },
+        "reasonCodes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "manualRevision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TripReviewRevision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "hold",
+        "reasonCodes",
+        "createdAt",
+        "manualRevision"
+      ],
+      "additionalProperties": false,
+      "description": "Present only in listTrips responses for scope=review. Review-queue state of the canonical trip: hold flag, stored review reasons, queue time and the current manual revision number (null without a manual report)."
     }
   }
 }

@@ -17,6 +17,7 @@ export const auditOperations = [
   "trip.reconciled",
   "manual.submitted",
   "manual.correction_requested",
+  "report.accepted_over_limits",
 ] as const;
 export const auditReasons = [
   "operator_request",

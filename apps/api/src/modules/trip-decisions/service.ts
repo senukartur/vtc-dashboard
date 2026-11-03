@@ -35,7 +35,13 @@ import { canonicalJson, contentHash } from "../sources/contracts/canonical.js";
 import type { NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 import type { TripState } from "../trips/groups.js";
 import type { Trips } from "../trips/service.js";
-import { classify, evaluationSnapshot } from "./evaluation.js";
+import {
+  ACCEPTED_OVER_LIMITS,
+  acceptance,
+  classify,
+  evaluationSnapshot,
+  qualificationCheck,
+} from "./evaluation.js";
 import { type Page, pagination } from "./pagination.js";
 
 type S = components["schemas"];
@@ -57,7 +63,10 @@ function reason(value: string) {
   if (!value.trim() || value.length > 2048) throw identityError(422);
   return value.trim();
 }
-function dto(row: Decision, e: NormalizedTripEvidence): S["Decision"] {
+type Reviewers = Map<string, S["MemberSummary"]>;
+function dto(row: Decision, e: NormalizedTripEvidence, reviewers: Reviewers): S["Decision"] {
+  const reviewer = row.actorId ? reviewers.get(row.actorId) : null;
+  if (reviewer === undefined) throw new Error("DECISION_REVIEWER_MISSING");
   return {
     id: row.id,
     outcome: row.outcome,
@@ -65,6 +74,11 @@ function dto(row: Decision, e: NormalizedTripEvidence): S["Decision"] {
     reason: row.reason,
     decidedAt: row.decidedAt,
     reviewerId: row.actorId,
+    reviewer,
+    acceptedOverLimits:
+      row.outcome === "accepted" &&
+      row.actorId !== null &&
+      row.reasonCodes.includes(ACCEPTED_OVER_LIMITS),
     reviewedRevisionId: row.reviewedRevisionId,
     basis: {
       factRevisionId: row.factId,
@@ -214,12 +228,20 @@ export function createTripDecisions(
       .for("share");
     return row;
   }
-  async function decisionDto(tx: TxContext, row: Decision) {
+  // Every caller first runs prepare() or authorizeInTransaction(), which lock the company row
+  // FOR UPDATE before any trip row. These identity FOR SHARE reads therefore follow the same
+  // company -> trips -> identity order as trip summaries, and identity writers queue on the
+  // company lock instead of forming a cycle. System decisions need no lookup.
+  async function reviewers(tx: TxContext, rows: readonly Decision[]): Promise<Reviewers> {
+    const ids = [...new Set(rows.flatMap((row) => (row.actorId ? [row.actorId] : [])))];
+    return ids.length ? ports.identity.memberSummariesInTransaction(tx, ids) : new Map();
+  }
+  async function decisionDto(tx: TxContext, row: Decision, people?: Reviewers) {
     const e = (await ports.trips.adjudication.facts(tx, [row.factId], true)).get(
       row.factId,
     )?.evidence;
     if (!e) throw new Error("DECISION_FACT_MISSING");
-    return dto(row, e);
+    return dto(row, e, people ?? (await reviewers(tx, [row])));
   }
   async function work(
     tx: TxContext,
@@ -263,18 +285,31 @@ export function createTripDecisions(
     explanation: string | null,
     actor: Actor | null,
     reviewedRevisionId: string | null,
+    confirmOverLimits = false,
   ) {
     const { row } = prepared,
       decidedAt = at(),
       previous = await latest(tx, row.id);
     const manualConfirmedAt = await confirmation(tx, row, e, decidedAt);
     const h = await ports.qualifications.lookupInTransaction(tx, e, manualConfirmedAt),
-      evaluation = classify(e, h, s.event?.confirmedEvent ?? null, [], true);
+      evaluation = classify(e, h, s.event?.confirmedEvent ?? null, [], true),
+      allowed =
+        outcome === "accepted"
+          ? acceptance(e, h, s.event?.confirmedEvent ?? null, {
+              hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
+              eventInvalid: s.eventInvalid,
+              eventReviewRequired: !!s.event?.reviewRequired,
+            })
+          : null;
+    // The flag must match the mode the reviewer saw: a missing or stale confirmation never
+    // accepts, and nothing else can waive a gate.
     if (
-      outcome === "accepted" &&
-      (evaluation.decision !== "accepted" || s.eventInvalid || s.event?.reviewRequired)
+      allowed &&
+      (allowed.mode === "unavailable" ||
+        (allowed.mode === "over_limits") !== (confirmOverLimits && actor !== null))
     )
       throw identityError(409, "RESOLUTION_REQUIRED");
+    const overLimits = allowed?.mode === "over_limits";
     const basis = evaluationSnapshot(e, h, s.event?.confirmedEvent ?? null, manualConfirmedAt),
       pending = await hasPendingProposal(tx, prepared.members);
     const changed = await ports.trips.adjudication.write(
@@ -315,7 +350,10 @@ export function createTripDecisions(
         actorId: actor?.userId ?? null,
         reviewedRevisionId,
         reason: explanation,
-        reasonCodes: evaluation.reasons,
+        reasonCodes:
+          allowed?.mode === "over_limits"
+            ? [...allowed.exceeded, ACCEPTED_OVER_LIMITS]
+            : evaluation.reasons,
         assignmentId: basis.qualificationAssignmentId,
         levelId: basis.levelId,
         ruleVersionId: basis.ruleVersionId,
@@ -340,6 +378,16 @@ export function createTripDecisions(
       occurredAt: decidedAt,
       reason: actor ? "staff_review" : "operator_request",
     });
+    if (overLimits && actor)
+      await audit.append(tx, {
+        actorKind: "user",
+        actorId: actor.userId,
+        operation: "report.accepted_over_limits",
+        subjectKind: "trip",
+        subjectId: row.id,
+        occurredAt: decidedAt,
+        reason: "staff_review",
+      });
     const eventId = newId();
     await outbox.append(tx, {
       eventId,
@@ -357,7 +405,7 @@ export function createTripDecisions(
       await ports.trips.groups.members(tx, [changed.id], true),
     );
     await work(tx, changed, committedSupport.hash, pending ? ["proposal_pending"] : [], pending);
-    return { data: dto(saved, e), version: changed.version };
+    return { data: dto(saved, e, await reviewers(tx, [saved])), version: changed.version };
   }
   async function assess(tx: TxContext, id: string) {
     await evaluateInTransaction(tx, id);
@@ -611,6 +659,8 @@ export function createTripDecisions(
       .orderBy(desc(tripProposals.createdAt), desc(tripProposals.id))
       .limit(1)
       .for("share");
+    // One bounded batch (at most 100 decisions) for every reviewer in the history.
+    const people = await reviewers(tx, decisions);
     return {
       view: "private",
       summary: await ports.trips.summaryInTransaction(
@@ -621,7 +671,7 @@ export function createTripDecisions(
       effectiveFacts: await ports.trips.effectiveFactsInTransaction(tx, row.id),
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
-      decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d))),
+      decisions: await Promise.all(decisions.map((d) => decisionDto(tx, d, people))),
       pendingProposalId: pending[0]?.id ?? null,
       reviewReasonCodes: row.reviewReasons,
     };
@@ -1140,17 +1190,20 @@ export function createTripDecisions(
             reasonCode: v.status === "unknown" ? v.reasonCode : null,
             candidateEntityIds: [],
           });
+        const event = s.event?.confirmedEvent ?? null,
+          allowed = acceptance(e, h, event, {
+            hasTelemetrySource: s.evidence.some((f) => f.provider === "ets2telemetry"),
+            eventInvalid: s.eventInvalid,
+            eventReviewRequired: !!s.event?.reviewRequired,
+          });
         return {
           data: {
             trip: await privateProjection(tx, row, actor),
             factRevisionId: e.factRevisionId,
             facts,
-            evaluation: evaluationSnapshot(
-              e,
-              h,
-              s.event?.confirmedEvent ?? null,
-              await confirmation(tx, row, e, decidedAt),
-            ),
+            evaluation: evaluationSnapshot(e, h, event, await confirmation(tx, row, e, decidedAt)),
+            qualificationCheck: qualificationCheck(e, h, event),
+            acceptance: { mode: allowed.mode, blockedReasonCodes: allowed.blockedReasonCodes },
             canDecide: blocked.length === 0,
             blockedReasonCodes: blocked,
           } satisfies S["Review"],
@@ -1161,9 +1214,16 @@ export function createTripDecisions(
     async decide(actor: Actor, id: string, key: string, version: number, raw: S["DecisionInput"]) {
       const value = input("DecisionInput", raw);
       reason(value.reason);
+      const { confirmOverLimits, ...body } = value,
+        confirmed = confirmOverLimits === true;
+      // Over-limit confirmation applies only to a direct acceptance (owner decisions 5 and 6).
+      if (confirmed && (value.decision !== "accept" || value.proposalId !== null))
+        throw identityError(422);
+      // An absent or false flag keeps the pre-existing receipt fingerprint for identical retries.
+      const fingerprint = confirmed ? { ...body, confirmOverLimits: true } : body;
       return run(async (tx) => {
         const prepared = await prepare(tx, id, actor);
-        return once(tx, actor, "decide", key, { id, version, value }, async () => {
+        return once(tx, actor, "decide", key, { id, version, value: fingerprint }, async () => {
           expected(prepared.row, version);
           if (value.proposalId) {
             const [p] = await c(tx)
@@ -1208,6 +1268,7 @@ export function createTripDecisions(
             reason(value.reason),
             actor,
             value.reviewedRevisionId,
+            confirmed,
           );
         });
       });
