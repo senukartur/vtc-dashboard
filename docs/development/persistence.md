@@ -4,7 +4,7 @@
 
 ## Runtime and connections
 
-Pins: Node 24.22.0, pnpm 12.14.0, TypeScript 5.9.3, mysql2 3.24.6, drizzle-orm 0.45.4, drizzle-kit 0.31.11 and real MySQL 8.4.11. Strict dependency/peer policies remain enabled. InnoDB, utf8mb4 labels, UTC and the SQL modes in `requiredSqlModes` are required. Every transaction checkout resets session timezone, modes, isolation, autocommit and connection charset, including reused connections. Isolation is `REPEATABLE-READ`; authorization/concurrency owners must still use locking reads and recheck current state.
+Pins: Node 24.22.2, pnpm 12.14.0, TypeScript 5.9.3, mysql2 3.24.6, drizzle-orm 0.45.4, drizzle-kit 0.31.11 and real MySQL 8.4.11. Strict dependency/peer policies remain enabled. InnoDB, utf8mb4 labels, UTC and the SQL modes in `requiredSqlModes` are required. Every transaction checkout resets session timezone, modes, isolation, autocommit and connection charset, including reused connections. Isolation is `REPEATABLE-READ`; authorization/concurrency owners must still use locking reads and recheck current state.
 
 Connection budget is **5 readiness + 5 transaction + 1 dedicated migrator = 11** for one instance of each factory and one migration invocation. Pools are lazy; identity-enabled startup also instantiates one shared UnitOfWork. Create one shared UnitOfWork per application process, rather than a pool per repository/request. Across processes the bound is `5 * readiness instances + 5 * UnitOfWork instances + concurrent migration invocations`; jobs and replicas must be added to the deployment budget. A named migration lock does not prevent waiting migrators from opening their own one connection. Final-host privileges and capacity remain VTC-041 gates.
 

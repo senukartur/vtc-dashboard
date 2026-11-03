@@ -10,27 +10,40 @@ updates:
     directories:
       - /
       - /deploy/test
+      - /deploy/development
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    groups:
+      runtime-images:
+        group-by: dependency-name
+        patterns: [node, mysql]
     ignore:
+      # Tag changes also require config/runtime.json, engines, workflows and docs.
+      # Keep same-version digest refreshes; review the pins weekly (review.md).
       - dependency-name: node
-        versions: ["< 24", ">= 25"]
+        versions: ["< 24.22.2", ">= 24.22.3"]
       - dependency-name: mysql
-        versions: ["< 8.4", ">= 8.5"]
+        versions: ["< 8.4.11", ">= 8.4.12"]
   - package-ecosystem: docker-compose
     directories:
       - /
       - /deploy/test
+      - /deploy/development
+      - /deploy/external-identities-live
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    groups:
+      runtime-images:
+        group-by: dependency-name
+        patterns: [node, mysql]
     ignore:
       - dependency-name: node
-        versions: ["< 24", ">= 25"]
+        versions: ["< 24.22.2", ">= 24.22.3"]
       - dependency-name: mysql
-        versions: ["< 8.4", ">= 8.5"]
+        versions: ["< 8.4.11", ">= 8.4.12"]
 # Root pnpm 12 hosted lockfile updating remains unverified; weekly manual coverage
 # and the dated removal condition are documented in docs/development/review.md.
