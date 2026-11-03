@@ -17,7 +17,7 @@ node scripts/setup-local.mjs
 Without host Node, run the same helper in the pinned image (PowerShell and POSIX shells expand `${PWD}`):
 
 ```sh
-docker run --rm --user node --mount "type=bind,source=${PWD},target=/workspace" --workdir /workspace node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 node scripts/setup-local.mjs
+docker run --rm --user node --mount "type=bind,source=${PWD},target=/workspace" --workdir /workspace node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c node scripts/setup-local.mjs
 ```
 
 The container's `node` user is UID/GID 1000. On native Linux with another host UID/GID, replace `--user node` with `--user "$(id -u):$(id -g)"` so the private file remains readable by its owner. The helper never overwrites an existing `.env` or prints generated passwords. Keep that file private; `.env.example` contains placeholders only.
@@ -54,7 +54,7 @@ VTC-007's separate transaction pool has five additional slots when instantiated,
 
 ## Native tooling and portable builds
 
-Host editing/typechecking or a future non-Docker deployment uses Node **24.22.0** and pnpm **12.14.0**. Install those versions using your normal runtime manager; `npm install --global pnpm@12.14.0` is one package-manager installation option. Exact versions are recorded in [the shared runtime baseline](../config/runtime.json), `.node-version`, the root manifest and container images. The setup helper's Node 18 minimum does not weaken the application runtime pin.
+Host editing/typechecking or a future non-Docker deployment uses Node **24.22.2** and pnpm **12.14.0**. Install those versions using your normal runtime manager; `npm install --global pnpm@12.14.0` is one package-manager installation option. Exact versions are recorded in [the shared runtime baseline](../config/runtime.json), `.node-version`, the root manifest and container images. The setup helper's Node 18 minimum does not weaken the application runtime pin.
 
 ```sh
 pnpm install --frozen-lockfile
