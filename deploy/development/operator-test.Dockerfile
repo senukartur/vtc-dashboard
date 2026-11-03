@@ -1,4 +1,4 @@
-FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS cli
+FROM docker:29.9.2-cli@sha256:5e6baf67325a79f64ed3bed6863954d5e05d0f3d4e57cbdb14809346814bbfdb AS cli
 FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 # Package hooks may generate test host keys, but must never start an SSH daemon.
 RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
