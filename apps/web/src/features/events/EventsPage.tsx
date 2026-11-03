@@ -5,7 +5,7 @@ import { useSession } from "../../app/Session.js";
 import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { publicContent, publicPath } from "../landing/content.js";
-import { EventState, useEventTimezone } from "./components.js";
+import { EventState, KeepFocusButton, useEventTimezone } from "./components.js";
 import { EventEditor } from "./EventEditor.js";
 import { type DTO, periodFrom } from "./model.js";
 import { useEventQuery } from "./queries.js";
@@ -29,11 +29,11 @@ export function EventsPage({ publicView = false }: { publicView?: boolean }) {
     allowed,
   );
   const data = query.data?.data.data;
-  /** Paging replaces the list (and its pager) while the page loads; focus stays on the page. */
   function page(next: string | null) {
     setSearch(next ? { period, cursor: next } : { period });
-    heading.current?.focus();
   }
+  /** Paging replaces the list and its pager while loading; focus then moves to the heading. */
+  const focusHeading = () => heading.current?.focus();
   return (
     <div className="events-page stack">
       <header className="events-heading">
@@ -69,7 +69,7 @@ export function EventsPage({ publicView = false }: { publicView?: boolean }) {
           />
           <EventState
             query={query}
-            focusTarget={() => heading.current?.focus()}
+            focusTarget={focusHeading}
             {...(cursor ? { reset: () => page(null) } : {})}
           />
           {data && (
@@ -88,14 +88,22 @@ export function EventsPage({ publicView = false }: { publicView?: boolean }) {
               {(cursor || data.nextCursor) && (
                 <nav className="events-pager" aria-label={t("next")}>
                   {cursor && (
-                    <Button variant="outline" onClick={() => page(null)}>
+                    <KeepFocusButton
+                      variant="outline"
+                      focusTarget={focusHeading}
+                      onClick={() => page(null)}
+                    >
                       {t("first")}
-                    </Button>
+                    </KeepFocusButton>
                   )}
                   {data.nextCursor && (
-                    <Button variant="outline" onClick={() => page(data.nextCursor)}>
+                    <KeepFocusButton
+                      variant="outline"
+                      focusTarget={focusHeading}
+                      onClick={() => page(data.nextCursor)}
+                    >
                       {t("next")}
-                    </Button>
+                    </KeepFocusButton>
                   )}
                 </nav>
               )}

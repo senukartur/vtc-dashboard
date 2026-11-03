@@ -75,6 +75,12 @@ async function brokenWords(root: Locator) {
     return broken;
   });
 }
+/** The next read of a path ending in `suffix` with `status` (await it before changing the mock). */
+function read(page: Page, suffix: string, status: number) {
+  return page.waitForResponse(
+    (response) => new URL(response.url()).pathname.endsWith(suffix) && response.status() === status,
+  );
+}
 async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
@@ -446,25 +452,34 @@ test("L6 counts and list failures stay in their section and are never shown as z
   await expect(signedUp).toContainText("No members have signed up.");
   await noOverflow(page);
   await capture(page, info, "events-section-failures");
-  // Retrying from the keyboard keeps focus in the section (the button is replaced while loading).
+  // Without cached data the retry button is replaced while loading, so focus moves to the
+  // section heading. Each mock change waits for the previous read to finish.
   const retry = decliners.getByRole("button", { name: "Try again", exact: true });
   await retry.focus();
+  let settled = read(page, "/decliners", 503);
   await page.keyboard.press("Enter");
+  await settled;
   await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
   await expect(decliners.getByRole("alert")).toBeVisible();
   state.declinersStatus = 200;
   await retry.focus();
+  settled = read(page, "/decliners", 200);
   await page.keyboard.press("Enter");
+  await settled;
   await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
   await expect(decliners).toContainText("No one has declined.");
   const counts = participants.getByRole("button", { name: "Load counts again", exact: true });
   await counts.focus();
+  settled = read(page, "/response-counts", 503);
   await page.keyboard.press("Enter");
+  await settled;
   await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
   await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
   state.countsStatus = 200;
   await counts.focus();
+  settled = read(page, "/response-counts", 200);
   await page.keyboard.press("Enter");
+  await settled;
   await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
   await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
   await expect(counts).toHaveCount(0);
@@ -480,10 +495,44 @@ test("L6 a failed list read retried from the keyboard focuses the page heading",
   const retry = workspace(page).getByRole("button", { name: "Try again", exact: true });
   await retry.focus();
   state.listStatus = 200;
+  const settled = read(page, "/events", 200);
   await page.keyboard.press("Enter");
+  await settled;
   await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   await expect(workspace(page).locator(".events-row")).toHaveCount(1);
   await quiet(page);
+});
+
+test("L6 a failed refresh of cached names keeps focus on Try again", async ({ page }) => {
+  const state = await openDetail(page);
+  await settledDetail(page);
+  const decliners = page.getByRole("region", { name: text.en.cantAttend, exact: true });
+  await expect(decliners).toContainText("No one has declined.");
+  // A committed response refreshes the decliners in the background while their page is cached.
+  state.declinersStatus = 503;
+  let settled = read(page, "/decliners", 503);
+  await page
+    .getByRole("group", { name: text.en.response, exact: true })
+    .getByRole("button", { name: text.en.participating, exact: true })
+    .click();
+  await page.getByRole("button", { name: text.en.save, exact: true }).click();
+  await settled;
+  const retry = decliners.getByRole("button", { name: "Try again", exact: true });
+  await expect(retry).toBeVisible();
+  await retry.focus();
+  settled = read(page, "/decliners", 503);
+  await page.keyboard.press("Enter");
+  await settled;
+  // The button stays mounted through the failed retry, so focus stays on it.
+  await expect(decliners.getByRole("alert")).toBeVisible();
+  await expect(retry).toBeFocused();
+  await expect(decliners.getByRole("heading", { level: 3 })).not.toBeFocused();
+  state.declinersStatus = 200;
+  settled = read(page, "/decliners", 200);
+  await page.keyboard.press("Enter");
+  await settled;
+  await expect(decliners).toContainText("No one has declined.");
+  await expect(retry).toHaveCount(0);
 });
 
 for (const phase of ["started", "cancelled"] as const)

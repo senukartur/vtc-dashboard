@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useRef, useState } from "react";
+import { type ComponentProps, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Button } from "../../shared/ui/primitives.js";
@@ -61,9 +61,33 @@ export function EventFailureView({ error, seconds = 0 }: { error: unknown; secon
   );
 }
 /**
- * `focusTarget` receives focus when Try again / Start from first page is used: without data the
- * refetch replaces the button with the loading status, so focus would otherwise fall to the body.
+ * A button that hands focus to `focusTarget` only when it is removed while focused, for example
+ * when a refetch without data replaces it with a loading state or paging replaces its list.
+ * While it stays mounted (a failed refetch of cached data), focus stays on it.
  */
+export function KeepFocusButton({
+  focusTarget,
+  ...props
+}: ComponentProps<typeof Button> & { focusTarget?: (() => void) | undefined }) {
+  const button = useRef<HTMLButtonElement>(null),
+    target = useRef(focusTarget);
+  useLayoutEffect(() => {
+    target.current = focusTarget;
+  });
+  // Layout cleanup runs before React removes the node, so it can still see that it was focused.
+  useLayoutEffect(() => {
+    const node = button.current;
+    return () => {
+      if (!node || node !== document.activeElement) return;
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body) target.current?.();
+      });
+    };
+  }, []);
+  return <Button ref={button} {...props} />;
+}
+/** `focusTarget` receives focus if the focused Try again / Start from first page button unmounts. */
 export function EventState({
   query,
   reset,
@@ -79,15 +103,13 @@ export function EventState({
   ) : query.isError ? (
     <>
       <EventFailureView error={query.error} />
-      <Button
+      <KeepFocusButton
         variant="outline"
-        onClick={() => {
-          void (reset ?? query.refetch)();
-          focusTarget?.();
-        }}
+        focusTarget={focusTarget}
+        onClick={() => void (reset ?? query.refetch)()}
       >
         {t(reset ? "reset" : "retry")}
-      </Button>
+      </KeepFocusButton>
     </>
   ) : null;
 }

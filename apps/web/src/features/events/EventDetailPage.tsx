@@ -15,6 +15,7 @@ import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js
 import {
   EventFailureView,
   EventState,
+  KeepFocusButton,
   useEventClock,
   useEventStarted,
   useEventTimezone,
@@ -505,16 +506,14 @@ function Participants({
             {t(view.state === "loading" ? "countsLoading" : "countsUnavailable")}
           </p>
           {view.state === "unavailable" && (
-            // The refetch replaces this button with the loading text; focus stays in the section.
-            <Button
+            // Without cached counts the refetch replaces this button; focus then moves to the heading.
+            <KeepFocusButton
               variant="outline"
-              onClick={() => {
-                void counts.refetch();
-                heading.current?.focus();
-              }}
+              focusTarget={() => heading.current?.focus()}
+              onClick={() => void counts.refetch()}
             >
               {t("retryCounts")}
-            </Button>
+            </KeepFocusButton>
           )}
         </div>
       )}
@@ -546,8 +545,9 @@ function MemberList({
   /** The page (and its pager) is replaced while it loads, so focus moves to the list heading. */
   function page(next: string | null) {
     setCursor(next);
-    heading.current?.focus();
   }
+  /** Paging replaces the page and its pager while loading; focus then moves to the list heading. */
+  const focusHeading = () => heading.current?.focus();
   return (
     <section className="events-members" aria-labelledby={headingId}>
       <h3 id={headingId} ref={heading} tabIndex={-1}>
@@ -556,7 +556,7 @@ function MemberList({
       <EventState
         query={query}
         reset={cursor ? () => page(null) : undefined}
-        focusTarget={() => heading.current?.focus()}
+        focusTarget={focusHeading}
       />
       {data && (
         <>
@@ -579,14 +579,22 @@ function MemberList({
           {(cursor || data.nextCursor) && (
             <div className="events-pager">
               {cursor && (
-                <Button variant="outline" onClick={() => page(null)}>
+                <KeepFocusButton
+                  variant="outline"
+                  focusTarget={focusHeading}
+                  onClick={() => page(null)}
+                >
                   {t("first")}
-                </Button>
+                </KeepFocusButton>
               )}
               {data.nextCursor && (
-                <Button variant="outline" onClick={() => page(data.nextCursor)}>
+                <KeepFocusButton
+                  variant="outline"
+                  focusTarget={focusHeading}
+                  onClick={() => page(data.nextCursor)}
+                >
                   {t("next")}
-                </Button>
+                </KeepFocusButton>
               )}
             </div>
           )}
@@ -874,20 +882,26 @@ function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
       ))}
       <div className="events-pager">
         {cursor && (
-          <Button
+          <KeepFocusButton
             type="button"
             variant="outline"
+            focusTarget={() => heading.current?.focus()}
             onClick={() => {
               setCursor(null);
             }}
           >
             {t("first")}
-          </Button>
+          </KeepFocusButton>
         )}
         {data?.nextCursor && (
-          <Button type="button" variant="outline" onClick={() => setCursor(data.nextCursor)}>
+          <KeepFocusButton
+            type="button"
+            variant="outline"
+            focusTarget={() => heading.current?.focus()}
+            onClick={() => setCursor(data.nextCursor)}
+          >
             {t("next")}
-          </Button>
+          </KeepFocusButton>
         )}
       </div>
       <EventFailureView error={command.failure} seconds={command.seconds} />
