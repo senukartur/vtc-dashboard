@@ -284,6 +284,13 @@
 .members-page .members-feedback {
   gap: 6px;
 }
+/* The held retry stays focusable while busy; it looks like a disabled button. */
+.members-page .members-retry[aria-disabled="true"] {
+  cursor: not-allowed;
+  color: var(--muted);
+  background: var(--surface-active);
+  border-color: var(--border-strong);
+}
 
 /* Portaled confirmation dialogs (membership, roles, Steam, deactivate, restore). */
 .dialog-content:has(.members-dialog) {

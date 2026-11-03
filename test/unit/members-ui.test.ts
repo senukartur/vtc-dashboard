@@ -9,6 +9,7 @@ import {
   memberPanel,
   membershipChange,
   membershipOf,
+  normalizeSearch,
   orderedRoles,
   parseFilters,
   type Role,
@@ -118,6 +119,17 @@ describe("filters and list path", () => {
       ),
     ).toEqual({ status: "inactive", role: "dispatcher", search: "Kestrel", cursor: "abc" });
     expect(parseFilters(new URLSearchParams(`search=${"x".repeat(200)}`)).search).toHaveLength(128);
+  });
+  test("normalizeSearch cuts by code points and never leaves an unpaired surrogate", () => {
+    const astral = "\u{1F69A}";
+    expect(normalizeSearch(`  ${"a".repeat(127)}${astral}${astral}  `)).toBe(
+      `${"a".repeat(127)}${astral}`,
+    );
+    expect(normalizeSearch(`ab\uD83D`)).toBe("ab");
+    expect(normalizeSearch("   ")).toBeNull();
+    const parsed = parseFilters(new URLSearchParams({ search: astral.repeat(130) }));
+    expect(Array.from(parsed.search ?? "")).toHaveLength(128);
+    expect(() => listPath(parsed)).not.toThrow();
   });
   test("listPath keeps status first and encodes the search and cursor", () => {
     expect(listPath({ status: "active", role: null, search: null, cursor: null })).toBe(

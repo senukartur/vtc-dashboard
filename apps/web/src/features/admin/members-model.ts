@@ -109,15 +109,29 @@ export type Filters = {
   cursor: string | null;
 };
 export const searchMaxLength = 128;
+const loneSurrogate = /^[\uD800-\uDFFF]$/;
+
+/**
+ * Trimmed search of at most 128 code points, or null when blank. It is cut by code points and
+ * drops unpaired surrogates, so the term always encodes into a URL.
+ */
+export function normalizeSearch(value: string): string | null {
+  return (
+    Array.from(value.trim())
+      .filter((point) => !loneSurrogate.test(point))
+      .slice(0, searchMaxLength)
+      .join("")
+      .trim() || null
+  );
+}
 
 /** Validated URL filters: unknown values are ignored, a blank search is no search. */
 export function parseFilters(params: URLSearchParams): Filters {
-  const role = params.get("role"),
-    search = (params.get("search") ?? "").trim().slice(0, searchMaxLength).trim();
+  const role = params.get("role");
   return {
     status: params.get("status") === "inactive" ? "inactive" : "active",
     role: roleFilters.includes(role as RoleFilter) ? (role as RoleFilter) : null,
-    search: search || null,
+    search: normalizeSearch(params.get("search") ?? ""),
     cursor: params.get("cursor") || null,
   };
 }

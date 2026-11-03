@@ -258,6 +258,19 @@ test("M3 list reads carry status first, the role filter and the debounced search
   await expect(search).toBeFocused();
 });
 
+test("M3 typing just after each debounced search write keeps every keystroke", async ({ page }) => {
+  const state = await open(page);
+  const search = page.getByRole("searchbox", { name: "Search by nickname", exact: true });
+  await search.focus();
+  // Each keystroke lands just after the previous term was written to the URL.
+  await page.keyboard.type("Fictional K", { delay: 330 });
+  await expect(search).toHaveValue("Fictional K");
+  await expect(page).toHaveURL(/\?status=active&search=Fictional\+K$/);
+  await expect(rows(page)).toHaveCount(1);
+  await expect(search).toHaveValue("Fictional K");
+  expect(state.reads.at(-1)).toBe("/admin/members?status=active&limit=25&search=Fictional%20K");
+});
+
 test("M3 membership switch sends one PUT with the reviewed version and no roles call", async ({
   page,
 }) => {
@@ -430,7 +443,7 @@ test("M3 Steam replacement sends the proof and reason with the member version", 
   await expect(heading(page, names.kestrel)).toBeFocused();
 });
 
-test("M4 an aborted switch keeps its key, body and version for Refresh", async ({ page }) => {
+test("M4 an aborted switch freezes its reason and retries the same request", async ({ page }) => {
   const state = await open(page);
   state.commandOutcomes.push("abort");
   await select(page, names.kestrel);
@@ -443,13 +456,19 @@ test("M4 an aborted switch keeps its key, body and version for Refresh", async (
     "Fictional reason",
   );
   await expect(dialog.getByRole("alert")).toBeVisible();
+  // The held attempt resends its frozen body: the sent reason cannot be edited or re-confirmed.
+  await expect(dialog.getByLabel("Reason", { exact: true })).toBeDisabled();
+  await expect(dialog.getByLabel("Reason", { exact: true })).toHaveValue("Fictional reason");
+  await expect(dialog.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  const retry = feedback(page).getByRole("button", { name: "Refresh", exact: true });
+  const retry = feedback(page).getByRole("button", { name: "Retry the same request", exact: true });
   await expect(retry).toBeFocused();
   await expect(feedback(page).getByRole("alert")).toContainText(
     "The result could not be confirmed.",
   );
+  for (const name of [text.en.membership, text.en.deactivate])
+    await expect(detail(page).getByRole("button", { name, exact: true })).toBeDisabled();
   await retry.click();
   await expect.poll(() => state.commands.length).toBe(2);
   const [first, second] = state.commands;
@@ -458,6 +477,38 @@ test("M4 an aborted switch keeps its key, body and version for Refresh", async (
   expect(second?.ifMatch).toBe(first?.ifMatch);
   expect(second?.path).toBe(`/admin/members/${ids.kestrel}/membership`);
   await expect(roles.getByLabel("Trainee", { exact: true })).toBeChecked();
+  await expect(heading(page, names.kestrel)).toBeFocused();
+});
+
+test("M4 a Steam retry that fails again keeps focus and the frozen request", async ({ page }) => {
+  const state = await open(page);
+  state.commandOutcomes.push("abort", "abort");
+  await select(page, names.kestrel);
+  await settledDetail(page);
+  const steam = detail(page).locator(".members-steam");
+  const dialog = await confirmWith(
+    page,
+    steam.getByRole("button", { name: text.en.steam, exact: true }),
+    "Fictional steam",
+  );
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await expect(dialog.getByLabel("Reason", { exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Confirm", exact: true })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  const retry = steam.getByRole("button", { name: "Retry the same request", exact: true });
+  await expect(retry).toBeFocused();
+  await retry.click();
+  await expect.poll(() => state.commands.length).toBe(2);
+  await expect(retry).not.toHaveAttribute("aria-disabled", "true");
+  await expect(retry).toBeFocused();
+  await retry.press("Enter");
+  await expect.poll(() => state.commands.length).toBe(3);
+  expect(new Set(state.commands.map((command) => command.key)).size).toBe(1);
+  expect(new Set(state.commands.map((command) => command.ifMatch))).toEqual(new Set(['"m-1"']));
+  expect(state.commands.map((command) => command.body)).toEqual(
+    Array(3).fill(JSON.stringify({ verificationId: ids.proof, reason: "Fictional steam" })),
+  );
   await expect(heading(page, names.kestrel)).toBeFocused();
 });
 
@@ -696,7 +747,7 @@ test("M11 last accepted dates use the display timezone and null stays neutral", 
 }) => {
   await open(page, { displayTimezone: "Europe/Moscow" });
   await expect(master(page)).toContainText(
-    "Last accepted is the reporting date of the latest accepted trip; no other activity is tracked. Dates in Europe/Moscow.",
+    "Last accepted is the day of the latest accepted trip's reporting time, shown in Europe/Moscow; no other activity is tracked.",
   );
   const cell = (name: string) =>
     master(page)
@@ -712,5 +763,6 @@ test("M11 last accepted dates use the display timezone and null stays neutral", 
   await expect(cell(names.trainee)).toHaveText("Last acceptedNone recorded");
   await select(page, names.trainee);
   await expect(detail(page)).toContainText("No accepted trips recorded");
+  await expect(detail(page)).toContainText("Dates and times in Europe/Moscow.");
   await expect(page.locator("body")).not.toContainText(/never drove|never driven/i);
 });

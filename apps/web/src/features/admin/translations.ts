@@ -60,17 +60,6 @@ export const administrationTranslations = {
     dispatcher: "Dispatcher",
     deputy_director: "Deputy Director",
     director: "Director",
-    protectedDirector:
-      "The serving Director is protected. Leadership can change only through verified-email transfer.",
-    saveRoles: "Save selected roles",
-    rolesHelp:
-      "Replace the role set with these selected roles. Per-game qualifications and history are preserved.",
-    deactivate: "Deactivate member",
-    deactivateHelp:
-      "End membership and current qualification periods. Current sessions and personal telemetry credentials will be invalidated.",
-    reinstate: "Reinstate same member",
-    reinstateHelp:
-      "Restore this identity with the explicit selected roles and new per-game qualifications. Old sessions and credentials remain invalid.",
     qualifications: "Per-game qualifications",
     levelLabelLoading: "Loading qualification label…",
     levelLabelUnavailable: "Qualification label unavailable",
@@ -79,10 +68,6 @@ export const administrationTranslations = {
     ats: "American Truck Simulator",
     noGame: "Do not assign this game",
     level: "Qualification level",
-    replacement: "Verified Steam replacement requests",
-    applyReplacement: "Apply verified Steam replacement",
-    replacementHelp:
-      "Use this current verified proof. Existing telemetry credentials will be invalidated; trip history is preserved.",
     noProof: "No current verified replacement is available.",
     identity: "Steam and TruckersMP",
     steamStatus: "Steam status",
@@ -364,7 +349,9 @@ export const administrationTranslations = {
         trainee: "Trainee",
       },
       footnote:
-        "Last accepted is the reporting date of the latest accepted trip; no other activity is tracked. Dates in {{timezone}}.",
+        "Last accepted is the day of the latest accepted trip's reporting time, shown in {{timezone}}; no other activity is tracked.",
+      detailTimes: "Dates and times in {{timezone}}.",
+      retrySame: "Retry the same request",
       noMatches: "No members match these filters.",
       resetFilters: "Reset filters",
       lastAccepted: "Last accepted trip: {{date}}",
@@ -512,17 +499,6 @@ export const administrationTranslations = {
     dispatcher: "Диспетчер",
     deputy_director: "Заместитель директора",
     director: "Директор",
-    protectedDirector:
-      "Аккаунт действующего директора защищён. Руководство передаётся только с подтверждением по текущей почте.",
-    saveRoles: "Сохранить выбранные роли",
-    rolesHelp:
-      "Текущий набор ролей будет заменён выбранным. Квалификации по играм и история сохраняются.",
-    deactivate: "Деактивировать участника",
-    deactivateHelp:
-      "Членство и текущие периоды квалификаций завершатся. Сеансы и личные ключи телеметрии будут аннулированы.",
-    reinstate: "Восстановить этого участника",
-    reinstateHelp:
-      "Вернуть прежний аккаунт с явно выбранными ролями и новыми квалификациями по играм. Старые сеансы и ключи останутся недействительными.",
     qualifications: "Квалификации по играм",
     levelLabelLoading: "Загрузка названия квалификации…",
     levelLabelUnavailable: "Название квалификации недоступно",
@@ -531,10 +507,6 @@ export const administrationTranslations = {
     ats: "American Truck Simulator",
     noGame: "Не назначать в этой игре",
     level: "Уровень квалификации",
-    replacement: "Подтверждённые запросы замены Steam",
-    applyReplacement: "Применить подтверждённую замену Steam",
-    replacementHelp:
-      "Будет использован этот действующий подтверждённый запрос. Ключи телеметрии аннулируются, история рейсов сохранится.",
     noProof: "Нет действующего подтверждённого запроса на замену.",
     identity: "Steam и TruckersMP",
     steamStatus: "Состояние Steam",
@@ -818,7 +790,9 @@ export const administrationTranslations = {
         trainee: "Стажёр",
       },
       footnote:
-        "«Последний принятый» — дата отчётности последнего принятого рейса; другая активность не отслеживается. Даты в поясе {{timezone}}.",
+        "«Последний принятый» — день отчётного времени последнего принятого рейса в поясе {{timezone}}; другая активность не отслеживается.",
+      detailTimes: "Даты и время — в поясе {{timezone}}.",
+      retrySame: "Повторить тот же запрос",
       noMatches: "Нет участников, подходящих под эти фильтры.",
       resetFilters: "Сбросить фильтры",
       lastAccepted: "Последний принятый рейс: {{date}}",

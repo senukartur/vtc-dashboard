@@ -38,6 +38,7 @@ import {
   roleDiff,
   roleFilters,
   rolesBody,
+  normalizeSearch,
   searchMaxLength,
 } from "./members-model.js";
 import { type DTO, useWorkspaceCommand, useWorkspaceQuery } from "./transport.js";
@@ -168,6 +169,33 @@ function Points({ items }: { items: string[] }) {
     </ul>
   );
 }
+/**
+ * Resends the held (uncertain) attempt with its frozen target, body, key and version. It stays
+ * focusable while busy (aria-disabled with a guard), so focus survives a retry that fails again.
+ */
+function HeldRetry({
+  retry,
+  busy,
+  onRetry,
+}: {
+  retry: RefObject<HTMLButtonElement | null>;
+  busy: boolean;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation("administration");
+  return (
+    <Button
+      ref={retry}
+      className="members-retry"
+      aria-disabled={busy || undefined}
+      onClick={() => {
+        if (!busy) onRetry();
+      }}
+    >
+      {t("membersUi.retrySame")}
+    </Button>
+  );
+}
 function IdentityFacts({ data }: { data: DTO["Identity"] }) {
   const { t } = useTranslation("administration"),
     dates = useDates();
@@ -285,7 +313,7 @@ function SteamReplacement({
               description={t("membersUi.replacementDescription")}
               busy={command.pending}
               disabled={command.held}
-              confirmDisabled={!reason.trim()}
+              confirmDisabled={!reason.trim() || command.held}
               restoreFocus={() => retry.current ?? heading.current}
               confirm={() => apply(proof.id)}
             >
@@ -301,7 +329,7 @@ function SteamReplacement({
                 <ReasonField
                   id={`members-steam-reason-${proof.id}`}
                   value={reason}
-                  disabled={command.pending}
+                  disabled={command.pending || command.held}
                   onChange={setReason}
                 />
               </div>
@@ -312,10 +340,10 @@ function SteamReplacement({
       <Pager cursor={cursor} next={proofs.data?.data.data.nextCursor} setCursor={setCursor} />
       <CommandFeedback command={command} />
       {command.held && (
-        <Button
-          ref={retry}
-          disabled={command.pending || command.seconds > 0}
-          onClick={() => {
+        <HeldRetry
+          retry={retry}
+          busy={command.pending || command.seconds > 0}
+          onRetry={() => {
             const at = Date.now();
             void command
               .run(
@@ -328,9 +356,7 @@ function SteamReplacement({
                 if (result) committed(at);
               });
           }}
-        >
-          {t("refresh")}
-        </Button>
+        />
       )}
     </section>
   );
@@ -526,7 +552,8 @@ function MemberPanel({
     restoreFocus = () => retry.current ?? heading.current;
   const reason = (key: keyof Reasons) => ({
     value: reasons[key],
-    disabled: busy,
+    // A held attempt resends its frozen body, so the sent reason stays visible and fixed.
+    disabled: busy || command.held,
     onChange: (value: string) => setReasons((previous) => ({ ...previous, [key]: value })),
   });
   /** Runs one member command and asks for the heading once the detail was read again. */
@@ -627,7 +654,7 @@ function MemberPanel({
               busy={busy}
               variant="default"
               disabled={command.held || stale || !restore.assignments.length || !labelsAvailable}
-              confirmDisabled={!reasons.restore.trim()}
+              confirmDisabled={!reasons.restore.trim() || command.held}
               restoreFocus={restoreFocus}
               confirm={async () =>
                 labelsAvailable && submit(`/admin/members/${id}/reinstatement`, restore)
@@ -709,7 +736,7 @@ function MemberPanel({
             description={t("membersUi.membershipDescription")}
             busy={busy}
             disabled={command.held || stale || !change || rolesChanged}
-            confirmDisabled={!reasons.membership.trim()}
+            confirmDisabled={!reasons.membership.trim() || command.held}
             restoreFocus={restoreFocus}
             confirm={async () =>
               !!change &&
@@ -773,7 +800,7 @@ function MemberPanel({
             description={t("membersUi.rolesDescription")}
             busy={busy}
             disabled={command.held || stale || !rolesChanged || !!change}
-            confirmDisabled={!reasons.roles.trim()}
+            confirmDisabled={!reasons.roles.trim() || command.held}
             restoreFocus={restoreFocus}
             confirm={() =>
               submit(
@@ -812,7 +839,7 @@ function MemberPanel({
             description={t("membersUi.deactivateDescription")}
             busy={busy}
             disabled={command.held || stale}
-            confirmDisabled={!reasons.deactivate.trim()}
+            confirmDisabled={!reasons.deactivate.trim() || command.held}
             triggerClassName="members-danger"
             restoreFocus={restoreFocus}
             confirm={() =>
@@ -915,6 +942,7 @@ function MemberDetail({
                     date: dates.day(trip.iso) ?? t("membersUi.levelUnavailable"),
                   })}
             </p>
+            <p className="muted">{t("membersUi.detailTimes", { timezone: dates.timezone })}</p>
             <p className="members-break">{data.email}</p>
             <p className="admin-id members-break">{id}</p>
           </div>
@@ -926,10 +954,10 @@ function MemberDetail({
             <div className="members-feedback stack">
               <CommandFeedback command={command} />
               {command.held && (
-                <Button
-                  ref={retry}
-                  disabled={busy}
-                  onClick={() => {
+                <HeldRetry
+                  retry={retry}
+                  busy={busy}
+                  onRetry={() => {
                     const at = Date.now();
                     void command
                       .run(
@@ -940,9 +968,7 @@ function MemberDetail({
                       )
                       .then((result) => requestFocus(at, !!result));
                   }}
-                >
-                  {t("refresh")}
-                </Button>
+                />
               )}
             </div>
           )}
@@ -1008,16 +1034,13 @@ function Members() {
     [selected, setSelected] = useState<string | null>(null),
     [focusOnLoad, setFocusOnLoad] = useState(false),
     [term, setTerm] = useState(filters.search ?? ""),
-    [synced, setSynced] = useState(filters.search),
     [backTo, setBackTo] = useState<string | null | undefined>(undefined),
     [pageFocus, setPageFocus] = useState<string | null>(null),
     master = useRef<HTMLElement>(null),
-    searchInput = useRef<HTMLInputElement>(null);
-  // A search changed outside the input (Reset filters, history navigation) replaces the typed term.
-  if (filters.search !== synced) {
-    setSynced(filters.search);
-    setTerm(filters.search ?? "");
-  }
+    searchInput = useRef<HTMLInputElement>(null),
+    // The search this field last wrote to the URL. Navigation commits in a transition, so the field
+    // must not be reset from the URL while its own write is still on the way.
+    pushed = useRef(filters.search);
   const query = useWorkspaceQuery(path, "EnvelopeListMemberAdmin"),
     options = useWorkspaceQuery("/admin/reinstatement-options", "EnvelopeReinstatementOptions");
   const items = query.data?.data.data.items,
@@ -1027,11 +1050,17 @@ function Members() {
     setSelected(null);
     setParams(filterParams({ ...filters, cursor: null, ...next }), { replace });
   }
+  // A search changed outside the field (Reset filters, history navigation) replaces the typed term.
   useEffect(() => {
-    const value = term.trim().slice(0, searchMaxLength).trim() || null;
+    if (filters.search === pushed.current) return;
+    pushed.current = filters.search;
+    setTerm(filters.search ?? "");
+  }, [filters.search]);
+  useEffect(() => {
+    const value = normalizeSearch(term);
     if (value === filters.search) return;
     const timer = setTimeout(() => {
-      setSynced(value);
+      pushed.current = value;
       setSelected(null);
       setParams(
         (previous) => filterParams({ ...parseFilters(previous), search: value, cursor: null }),
