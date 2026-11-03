@@ -227,11 +227,12 @@ const areas = [
   {
     paths: [
       "scripts/ci-result.mjs",
+      "scripts/ci-scope.mjs",
       "scripts/browser-diagnostics.mjs",
       "scripts/trip-fixture-diagnostics.mjs",
       "test/support/safe-browser-reporter.ts",
     ],
-    tests: ["ci-result", "browser-diagnostics", "trip-ci-diagnostics"],
+    tests: ["ci-result", "ci-scope", "browser-diagnostics", "trip-ci-diagnostics"],
   },
   {
     paths: ["scripts/test-selection.mjs", "scripts/test-affected.mjs"],

@@ -55,8 +55,28 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
+  scope:
+    # Owner-approved path rule (VTC-070): PRs skip the rehearsal unless scripts/ci-scope.mjs
+    # matches a changed path; main always runs it. Required CI accepts a skip only from here.
+    name: Rehearsal scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rehearsal: ${{ steps.scope.outputs.rehearsal }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.0
+      - id: scope
+        run: node scripts/ci-scope.mjs
   deployment:
     name: Deployment rehearsal
+    needs: [scope]
+    if: ${{ needs.scope.outputs.rehearsal == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -93,7 +113,7 @@ jobs:
           compression-level: 0
   required:
     name: Required CI
-    needs: [quality, deployment, artifact]
+    needs: [scope, quality, deployment, artifact]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -109,7 +129,9 @@ jobs:
       - name: Require explicit quality success
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          REHEARSAL_SCOPE: ${{ needs.scope.outputs.rehearsal }}
           DEPLOYMENT_RESULT: ${{ needs.deployment.result }}
           ARTIFACT_RESULT: ${{ needs.artifact.result }}
         run: |
-          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT, deployment: process.env.DEPLOYMENT_RESULT, artifact: process.env.ARTIFACT_RESULT, event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF });'
+          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT, scope: process.env.SCOPE_RESULT, rehearsal: process.env.REHEARSAL_SCOPE, deployment: process.env.DEPLOYMENT_RESULT, artifact: process.env.ARTIFACT_RESULT, event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF });'
