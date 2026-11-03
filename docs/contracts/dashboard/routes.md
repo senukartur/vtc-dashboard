@@ -34,6 +34,7 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/members` | `listAdminMembers` | `members.manage` | VTC-038 |
 | `GET /api/v1/admin/members/{memberId}` | `getAdminMember` | `members.manage` | VTC-038 |
 | `PUT /api/v1/admin/members/{memberId}/roles` | `setRoles` | `members.manage` | VTC-038 |
+| `PUT /api/v1/admin/members/{memberId}/membership` | `setMembership` | `members.manage` | VTC-064A |
 | `POST /api/v1/admin/members/{memberId}/deactivation` | `deactivateMember` | `members.manage` | VTC-038 |
 | `POST /api/v1/admin/members/{memberId}/reinstatement` | `reinstateMember` | `members.manage` | VTC-038 |
 | `POST /api/v1/admin/members/{memberId}/steam-replacement` | `replaceSteam` | `members.manage` | VTC-018 |

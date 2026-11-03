@@ -39,6 +39,7 @@ export async function registerAdministrationRoutes(
       "/api/v1/admin/reinstatement-options",
       "/api/v1/admin/members/:memberId",
       "/api/v1/admin/members/:memberId/roles",
+      "/api/v1/admin/members/:memberId/membership",
       "/api/v1/admin/members/:memberId/deactivation",
       "/api/v1/admin/members/:memberId/reinstatement",
       "/api/v1/admin/company-settings",
@@ -116,7 +117,15 @@ export async function registerAdministrationRoutes(
     { schema: { response: { 200: ref("EnvelopeReinstatementOptions") } } },
     async (r) => envelope(await administration.reinstatementOptions(await actor(r)), r),
   );
-  app.get<{ Querystring: { limit?: number; cursor?: string; status?: "active" | "inactive" } }>(
+  app.get<{
+    Querystring: {
+      limit?: number;
+      cursor?: string;
+      status?: "active" | "inactive";
+      role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+      search?: string;
+    };
+  }>(
     "/api/v1/admin/members",
     {
       schema: {
@@ -125,6 +134,11 @@ export async function registerAdministrationRoutes(
           properties: {
             ...page.properties,
             status: { type: "string", enum: ["active", "inactive"] },
+            role: {
+              type: "string",
+              enum: ["trainee", "driver", "dispatcher", "deputy_director", "director"],
+            },
+            search: { type: "string", minLength: 1, maxLength: 128 },
           },
         },
         response: { 200: ref("EnvelopeListMemberAdmin") },
@@ -159,6 +173,25 @@ export async function registerAdministrationRoutes(
       const data = await memberCommand(r, {
         kind: "roles",
         roles: r.body.roles,
+        reason: r.body.reason,
+      });
+      reply.header("ETag", `"v${data.version}"`);
+      return envelope(data, r);
+    },
+  );
+  app.put<{ Params: { memberId: string }; Body: S["MembershipInput"] }>(
+    "/api/v1/admin/members/:memberId/membership",
+    {
+      schema: {
+        params,
+        body: ref("MembershipInput"),
+        response: { 200: ref("EnvelopeCommandResult") },
+      },
+    },
+    async (r, reply) => {
+      const data = await memberCommand(r, {
+        kind: "membership",
+        membership: r.body.membership,
         reason: r.body.reason,
       });
       reply.header("ETag", `"v${data.version}"`);

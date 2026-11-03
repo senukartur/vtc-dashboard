@@ -1325,8 +1325,9 @@ export function createIdentity(
       key: string,
       expectedVersion: number,
       input: {
-        kind: "roles" | "deactivate" | "reinstate";
+        kind: "roles" | "deactivate" | "reinstate" | "membership";
         roles?: readonly AssignableRole[];
+        membership?: "trainee" | "driver";
         qualifications?: readonly components["schemas"]["AssignmentInput"][];
         reason?: string;
       },
@@ -1336,7 +1337,15 @@ export function createIdentity(
         throw identityError(422);
       if (input.kind !== "reinstate" && input.qualifications !== undefined)
         throw identityError(422);
-      if (input.kind !== "deactivate" && input.roles === undefined) throw identityError(422);
+      if (
+        input.kind === "membership"
+          ? input.roles !== undefined ||
+            (input.membership !== "trainee" && input.membership !== "driver")
+          : input.membership !== undefined
+      )
+        throw identityError(422);
+      if (input.kind !== "deactivate" && input.kind !== "membership" && input.roles === undefined)
+        throw identityError(422);
       if (input.roles) validRoles(input.roles);
       return unwrap(
         await run(async (tx) => {
@@ -1356,6 +1365,31 @@ export function createIdentity(
               if (target.version !== expectedVersion) throw identityError(409, "VERSION_CONFLICT");
               if ((input.kind === "reinstate") !== (target.status === "inactive"))
                 throw identityError(409);
+              if (input.kind === "membership" && input.membership) {
+                // Direct Trainee/Driver change (VTC-064A): replaces only the membership role.
+                // Other roles, qualifications, sessions, credentials and epochs stay unchanged,
+                // like trainee promotion; capabilities are recomputed from roles per request.
+                const explicit = (
+                  await client(tx)
+                    .select({ role: roles.role })
+                    .from(roles)
+                    .where(eq(roles.userId, targetId))
+                    .for("update")
+                ).map((row) => row.role);
+                const opposite = input.membership === "trainee" ? "driver" : "trainee";
+                if (explicit.includes(input.membership) && !explicit.includes(opposite))
+                  throw identityError(409, "STATE_CONFLICT");
+                await replaceRoles(tx, targetId, [
+                  ...explicit.filter((role) => role !== "trainee" && role !== "driver"),
+                  input.membership,
+                ]);
+                await client(tx)
+                  .update(membership)
+                  .set({ version: target.version + 1 })
+                  .where(eq(membership.userId, targetId));
+                await changed(tx, actor.userId, targetId, current);
+                return { id: targetId, version: target.version + 1 };
+              }
               const instant = now().toISOString();
               if (input.kind === "deactivate") {
                 if (!ports.qualificationsLifecycle) throw identityError(503);
@@ -1552,11 +1586,19 @@ export function createIdentity(
       limit: number,
       status?: "active" | "inactive",
       targetId?: string,
+      filters: { role?: Role | undefined; search?: string | undefined } = {},
     ) {
       const current = await lockCompany(tx);
       await checkActor(tx, actor, current);
       requireCapability(actor, "members.manage");
       if (!Number.isInteger(limit) || limit < 1 || limit > 101) throw identityError(422);
+      const { role } = filters,
+        term = filters.search?.trim();
+      if (role !== undefined && role !== "director" && !assignableRoles.includes(role))
+        throw identityError(422);
+      if (term !== undefined && (!term || term.length > 128)) throw identityError(422);
+      // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
+      const escaped = term?.replace(/[\\%_]/g, (value) => `\\${value}`);
       const rows = await client(tx)
         .select({
           id: user.id,
@@ -1574,6 +1616,12 @@ export function createIdentity(
             after ? gt(user.id, applicationId(after)) : undefined,
             status ? eq(membership.status, status) : undefined,
             targetId ? eq(user.id, applicationId(targetId)) : undefined,
+            role === "director"
+              ? eq(user.id, current.directorUserId)
+              : role
+                ? sql`EXISTS (SELECT 1 FROM ${roles} WHERE ${roles.userId} = ${user.id} AND ${roles.role} = ${role})`
+                : undefined,
+            escaped !== undefined ? sql`${user.name} LIKE ${`%${escaped}%`}` : undefined,
           ),
         )
         .orderBy(user.id)

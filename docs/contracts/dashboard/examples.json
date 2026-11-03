@@ -618,7 +618,8 @@
               "status": "active",
               "accessEpoch": 1,
               "identityEpoch": 1,
-              "version": 1
+              "version": 1,
+              "lastAcceptedTripAt": "2026-10-20T18:30:00.000Z"
             }
           ],
           "nextCursor": null
@@ -661,7 +662,8 @@
           "status": "active",
           "accessEpoch": 1,
           "identityEpoch": 1,
-          "version": 1
+          "version": 1,
+          "lastAcceptedTripAt": null
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -683,6 +685,24 @@
       },
       "request": {
         "roles": [],
+        "reason": "synthetic-example"
+      }
+    },
+    {
+      "id": "setMembership:success",
+      "operationId": "setMembership",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "membership": "driver",
         "reason": "synthetic-example"
       }
     },

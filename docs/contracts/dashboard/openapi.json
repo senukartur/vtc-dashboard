@@ -1251,6 +1251,33 @@
                 "inactive"
               ]
             }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "description": "Current role. Director matches only the serving director pointer. Filters before pagination; bound into the signed cursor.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "trainee",
+                "driver",
+                "dispatcher",
+                "deputy_director",
+                "director"
+              ]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive nickname substring; surrounding whitespace is ignored and a blank term is rejected. Filters before pagination; bound into the signed cursor.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
           }
         ]
       }
@@ -1375,6 +1402,80 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RolesInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/members/{memberId}/membership": {
+      "put": {
+        "operationId": "setMembership",
+        "tags": [
+          "identity"
+        ],
+        "summary": "setMembership",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "identity",
+        "x-owner-card": "VTC-064A",
+        "x-capability": "members.manage",
+        "x-guards": [
+          "protect_current_director",
+          "preserve_other_roles",
+          "preserve_qualifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCommandResult"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong authoritative aggregate version, for the next command."
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MembershipInput"
               }
             }
           }
@@ -10151,6 +10252,18 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
+          },
+          "lastAcceptedTripAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10159,7 +10272,8 @@
           "status",
           "accessEpoch",
           "identityEpoch",
-          "version"
+          "version",
+          "lastAcceptedTripAt"
         ],
         "additionalProperties": false
       },
@@ -10187,6 +10301,28 @@
         },
         "required": [
           "roles",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "MembershipInput": {
+        "type": "object",
+        "properties": {
+          "membership": {
+            "type": "string",
+            "enum": [
+              "trainee",
+              "driver"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "membership",
           "reason"
         ],
         "additionalProperties": false

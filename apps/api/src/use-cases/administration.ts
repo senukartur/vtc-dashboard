@@ -2,6 +2,7 @@ import { createAudit, type UnitOfWork } from "@vtc/db";
 import { type Actor, type Identity, identityError } from "../modules/identity/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import { pagination, type Page } from "../modules/qualifications/pagination.js";
+import { createTripActivity } from "../modules/trips/activity.js";
 
 export function createAdministration(
   unit: UnitOfWork,
@@ -14,8 +15,12 @@ export function createAdministration(
     admissions: boolean;
     mail: boolean;
   },
+  // Kept apart from `enabled`, which is returned as the SourceCapabilities contract.
+  tripsEnabled = false,
 ) {
   const qualifications = createQualificationInitialization(unit),
+    // The runtime database role can read trips only where the Trips module is configured.
+    activity = tripsEnabled ? createTripActivity(unit) : undefined,
     audit = createAudit(unit),
     page = pagination(identity.config.secret, "administration");
   async function settings(actor: Actor) {
@@ -47,8 +52,20 @@ export function createAdministration(
       await identity.updateCompanySettings(actor, key, expected, timezone);
       return settings(actor);
     },
-    async members(actor: Actor, options: Page & { status?: "active" | "inactive" }, id?: string) {
-      const paging = page(actor, ["members", options.status ?? "all"], options);
+    async members(
+      actor: Actor,
+      options: Page & {
+        status?: "active" | "inactive";
+        role?: "trainee" | "driver" | "dispatcher" | "deputy_director" | "director";
+        search?: string;
+      },
+      id?: string,
+    ) {
+      const paging = page(
+        actor,
+        ["members", options.status ?? "all", options.role ?? "any", options.search ?? null],
+        options,
+      );
       return identity.transaction(async (tx) => {
         const rows = await identity.administrationMembersInTransaction(
           tx,
@@ -57,15 +74,19 @@ export function createAdministration(
           id ? 1 : paging.limit + 1,
           options.status,
           id,
+          { role: options.role, search: options.search },
         );
         if (id && !rows.length) throw identityError(404);
-        const selected = rows.slice(0, paging.limit);
-        const assignments = await qualifications.administrationProjection(
-          tx,
-          selected.map((row) => row.id),
-        );
+        const selected = rows.slice(0, paging.limit),
+          ids = selected.map((row) => row.id);
+        // Lock order: company -> sorted members (share) -> qualifications -> plain trips read.
+        const assignments = await qualifications.administrationProjection(tx, ids);
+        const lastAccepted = activity
+          ? await activity.lastAcceptedInTransaction(tx, ids)
+          : new Map<string, string>();
         const items = selected.map(({ id, nickname, roles, ...row }) => ({
           ...row,
+          lastAcceptedTripAt: lastAccepted.get(id) ?? null,
           profile: {
             member: { id, nickname, roles, formerMember: row.status === "inactive" },
             qualifications: assignments.get(id) ?? [],
