@@ -228,10 +228,9 @@ export function createTripDecisions(
       .for("share");
     return row;
   }
-  // Every caller first runs prepare() or authorizeInTransaction(), which lock the company row
-  // FOR UPDATE before any trip row. These identity FOR SHARE reads therefore follow the same
-  // company -> trips -> identity order as trip summaries, and identity writers queue on the
-  // company lock instead of forming a cycle. System decisions need no lookup.
+  // Every staff path first runs prepare() or authorizeInTransaction(), which take the company
+  // row FOR UPDATE before anything else. Identity writers lock the company row first too, so
+  // these identity FOR SHARE reads are serialized against them. System decisions need no lookup.
   async function reviewers(tx: TxContext, rows: readonly Decision[]): Promise<Reviewers> {
     const ids = [...new Set(rows.flatMap((row) => (row.actorId ? [row.actorId] : [])))];
     return ids.length ? ports.identity.memberSummariesInTransaction(tx, ids) : new Map();

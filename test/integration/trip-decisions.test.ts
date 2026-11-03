@@ -2937,7 +2937,10 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
       { ...body, proposalId: newId(), confirmOverLimits: true },
     ])
       expect((await post(invalid, newId())).statusCode).toBe(422);
-    expect((await post(body, newId())).statusCode).toBe(409);
+    // RESOLUTION_REQUIRED is internal; the wire carries the generic public conflict code.
+    const missingFlag = await post(body, newId());
+    expect(missingFlag.statusCode).toBe(409);
+    expect(missingFlag.json().error.code).toBe("STATE_CONFLICT");
     expect(await audits(id)).toEqual([]);
     const accepted = await post({ ...body, confirmOverLimits: true });
     expect(accepted.statusCode).toBe(200);
@@ -2956,7 +2959,9 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
     expect(replay.statusCode).toBe(200);
     expect(replay.json().data).toEqual(accepted.json().data);
     expect(replay.headers.etag).toBe(accepted.headers.etag);
-    expect((await post(body)).statusCode).toBe(409);
+    const changedFlag = await post(body);
+    expect(changedFlag.statusCode).toBe(409);
+    expect(changedFlag.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(await audits(id)).toEqual([
       { operation: "report.accepted_over_limits", actor: director.userId, reason: "staff_review" },
       { operation: "report.reviewed", actor: director.userId, reason: "staff_review" },
