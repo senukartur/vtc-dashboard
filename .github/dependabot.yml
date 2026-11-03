@@ -41,6 +41,9 @@ updates:
         group-by: dependency-name
         patterns: [node, mysql]
     ignore:
+      # Hosted digest updater fails with "Expected content to change!".
+      # Temporary manual coverage and removal condition: review.md (2026-11-10).
+      - dependency-name: caddy
       - dependency-name: node
         versions: ["< 24.22.2", ">= 24.22.3"]
       - dependency-name: mysql
