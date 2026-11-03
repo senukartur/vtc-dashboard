@@ -123,6 +123,8 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/events/{eventId}/my-response` | `getEventResponse` | `events.respond` | VTC-034 |
 | `PUT /api/v1/events/{eventId}/my-response` | `setEventResponse` | `events.respond` | VTC-034 |
 | `GET /api/v1/events/{eventId}/participants` | `listEventParticipants` | `company.read` | VTC-034 |
+| `GET /api/v1/events/{eventId}/decliners` | `listEventDecliners` | `company.read` | VTC-058A |
+| `GET /api/v1/events/{eventId}/response-counts` | `getEventResponseCounts` | `company.read` | VTC-058A |
 | `GET /api/v1/me/upcoming-event` | `getUpcomingEvent` | `company.read` | VTC-034 |
 | `POST /api/v1/admin/events` | `createEvent` | `events.manage` | VTC-034 |
 | `PATCH /api/v1/admin/events/{eventId}` | `updateEvent` | `events.manage` | VTC-034 |

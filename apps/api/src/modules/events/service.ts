@@ -247,6 +247,46 @@ export function createEvents(
     if (!row || (publicOnly && row.visibility !== "public")) throw identityError(404);
     return row;
   }
+  // Member-visible response lists: safe summaries only, never reasons. Each status keeps its own cursor scope.
+  function responders(
+    actor: Actor,
+    id: string,
+    status: "participating" | "declined",
+    options: Page,
+  ): Promise<S["ListParticipant"]> {
+    return run(async (tx) => {
+      await authorize(tx, actor);
+      await lock(tx, id);
+      const p = page(
+        actor,
+        [status === "participating" ? "participants" : "decliners", id],
+        options,
+      );
+      const rows = await c(tx)
+        .select({ memberId: eventResponses.memberId })
+        .from(eventResponses)
+        .where(
+          and(
+            eq(eventResponses.eventId, id),
+            eq(eventResponses.status, status),
+            p.after ? gt(eventResponses.memberId, p.after.id) : undefined,
+          ),
+        )
+        .orderBy(asc(eventResponses.memberId))
+        .limit(p.limit + 1);
+      const result = p.finish(rows, (r) => ({ id: r.memberId, time: null }));
+      const summaries = await ports.identity.memberSummariesInTransaction(
+        tx,
+        result.items.map((r) => r.memberId),
+      );
+      return {
+        items: result.items.map((r) => ({
+          member: summaries.get(r.memberId) as S["MemberSummary"],
+        })),
+        nextCursor: result.nextCursor,
+      };
+    });
+  }
   async function revision(tx: TxContext, id: string) {
     const [row] = await c(tx)
       .select()
@@ -1046,34 +1086,30 @@ export function createEvents(
         return { data, version: result.version };
       });
     },
-    async participants(actor: Actor, id: string, options: Page = {}) {
+    participants(actor: Actor, id: string, options: Page = {}) {
+      return responders(actor, id, "participating", options);
+    },
+    decliners(actor: Actor, id: string, options: Page = {}) {
+      return responders(actor, id, "declined", options);
+    },
+    async responseCounts(actor: Actor, id: string): Promise<S["EventResponseCounts"]> {
       return run(async (tx) => {
         await authorize(tx, actor);
         await lock(tx, id);
-        const p = page(actor, ["participants", id], options);
         const rows = await c(tx)
-          .select()
+          .select({ status: eventResponses.status, total: sql<number | string>`COUNT(*)` })
           .from(eventResponses)
           .where(
             and(
               eq(eventResponses.eventId, id),
-              eq(eventResponses.status, "participating"),
-              p.after ? gt(eventResponses.memberId, p.after.id) : undefined,
+              inArray(eventResponses.status, ["participating", "declined"]),
             ),
           )
-          .orderBy(asc(eventResponses.memberId))
-          .limit(p.limit + 1);
-        const result = p.finish(rows, (r) => ({ id: r.memberId, time: null }));
-        const summaries = await ports.identity.memberSummariesInTransaction(
-          tx,
-          result.items.map((r) => r.memberId),
-        );
-        return {
-          items: result.items.map((r) => ({
-            member: summaries.get(r.memberId) as S["MemberSummary"],
-          })),
-          nextCursor: result.nextCursor,
-        };
+          .groupBy(eventResponses.status);
+        const total = (status: "participating" | "declined") =>
+          Number(rows.find((r) => r.status === status)?.total ?? 0);
+        // Counts only: no unanswered total, identities or reasons leave this read.
+        return { participating: total("participating"), declined: total("declined") };
       });
     },
     async attendance(actor: Actor, id: string, options: Page = {}) {
