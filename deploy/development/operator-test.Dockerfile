@@ -1,5 +1,5 @@
 FROM docker:29.8.2-cli@sha256:35cfcf893c20f2931f4909151b5407aaaeab711277de7ce8b8f521f095d54c32 AS cli
-FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
+FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c
 # Package hooks may generate test host keys, but must never start an SSH daemon.
 RUN printf '#!/bin/sh\nexit 101\n' > /usr/sbin/policy-rc.d \
     && chmod 0755 /usr/sbin/policy-rc.d \

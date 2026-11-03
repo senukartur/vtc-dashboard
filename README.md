@@ -15,7 +15,7 @@ node scripts/setup-local.mjs
 docker compose up --build --watch
 ```
 
-Open [the local UI](http://127.0.0.1:5173). The setup helper only needs host Node 18+; a Docker-only equivalent is in [CONTRIBUTING.md](docs/CONTRIBUTING.md). The application itself uses pinned Node 24.22.0, pnpm 12.14.0 and MySQL 8.4.11 inside containers. No credentials or seed accounts are committed.
+Open [the local UI](http://127.0.0.1:5173). The setup helper only needs host Node 18+; a Docker-only equivalent is in [CONTRIBUTING.md](docs/CONTRIBUTING.md). The application itself uses pinned Node 24.22.2, pnpm 12.14.0 and MySQL 8.4.11 inside containers. No credentials or seed accounts are committed.
 
 Run `docker compose exec app pnpm check`, `pnpm db:check`, `pnpm smoke:local` or `pnpm build` inside that container. See [the command reference](docs/CONTRIBUTING.md) and [workspace evidence](docs/development/workspace.md) for portable native builds, health/readiness, data persistence and pending gates. The initial page is a bilingual connection screen, not an implemented company dashboard.
 
