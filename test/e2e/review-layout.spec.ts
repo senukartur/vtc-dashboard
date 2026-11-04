@@ -976,6 +976,9 @@ const wideFont = ".review-toolbar, .review-toolbar * { letter-spacing: 0.06em !i
  * Queue toolbar geometry: spare width once the tabs, the bar gap and the filters with their own
  * gaps share one row (spareControls) or the filters alone (spareSelects); the room left beside
  * the tabs and the widest single filter when items wrap; row alignment; and the timezone note.
+ * The arrangement follows the CSS: phones (760px viewport and below) stack the controls, a toolbar
+ * of 1000px or more keeps the tabs and filters on one row, narrower toolbars put the filters on a
+ * row below the tabs.
  */
 function toolbarBudget(page: Page) {
   return page.evaluate(async () => {
@@ -1009,7 +1012,9 @@ function toolbarBudget(page: Page) {
       a.top < b.bottom - 0.5 &&
       b.top < a.bottom - 0.5;
     const round = (value: number) => Math.round(value * 10) / 10;
+    const arrangement = window.innerWidth <= 760 ? "phone" : width >= 1000 ? "one-row" : "two-row";
     return {
+      arrangement,
       width: round(width),
       filters: filters.length,
       filterWidths: [tabs, ...filters].map((element) => round(box(element).width)),
@@ -1017,6 +1022,7 @@ function toolbarBudget(page: Page) {
       spareSelects: round(width - used),
       rowSpreadControls: round(spread([tabs, ...filters])),
       rowSpreadSelects: round(spread(filters)),
+      filtersBelowTabs: filters.every((filter) => box(filter).top >= box(tabs).bottom - 0.5),
       tabsSpare: round(width - box(tabs).width),
       widestSelectSpare: round(width - Math.max(...filters.map((f) => box(f).width))),
       selectHeights: selects.map((select) => round(box(select).height)),
@@ -1031,9 +1037,10 @@ test("R18 toolbar budget with wide-font spare in RU and EN on both tabs and besi
 }, info) => {
   test.setTimeout(60_000);
   const project = info.project.name,
-    touch = project === "mobile-chromium",
     desktop = project === "desktop-chromium";
   await open(page);
+  // Coarse pointers raise every control to a 40px target.
+  const touch = await coarse(page);
   const layouts = desktop
     ? [
         { width: 1280, trip: null },
@@ -1079,15 +1086,16 @@ test("R18 toolbar budget with wide-font spare in RU and EN on both tabs and besi
           expect(budget.widestSelectSpare, label).toBeGreaterThanOrEqual(4);
           expect(budget.timezoneInside, label).toBe(true);
           expect(budget.timezoneOverlaps, label).toBe(false);
-          if (!touch) {
-            // Tablet and desktop keep every filter on one row with room to spare.
-            expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
-            expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
-          }
-          if (desktop) {
-            // Desktop, also beside the decision panel, keeps the tabs on that row too.
+          if (budget.arrangement === "one-row") {
+            // A toolbar of 1000px or more keeps the tabs and every filter on one row.
             expect(budget.rowSpreadControls, label).toBeLessThanOrEqual(4);
             expect(budget.spareControls, label).toBeGreaterThanOrEqual(4);
+          } else if (budget.arrangement === "two-row") {
+            // Narrower toolbars (tablet, 1200px beside the panel) put every filter on one row
+            // below the tabs, on both tabs alike.
+            expect(budget.filtersBelowTabs, label).toBe(true);
+            expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
+            expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
           }
           await noOverflow(page);
           expect(await brokenWords(page.locator(".review-toolbar")), label).toEqual([]);
