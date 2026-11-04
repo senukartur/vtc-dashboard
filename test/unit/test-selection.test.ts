@@ -10,6 +10,7 @@ import {
   parseSelection,
   selectableLanes,
   serializeSelection,
+  shardableLanes,
   validShard,
 } from "../../scripts/test-selection.mjs";
 
@@ -114,7 +115,9 @@ describe("launcher arguments", () => {
       ["e2e", "--project", "firefox"],
       ["e2e", "--grep", "x"],
       ["core", "--skip-check"],
-      ["integration", "--shard", "1/4"],
+      ["unit", "--shard", "1/4"],
+      ["persistence-recovery", "--shard", "1/2"],
+      ["integration", "--probe", "--shard", "1/2"],
       ["e2e", "--shard", "5/4"],
       ["e2e", "--shard", "0/4"],
       ["e2e", "--shard", "1/9"],
@@ -133,12 +136,17 @@ describe("CI groups", () => {
     expect(new Set(stages).size).toBe(stages.length);
   });
 
-  test("accept a shard for the browser group only", () => {
+  test("accept a shard for the integration and browser groups only", () => {
     expect(parseLocalArguments(["e2e", "--skip-check", "--shard", "2/4"])).toMatchObject({
       focus: "e2e",
       skipCheck: true,
       shard: "2/4",
     });
+    expect(parseLocalArguments(["integration", "--skip-check", "--shard", "1/2"])).toMatchObject({
+      focus: "integration",
+      shard: "1/2",
+    });
+    expect(shardableLanes).toEqual(["integration", "e2e"]);
     expect(parseLocalArguments(["persistence-recovery", "--skip-check"]).focus).toBe(
       "persistence-recovery",
     );
