@@ -15,9 +15,22 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality suite
+    # Each leg runs its own isolated stack; together the legs run every stage of the aggregate.
+    # needs.quality.result is success only when every leg succeeds.
+    name: Quality suite (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: core, group: core, shard: "" }
+          - { name: integration, group: integration, shard: "" }
+          - { name: persistence-recovery, group: persistence-recovery, shard: "" }
+          - { name: e2e 1-4, group: e2e, shard: 1/4 }
+          - { name: e2e 2-4, group: e2e, shard: 2/4 }
+          - { name: e2e 3-4, group: e2e, shard: 3/4 }
+          - { name: e2e 4-4, group: e2e, shard: 4/4 }
     steps:
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,20 +40,43 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.2
-      - name: Run isolated quality suite
-        timeout-minutes: 65
-        run: node scripts/test-ci.mjs
+      - name: Run isolated quality group
+        timeout-minutes: 35
+        env:
+          QUALITY_GROUP: ${{ matrix.group }}
+          QUALITY_SHARD: ${{ matrix.shard }}
+        run: node scripts/test-ci.mjs --group "$QUALITY_GROUP" ${QUALITY_SHARD:+--shard "$QUALITY_SHARD"}
       - name: Upload safe structured result
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: quality-${{ github.run_id }}-${{ github.run_attempt }}
+          name: quality-${{ matrix.group }}-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: .local/ci/quality.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 3
+  scope:
+    # Owner-approved path rule (VTC-070): PRs skip the rehearsal unless scripts/ci-scope.mjs
+    # matches a changed path; main always runs it. Required CI accepts a skip only from here.
+    name: Rehearsal scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      rehearsal: ${{ steps.scope.outputs.rehearsal }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.22.2
+      - id: scope
+        run: node scripts/ci-scope.mjs
   deployment:
     name: Deployment rehearsal
+    needs: [scope]
+    if: ${{ needs.scope.outputs.rehearsal == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
@@ -77,7 +113,7 @@ jobs:
           compression-level: 0
   required:
     name: Required CI
-    needs: [quality, deployment, artifact]
+    needs: [scope, quality, deployment, artifact]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -93,7 +129,9 @@ jobs:
       - name: Require explicit quality success
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          REHEARSAL_SCOPE: ${{ needs.scope.outputs.rehearsal }}
           DEPLOYMENT_RESULT: ${{ needs.deployment.result }}
           ARTIFACT_RESULT: ${{ needs.artifact.result }}
         run: |
-          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT, deployment: process.env.DEPLOYMENT_RESULT, artifact: process.env.ARTIFACT_RESULT, event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF });'
+          node --input-type=module -e 'import { requiredCi } from "./scripts/ci-result.mjs"; process.exitCode = requiredCi({ quality: process.env.QUALITY_RESULT, scope: process.env.SCOPE_RESULT, rehearsal: process.env.REHEARSAL_SCOPE, deployment: process.env.DEPLOYMENT_RESULT, artifact: process.env.ARTIFACT_RESULT, event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF });'

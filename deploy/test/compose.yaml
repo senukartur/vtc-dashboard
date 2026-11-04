@@ -37,6 +37,7 @@ services:
       VTC_TEST_PROBE: ${VTC_TEST_PROBE:-}
       VTC_TEST_SELECTION: ${VTC_TEST_SELECTION:-}
       VTC_TEST_PROJECT: ${VTC_TEST_PROJECT:-}
+      VTC_TEST_SHARD: ${VTC_TEST_SHARD:-}
       VTC_TEST_SKIP_CHECK: ${VTC_TEST_SKIP_CHECK:-}
     networks: [isolated]
     volumes:
