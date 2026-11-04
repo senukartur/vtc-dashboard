@@ -1,3 +1,4 @@
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -13,16 +14,43 @@ import {
   MyQualificationWidget,
   ReviewerQueueWidget,
 } from "./components.js";
-import { computePeriodDates, type GameFilter, type PeriodFilter, periods } from "./model.js";
+import {
+  computePeriodDates,
+  type GameFilter,
+  PERIOD_FALLBACK_TIMEZONE,
+  type PeriodFilter,
+  periods,
+  periodTimeZone,
+} from "./model.js";
 import {
   useCompanyAnalytics,
   useDriverLeaderboard,
   useMyQualificationProgress,
   useRecentCompanyTrips,
+  useReportingTimezoneSource,
   useReviewQueueTrips,
   useUpcomingEvent,
 } from "./queries.js";
 import "./dashboard.css";
+
+/**
+ * A block's view while the overview waits for the reporting timezone: loading, never the cached
+ * data or error of keys the page may not use.
+ */
+function untilAnchored<T>(query: UseQueryResult<T>, anchored: boolean): UseQueryResult<T> {
+  if (anchored) return query;
+  return {
+    ...query,
+    data: undefined,
+    error: null,
+    isError: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    isSuccess: false,
+    isPending: true,
+    status: "pending",
+  } as UseQueryResult<T>;
+}
 
 /** Gate: without company.read no dashboard query hook mounts, so nothing is requested. */
 export function DashboardPage() {
@@ -58,7 +86,20 @@ function DashboardContent() {
   const [period, setPeriod] = useState<PeriodFilter>("thisMonth");
   const [granularity, setGranularity] = useState<"day" | "month">("day");
 
-  const dates = computePeriodDates(period);
+  // Overview reads wait for the reporting timezone, so the first period request already has its
+  // dates and, on a cold load, analytics and the leaderboard enter the read queue first. A failed
+  // read that is being retried still waits, so no request uses the fallback dates first.
+  const timezoneQuery = useReportingTimezoneSource();
+  const reportingTimezone = periodTimeZone(
+    timezoneQuery.data,
+    timezoneQuery.isError && !timezoneQuery.isFetching,
+  );
+  const anchored = reportingTimezone !== undefined;
+  const dates = computePeriodDates(
+    period,
+    new Date(),
+    reportingTimezone ?? PERIOD_FALLBACK_TIMEZONE,
+  );
   const effectiveGame = game === "all" ? undefined : game;
 
   const analyticsQuery = useCompanyAnalytics({
@@ -66,6 +107,7 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     granularity,
+    enabled: anchored,
   });
 
   // Contract maximum: the widget shows the top ten, the KPI counts every returned driver.
@@ -74,21 +116,47 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     limit: 100,
+    enabled: anchored,
   });
 
-  const ets2ProgressQuery = useMyQualificationProgress("ets2");
-  const atsProgressQuery = useMyQualificationProgress("ats");
-  const upcomingEventQuery = useUpcomingEvent();
-  const reviewTripsQuery = useReviewQueueTrips();
+  // Enabled in the same render as the period reads and after them in hook order. The shell chip
+  // keeps its own enabled observer of the nearest event.
+  const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
+  const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
+  const upcomingEventQuery = useUpcomingEvent({ enabled: anchored });
+  const reviewTripsQuery = useReviewQueueTrips({ enabled: anchored });
   // Follows the game filter only: the trips list has no date filter for the period.
-  const recentTripsQuery = useRecentCompanyTrips(effectiveGame);
+  const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
+
+  /**
+   * Retry rereads a pending, failed or zone-less stats read first (reusing a read in flight). A new
+   * zone changes the period keys and those queries fetch on their own; refetching the current ones
+   * would repeat the old dates. Refetch ignores `enabled`, so it never runs on a pending zone.
+   */
+  const retryPeriodData = async () => {
+    if (
+      !anchored ||
+      timezoneQuery.isError ||
+      timezoneQuery.data?.currentMonth.status === "unavailable"
+    ) {
+      const result = await timezoneQuery.refetch({ cancelRefetch: false });
+      // The page may have gone (navigation, revoked access): no private reads for it.
+      if (!titleRef.current) return;
+      if (periodTimeZone(result.data, result.isError) !== reportingTimezone) return;
+    }
+    void analyticsQuery.refetch({ cancelRefetch: false });
+    void leaderboardQuery.refetch({ cancelRefetch: false });
+  };
 
   const canReview = capabilities.includes("trips.review");
-  const analytics = analyticsQuery.data;
-  const leaderboard = leaderboardQuery.data;
-  const pending = analyticsQuery.isPending || leaderboardQuery.isPending;
+  // Until the zone is known the page waits: the fallback keys' cached data or errors never show.
+  const analytics = anchored ? analyticsQuery.data : undefined;
+  const leaderboard = anchored ? leaderboardQuery.data : undefined;
+  const analyticsPending = !anchored || analyticsQuery.isPending;
+  const leaderboardPending = !anchored || leaderboardQuery.isPending;
+  const pending = analyticsPending || leaderboardPending;
   // A failed background refresh keeps the last data; the alert is only for having none.
-  const analyticsFailed = analyticsQuery.isError && !analytics;
+  const analyticsFailed = anchored && analyticsQuery.isError && !analytics;
 
   // Zero only counts as an empty company when both sources actually answered.
   const isCompanyEmpty =
@@ -155,8 +223,7 @@ function DashboardContent() {
             variant="outline"
             onClick={() => {
               titleRef.current?.focus();
-              void analyticsQuery.refetch();
-              void leaderboardQuery.refetch();
+              void retryPeriodData();
             }}
           >
             {t("states.retry")}
@@ -173,32 +240,37 @@ function DashboardContent() {
 
           <KpiStrip
             analytics={analytics}
-            analyticsPending={analyticsQuery.isPending}
+            analyticsPending={analyticsPending}
             leaderboard={leaderboard}
-            leaderboardPending={leaderboardQuery.isPending}
-            leaderboardFailed={leaderboardQuery.isError && !leaderboard}
+            leaderboardPending={leaderboardPending}
+            leaderboardFailed={anchored && leaderboardQuery.isError && !leaderboard}
             locale={locale}
           />
 
           <div className="dashboard-grid" aria-busy={pending}>
             <ActualDistanceChart
               analytics={analytics}
-              pending={analyticsQuery.isPending}
+              pending={analyticsPending}
               locale={locale}
               displayTimezone={displayTimezone}
               granularity={granularity}
               onGranularityChange={setGranularity}
             />
             <MyQualificationWidget
-              ets2Progress={ets2ProgressQuery}
-              atsProgress={atsProgressQuery}
+              ets2Progress={untilAnchored(ets2ProgressQuery, anchored)}
+              atsProgress={untilAnchored(atsProgressQuery, anchored)}
               available={capabilities.includes("trips.submit_own")}
             />
-            <LeaderboardWidget query={leaderboardQuery} locale={locale} />
+            <LeaderboardWidget query={untilAnchored(leaderboardQuery, anchored)} locale={locale} />
             <div className="dashboard-side">
-              {canReview && <ReviewerQueueWidget query={reviewTripsQuery} locale={locale} />}
+              {canReview && (
+                <ReviewerQueueWidget
+                  query={untilAnchored(reviewTripsQuery, anchored)}
+                  locale={locale}
+                />
+              )}
               <UpcomingEventWidget
-                query={upcomingEventQuery}
+                query={untilAnchored(upcomingEventQuery, anchored)}
                 locale={locale}
                 displayTimezone={displayTimezone}
                 canRespond={capabilities.includes("events.respond")}
@@ -206,7 +278,7 @@ function DashboardContent() {
             </div>
             {/* Full-width third row, below the first desktop screen. */}
             <RecentTripsWidget
-              query={recentTripsQuery}
+              query={untilAnchored(recentTripsQuery, anchored)}
               locale={locale}
               displayTimezone={displayTimezone}
             />

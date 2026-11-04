@@ -15,6 +15,7 @@ import {
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
+  makeCompanyStatsFixture,
   makeOptionalEventFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
@@ -350,6 +351,11 @@ describe("overview block fixtures", () => {
     expect(
       schema("EnvelopeEventResponseCounts").safeParse(makeResponseCountsFixture()).success,
     ).toBe(true);
+    // The reporting timezone source of the period anchors: an available and an unavailable month.
+    for (const zone of ["Europe/Moscow", null])
+      expect(
+        schema("EnvelopeCompanyStatsPublic").safeParse(makeCompanyStatsFixture(zone)).success,
+      ).toBe(true);
   });
 
   it("start in the far future so the real clock never passes them", () => {

@@ -2,14 +2,39 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
+import { readCompanyStats } from "../landing/stats.js";
 import { type DTO, dashboardRead } from "./transport.js";
 import { recentTripsPath } from "./view-model.js";
+
+/**
+ * Source of the company reporting timezone for the period anchors. Same key, reader and public
+ * meta as the landing StatsBand, so both share one cached anonymous read; only
+ * `currentMonth.reportingTimezone` is used here.
+ */
+export function useReportingTimezoneSource() {
+  const session = useSession();
+  return useQuery({
+    queryKey: ["public-company-stats"],
+    queryFn: ({ signal }) => readCompanyStats(signal),
+    meta: { private: false },
+    enabled: !!session.self?.capabilities.includes("company.read"),
+    retry: false,
+    staleTime: 60000,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+    // A failed read has no data, so a reconnect would reread it, reset it to pending and turn a
+    // page already showing UTC-anchored data back to loading (unmounting forms, dropping focus).
+    // The UTC fallback lasts until Retry or a remount instead.
+    refetchOnReconnect: false,
+  });
+}
 
 export function useCompanyAnalytics(params: {
   fromDate: string;
   toDateExclusive: string;
   game?: "ets2" | "ats" | undefined;
   granularity?: "day" | "month" | undefined;
+  enabled?: boolean | undefined;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -35,7 +60,7 @@ export function useCompanyAnalytics(params: {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: params.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -63,6 +88,7 @@ export function useDriverLeaderboard(params: {
   toDateExclusive: string;
   game?: "ets2" | "ats" | undefined;
   limit?: number | undefined;
+  enabled?: boolean | undefined;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -88,7 +114,7 @@ export function useDriverLeaderboard(params: {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: params.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -146,7 +172,8 @@ export function useTripStatusSummary(game?: "ets2" | "ats") {
   });
 }
 
-export function useUpcomingEvent() {
+/** The shell chip calls this without options; the overview gates its own observer. */
+export function useUpcomingEvent(options?: { enabled?: boolean | undefined }) {
   const session = useSession();
   const path = "/me/upcoming-event";
 
@@ -160,7 +187,7 @@ export function useUpcomingEvent() {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 60000,
     queryFn: async ({ signal }) => {
@@ -176,7 +203,10 @@ export function useUpcomingEvent() {
   });
 }
 
-export function useMyQualificationProgress(game: "ets2" | "ats") {
+export function useMyQualificationProgress(
+  game: "ets2" | "ats",
+  options?: { enabled?: boolean | undefined },
+) {
   const session = useSession();
   const { i18n } = useTranslation();
   const path = `/me/qualification-progress?game=${game}`;
@@ -193,7 +223,8 @@ export function useMyQualificationProgress(game: "ets2" | "ats") {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("trips.submit_own"),
+    enabled:
+      options?.enabled !== false && !!session.self?.capabilities.includes("trips.submit_own"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -213,7 +244,10 @@ export function useMyQualificationProgress(game: "ets2" | "ats") {
  * Latest accepted company trips for the overview. It follows the page game filter; the period
  * filter does not apply because the trips list has no date filter.
  */
-export function useRecentCompanyTrips(game?: "ets2" | "ats") {
+export function useRecentCompanyTrips(
+  game?: "ets2" | "ats",
+  options?: { enabled?: boolean | undefined },
+) {
   const session = useSession();
   const client = useQueryClient();
   const { i18n } = useTranslation();
@@ -230,7 +264,7 @@ export function useRecentCompanyTrips(game?: "ets2" | "ats") {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -253,7 +287,7 @@ export function useRecentCompanyTrips(game?: "ets2" | "ats") {
   });
 }
 
-export function useReviewQueueTrips() {
+export function useReviewQueueTrips(options?: { enabled?: boolean | undefined }) {
   const session = useSession();
   const { i18n } = useTranslation();
   const path = "/trips?scope=review&decision=pending_review&limit=5";
@@ -269,7 +303,7 @@ export function useReviewQueueTrips() {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("trips.review"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("trips.review"),
     retry: false,
     staleTime: 15000,
     queryFn: async ({ signal }) => {

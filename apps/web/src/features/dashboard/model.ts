@@ -1,4 +1,5 @@
 // Pure overview dashboard helpers: filter values, period ranges and progress geometry.
+import type { components } from "@vtc/contracts";
 import { chartGeometry } from "../../shared/formatting.js";
 
 export type GameFilter = "all" | "ets2" | "ats";
@@ -11,37 +12,68 @@ export const periods: readonly PeriodFilter[] = [
   "last7Days",
 ];
 
-// Period anchor ("today", month start) uses the UTC clock; the API interprets the dates in the reporting timezone.
+/** Anchor zone when the reporting timezone is unknown: the behaviour before VTC-056. */
+export const PERIOD_FALLBACK_TIMEZONE = "UTC";
+
+const calendarLocale = "en-US-u-ca-gregory-nu-latn";
+const dateFields = { year: "numeric", month: "numeric", day: "numeric" } as const;
+
+/** Today's calendar date in `timeZone`. A zone unknown to the browser falls back to UTC. */
+function calendarToday(now: Date, timeZone: string): { year: number; month: number; day: number } {
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat(calendarLocale, { ...dateFields, timeZone });
+  } catch {
+    format = new Intl.DateTimeFormat(calendarLocale, {
+      ...dateFields,
+      timeZone: PERIOD_FALLBACK_TIMEZONE,
+    });
+  }
+  const parts = format.formatToParts(now);
+  const part = (type: "year" | "month" | "day") =>
+    Number(parts.find((item) => item.type === type)?.value);
+  return { year: part("year"), month: part("month"), day: part("day") };
+}
+
+/** Calendar arithmetic only: `Date.UTC` normalises overflowing months and days. */
+function isoDate(year: number, month: number, day: number): string {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  return `${pad(date.getUTCFullYear(), 4)}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+// Anchors are today's calendar date in the company reporting timezone; the API reads the dates in that timezone.
 export function computePeriodDates(
   period: PeriodFilter,
-  now = new Date(),
+  now: Date,
+  timeZone: string,
 ): { fromDate: string; toDateExclusive: string } {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const formatDate = (d: Date) =>
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  const { year, month, day } = calendarToday(now, timeZone);
+  if (period === "thisMonth")
+    return { fromDate: isoDate(year, month, 1), toDateExclusive: isoDate(year, month + 1, 1) };
+  if (period === "lastMonth")
+    return { fromDate: isoDate(year, month - 1, 1), toDateExclusive: isoDate(year, month, 1) };
+  const days = period === "last7Days" ? 7 : 30;
+  return {
+    fromDate: isoDate(year, month, day + 1 - days),
+    toDateExclusive: isoDate(year, month, day + 1),
+  };
+}
 
-  const currentYear = now.getUTCFullYear();
-  const currentMonth = now.getUTCMonth();
-
-  if (period === "thisMonth") {
-    const from = new Date(Date.UTC(currentYear, currentMonth, 1));
-    const to = new Date(Date.UTC(currentYear, currentMonth + 1, 1));
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  if (period === "lastMonth") {
-    const from = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
-    const to = new Date(Date.UTC(currentYear, currentMonth, 1));
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  if (period === "last7Days") {
-    const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-    const from = new Date(to.getTime() - 7 * 86400000);
-    return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
-  }
-  // last30Days
-  const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  const from = new Date(to.getTime() - 30 * 86400000);
-  return { fromDate: formatDate(from), toDateExclusive: formatDate(to) };
+/**
+ * Zone for the period anchors, read from the public company stats. Undefined while that read is
+ * pending; UTC when it failed without data or the company has no reporting timezone. Retained
+ * data wins over a later failed refresh.
+ */
+export function periodTimeZone(
+  stats: components["schemas"]["CompanyStatsPublic"] | undefined,
+  failed: boolean,
+): string | undefined {
+  if (stats)
+    return stats.currentMonth.status === "available"
+      ? stats.currentMonth.reportingTimezone
+      : PERIOD_FALLBACK_TIMEZONE;
+  return failed ? PERIOD_FALLBACK_TIMEZONE : undefined;
 }
 
 /**

@@ -3,10 +3,15 @@ import { pagination } from "../../apps/api/src/modules/identity/pagination.ts";
 import type { Actor } from "../../apps/api/src/modules/identity/service.ts";
 import {
   computePeriodDates,
+  PERIOD_FALLBACK_TIMEZONE,
+  type PeriodFilter,
+  periods,
+  periodTimeZone,
   progressPercent,
 } from "../../apps/web/src/features/dashboard/model.ts";
 import { dashboardTranslations } from "../../apps/web/src/features/dashboard/translations.ts";
 import { formatDecimal, formatQuantity, formatUtc } from "../../apps/web/src/shared/formatting.ts";
+import { makeCompanyStatsFixture } from "../e2e/support/dashboard-fixtures.ts";
 
 function keys(value: object, prefix = ""): string[] {
   return Object.entries(value)
@@ -24,37 +29,154 @@ function values(value: object): string[] {
 
 describe("Dashboard & Driver Profiles Unit Tests", () => {
   describe("Period calculations", () => {
-    const midOctober = new Date("2026-10-15T12:00:00.000Z");
+    /** The period as "from..toExclusive" at a fixed instant in a zone. */
+    const p = (period: PeriodFilter, iso: string, timeZone: string) => {
+      const { fromDate, toDateExclusive } = computePeriodDates(period, new Date(iso), timeZone);
+      return `${fromDate}..${toDateExclusive}`;
+    };
+    const all = (iso: string, timeZone: string) =>
+      Object.fromEntries(periods.map((period) => [period, p(period, iso, timeZone)]));
+    const midOctober = "2026-10-15T12:00:00.000Z";
 
     it("computes thisMonth correctly for mid-month date", () => {
-      const res = computePeriodDates("thisMonth", midOctober);
-      expect(res.fromDate).toBe("2026-10-01");
-      expect(res.toDateExclusive).toBe("2026-11-01");
+      expect(p("thisMonth", midOctober, "UTC")).toBe("2026-10-01..2026-11-01");
     });
 
     it("computes lastMonth correctly", () => {
-      const res = computePeriodDates("lastMonth", midOctober);
-      expect(res.fromDate).toBe("2026-09-01");
-      expect(res.toDateExclusive).toBe("2026-10-01");
+      expect(p("lastMonth", midOctober, "UTC")).toBe("2026-09-01..2026-10-01");
     });
 
     it("handles year rollover in lastMonth correctly", () => {
-      const earlyJan = new Date("2027-01-05T08:00:00.000Z");
-      const res = computePeriodDates("lastMonth", earlyJan);
-      expect(res.fromDate).toBe("2026-12-01");
-      expect(res.toDateExclusive).toBe("2027-01-01");
+      expect(p("lastMonth", "2027-01-05T08:00:00.000Z", "UTC")).toBe("2026-12-01..2027-01-01");
     });
 
     it("computes last7Days correctly", () => {
-      const res = computePeriodDates("last7Days", midOctober);
-      expect(res.toDateExclusive).toBe("2026-10-16");
-      expect(res.fromDate).toBe("2026-10-09");
+      expect(p("last7Days", midOctober, "UTC")).toBe("2026-10-09..2026-10-16");
     });
 
     it("computes last30Days correctly", () => {
-      const res = computePeriodDates("last30Days", midOctober);
-      expect(res.toDateExclusive).toBe("2026-10-16");
-      expect(res.fromDate).toBe("2026-09-16");
+      expect(p("last30Days", midOctober, "UTC")).toBe("2026-09-16..2026-10-16");
+    });
+
+    it("anchors to the reporting date in a positive-offset zone at a month boundary", () => {
+      // Moscow (UTC+3): 23:59 on 31 October, then 00:00 on 1 November.
+      expect(all("2026-10-31T20:59:00.000Z", "Europe/Moscow")).toEqual({
+        thisMonth: "2026-10-01..2026-11-01",
+        lastMonth: "2026-09-01..2026-10-01",
+        last7Days: "2026-10-25..2026-11-01",
+        last30Days: "2026-10-02..2026-11-01",
+      });
+      const midnight = "2026-10-31T21:00:00.000Z";
+      expect(all(midnight, "Europe/Moscow")).toEqual({
+        thisMonth: "2026-11-01..2026-12-01",
+        lastMonth: "2026-10-01..2026-11-01",
+        last7Days: "2026-10-26..2026-11-02",
+        last30Days: "2026-10-03..2026-11-02",
+      });
+      // The UTC clock at the same instant is still in October.
+      expect(p("thisMonth", midnight, "UTC")).toBe("2026-10-01..2026-11-01");
+    });
+
+    it("rolls over the year in a positive-offset zone", () => {
+      // Tokyo (UTC+9): 23:59 on 31 December, then 00:00 on 1 January.
+      expect(p("thisMonth", "2026-12-31T14:59:00.000Z", "Asia/Tokyo")).toBe(
+        "2026-12-01..2027-01-01",
+      );
+      expect(p("thisMonth", "2026-12-31T15:00:00.000Z", "Asia/Tokyo")).toBe(
+        "2027-01-01..2027-02-01",
+      );
+      expect(p("lastMonth", "2026-12-31T15:00:00.000Z", "Asia/Tokyo")).toBe(
+        "2026-12-01..2027-01-01",
+      );
+    });
+
+    it("anchors to the reporting date in a negative-offset zone at a month boundary", () => {
+      // Los Angeles (UTC-8): 23:59 on 30 November while UTC is already in December.
+      const lateNovember = "2026-12-01T07:59:00.000Z";
+      expect(all(lateNovember, "America/Los_Angeles")).toEqual({
+        thisMonth: "2026-11-01..2026-12-01",
+        lastMonth: "2026-10-01..2026-11-01",
+        last7Days: "2026-11-24..2026-12-01",
+        last30Days: "2026-11-01..2026-12-01",
+      });
+      expect(p("thisMonth", lateNovember, "UTC")).toBe("2026-12-01..2027-01-01");
+      // 00:00 on 1 December in Los Angeles.
+      const december = "2026-12-01T08:00:00.000Z";
+      expect(p("thisMonth", december, "America/Los_Angeles")).toBe("2026-12-01..2027-01-01");
+      expect(p("last7Days", december, "America/Los_Angeles")).toBe("2026-11-25..2026-12-02");
+      // The last millisecond of 2026 in Los Angeles.
+      const yearEnd = "2027-01-01T07:59:59.999Z";
+      expect(p("thisMonth", yearEnd, "America/Los_Angeles")).toBe("2026-12-01..2027-01-01");
+      expect(p("lastMonth", yearEnd, "America/Los_Angeles")).toBe("2026-11-01..2026-12-01");
+    });
+
+    it("follows the calendar date in the extreme offsets", () => {
+      const instant = "2026-10-15T10:30:00.000Z";
+      expect(p("last7Days", instant, "Pacific/Kiritimati")).toBe("2026-10-10..2026-10-17");
+      expect(p("last7Days", instant, "UTC")).toBe("2026-10-09..2026-10-16");
+      expect(p("last7Days", instant, "Pacific/Pago_Pago")).toBe("2026-10-08..2026-10-15");
+    });
+
+    it("counts calendar days across the spring DST change", () => {
+      // New York moves from UTC-5 to UTC-4 on 8 March 2026, a 23-hour day.
+      const zone = "America/New_York";
+      expect(p("last7Days", "2026-03-08T04:59:59.999Z", zone)).toBe("2026-03-01..2026-03-08");
+      expect(p("last7Days", "2026-03-08T05:00:00.000Z", zone)).toBe("2026-03-02..2026-03-09");
+      expect(p("last7Days", "2026-03-09T03:59:00.000Z", zone)).toBe("2026-03-02..2026-03-09");
+      expect(p("last7Days", "2026-03-09T04:00:00.000Z", zone)).toBe("2026-03-03..2026-03-10");
+    });
+
+    it("counts calendar days across the autumn DST change at a month boundary", () => {
+      // New York moves from UTC-4 to UTC-5 on 1 November 2026, a 25-hour day.
+      const zone = "America/New_York";
+      expect(p("thisMonth", "2026-11-01T03:59:00.000Z", zone)).toBe("2026-10-01..2026-11-01");
+      expect(p("thisMonth", "2026-11-01T04:00:00.000Z", zone)).toBe("2026-11-01..2026-12-01");
+      expect(p("lastMonth", "2026-11-01T04:00:00.000Z", zone)).toBe("2026-10-01..2026-11-01");
+      expect(p("last7Days", "2026-11-02T04:59:00.000Z", zone)).toBe("2026-10-26..2026-11-02");
+      expect(p("last7Days", "2026-11-02T05:00:00.000Z", zone)).toBe("2026-10-27..2026-11-03");
+    });
+
+    it("keeps the 25-hour autumn DST day in Europe as one calendar day", () => {
+      // Berlin moves from UTC+2 to UTC+1 on 25 October 2026.
+      const zone = "Europe/Berlin";
+      expect(p("last7Days", "2026-10-24T22:00:00.000Z", zone)).toBe("2026-10-19..2026-10-26");
+      expect(p("last7Days", "2026-10-25T22:59:00.000Z", zone)).toBe("2026-10-19..2026-10-26");
+      expect(p("last7Days", "2026-10-25T23:00:00.000Z", zone)).toBe("2026-10-20..2026-10-27");
+    });
+
+    it("falls back to UTC for a zone the browser does not know", () => {
+      const instant = "2026-10-31T21:00:00.000Z";
+      for (const zone of ["Not/A_Zone", "Mars/Olympus_Mons"]) {
+        expect(() => computePeriodDates("thisMonth", new Date(instant), zone)).not.toThrow();
+        expect(all(instant, zone)).toEqual(all(instant, "UTC"));
+        expect(p("thisMonth", instant, zone)).toBe("2026-10-01..2026-11-01");
+        expect(p("last7Days", instant, zone)).toBe("2026-10-25..2026-11-01");
+      }
+      expect(PERIOD_FALLBACK_TIMEZONE).toBe("UTC");
+    });
+  });
+
+  describe("periodTimeZone", () => {
+    const stats = (zone: string | null) => makeCompanyStatsFixture(zone).data;
+
+    it("uses the reporting timezone of an available month", () => {
+      expect(periodTimeZone(stats("Europe/Moscow"), false)).toBe("Europe/Moscow");
+    });
+
+    it("falls back to UTC when the company has no reporting timezone", () => {
+      expect(periodTimeZone(stats(null), false)).toBe("UTC");
+    });
+
+    it("falls back to UTC when the read failed without data", () => {
+      expect(periodTimeZone(undefined, true)).toBe("UTC");
+    });
+
+    it("waits while the read is pending", () => {
+      expect(periodTimeZone(undefined, false)).toBeUndefined();
+    });
+
+    it("keeps the retained zone after a failed refresh", () => {
+      expect(periodTimeZone(stats("Europe/Moscow"), true)).toBe("Europe/Moscow");
     });
   });
 
@@ -131,6 +253,18 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
         expect(summary).toContain("{{date}}");
         expect(summary).toContain("{{distance}}");
       }
+    });
+
+    it("states that periods follow the company reporting timezone", () => {
+      expect(en.subtitle).toContain("periods");
+      expect(en.subtitle).toContain("reporting timezone");
+      expect(ru.subtitle).toContain("периоды");
+      expect(ru.subtitle).toContain("отчётном часовом поясе");
+      expect(en.definitions.timezoneDesc).toContain("company reporting timezone");
+      expect(ru.definitions.timezoneDesc).toContain("отчётном часовом поясе компании");
+      // The overview has no weekly period.
+      expect(en.definitions.timezoneDesc).not.toMatch(/weeks/i);
+      expect(ru.definitions.timezoneDesc).not.toMatch(/недели/i);
     });
 
     it("contains no empty values and no mockup-only slogan", () => {
