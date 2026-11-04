@@ -1,4 +1,5 @@
-// Synthetic overview fixtures for the recent company trips and nearest convoy blocks (VTC-055).
+// Synthetic overview fixtures: recent company trips and nearest convoy blocks (VTC-055) and the
+// public company stats that carry the reporting timezone for the period anchors (VTC-056).
 // Pure data without Playwright imports, so unit tests parse every fixture with the runtime schemas.
 import type { components } from "@vtc/contracts";
 
@@ -189,4 +190,33 @@ export function makeResponseCountsFixture(participating = 8, declined = 2) {
     data: { participating, declined },
     meta,
   } satisfies S["EnvelopeEventResponseCounts"];
+}
+
+/**
+ * Public company stats; the overview reads only `currentMonth.reportingTimezone`. A null zone is
+ * the unavailable month the API returns when the company has no reporting timezone.
+ */
+export function makeCompanyStatsFixture(
+  reportingTimezone: string | null,
+): S["EnvelopeCompanyStatsPublic"] {
+  return {
+    data: {
+      activeMembers: 3,
+      computedAt: "2026-10-26T12:00:00.000Z",
+      currentMonth:
+        reportingTimezone === null
+          ? { status: "unavailable", reason: "company_reporting_timezone" }
+          : {
+              status: "available",
+              month: "2026-10",
+              fromDate: "2026-10-01",
+              toDateExclusive: "2026-11-01",
+              reportingTimezone,
+              acceptedTrips: 42,
+              actualDistanceM: "125430000",
+              games: ["ets2", "ats"],
+            },
+    },
+    meta,
+  };
 }

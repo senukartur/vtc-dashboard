@@ -44,12 +44,30 @@ const dashboardOnlyPaths = [
   "/api/v1/qualification-levels",
   "/api/v1/trips",
   "/api/v1/events/",
+  "/api/v1/public/company-stats",
 ];
 function requestsTo(state: DashboardMockState, prefix: string) {
   return state.requests.filter((url) => url.pathname.startsWith(prefix)).map(String);
 }
 function lastRequest(state: DashboardMockState, path: string) {
   return state.requests.filter((url) => url.pathname === path).at(-1);
+}
+const statsPath = "/api/v1/public/company-stats";
+const periodPaths = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"] as const;
+/** Period requests to one or both period endpoints, optionally for one date range. */
+function periodRequests(
+  state: DashboardMockState,
+  path?: string,
+  fromDate?: string,
+  toDateExclusive?: string,
+) {
+  return state.requests.filter(
+    (url) =>
+      (path ? url.pathname === path : periodPaths.some((item) => item === url.pathname)) &&
+      (fromDate === undefined || url.searchParams.get("fromDate") === fromDate) &&
+      (toDateExclusive === undefined ||
+        url.searchParams.get("toDateExclusive") === toDateExclusive),
+  );
 }
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -86,6 +104,11 @@ test.describe("Company Dashboard E2E", () => {
       page.getByRole("heading", { name: "Company Overview", exact: true }),
     ).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+    await expect(
+      page.getByText("Accepted trips only; periods use the company reporting timezone", {
+        exact: true,
+      }),
+    ).toBeVisible();
 
     const metrics = kpis(page);
     await expect(metrics.getByRole("term")).toHaveText([
@@ -122,11 +145,18 @@ test.describe("Company Dashboard E2E", () => {
     await capture(page, info, "dashboard-overview-en", true);
     await switchLanguage(page, "ru");
     await expect(page.getByRole("heading", { name: "Обзор компании", exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Только принятые рейсы; периоды — в отчётном часовом поясе компании", {
+        exact: true,
+      }),
+    ).toBeVisible();
     await loaded(page);
     await capture(page, info, "dashboard-overview-ru", true);
   });
 
   test("filters by game and period with matching totals and requests", async ({ page }) => {
+    const now = new Date("2026-10-15T12:00:00.000Z");
+    await page.clock.setFixedTime(now);
     const state = await mockDashboardRoutes(page, { filterAware: true });
     await page.goto("/account/dashboard");
     await loaded(page);
@@ -146,7 +176,8 @@ test.describe("Company Dashboard E2E", () => {
     await periodSelect(page).selectOption("lastMonth");
     await expect(periodSelect(page)).toHaveValue("lastMonth");
 
-    const expected = computePeriodDates("lastMonth");
+    const expected = computePeriodDates("lastMonth", now, "Europe/Moscow");
+    expect(expected).toEqual({ fromDate: "2026-09-01", toDateExclusive: "2026-10-01" });
     for (const path of ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"]) {
       await expect
         .poll(() => lastRequest(state, path)?.searchParams.get("fromDate"))
@@ -182,6 +213,86 @@ test.describe("Company Dashboard E2E", () => {
       );
     }
   });
+
+  test("anchors periods to the reporting timezone across a month boundary", async ({ page }) => {
+    // 01:30 on 1 November in Moscow while the UTC clock still shows 31 October.
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, { filterAware: true });
+    await page.goto("/account/dashboard");
+    await loaded(page);
+
+    const statsIndex = state.requests.findIndex((url) => url.pathname === statsPath);
+    const firstPeriodIndex = state.requests.findIndex((url) =>
+      url.pathname.startsWith("/api/v1/analytics/"),
+    );
+    expect(statsIndex).toBeGreaterThanOrEqual(0);
+    expect(firstPeriodIndex).toBeGreaterThan(statsIndex);
+    const initial = periodRequests(state);
+    expect(initial).toHaveLength(2);
+    for (const url of initial) {
+      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+    }
+
+    for (const [period, fromDate, toDateExclusive] of [
+      ["lastMonth", "2026-10-01", "2026-11-01"],
+      ["last7Days", "2026-10-26", "2026-11-02"],
+      ["last30Days", "2026-10-03", "2026-11-02"],
+    ] as const) {
+      await periodSelect(page).selectOption(period);
+      for (const path of periodPaths)
+        await expect
+          .poll(() => periodRequests(state, path, fromDate, toDateExclusive).length)
+          .toBe(1);
+      await loaded(page);
+    }
+    expect(requestsTo(state, statsPath)).toHaveLength(1);
+    // One request per endpoint for the initial period and for each change.
+    for (const path of periodPaths) expect(periodRequests(state, path)).toHaveLength(4);
+  });
+
+  test("waits for the reporting timezone before requesting period data", async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, { filterAware: true });
+    state.hold("stats");
+    await page.goto("/account/dashboard");
+    await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
+    await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
+    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
+    await expect(loadingStatus(page)).toHaveCount(1);
+    for (const button of await gameGroup(page).getByRole("button").all())
+      await expect(button).toBeEnabled();
+    await expect(periodSelect(page)).toBeEnabled();
+
+    state.release("stats");
+    await loaded(page);
+    for (const path of periodPaths) {
+      const requests = periodRequests(state, path);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
+      expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+    }
+  });
+
+  for (const variant of ["failed", "unavailable"] as const) {
+    test(`falls back to UTC anchors when the timezone is ${variant}`, async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        ...(variant === "failed" ? { failures: { stats: 503 } } : { reportingTimezone: null }),
+      });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      expect(requestsTo(state, statsPath)).toHaveLength(1);
+      for (const path of periodPaths) {
+        const requests = periodRequests(state, path);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-10-01");
+        expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-11-01");
+      }
+    });
+  }
 
   test("shows the assigned qualification names for each game instead of UUIDs", async ({
     page,

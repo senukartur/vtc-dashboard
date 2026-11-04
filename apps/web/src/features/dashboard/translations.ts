@@ -1,7 +1,7 @@
 export const dashboardTranslations = {
   ru: {
     title: "Обзор компании",
-    subtitle: "Только принятые рейсы; итоги — в отчётном часовом поясе компании",
+    subtitle: "Только принятые рейсы; периоды — в отчётном часовом поясе компании",
     filters: {
       game: "Игра",
       allGames: "Все игры",
@@ -109,7 +109,7 @@ export const dashboardTranslations = {
       toggleClose: "Скрыть пояснения",
       timezoneTitle: "Учет по часовому поясу компании",
       timezoneDesc:
-        "Все отчетные периоды (месяцы, недели, дни) группируются по расчетному часовому поясу компании, независимо от часового пояса водителя.",
+        "Периоды (текущий и прошлый месяц, последние 7 и 30 дней) — календарные дни в отчётном часовом поясе компании, а не по часам вашего устройства. Рейсы относятся к дням в том же поясе, независимо от часового пояса водителя.",
       telemetryTitle: "Фактическое время начала рейса",
       telemetryDesc:
         "В телеметрии учитывается точное время старта поездки для определения квалификационного прогресса и периодов.",
@@ -135,7 +135,7 @@ export const dashboardTranslations = {
   },
   en: {
     title: "Company Overview",
-    subtitle: "Accepted trips only; totals use the company reporting timezone",
+    subtitle: "Accepted trips only; periods use the company reporting timezone",
     filters: {
       game: "Game",
       allGames: "All games",
@@ -243,7 +243,7 @@ export const dashboardTranslations = {
       toggleClose: "Hide explanations",
       timezoneTitle: "Company Timezone Attribution",
       timezoneDesc:
-        "All reporting periods (months, weeks, days) are aggregated using the official company timezone, regardless of the driver's local timezone.",
+        "Periods (this month, last month, the last 7 and 30 days) are calendar days in the company reporting timezone, not on your device's clock. Trips are assigned to days in the same timezone, whatever the driver's own timezone.",
       telemetryTitle: "Actual Trip Start Time",
       telemetryDesc:
         "Telemetry uses the exact start timestamp to attribute trips to periods and qualification progress.",

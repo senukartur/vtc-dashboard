@@ -13,12 +13,20 @@ import {
   MyQualificationWidget,
   ReviewerQueueWidget,
 } from "./components.js";
-import { computePeriodDates, type GameFilter, type PeriodFilter, periods } from "./model.js";
+import {
+  computePeriodDates,
+  type GameFilter,
+  PERIOD_FALLBACK_TIMEZONE,
+  type PeriodFilter,
+  periods,
+  periodTimeZone,
+} from "./model.js";
 import {
   useCompanyAnalytics,
   useDriverLeaderboard,
   useMyQualificationProgress,
   useRecentCompanyTrips,
+  useReportingTimezoneSource,
   useReviewQueueTrips,
   useUpcomingEvent,
 } from "./queries.js";
@@ -58,7 +66,14 @@ function DashboardContent() {
   const [period, setPeriod] = useState<PeriodFilter>("thisMonth");
   const [granularity, setGranularity] = useState<"day" | "month">("day");
 
-  const dates = computePeriodDates(period);
+  // Period data waits for the reporting timezone, so the first request already has its dates.
+  const timezoneQuery = useReportingTimezoneSource();
+  const reportingTimezone = periodTimeZone(timezoneQuery.data, timezoneQuery.isError);
+  const dates = computePeriodDates(
+    period,
+    new Date(),
+    reportingTimezone ?? PERIOD_FALLBACK_TIMEZONE,
+  );
   const effectiveGame = game === "all" ? undefined : game;
 
   const analyticsQuery = useCompanyAnalytics({
@@ -66,6 +81,7 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     granularity,
+    enabled: reportingTimezone !== undefined,
   });
 
   // Contract maximum: the widget shows the top ten, the KPI counts every returned driver.
@@ -74,6 +90,7 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     limit: 100,
+    enabled: reportingTimezone !== undefined,
   });
 
   const ets2ProgressQuery = useMyQualificationProgress("ets2");
@@ -155,6 +172,7 @@ function DashboardContent() {
             variant="outline"
             onClick={() => {
               titleRef.current?.focus();
+              if (timezoneQuery.isError) void timezoneQuery.refetch();
               void analyticsQuery.refetch();
               void leaderboardQuery.refetch();
             }}

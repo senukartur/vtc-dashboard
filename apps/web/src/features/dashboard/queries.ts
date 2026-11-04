@@ -2,14 +2,35 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
+import { readCompanyStats } from "../landing/stats.js";
 import { type DTO, dashboardRead } from "./transport.js";
 import { recentTripsPath } from "./view-model.js";
+
+/**
+ * Source of the company reporting timezone for the period anchors. Same key, reader and public
+ * meta as the landing StatsBand, so both share one cached anonymous read; only
+ * `currentMonth.reportingTimezone` is used here.
+ */
+export function useReportingTimezoneSource() {
+  const session = useSession();
+  return useQuery({
+    queryKey: ["public-company-stats"],
+    queryFn: ({ signal }) => readCompanyStats(signal),
+    meta: { private: false },
+    enabled: !!session.self?.capabilities.includes("company.read"),
+    retry: false,
+    staleTime: 60000,
+    gcTime: 300000,
+    refetchOnWindowFocus: false,
+  });
+}
 
 export function useCompanyAnalytics(params: {
   fromDate: string;
   toDateExclusive: string;
   game?: "ets2" | "ats" | undefined;
   granularity?: "day" | "month" | undefined;
+  enabled?: boolean | undefined;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -35,7 +56,7 @@ export function useCompanyAnalytics(params: {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: params.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -63,6 +84,7 @@ export function useDriverLeaderboard(params: {
   toDateExclusive: string;
   game?: "ets2" | "ats" | undefined;
   limit?: number | undefined;
+  enabled?: boolean | undefined;
 }) {
   const session = useSession();
   const client = useQueryClient();
@@ -88,7 +110,7 @@ export function useDriverLeaderboard(params: {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: params.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {

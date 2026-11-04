@@ -3,6 +3,7 @@ import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import {
   type FixtureLocale,
+  makeCompanyStatsFixture,
   makeOptionalEventFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
@@ -349,7 +350,8 @@ export type DashboardEndpoint =
   | "event"
   | "myResponse"
   | "counts"
-  | "rsvp";
+  | "rsvp"
+  | "stats";
 
 /** Planned outcome of the next RSVP PUT: a failure status (with Retry-After) or a network abort. */
 export type RsvpOutcome = { status: number; retryAfter?: number } | "abort";
@@ -392,6 +394,8 @@ export interface DashboardMockState {
   commands: RsvpCommand[];
   /** Outcomes consumed by the next RSVP PUTs before they succeed again. */
   rsvpOutcomes: RsvpOutcome[];
+  /** Zone in the public company stats; null returns the unavailable month. */
+  reportingTimezone: string | null;
 }
 
 /** The mocked endpoint of a request; trips are split by scope, my-response by method. */
@@ -401,6 +405,7 @@ function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
   if (path === "/api/v1/analytics/leaderboard") return "leaderboard";
   if (path === "/api/v1/me/qualification-progress") return "progress";
   if (path === "/api/v1/me/upcoming-event") return "event";
+  if (path === "/api/v1/public/company-stats") return "stats";
   if (path === "/api/v1/trips") {
     const scope = url.searchParams.get("scope");
     return scope === "review" ? "review" : scope === "company" ? "companyTrips" : undefined;
@@ -426,6 +431,8 @@ export async function mockDashboardRoutes(
     leaderboardSize?: number;
     leaderboardNextCursor?: boolean;
     reviewNextCursor?: boolean;
+    /** Public company stats zone (default Europe/Moscow); null: no reporting timezone. */
+    reportingTimezone?: string | null;
   } = {},
 ): Promise<DashboardMockState> {
   const gates = new Map<DashboardEndpoint, { promise: Promise<void>; release: () => void }>();
@@ -460,6 +467,8 @@ export async function mockDashboardRoutes(
     counts: makeResponseCountsFixture().data,
     commands: [],
     rsvpOutcomes: [],
+    reportingTimezone:
+      options.reportingTimezone === undefined ? "Europe/Moscow" : options.reportingTimezone,
   };
   if (options.holdAnalytics) state.holdAnalytics();
   await page.route("**/api/v1/**", async (route) => {
@@ -522,6 +531,9 @@ export async function mockDashboardRoutes(
     }
     if (endpoint === "event") {
       return route.fulfill({ json: makeOptionalEventFixture(state.upcoming) });
+    }
+    if (endpoint === "stats") {
+      return route.fulfill({ json: makeCompanyStatsFixture(state.reportingTimezone) });
     }
     if (endpoint === "myResponse") {
       return route.fulfill({
