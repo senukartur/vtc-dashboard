@@ -151,7 +151,15 @@ export function rehearsalTiming(bundle) {
     const offset = isoInstant.test(row?.startedUtc ?? "")
       ? Date.parse(row.startedUtc) - started
       : -1;
-    if (row?.ordinal !== scenarios.length + 1 || !boundedMs(row?.durationMs) || !boundedMs(offset))
+    // A window shard runs an ascending subset of 1..9, so ordinals must only strictly increase.
+    const previous = scenarios.at(-1)?.ordinal ?? 0;
+    if (
+      !Number.isSafeInteger(row?.ordinal) ||
+      row.ordinal <= previous ||
+      row.ordinal > 9 ||
+      !boundedMs(row?.durationMs) ||
+      !boundedMs(offset)
+    )
       return null;
     scenarios.push({ ordinal: row.ordinal, startOffsetMs: offset, durationMs: row.durationMs });
   }

@@ -222,10 +222,20 @@ test("rehearsal timing publishes only fixed numeric window fields", () => {
     ticks: { count: 4, busySeconds: 13 },
   });
   assert.ok(!JSON.stringify(timing).includes(secret));
-  // Gaps, foreign ordinals, malformed instants and unbounded durations publish nothing.
+  // Every window shard is an ascending subset of 1..9 and publishes its own ordinals.
+  for (const shard of windowShards)
+    assert.deepEqual(
+      rehearsalTiming(bundle(shard.map(scenario)))?.scenarios.map((row) => row.ordinal),
+      shard,
+    );
+  // Repeated, descending or foreign ordinals, malformed instants and unbounded durations
+  // publish nothing.
   for (const rows of [
-    [scenario(2)],
-    [scenario(1), scenario(3)],
+    [scenario(2), scenario(2)],
+    [scenario(3), scenario(2)],
+    [scenario(0)],
+    [{ ...scenario(9), ordinal: 10 }],
+    [{ ...scenario(1), ordinal: "1" }],
     [{ ...scenario(1), startedUtc: secret }],
     [{ ...scenario(1), startedUtc: "2026-11-04T03:59:00.000Z" }],
     [{ ...scenario(1), durationMs: -1 }],
