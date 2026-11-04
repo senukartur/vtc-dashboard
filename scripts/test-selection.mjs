@@ -197,13 +197,16 @@ const areas = [
       "apps/api/src/use-cases/trip-reconciliation.ts",
       "apps/web/src/features/review/",
     ],
-    tests: ["reconciliation", "trips-corrections"],
+    tests: ["reconciliation", "trips-corrections", "review"],
   },
   {
     paths: ["apps/api/src/modules/telemetry/", "apps/api/src/modules/sources/"],
     tests: ["telemetry"],
   },
-  { paths: ["apps/api/src/modules/trips/", "apps/web/src/features/trips/"], tests: ["trip"] },
+  {
+    paths: ["apps/api/src/modules/trips/", "apps/web/src/features/trips/"],
+    tests: ["trip", "review"],
+  },
   {
     paths: ["apps/api/src/modules/trip-decisions/", "apps/api/src/use-cases/trip-decisions.ts"],
     tests: ["trip-decisions", "trips-corrections"],

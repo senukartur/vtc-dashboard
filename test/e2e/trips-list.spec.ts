@@ -485,11 +485,15 @@ test("list requests keep server scope rules and review stays permission gated", 
   await page.route("**/api/v1/me", (route) => route.fulfill({ json: accountFixture("en") }));
   lists.length = 0;
   await page.goto("/account/review");
+  const main = page.getByRole("main");
+  await expect(main.getByRole("heading", { level: 1, name: "Review workspace" })).toBeVisible();
   await expect(
-    page
-      .getByText(/^(Your current permissions do not allow this action\.|.*permission.*)$/i)
-      .first(),
+    main.getByText("Your current permissions do not allow this action.", { exact: true }),
   ).toBeVisible();
+  // The forbidden queue renders no toolbar or table and never asks for the review scope.
+  await expect(main.getByRole("table")).toHaveCount(0);
+  await expect(main.locator("#review-game")).toHaveCount(0);
   await page.waitForTimeout(250);
   expect(lists).toEqual([]);
+  expect(lists.some((q) => q.get("scope") === "review")).toBe(false);
 });

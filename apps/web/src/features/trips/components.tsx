@@ -61,6 +61,7 @@ export function Confirm({
   pending = false,
   failure,
   variant = "outline",
+  describedBy,
 }: {
   label: string;
   guard: string;
@@ -70,6 +71,8 @@ export function Confirm({
   pending?: boolean;
   failure?: unknown;
   variant?: "default" | "outline";
+  /** Id of text that explains the trigger, for example why it is disabled. */
+  describedBy?: string | undefined;
 }) {
   const { t } = useTranslation("trips"),
     [snapshot, setSnapshot] = useState<{
@@ -98,6 +101,7 @@ export function Confirm({
         <Button
           type="button"
           variant={variant}
+          aria-describedby={describedBy}
           disabled={disabled || pending}
           onClick={() => setSnapshot({ guard, run: onConfirm, content: children, failure })}
         >

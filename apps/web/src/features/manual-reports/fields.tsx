@@ -107,6 +107,30 @@ export function ManualCatalogField({
     </fieldset>
   );
 }
+/**
+ * Private evidence bytes through the authorized binary route, bounded to 15 seconds. The
+ * response must match the metadata's content type and size; HTTP failures keep their status
+ * (410 means expired).
+ */
+export async function evidenceContent(
+  item: Pick<DTO["Evidence"], "id" | "contentType" | "byteLength">,
+  signal: AbortSignal,
+): Promise<Blob> {
+  const r = await fetch(`/api/v1/evidence/${item.id}/content`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+  });
+  if (!r.ok) {
+    const { fail } = await import("../trips/transport.js");
+    fail(r);
+  }
+  if (r.headers.get("Content-Type")?.split(";")[0] !== item.contentType)
+    throw new AccountFailure("unavailable");
+  const blob = await r.blob();
+  if (blob.size !== item.byteLength) throw new AccountFailure("unavailable");
+  return blob;
+}
 export function EvidenceItem({
   id,
   onRemove,
@@ -163,22 +187,10 @@ export function EvidenceItem({
               setError(null);
               let url: string | undefined;
               try {
-                const r = await fetch(`/api/v1/evidence/${id}/content`, {
-                  credentials: "same-origin",
-                  cache: "no-store",
-                  signal: AbortSignal.any([
-                    lifetime.current?.signal ?? AbortSignal.abort(),
-                    AbortSignal.timeout(15000),
-                  ]),
-                });
-                if (!r.ok) {
-                  const { fail } = await import("../trips/transport.js");
-                  fail(r);
-                }
-                if (r.headers.get("Content-Type")?.split(";")[0] !== item.contentType)
-                  throw new AccountFailure("unavailable");
-                const blob = await r.blob();
-                if (blob.size !== item.byteLength) throw new AccountFailure("unavailable");
+                const blob = await evidenceContent(
+                  item,
+                  lifetime.current?.signal ?? AbortSignal.abort(),
+                );
                 url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;

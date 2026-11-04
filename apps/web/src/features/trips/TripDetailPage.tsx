@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
+import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
 import { ReconciliationHistory } from "../review/ReconciliationPage.js";
-import { ProposalList, ReviewPanel } from "../review/ReviewPanel.js";
+import { DecisionPanel } from "../review/DecisionPanel.js";
+import { ProposalList } from "../review/ReviewPanel.js";
+import { queueSearch } from "../review/review-model.js";
 import {
   Codes,
   Confirm,
@@ -28,7 +30,8 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
     query = useTripQuery(
       `/trips/${tripId}`,
       "EnvelopeTripView",
-      validId(tripId) && (!review || !!session.self?.capabilities.includes("trips.review")),
+      // The review page reads the trip through its review read instead.
+      validId(tripId) && !review,
     ),
     [history, setHistory] = useState(false),
     [reason, setReason] = useState(""),
@@ -48,10 +51,11 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
         <p>{t("notFound")}</p>
       </Card>
     );
+  if (review) return <ReviewDetail tripId={tripId} />;
   return (
     <div className="stack trip-page">
       <header className="trip-heading">
-        <h1>{t(review ? "review" : "title")}</h1>
+        <h1>{t("title")}</h1>
         {!query.isError && (
           <Button
             variant="outline"
@@ -104,7 +108,13 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
                 {view.decisions.map((d) => (
                   <article key={d.id} className="trip-revision">
                     <h3>{t(d.outcome)}</h3>
-                    <p>{d.reason}</p>
+                    <p className="review-decision-by">
+                      {d.reviewer?.nickname ?? t("system")}
+                      {d.acceptedOverLimits && (
+                        <Badge className="review-marker">{t("overLimitsMarker")}</Badge>
+                      )}
+                    </p>
+                    <p className="review-multiline">{d.reason}</p>
                     <Fields
                       values={{
                         reviewedRevisionId: d.reviewedRevisionId,
@@ -174,19 +184,49 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
                   {history && <PrivateHistory tripId={summary.id} />}
                 </details>
               </Card>
-              {staff &&
-                (review ? (
-                  <ReviewPanel tripId={summary.id} />
-                ) : (
-                  <Button asChild>
-                    <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
-                  </Button>
-                ))}
+              {staff && (
+                <Button asChild>
+                  <Link to={`/account/review/${summary.id}`}>{t("review")}</Link>
+                </Button>
+              )}
               {staff && <ReconciliationHistory tripId={summary.id} />}
             </>
           )}
         </>
       )}
+    </div>
+  );
+}
+/**
+ * Full review page: back to the same queue view, the decision workspace in two columns from
+ * 1200px, then the private report history and reconciliation history.
+ */
+function ReviewDetail({ tripId }: { tripId: string }) {
+  const { t } = useTranslation("trips"),
+    location = useLocation(),
+    [history, setHistory] = useState(false),
+    back = `/account/review${queueSearch(new URLSearchParams(location.search))}`;
+  return (
+    <div className="stack trip-page review-detail">
+      <header className="trip-heading review-detail-header">
+        <div>
+          <h1>{t("review")}</h1>
+          <p className="trips-note">{t("frozen")}</p>
+        </div>
+        <Button asChild variant="outline">
+          <Link to={back}>
+            <span aria-hidden="true">←</span> {t("queueBack")}
+          </Link>
+        </Button>
+      </header>
+      <DecisionPanel tripId={tripId} variant="page" />
+      <Card>
+        <details open={history} onToggle={(e) => setHistory(e.currentTarget.open)}>
+          <summary>{t("privateView")}</summary>
+          {history && <PrivateHistory tripId={tripId} />}
+        </details>
+      </Card>
+      <ReconciliationHistory tripId={tripId} />
     </div>
   );
 }
