@@ -375,6 +375,159 @@
   overflow-wrap: anywhere;
 }
 
+/* Nearest convoy: countdown chip, participants and the own quick response. */
+.dashboard-page .dashboard-countdown {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-badge);
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.dashboard-page .dashboard-event-info,
+.dashboard-page .dashboard-rsvp-body,
+.dashboard-page .dashboard-decline {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.dashboard-page .dashboard-event-info {
+  gap: 2px;
+}
+.dashboard-page .dashboard-event-route {
+  overflow-wrap: break-word;
+}
+.dashboard-page .dashboard-rsvp,
+.dashboard-page .dashboard-rsvp-group,
+.dashboard-page .dashboard-decline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+/* A native fieldset names the toggle group; drop its default box. */
+.dashboard-page .dashboard-rsvp-group {
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.dashboard-page .dashboard-going {
+  margin-left: auto;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-rsvp-state {
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-tone-participating {
+  color: var(--accepted);
+}
+.dashboard-page .dashboard-tone-declined {
+  color: var(--destructive);
+}
+.dashboard-page .dashboard-tone-unanswered {
+  color: var(--secondary);
+}
+/* Pressed state carries the text meaning; colour only supports it. */
+.dashboard-page .button.dashboard-toggle-going[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+.dashboard-page .button.dashboard-toggle-decline[aria-pressed="true"] {
+  border-color: var(--destructive);
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.dashboard-page .button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+.dashboard-page .dashboard-reason {
+  min-height: 64px;
+}
+
+/* Recent company trips: a full-width third row, below the first desktop screen. */
+.dashboard-page .dashboard-recent-trips {
+  grid-column: 1 / -1;
+}
+.dashboard-page .dashboard-trip-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-page .dashboard-trip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-block: 2px;
+}
+.dashboard-page .dashboard-trip + .dashboard-trip {
+  border-top: 1px solid var(--border);
+}
+.dashboard-page .dashboard-game {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--radius-badge);
+  background: var(--accent-soft);
+  color: var(--focus);
+  font-size: var(--font-badge);
+  font-weight: 700;
+  line-height: 1.6;
+}
+/* Route and meta share one line when they fit; otherwise the meta wraps under the route. */
+.dashboard-page .dashboard-trip-text {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 12px;
+  min-width: 0;
+}
+/* Whole-word wrapping, unlike the shared break-anywhere table cells. */
+.dashboard-page .dashboard-trip-route,
+.dashboard-page .dashboard-trip-meta {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.dashboard-page .dashboard-trip-route {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-height: var(--target-min);
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: none;
+}
+.dashboard-page .dashboard-trip-route:hover {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+/* Inline after the route, unlike the shared block-level small. */
+.dashboard-page .dashboard-fallback {
+  display: inline;
+  color: var(--muted);
+  font-size: var(--font-small);
+  font-weight: 400;
+}
+.dashboard-page .dashboard-trip-meta {
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.dashboard-page .dashboard-nowrap {
+  white-space: nowrap;
+}
+
 /* States and notices */
 .dashboard-page .dashboard-error {
   justify-items: start;

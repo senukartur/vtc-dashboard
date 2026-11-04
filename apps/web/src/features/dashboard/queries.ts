@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
 import { type DTO, dashboardRead } from "./transport.js";
+import { recentTripsPath } from "./view-model.js";
 
 export function useCompanyAnalytics(params: {
   fromDate: string;
@@ -201,6 +202,50 @@ export function useMyQualificationProgress(game: "ets2" | "ats") {
       } catch (error) {
         if (error instanceof AccountFailure && !signal.aborted) {
           if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
+        }
+        throw error;
+      }
+    },
+  });
+}
+
+/**
+ * Latest accepted company trips for the overview. It follows the page game filter; the period
+ * filter does not apply because the trips list has no date filter.
+ */
+export function useRecentCompanyTrips(game?: "ets2" | "ats") {
+  const session = useSession();
+  const client = useQueryClient();
+  const { i18n } = useTranslation();
+  const path = recentTripsPath(game);
+
+  return useQuery({
+    queryKey: [
+      "dashboard-recent-trips",
+      session.self?.member.id,
+      session.generation,
+      session.self?.identityEpoch,
+      session.self?.capabilities.join(","),
+      i18n.resolvedLanguage,
+      path,
+    ],
+    meta: { private: true },
+    enabled: !!session.self?.capabilities.includes("company.read"),
+    retry: false,
+    staleTime: 30000,
+    queryFn: async ({ signal }) => {
+      try {
+        return (await dashboardRead(path, "EnvelopeListTripSummary", signal)).data.data;
+      } catch (error) {
+        if (error instanceof AccountFailure && !signal.aborted) {
+          if (error.kind === "unauthorized") await session.confirmSessionLoss(signal);
+          if (error.kind === "forbidden") {
+            client.removeQueries({
+              type: "inactive",
+              predicate: (q) => q.meta?.private === true,
+            });
+            await session.refresh();
+          }
         }
         throw error;
       }

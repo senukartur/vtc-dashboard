@@ -21,11 +21,10 @@ import "./dashboard.css";
 type AnalyticsData = DTO["Analytics"];
 type LeaderboardData = DTO["ListLeaderboardEntry"];
 type ProgressData = DTO["Progress"];
-type EventData = DTO["OptionalEvent"];
 type ReviewListData = DTO["ListTripSummary"];
 
-/** Decorative placeholder; the page status line announces loading. */
-function Skeleton({ className }: { className?: string }) {
+/** Decorative placeholder; the page status line or the block itself announces loading. */
+export function Skeleton({ className }: { className?: string }) {
   return (
     <span
       className={className ? `dashboard-skeleton ${className}` : "dashboard-skeleton"}
@@ -552,51 +551,6 @@ export function ReviewerQueueWidget({
       <Link to="/account/review" className="dashboard-head-link">
         {t("reviewQueue.reviewLink")}
       </Link>
-    </Card>
-  );
-}
-
-export function UpcomingEventWidget({
-  query,
-  locale,
-  displayTimezone,
-}: {
-  query: UseQueryResult<EventData>;
-  locale: Locale;
-  displayTimezone: string;
-}) {
-  const { t } = useTranslation("dashboard");
-  const headingId = useId();
-  const event = query.data;
-
-  let body: ReactNode;
-  if (event) {
-    body = (
-      <>
-        <h3 className="dashboard-event-title">{event.title}</h3>
-        <p className="dashboard-muted">
-          {formatUtc(event.startsAt, locale, displayTimezone)} ({displayTimezone})
-        </p>
-        <Link to={`/account/events/${event.id}`} className="dashboard-head-link">
-          {t("upcomingEvent.viewEvent")}
-        </Link>
-      </>
-    );
-  } else if (event === null) {
-    // Success without an event; kept even if a later background refresh fails.
-    body = <p className="dashboard-muted">{t("upcomingEvent.noUpcoming")}</p>;
-  } else if (query.isError) {
-    body = <p className="dashboard-muted">{t("upcomingEvent.error")}</p>;
-  } else {
-    body = <Skeleton className="dashboard-skeleton-line" />;
-  }
-
-  return (
-    <Card className="dashboard-side-card" aria-labelledby={headingId}>
-      <div className="dashboard-card-head">
-        <h2 id={headingId}>{t("upcomingEvent.title")}</h2>
-      </div>
-      {body}
     </Card>
   );
 }
