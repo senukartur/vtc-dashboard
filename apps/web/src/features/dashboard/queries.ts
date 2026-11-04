@@ -22,6 +22,10 @@ export function useReportingTimezoneSource() {
     staleTime: 60000,
     gcTime: 300000,
     refetchOnWindowFocus: false,
+    // A failed read has no data, so a reconnect would reread it, reset it to pending and turn a
+    // page already showing UTC-anchored data back to loading (unmounting forms, dropping focus).
+    // The UTC fallback lasts until Retry or a remount instead.
+    refetchOnReconnect: false,
   });
 }
 

@@ -309,6 +309,28 @@ test.describe("Company Dashboard E2E", () => {
     });
   }
 
+  test("keeps the UTC fallback view through a reconnect", async ({ page, context }) => {
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, {
+      filterAware: true,
+      failures: { stats: 503 },
+    });
+    await page.goto("/account/dashboard");
+    await loaded(page);
+    expect(requestsTo(state, statsPath)).toHaveLength(1);
+
+    // A reconnect must not reread the failed zone and send the page back to loading.
+    delete state.failures.stats;
+    await context.setOffline(true);
+    await context.setOffline(false);
+    // Nothing visible changes to wait for; give a reread time to start.
+    await page.waitForTimeout(500);
+    expect(requestsTo(state, statsPath)).toHaveLength(1);
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
+    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+    await expect(loadingStatus(page)).toHaveCount(0);
+  });
+
   test("rereads a failed timezone on Retry and requests only the new dates", async ({ page }) => {
     // Moscow is already in November; the UTC fallback is still in October.
     await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
