@@ -10,6 +10,7 @@ import {
   recentTripRow,
   recentTripsPath,
   responsePressed,
+  retainsError,
   rsvpView,
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
@@ -21,6 +22,7 @@ import {
   nextUpcomingEvent,
   overviewNow,
   recentTripItems,
+  recentTrips,
   upcomingEvent,
 } from "../e2e/support/dashboard-fixtures.ts";
 
@@ -123,8 +125,35 @@ describe("recent trip rows", () => {
   });
 
   it("flags English fallback labels", () => {
-    expect(praha && recentTripRow(praha, "en", "UTC").fallback).toBe(true);
+    const russian = recentTrips("ru");
+    const wien = russian[2] && recentTripRow(russian[2], "ru", "UTC");
+    expect(wien?.fallback).toBe(true);
+    expect(wien?.destination).toBe("Wien");
+    expect(wien?.origin).toBe("Прага");
+    expect(russian[0] && recentTripRow(russian[0], "ru", "UTC").fallback).toBe(false);
+    expect(praha && recentTripRow(praha, "en", "UTC").fallback).toBe(false);
     expect(berlin && recentTripRow(berlin, "en", "UTC").fallback).toBe(false);
+  });
+});
+
+describe("retry of a block without data", () => {
+  it("keeps the error only until a newer outcome", () => {
+    // Pressed at the first error: kept while the refetch is pending.
+    expect(retainsError(1, { data: undefined, errorUpdateCount: 1 })).toBe(true);
+    // Data or a later error ends it.
+    expect(retainsError(1, { data: { items: [] }, errorUpdateCount: 1 })).toBe(false);
+    expect(retainsError(1, { data: undefined, errorUpdateCount: 2 })).toBe(false);
+    // Another query (a new game) starts without errors.
+    expect(retainsError(1, { data: undefined, errorUpdateCount: 0 })).toBe(false);
+    // Without a pressed Retry nothing is kept, so once reset after success a later 403 at the
+    // same error count shows forbidden instead of the retained error.
+    expect(retainsError(null, { data: undefined, errorUpdateCount: 1 })).toBe(false);
+    expect(
+      blockView(
+        { data: undefined, isError: true, error: new AccountFailure("forbidden") },
+        (data: { items: unknown[] }) => data.items.length === 0,
+      ),
+    ).toBe("forbidden");
   });
 });
 
@@ -284,6 +313,24 @@ describe("overview block translations", () => {
 
 describe("overview block fixtures", () => {
   it("parse with the browser runtime schemas", () => {
+    for (const locale of ["en", "ru"] as const)
+      expect(
+        schema("EnvelopeListTripSummary").safeParse(makeRecentTripsFixture(recentTrips(locale)))
+          .success,
+      ).toBe(true);
+    const ids = recentTrips("en").flatMap((trip) =>
+      [trip.origin, trip.destination].flatMap((label) => (label ? [label.entityId] : [])),
+    );
+    // Distinct places keep distinct catalog IDs, and the IDs do not depend on the locale.
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(
+      recentTrips("ru").flatMap((trip) =>
+        [trip.origin, trip.destination].flatMap((label) => (label ? [label.entityId] : [])),
+      ),
+    ).toEqual(ids);
+    for (const trip of recentTrips("ru"))
+      for (const label of [trip.origin, trip.destination])
+        if (label) expect(label.requestedLocale).toBe("ru");
     expect(schema("EnvelopeListTripSummary").safeParse(makeRecentTripsFixture()).success).toBe(
       true,
     );

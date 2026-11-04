@@ -30,6 +30,17 @@ export function blockView<T>(
   return "loading";
 }
 
+/**
+ * While a user Retry runs without data, the block keeps its error view. `since` is the query's
+ * error count when Retry was pressed; data or a later error is a newer outcome that ends it.
+ */
+export function retainsError(
+  since: number | null,
+  query: { data: unknown; errorUpdateCount: number },
+) {
+  return since !== null && query.data === undefined && query.errorUpdateCount === since;
+}
+
 function isForbidden(error: unknown) {
   return error instanceof AccountFailure && error.kind === "forbidden";
 }

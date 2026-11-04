@@ -11,13 +11,39 @@ export const overviewNow = "2099-11-02T13:30:00.000Z";
 export const upcomingEventId = "70000000-0000-4000-8000-000000000001";
 export const nextEventId = "70000000-0000-4000-8000-000000000002";
 
-function place(label: string, englishFallback = false): S["CatalogLabel"] {
+export type FixtureLocale = "en" | "ru";
+
+/** Fictional catalog places with fixed IDs; a null Russian name renders the English fallback. */
+const places = {
+  berlin: { id: "60000000-0000-4000-8000-000000000101", en: "Berlin", ru: "Берлин" },
+  warszawa: { id: "60000000-0000-4000-8000-000000000102", en: "Warszawa", ru: "Варшава" },
+  seattle: { id: "60000000-0000-4000-8000-000000000103", en: "Seattle", ru: "Сиэтл" },
+  portland: { id: "60000000-0000-4000-8000-000000000104", en: "Portland", ru: "Портленд" },
+  praha: { id: "60000000-0000-4000-8000-000000000105", en: "Praha", ru: "Прага" },
+  wien: { id: "60000000-0000-4000-8000-000000000106", en: "Wien", ru: null },
+  phoenix: { id: "60000000-0000-4000-8000-000000000107", en: "Phoenix", ru: "Финикс" },
+  petersburg: {
+    id: "60000000-0000-4000-8000-000000000108",
+    en: "Saint Petersburg",
+    ru: "Санкт-Петербург",
+  },
+  novgorod: {
+    id: "60000000-0000-4000-8000-000000000109",
+    en: "Nizhny Novgorod",
+    ru: "Нижний Новгород",
+  },
+} as const satisfies Record<string, { id: string; en: string; ru: string | null }>;
+
+/** The label as the API renders it for `locale`: requested locale, rendered locale and fallback. */
+function place(name: keyof typeof places, locale: FixtureLocale): S["CatalogLabel"] {
+  const entry: { id: string; en: string; ru: string | null } = places[name];
+  const russian = locale === "ru" ? entry.ru : null;
   return {
-    entityId: `60000000-0000-4000-8000-${String(label.length).padStart(12, "0")}`,
-    label,
-    requestedLocale: englishFallback ? "ru" : "en",
-    renderedLocale: "en",
-    englishFallback,
+    entityId: entry.id,
+    label: russian ?? entry.en,
+    requestedLocale: locale,
+    renderedLocale: russian === null ? "en" : "ru",
+    englishFallback: locale === "ru" && russian === null,
     retired: false,
   };
 }
@@ -58,51 +84,56 @@ function trip(
 }
 
 /**
- * Five accepted company trips: a null distance (`Unavailable`), an English-fallback label, an
- * unknown origin, a missing counted time and long Russian place names.
+ * Five accepted company trips as rendered for `locale`: a null distance (`Unavailable`), an
+ * English-fallback label in Russian, an unknown origin, a missing counted time and long Russian
+ * place names. IDs, drivers and values do not depend on the locale.
  */
-export const recentTripItems: S["TripSummary"][] = [
-  trip(1, {
-    game: "ets2",
-    origin: place("Berlin"),
-    destination: place("Warszawa"),
-    driver: "AlphaDriver",
-    actualDistanceM: "580000",
-    reportingAt: "2099-11-01T14:30:00.000Z",
-  }),
-  trip(2, {
-    game: "ats",
-    origin: place("Seattle"),
-    destination: place("Portland"),
-    driver: "BetaHauler",
-    actualDistanceM: null,
-    reportingAt: "2099-11-01T09:15:00.000Z",
-  }),
-  trip(3, {
-    game: "ets2",
-    origin: place("Praha"),
-    destination: place("Wien", true),
-    driver: "NightConvoyCaptain",
-    actualDistanceM: "334000",
-    reportingAt: "2099-10-31T20:05:00.000Z",
-  }),
-  trip(4, {
-    game: "ats",
-    origin: null,
-    destination: place("Phoenix"),
-    driver: "CedarWolf",
-    actualDistanceM: "1103000",
-    reportingAt: null,
-  }),
-  trip(5, {
-    game: "ets2",
-    origin: place("Санкт-Петербург"),
-    destination: place("Нижний Новгород"),
-    driver: "PolarBear",
-    actualDistanceM: "1250000",
-    reportingAt: "2099-10-30T07:45:00.000Z",
-  }),
-];
+export function recentTrips(locale: FixtureLocale = "en"): S["TripSummary"][] {
+  return [
+    trip(1, {
+      game: "ets2",
+      origin: place("berlin", locale),
+      destination: place("warszawa", locale),
+      driver: "AlphaDriver",
+      actualDistanceM: "580000",
+      reportingAt: "2099-11-01T14:30:00.000Z",
+    }),
+    trip(2, {
+      game: "ats",
+      origin: place("seattle", locale),
+      destination: place("portland", locale),
+      driver: "BetaHauler",
+      actualDistanceM: null,
+      reportingAt: "2099-11-01T09:15:00.000Z",
+    }),
+    trip(3, {
+      game: "ets2",
+      origin: place("praha", locale),
+      destination: place("wien", locale),
+      driver: "NightConvoyCaptain",
+      actualDistanceM: "334000",
+      reportingAt: "2099-10-31T20:05:00.000Z",
+    }),
+    trip(4, {
+      game: "ats",
+      origin: null,
+      destination: place("phoenix", locale),
+      driver: "CedarWolf",
+      actualDistanceM: "1103000",
+      reportingAt: null,
+    }),
+    trip(5, {
+      game: "ets2",
+      origin: place("petersburg", locale),
+      destination: place("novgorod", locale),
+      driver: "PolarBear",
+      actualDistanceM: "1250000",
+      reportingAt: "2099-10-30T07:45:00.000Z",
+    }),
+  ];
+}
+/** The English rendering, for tests that only need IDs, drivers and values. */
+export const recentTripItems = recentTrips("en");
 
 export function makeRecentTripsFixture(items: S["TripSummary"][] = recentTripItems) {
   return {

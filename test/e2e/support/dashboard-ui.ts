@@ -2,10 +2,12 @@ import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import {
+  type FixtureLocale,
   makeOptionalEventFixture,
   makeRecentTripsFixture,
   makeResponseCountsFixture,
   makeRsvpFixture,
+  recentTrips,
   upcomingEvent,
 } from "./dashboard-fixtures.ts";
 import { inertNotifications } from "./notifications.ts";
@@ -373,8 +375,13 @@ export interface DashboardMockState {
   /** Holds every response of an endpoint until `release` is called for it. */
   hold(endpoint: DashboardEndpoint): void;
   release(endpoint: DashboardEndpoint): void;
-  /** `scope=company` trips; undefined keeps the five-trip fixture. */
+  /** `scope=company` trips; undefined keeps the five-trip fixture in `tripLocale`. */
   companyTrips: S["EnvelopeListTripSummary"] | undefined;
+  /**
+   * Locale the API renders catalog labels in. Switching the UI language is local to the browser,
+   * so a test in Russian sets it to match.
+   */
+  tripLocale: FixtureLocale;
   /** What `/me/upcoming-event` returns (null: no scheduled event). */
   upcoming: S["EventPublic"] | null;
   /** The member's own response; a successful PUT replaces it with the next version. */
@@ -447,6 +454,7 @@ export async function mockDashboardRoutes(
       state.release("analytics");
     },
     companyTrips: undefined,
+    tripLocale: "en",
     upcoming: upcomingEvent,
     response: makeRsvpFixture().data,
     counts: makeResponseCountsFixture().data,
@@ -583,7 +591,9 @@ export async function mockDashboardRoutes(
       return route.fulfill({ json: makeMemberProfileFixture(memberId) });
     }
     if (endpoint === "companyTrips") {
-      return route.fulfill({ json: state.companyTrips ?? makeRecentTripsFixture() });
+      return route.fulfill({
+        json: state.companyTrips ?? makeRecentTripsFixture(recentTrips(state.tripLocale)),
+      });
     }
     if (path === "/api/v1/trips") {
       const fixture = makeTripSummaryListFixture();

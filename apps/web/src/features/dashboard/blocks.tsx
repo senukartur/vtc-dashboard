@@ -27,6 +27,7 @@ import {
   RECENT_TRIPS_LIMIT,
   recentTripRow,
   responsePressed,
+  retainsError,
   rsvpView,
 } from "./view-model.js";
 import "./dashboard.css";
@@ -67,8 +68,11 @@ function useBlockRetry(query: {
   refetch: () => Promise<unknown>;
 }) {
   const [since, setSince] = useState<number | null>(null);
+  const retrying = retainsError(since, query);
+  // Data or a later error ends the retry, so a later query (another game) shows its own state.
+  if (since !== null && !retrying) setSince(null);
   return {
-    retrying: since !== null && query.data === undefined && query.errorUpdateCount === since,
+    retrying,
     retry() {
       setSince(query.errorUpdateCount);
       void query.refetch();
@@ -232,7 +236,13 @@ export function UpcomingEventWidget({
           <p className="dashboard-muted dashboard-event-route">{event.route}</p>
         </div>
         {canRespond && phase === "open" ? (
-          <ConvoyResponse key={event.id} event={event} phase={phase} heading={heading}>
+          <ConvoyResponse
+            key={event.id}
+            event={event}
+            phase={phase}
+            heading={heading}
+            onConflict={() => void query.refetch({ cancelRefetch: false })}
+          >
             {count}
           </ConvoyResponse>
         ) : (
@@ -341,11 +351,17 @@ function ConvoyResponse({
   event,
   phase,
   heading,
+  onConflict,
   children,
 }: {
   event: NonNullable<EventData>;
   phase: EventPhase;
   heading: RefObject<HTMLHeadingElement | null>;
+  /**
+   * Refetches the nearest event. The command hook refreshes only the events caches, so after a
+   * cancellation or reschedule the overview would keep showing open controls for a closed event.
+   */
+  onConflict: () => void;
   /** The participants count, shown at the end of the response row. */
   children: ReactNode;
 }) {
@@ -353,8 +369,16 @@ function ConvoyResponse({
   const id = useId();
   const path = `/events/${event.id}/my-response`;
   const query = useEventQuery(path, "EnvelopeRsvp");
-  const command = useEventCommand();
-  const view = rsvpView({ canRespond: true, phase, query });
+  const command = useEventCommand((failure) => {
+    if (failure.kind === "conflict") onConflict();
+  });
+  // A Retry without data keeps "unavailable" (and focus on Retry) until it settles.
+  const { retrying, retry } = useBlockRetry(query);
+  const view = rsvpView({
+    canRespond: true,
+    phase,
+    query: retrying ? { isError: true, error: null } : query,
+  });
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState("");
   const [invalid, setInvalid] = useState(false);
@@ -454,7 +478,7 @@ function ConvoyResponse({
         <KeepFocusButton
           variant="outline"
           focusTarget={() => heading.current?.focus()}
-          onClick={() => void query.refetch()}
+          onClick={retry}
         >
           {t("upcomingEvent.retry")}
         </KeepFocusButton>

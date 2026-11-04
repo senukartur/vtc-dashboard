@@ -19,6 +19,7 @@ const text = {
     allTrips: "All company trips",
     unavailable: "Unavailable",
     unknown: "Unknown",
+    phoenix: "Phoenix",
     fallback: "English fallback",
     countdown: "in 3 d 4 h",
     going: "Going: 8",
@@ -44,6 +45,7 @@ const text = {
     allTrips: "Все рейсы компании",
     unavailable: "Недоступно",
     unknown: "Неизвестно",
+    phoenix: "Финикс",
     fallback: "Показано на английском",
     countdown: "через 3 д 4 ч",
     going: "Поедут: 8",
@@ -162,10 +164,21 @@ async function activateBlocked(page: Page, target: Locator, touch: boolean) {
     await page.keyboard.press("Space");
   }
 }
+/** Mock state of each page opened by `open`, for the locale helpers. */
+const mocks = new WeakMap<Page, DashboardMockState>();
+/**
+ * Switches the UI language. The switch stays in the browser, so the mock is told to render
+ * catalog labels for the same locale.
+ */
+async function toLocale(page: Page, locale: Locale) {
+  const state = mocks.get(page);
+  if (state) state.tripLocale = locale;
+  if (locale === "ru") await switchLanguage(page, "ru");
+}
 /** Reloads and restores the tested language (the account fixture prefers English). */
 async function reload(page: Page, locale: Locale) {
   await page.reload();
-  if (locale === "ru") await switchLanguage(page, "ru");
+  await toLocale(page, locale);
 }
 const isTouch = (info: TestInfo) => info.project.name === "mobile-chromium";
 const count = (state: DashboardMockState, pattern: RegExp) =>
@@ -179,6 +192,7 @@ async function open(
 ) {
   await page.clock.setFixedTime(new Date(overviewNow));
   const state = await mockDashboardRoutes(page, capabilities ? { capabilities } : {});
+  mocks.set(page, state);
   setup?.(state);
   await page.goto("/account/dashboard");
   await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
@@ -192,7 +206,7 @@ async function settled(page: Page, respond = true) {
   await page.evaluate(() => document.fonts.ready);
 }
 async function inLocale(page: Page, locale: Locale) {
-  if (locale === "ru") await switchLanguage(page, "ru");
+  await toLocale(page, locale);
   await settled(page);
 }
 
@@ -215,9 +229,14 @@ for (const locale of ["en", "ru"] as const) {
     );
     await expect(rows.nth(1)).toContainText(t.unavailable);
     await expect(rows.nth(1)).not.toContainText(/\b0 (km|км)/);
-    await expect(tripLink(page, recentTripItems[2]?.id ?? "")).toContainText(t.fallback);
+    // Only the Russian rendering lacks a name (Wien) and falls back to English.
+    if (locale === "ru")
+      await expect(tripLink(page, recentTripItems[2]?.id ?? "")).toContainText(
+        `Прага → Wien · ${t.fallback}`,
+      );
+    else await expect(trips).not.toContainText(t.fallback);
     await expect(tripLink(page, recentTripItems[3]?.id ?? "")).toContainText(
-      `${t.unknown} → Phoenix`,
+      `${t.unknown} → ${t.phoenix}`,
     );
     await expect(tripLink(page, recentTripItems[0]?.id ?? "")).not.toContainText(t.fallback);
     // Accepted-only list: no status badges.
@@ -409,10 +428,13 @@ test("B5 reuses the key for an unchanged retry and handles conflicts and rate li
   await activate(page, cantGo(page), touch);
   await reasonBox(page).fill("Fictional workshop shift");
   const reads = count(state, /\/my-response$/);
+  const nearest = count(state, /^\/api\/v1\/me\/upcoming-event$/);
   state.rsvpOutcomes.push({ status: 409 });
   await saveButton(page).click();
   await expect(eventCard(page).getByRole("alert")).toContainText("The event changed.");
   await expect.poll(() => count(state, /\/my-response$/)).toBeGreaterThan(reads);
+  // The event itself may have been cancelled or rescheduled, so the overview rereads it.
+  await expect.poll(() => count(state, /^\/api\/v1\/me\/upcoming-event$/)).toBeGreaterThan(nearest);
   await expect(reasonBox(page)).toHaveValue("Fictional workshop shift");
 
   // A rate limit keeps the wait outside the alert and blocks every response control.
@@ -455,7 +477,7 @@ for (const locale of ["en", "ru"] as const) {
   }, info) => {
     const t = text[locale];
     const state = await open(page, (s) => s.hold("companyTrips"));
-    if (locale === "ru") await switchLanguage(page, "ru");
+    await toLocale(page, locale);
     const trips = tripsCard(page);
     await expect(trips).toHaveAttribute("aria-busy", "true");
     await expect(trips.locator(".dashboard-skeleton")).toHaveCount(5);
@@ -483,7 +505,7 @@ for (const locale of ["en", "ru"] as const) {
     const state = await open(page, (s) => {
       s.failures.companyTrips = 503;
     });
-    if (locale === "ru") await switchLanguage(page, "ru");
+    await toLocale(page, locale);
     const retry = tripsCard(page).getByRole("button", { name: t.retry, exact: true });
     await expect(tripsCard(page).getByText(t.tripsError, { exact: true })).toBeVisible();
     await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
@@ -508,7 +530,7 @@ for (const locale of ["en", "ru"] as const) {
     const state = await open(page, (s) => {
       s.upcoming = null;
     });
-    if (locale === "ru") await switchLanguage(page, "ru");
+    await toLocale(page, locale);
     const event = eventCard(page);
     await expect(event.getByText(t.noUpcoming, { exact: true })).toBeVisible();
     await expect(event.getByRole("link", { name: t.allEvents, exact: true })).toHaveAttribute(
@@ -542,13 +564,64 @@ for (const locale of ["en", "ru"] as const) {
     await expect(responseGroup(page)).toHaveCount(0);
     await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
     await capture(page, info, `blocks-convoy-partial-${locale}`);
+    // A failed retry keeps the unavailable state and focus on Retry, with no toggles between.
+    const responseRetry = eventCard(page).getByRole("button", { name: t.retry, exact: true });
+    await eventCard(page).evaluate((node) => {
+      const seen = { toggles: 0 };
+      (window as unknown as { __toggles: typeof seen }).__toggles = seen;
+      new MutationObserver(() => {
+        if (node.querySelector("fieldset")) seen.toggles += 1;
+      }).observe(node, { childList: true, subtree: true });
+    });
+    const reads = count(state, /\/my-response$/);
+    state.hold("myResponse");
+    await responseRetry.focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => count(state, /\/my-response$/)).toBe(reads + 1);
+    await expect(eventCard(page).getByText(t.responseUnavailable, { exact: true })).toBeVisible();
+    await expect(responseRetry).toBeFocused();
+    state.release("myResponse");
+    await page.waitForTimeout(300);
+    await expect(responseRetry).toBeFocused();
+    await expect(eventCard(page).getByText(t.responseUnavailable, { exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __toggles: { toggles: number } }).__toggles.toggles,
+      ),
+    ).toBe(0);
+
     delete state.failures.myResponse;
-    await eventCard(page).getByRole("button", { name: t.retry, exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(going(page)).toHaveAttribute("aria-pressed", "false");
     await expect(eventHeading(page)).toBeFocused();
   });
 }
+
+test("B7 a later query shows its own state after a successful retry", async ({ page }) => {
+  // Retry succeeds at the first error; the next game's first error is then a 403.
+  const state = await open(page, (s) => {
+    s.failures.companyTrips = 503;
+  });
+  const retry = tripsCard(page).getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
+  delete state.failures.companyTrips;
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(tripsCard(page).getByRole("listitem")).toHaveCount(5);
+  state.failures.companyTrips = 403;
+  await page
+    .getByRole("group", { name: "Game", exact: true })
+    .getByRole("button", { name: "ETS2", exact: true })
+    .click();
+  await expect(tripsCard(page).getByText(text.en.tripsForbidden, { exact: true })).toBeVisible();
+  await expect(tripsCard(page).getByRole("button")).toHaveCount(0);
+  expect(
+    state.requests.some(
+      (url) =>
+        url.searchParams.get("scope") === "company" && url.searchParams.get("game") === "ets2",
+    ),
+  ).toBe(true);
+});
 
 test("B8 updates the countdown at its boundary and closes responses at the start", async ({
   page,
