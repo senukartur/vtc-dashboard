@@ -74,11 +74,22 @@ jobs:
       - id: scope
         run: node scripts/ci-scope.mjs
   deployment:
-    name: Deployment rehearsal
+    # Owner-approved split (VTC-072): each leg runs its own allocation and core group; the window
+    # shards in rehearsal-child.mjs cover all nine scenarios. needs.deployment.result is success
+    # only when every leg succeeds.
+    name: Deployment rehearsal (${{ matrix.name }})
     needs: [scope]
     if: ${{ needs.scope.outputs.rehearsal == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: window 1-3, args: --window-shard 1/3 }
+          - { name: window 2-3, args: --window-shard 2/3 }
+          - { name: window 3-3, args: --window-shard 3/3 }
+          - { name: recovery, args: --core-recovery }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,7 +97,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.2
-      - run: node deploy/development/test.mjs
+      - env:
+          REHEARSAL_ARGS: ${{ matrix.args }}
+        run: node deploy/development/test.mjs $REHEARSAL_ARGS
   artifact:
     name: Production release artifact
     needs: [quality, deployment]

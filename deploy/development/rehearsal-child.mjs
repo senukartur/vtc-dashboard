@@ -10,6 +10,17 @@ const evidenceNames = new Set([
   "rehearsal-recovery.json",
 ]);
 
+const allScenarios = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+// Owner-approved split (VTC-072, 2026-11-04): CI runs the window as three parallel shards,
+// each after its own core group. Shards keep the original ascending order (scenario 1 reads
+// the whole feed, 4 relies on actor roles that 5 later changes) and are balanced by the
+// hosted durations; together they cover every scenario exactly once.
+export const windowShards = [
+  [2, 3, 5],
+  [4, 6, 9],
+  [1, 7, 8],
+];
+
 export function validateEvidenceCollector(actual, expected) {
   if (
     !actual ||
@@ -38,6 +49,7 @@ export async function retainRehearsalEvidence(
   path,
   {
     requireWindow,
+    scenarios = allScenarios,
     requiredGroups = [],
     sourceSha,
     sourceFingerprint,
@@ -86,7 +98,7 @@ export async function retainRehearsalEvidence(
     requireWindow &&
     (bundle.windowFenced ||
       bundle.files["notifications-acceptance-last.json"]?.result !== "cleaned" ||
-      bundle.files["notifications-acceptance-last.json"]?.scenario !== 9 ||
+      bundle.files["notifications-acceptance-last.json"]?.scenario !== scenarios.at(-1) ||
       bundle.files["notifications-acceptance-last.json"]?.sharedGrantsUnchanged !== true ||
       bundle.files["notifications-acceptance-last.json"]?.sharedFilesUnchanged !== true ||
       bundle.files["notifications-acceptance-last.json"]?.evidenceSha256 !==
@@ -104,9 +116,15 @@ export async function retainRehearsalEvidence(
           row.ordinal,
           row.status,
         ]),
-      ) !== JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 9].map((ordinal) => [ordinal, "pass"])))
+      ) !== JSON.stringify(scenarios.map((ordinal) => [ordinal, "pass"])))
   )
     throw new Error("REHEARSAL_WINDOW_EVIDENCE_MISSING");
+  // The window receipt names the scenario list this leg was asked to run.
+  if (
+    requiredGroups.includes("window") &&
+    JSON.stringify(bundle.files["rehearsal-window.json"].scenarios) !== JSON.stringify(scenarios)
+  )
+    throw new Error("REHEARSAL_GROUP_EVIDENCE_BINDING_INVALID");
   const handle = await open(path, "wx", 0o600);
   try {
     await handle.writeFile(JSON.stringify({ sourceSha, sourceFingerprint, ...bundle }) + "\n");
@@ -151,6 +169,22 @@ export function rehearsalTiming(bundle) {
 }
 
 export function rehearsalPlan(args) {
+  if (Array.isArray(args) && args.length === 2 && args[0] === "--window-shard") {
+    const match = /^([1-9])\/([1-9])$/.exec(typeof args[1] === "string" ? args[1] : "");
+    if (
+      !match ||
+      Number(match[2]) !== windowShards.length ||
+      Number(match[1]) > windowShards.length
+    )
+      throw new Error("REHEARSAL_MODE_INVALID");
+    return {
+      mode: "full",
+      groups: ["core", "window"],
+      requireWindow: true,
+      fullCoverage: false,
+      scenarios: windowShards[Number(match[1]) - 1],
+    };
+  }
   if (
     !Array.isArray(args) ||
     args.length > 1 ||
@@ -163,6 +197,7 @@ export function rehearsalPlan(args) {
     groups: manual ? ["core"] : args.length ? ["core", "recovery"] : ["core", "window", "recovery"],
     requireWindow: args.length === 0,
     fullCoverage: args.length === 0,
+    scenarios: args.length ? [] : allScenarios,
   };
 }
 

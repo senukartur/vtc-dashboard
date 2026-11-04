@@ -1231,6 +1231,10 @@ else:
                        'SELECT COUNT(*) FROM vtc.admissions_applications;')
     predecessor_counts = context[10](reference_query)
     assert any(int(value) > 0 for value in predecessor_counts.decode().splitlines()), 'REHEARSAL_PREDECESSOR_FIXTURES_MISSING'
-    notifications_acceptance.rehearse(context[1])
+    # The controller passes the scenario list of its CI shard (VTC-072); the harness accepts a
+    # subset only for this disposable project and verifies exactly that list.
+    scenarios = [int(v) for v in os.environ.get('REHEARSAL_SCENARIOS', '1,2,3,4,5,6,7,8,9').split(',')]
+    notifications_acceptance.rehearse(context[1], scenarios)
     assert context[10](reference_query) == predecessor_counts, 'REHEARSAL_SHARED_FIXTURE_COUNTS_CHANGED'
-    receipt(context[1], 'window', {'coreSha256': context[1].digest(context[0] / 'state/rehearsal-core.json')})
+    receipt(context[1], 'window', {'coreSha256': context[1].digest(context[0] / 'state/rehearsal-core.json'),
+                                   'scenarios': scenarios})

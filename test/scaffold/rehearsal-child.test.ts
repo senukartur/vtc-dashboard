@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import { rehearsalTiming, runRehearsalChild } from "../../deploy/development/rehearsal-child.mjs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  rehearsalPlan,
+  rehearsalTiming,
+  retainRehearsalEvidence,
+  runRehearsalChild,
+  windowShards,
+} from "../../deploy/development/rehearsal-child.mjs";
 const stdio = "ignore";
 test("rehearsal child retains completed and failed native outcomes", async () => {
   for (const code of [0, 7]) {
@@ -232,4 +241,90 @@ test("rehearsal timing publishes only fixed numeric window fields", () => {
     scenarios: [],
     ticks: { count: 0, busySeconds: 0 },
   });
+});
+test("window shards cover every scenario once in the original order", () => {
+  assert.deepEqual(windowShards.flat().sort(), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  for (const shard of windowShards) assert.deepEqual([...shard].sort(), shard);
+  // Scenario 1 reads the whole feed from an empty cursor, so it must lead its shard.
+  assert.equal(windowShards.find((shard) => shard.includes(1))?.[0], 1);
+  for (const [index, shard] of windowShards.entries())
+    assert.deepEqual(rehearsalPlan(["--window-shard", `${index + 1}/${windowShards.length}`]), {
+      mode: "full",
+      groups: ["core", "window"],
+      requireWindow: true,
+      fullCoverage: false,
+      scenarios: shard,
+    });
+  for (const value of ["0/3", "4/3", "1/2", "1/3x", " 1/3", ""])
+    assert.throws(() => rehearsalPlan(["--window-shard", value]), /REHEARSAL_MODE_INVALID/);
+  assert.throws(() => rehearsalPlan(["--window-shard"]), /REHEARSAL_MODE_INVALID/);
+  assert.deepEqual(rehearsalPlan([]).scenarios, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+test("shard evidence must name exactly the requested scenarios", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vtc-shard-evidence-"));
+  try {
+    const digest = "c".repeat(64),
+      runId = "12345678-1234-4123-8123-123456789abc",
+      binding = {
+        sourceSha: "a".repeat(40),
+        sourceFingerprint: "b".repeat(64),
+        revision: "d".repeat(40),
+        project: "vtc011-0123456789abcdef",
+        volume: "vtc011-0123456789abcdef-config",
+      },
+      expectedImageId: string = `sha256:${digest}`;
+    const bundle = (ran: number[], receipt = ran, last = ran.at(-1)) => {
+      const files = {
+        "rehearsal-core.json": { binding },
+        "rehearsal-window.json": { binding, scenarios: receipt },
+        "notifications-acceptance-last.json": {
+          result: "cleaned",
+          scenario: last,
+          sharedGrantsUnchanged: true,
+          sharedFilesUnchanged: true,
+          evidenceSha256: digest,
+        },
+        "notifications-acceptance-evidence.json": {
+          runId,
+          revision: binding.revision,
+          imageId: expectedImageId,
+          fixture: {
+            runId,
+            status: "pass",
+            scenarios: ran.map((ordinal) => ({ ordinal, status: "pass" })),
+          },
+        },
+      };
+      const digests = Object.fromEntries(Object.keys(files).map((name) => [name, digest]));
+      return Buffer.from(JSON.stringify({ version: 1, windowFenced: false, files, digests }));
+    };
+    const defaults = {
+      ...binding,
+      expectedImageId,
+      requireWindow: true,
+      requiredGroups: ["core", "window"],
+    };
+    const options = { ...defaults, scenarios: [4, 6, 9] };
+    assert.equal(
+      await retainRehearsalEvidence(bundle([4, 6, 9]), join(root, "ok.json"), options),
+      4,
+    );
+    for (const [name, bytes, error] of [
+      ["all", bundle([1, 2, 3, 4, 5, 6, 7, 8, 9]), /REHEARSAL_WINDOW_EVIDENCE_MISSING/],
+      ["fewer", bundle([4, 6]), /REHEARSAL_WINDOW_EVIDENCE_MISSING/],
+      ["last", bundle([4, 6, 9], [4, 6, 9], 8), /REHEARSAL_WINDOW_EVIDENCE_MISSING/],
+      ["receipt", bundle([4, 6, 9], [1, 7, 8]), /REHEARSAL_GROUP_EVIDENCE_BINDING_INVALID/],
+    ] as const)
+      await assert.rejects(
+        retainRehearsalEvidence(bytes, join(root, `${name}.json`), options),
+        error,
+      );
+    // The default plan still requires all nine scenarios in one window.
+    await assert.rejects(
+      retainRehearsalEvidence(bundle([4, 6, 9]), join(root, "default.json"), defaults),
+      /REHEARSAL_WINDOW_EVIDENCE_MISSING/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -55,6 +55,20 @@ class WindowTests(unittest.TestCase):
         self.window.save(value)
         return value
 
+    def test_scenario_subsets_are_limited_to_disposable_rehearsal_projects(self):
+        self.assertEqual(n.scenario_selection(o, list(range(1, 10))), list(range(1, 10)))
+        for project, allowed in [('vtc-development', False), ('vtc011-0123456789abcdef', True)]:
+            with patch.object(o, 'PROJECT', project):
+                if allowed:
+                    self.assertEqual(n.scenario_selection(o, [2, 3, 5]), [2, 3, 5])
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'NOTIFICATIONS_REVIEWED_INPUT_REQUIRED'):
+                        n.scenario_selection(o, [2, 3, 5])
+        with patch.object(o, 'PROJECT', 'vtc011-0123456789abcdef'):
+            for value in [[], [3, 2], [2, 2], [0, 1], [1, 10], ['1'], [True], '1,2', None]:
+                with self.assertRaisesRegex(RuntimeError, 'NOTIFICATIONS_REVIEWED_INPUT_REQUIRED'):
+                    n.scenario_selection(o, value)
+
     def test_closed_modes_and_uuid_reject_before_allocating(self):
         for mode, run in [('shell', RUN), ('prepare', '../escape'), ('prepare', RUN.upper())]:
             with self.assertRaisesRegex(RuntimeError, 'NOTIFICATIONS_ARGUMENT_INVALID'):
