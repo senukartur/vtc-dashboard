@@ -44,12 +44,13 @@ try {
   const branch = await api("branches/main");
   const comparison = await api(`compare/${revision}...${branch.commit.sha}`);
   const listing = await api(`actions/runs/${run.id}/artifacts?per_page=100`);
-  const name = `development-${run.id}-${run.run_attempt}-${revision}`;
+  if (listing.total_count !== listing.artifacts?.length)
+    throw new Error("ARTIFACT_LISTING_PARTIAL");
   const selected = requireRelease({
     revision,
     run,
     workflow,
-    artifacts: listing.artifacts.filter((value) => value.name === name),
+    artifacts: listing.artifacts,
     ancestor: ["ahead", "identical"].includes(comparison.status),
     current: branch.commit.sha,
     mode: automatic ? "auto" : "manual",
