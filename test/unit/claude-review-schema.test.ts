@@ -62,3 +62,20 @@ test.each(jobs)("%s CLI schema rejects malformed, missing and unexpected review 
   ])
     expect(validate({ summary: "Invalid finding.", findings: [invalid] })).toBe(false);
 });
+
+test("the review job publishes the status the main ruleset requires", () => {
+  const ruleset = JSON.parse(
+    readFileSync(new URL("../../.github/rulesets/main.json", import.meta.url), "utf8"),
+  );
+  const checks = ruleset.rules.find(
+    (rule: { type: string }) => rule.type === "required_status_checks",
+  ).parameters.required_status_checks;
+  expect(checks).toContainEqual({ context: "Advisory review", integration_id: 15368 });
+  const review = workflow.split(/\r?\n {2}mention:/)[0] ?? "";
+  expect(review).toContain("statuses: write");
+  expect(review).toContain("context: 'Advisory review'");
+  // A cancelled review publishes nothing, so a newer run decides the status.
+  expect(review).toContain("!cancelled() && (steps.target.outputs.eligible == 'true'");
+  // The on-demand job must not publish the required status.
+  expect(workflow.split(/\r?\n {2}mention:/)[1]).not.toContain("createCommitStatus");
+});

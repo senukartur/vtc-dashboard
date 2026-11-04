@@ -30,6 +30,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Publishes the required "Advisory review" commit status (VTC-075).
+      statuses: write
     steps:
       - name: Check review target
         id: target
@@ -46,12 +48,18 @@ jobs:
             --jq '[.author.login, .isCrossRepository, .isDraft, .state, .headRefOid, .baseRefOid, .baseRefName] | @tsv')
           IFS=$'\t' read -r author_login is_cross_repository is_draft state head_sha base_sha base_ref <<< "$target"
           eligible=false
+          exempt=false
+          # Dependabot PRs are not reviewed; their required status records that instead (VTC-075).
+          if [[ "$author_login" == "dependabot[bot]" && "$is_cross_repository" == "false" &&                 "$state" == "OPEN" && "$head_sha" == "$REVIEWED_HEAD_SHA" ]]; then
+            exempt=true
+          fi
           if [[ "$author_login" != "dependabot[bot]" && "$is_cross_repository" == "false" && "$is_draft" == "false" && \
                 "$state" == "OPEN" && "$head_sha" == "$REVIEWED_HEAD_SHA" && \
                 "$base_ref" == "$DEFAULT_BRANCH" ]]; then
             eligible=true
           fi
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,6 +128,7 @@ jobs:
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Grep(./.git/**),Glob(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        id: publish
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
@@ -228,6 +237,37 @@ jobs:
               body,
               event: 'COMMENT',
               comments,
+            });
+      # Required by the main ruleset (VTC-075), so auto-merge waits for this review and its
+      # inline threads. A failed, cancelled or missing review blocks merge until the run is re-run.
+      - name: Publish required review status
+        if: ${{ !cancelled() && (steps.target.outputs.eligible == 'true' || steps.target.outputs.exempt == 'true') }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REVIEW_HEAD_SHA: ${{ steps.target.outputs.head_sha }}
+          EXEMPT: ${{ steps.target.outputs.exempt }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        with:
+          script: |
+            const sha = process.env.REVIEW_HEAD_SHA || '';
+            if (!/^[0-9a-f]{40}$/i.test(sha)) {
+              core.setFailed('No valid pull request head SHA was provided.');
+              return;
+            }
+            const exempt = process.env.EXEMPT === 'true';
+            const published = process.env.PUBLISH_OUTCOME === 'success';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              context: 'Advisory review',
+              state: exempt || published ? 'success' : 'failure',
+              description: exempt
+                ? 'Dependabot PR: advisory review not run'
+                : published
+                  ? 'Advisory review published for this head'
+                  : 'Advisory review failed; re-run the workflow',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
   mention:
