@@ -39,6 +39,7 @@ Tests and acceptance scenarios: exact concept scenario numbers when applicable
 Checks: exact commands, environment, expected evidence
 Docs to update:
 Remaining verification and integration gates:
+Manual verification after merge: None | each check, environment, steps, expected result and criterion
 Risks / unresolved owner decisions / out of scope:
 ```
 

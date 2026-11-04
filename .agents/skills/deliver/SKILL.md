@@ -1,6 +1,6 @@
 ---
 name: deliver
-description: Deliver one VTCDashboard task through planning, implementation, verification and independent review, then open a draft PR. Use when the owner invokes $deliver with a VTC card or task description.
+description: Deliver one VTCDashboard task through planning, implementation, verification and independent review, open a PR, merge it when Required CI and review pass, and keep its Trello card status current. Use when the owner invokes $deliver with a VTC card or task description.
 ---
 
 # Deliver with Codex
@@ -13,6 +13,6 @@ Use the host's available subagent tools, for example `collaboration.spawn_agent`
 
 Codex subagents inherit the parent permissions. Calling a role read-only in a prompt does not disable its shell/write tools, and a custom agent file cannot override the parent sandbox. Record that limit and use supplied source/diff snapshots for planning/review. Use stronger host controls when actually available; if enforced read-only execution is required but unavailable, follow the shared missing-capability stop. Do not claim parity with Claude's tool allowlists. See [official subagent permission guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents#approvals-and-sandbox-controls).
 
-Use `codex` as the branch prefix unless the owner specifies another. Prefer the app's attached-worktree and PR-attachment tools when available; otherwise use the shared workflow's Git/CLI alternatives. Invoking delivery requests the scoped delegation, local commits, task-branch push and draft PR; it does not authorize merge, deployment or Trello writes.
+Use `codex` as the branch prefix unless the owner specifies another. Prefer the app's attached-worktree and PR-attachment tools when available; otherwise use the shared workflow's Git/CLI alternatives. Invoking delivery requests the scoped delegation, local commits, task-branch pushes, the PR, its normal merge once the shared workflow's merge gates pass, and the assigned card's Trello status updates; it does not authorize deployment, bypassing branch protection or other Trello writes.
 
 Manual-only invocation is configured in `agents/openai.yaml`. Do not add Claude-specific frontmatter or `$ARGUMENTS` substitution to this entrypoint.
