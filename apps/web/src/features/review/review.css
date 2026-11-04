@@ -82,8 +82,10 @@
   align-items: start;
 }
 @media (min-width: 1200px) {
+  /* Three fifths for the queue: with the panel open every column keeps room to spare even
+     where fonts render wider (Linux CI); the panel's sections wrap between words. */
   .review-queue .review-layout[data-panel] {
-    grid-template-columns: minmax(0, 7fr) minmax(0, 6fr);
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
 .review-queue .review-list-area {
@@ -146,10 +148,10 @@
   padding-left: 8px;
 }
 .review-queue .review-col-driver {
-  width: 18%;
+  width: 17%;
 }
 .review-queue .review-col-route {
-  width: 25%;
+  width: 24%;
 }
 .review-queue .review-col-type {
   width: 18%;
@@ -158,10 +160,10 @@
   width: 9%;
 }
 .review-queue .review-col-rules {
-  width: 16%;
+  width: 17%;
 }
 .review-queue .review-col-filed {
-  width: 14%;
+  width: 15%;
 }
 .review-queue .review-driver {
   font-weight: 600;
