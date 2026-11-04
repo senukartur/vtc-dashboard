@@ -36,7 +36,9 @@
     "test:e2e": "node --import tsx scripts/test-lanes.ts e2e",
     "test:failure-reporting": "node --import tsx scripts/test-lanes.ts failure-reporting",
     "test:all": "node --import tsx scripts/test-lanes.ts all",
-    "test:local": "node scripts/test-local.mjs"
+    "test:selected": "node --import tsx scripts/test-lanes.ts selected",
+    "test:local": "node scripts/test-local.mjs",
+    "test:affected": "node scripts/test-affected.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
