@@ -98,9 +98,12 @@ export function reviewType(trip: DTO["TripPrivate"]): QueueType {
   return "telemetry";
 }
 
+/** Rule outcomes that record a pass; every other rule code needs an assessment. */
+const passCodes = new Set(["rule_passed"]);
+// Any rule code that is neither a pass nor an over-limit breach (unknown, invalid or incomplete
+// data, unknown rule types) and any unresolved qualification lookup needs an assessment.
 const checkCode = (code: string) =>
-  /^rule_[a-z_]+_unknown$/.test(code) ||
-  code === "rule_trailers_incomplete" ||
+  (code.startsWith("rule_") && !passCodes.has(code) && !overLimitCodes.has(code)) ||
   code === "unknown_rule_type" ||
   code.startsWith("qualification_");
 

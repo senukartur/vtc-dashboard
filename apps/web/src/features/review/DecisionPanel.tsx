@@ -10,9 +10,11 @@ import { type DTO, revisionFields } from "../trips/transport.js";
 import {
   DecisionForm,
   EvidenceList,
+  HoldReasons,
   QualificationCheckList,
   ReviewHistory,
   RevisionDiff,
+  TripFacts,
 } from "./decision-parts.js";
 import { ReviewCorrections } from "./ReviewPanel.js";
 import { historyItems, isOwn, queueType, reviewType } from "./review-model.js";
@@ -89,9 +91,14 @@ export function DecisionPanel({
   }, [tripId, variant]);
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (variant !== "side" || event.key !== "Escape" || !onClose) return;
+    // An IME composition uses Escape to cancel itself.
+    if (event.nativeEvent.isComposing) return;
     // React bubbles events from portaled dialogs (confirmation, evidence viewer) through this
     // section; their Escape only closes the dialog, never the panel.
-    if (!event.currentTarget.contains(event.target as Node)) return;
+    const target = event.target as Node;
+    if (!event.currentTarget.contains(target)) return;
+    // Escape inside the decision form never discards a draft choice, reason or confirmation.
+    if (target instanceof Element && target.closest(".review-form")) return;
     event.stopPropagation();
     onClose();
   }
@@ -99,6 +106,11 @@ export function DecisionPanel({
     history = review
       ? historyItems(revisions.isError ? [] : revisionItems, review.trip.decisions)
       : [],
+    // Telemetry-only trips have no revision to compare, and late telemetry changed the confirmed
+    // facts, so both show the trip's effective facts.
+    facts = review && (!revision || review.trip.summary.sourceKinds.includes("ets2telemetry")) && (
+      <TripFacts facts={review.trip.effectiveFacts} game={review.trip.summary.game} />
+    ),
     diff = review && revision && (
       <RevisionDiff
         revision={revision}
@@ -189,6 +201,7 @@ export function DecisionPanel({
             {revision && <> · {t("revisionNumber", { number: revision.number })}</>}
           </p>
         )}
+        {review && <HoldReasons codes={review.trip.reviewReasonCodes} />}
       </header>
       <div className="review-decision-body">
         <State query={query} />
@@ -196,6 +209,7 @@ export function DecisionPanel({
           (variant === "page" ? (
             <div className="review-decision-columns">
               <div className="review-column">
+                {facts}
                 {diff}
                 {evidence}
                 {check}
@@ -207,6 +221,7 @@ export function DecisionPanel({
             </div>
           ) : (
             <>
+              {facts}
               {diff}
               {evidence}
               {check}

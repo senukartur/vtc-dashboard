@@ -112,6 +112,95 @@ export function EntityLabel({
   );
 }
 
+/** Why the trip waits for staff: the trip's stored review reasons, localized where known. */
+export function HoldReasons({ codes }: { codes: readonly string[] }) {
+  const { t } = useTranslation("trips");
+  if (!codes.length) return null;
+  return (
+    <p className="review-hold">
+      <strong>{t("heldBecause")}:</strong>{" "}
+      {codes.map((code, index) => (
+        <span key={code}>
+          {index > 0 && " · "}
+          <CodeLabel code={code} />
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/**
+ * Compact effective facts of the trip (telemetry or confirmed manual facts). Unknown values read
+ * as unavailable and are never shown as zero.
+ */
+export function TripFacts({
+  facts,
+  game,
+}: {
+  facts: DTO["EffectiveTripFacts"] | null | undefined;
+  game: Game;
+}) {
+  const { t } = useTranslation("trips"),
+    locale = useLocale(),
+    session = useSession(),
+    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  if (!facts)
+    return (
+      <ReviewSection title={t("tripFacts")}>
+        <p className="review-muted">{t("partial")}</p>
+      </ReviewSection>
+    );
+  const pin = (value: DTO["EffectiveCatalogPin"] | null, kind: Kind) =>
+    value ? (
+      <EntityLabel
+        entityId={value.entityId}
+        revisionId={value.catalogRevisionId}
+        game={game}
+        kind={kind}
+      />
+    ) : (
+      t("unknown")
+    );
+  const rows: [string, ReactNode][] = [
+    ["origin", pin(facts.origin, "city")],
+    ["destination", pin(facts.destination, "city")],
+    ["cargo", pin(facts.cargo, "cargo")],
+    ["cargoMassDisplay", formatQuantity(facts.cargoMassKg, "t", locale)],
+    [
+      "trailersList",
+      facts.trailers.length
+        ? facts.trailers.map((trailer, index) => (
+            // Trailer order is the fact order; an unknown slot has no entity ID to key by.
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional trailer slots
+            <span key={index}>
+              {index > 0 && ", "}
+              {pin(trailer, "trailer_type")}
+            </span>
+          ))
+        : t("unknown"),
+    ],
+    ["actualDistanceDisplay", formatQuantity(facts.actualDistanceM, "km", locale)],
+    ["plannedDistanceM", formatQuantity(facts.plannedDistanceM, "km", locale)],
+    ["actualStartAt", formatUtc(facts.actualStartAt, locale, timezone)],
+    ["actualCompletedAt", formatUtc(facts.actualCompletedAt, locale, timezone)],
+  ];
+  return (
+    <ReviewSection title={t("tripFacts")} note={t("factsSource", { source: t(facts.provider) })}>
+      <dl className="review-facts">
+        {rows.map(([key, value]) => (
+          <div key={key}>
+            <dt>{t(key)}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {(!facts.ruleContextComplete ||
+        !facts.wholeTripDistanceSupported ||
+        !facts.trailersComplete) && <p className="review-muted">{t("partial")}</p>}
+    </ReviewSection>
+  );
+}
+
 const catalogKind: Partial<Record<DiffRow["field"], Kind>> = {
   origin: "city",
   destination: "city",

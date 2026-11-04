@@ -106,6 +106,10 @@ describe("queue rows", () => {
     expect(ruleFlag(["rule_mass_unknown", "rule_trailer_type_disallowed"])).toBe("exceeded");
     expect(ruleFlag(["rule_adr_category_unknown"])).toBe("check");
     expect(ruleFlag(["qualification_history_unknown"])).toBe("check");
+    // Invalid or incomplete rule data needs an assessment; only a recorded pass is "OK".
+    expect(ruleFlag(["rule_mass_invalid"])).toBe("check");
+    expect(ruleFlag(["rule_trailers_incomplete"])).toBe("check");
+    expect(ruleFlag(["rule_passed"])).toBe("none");
     expect(ruleFlag(["manual_requires_other_reviewer"])).toBe("none");
     const entry = queueEntry();
     expect(isOwn(entry, entry.owner.id)).toBe(true);

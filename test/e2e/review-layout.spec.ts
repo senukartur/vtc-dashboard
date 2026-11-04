@@ -177,9 +177,7 @@ async function wrapsBetweenWords(root: Locator) {
       .map((node) => getComputedStyle(node).overflowWrap),
   );
   expect(new Set(values)).toEqual(new Set(["normal"]));
-  expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth + 4)).toBe(
-    true,
-  );
+  expect(await root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 }
 async function open(
   page: Page,
@@ -213,7 +211,7 @@ for (const locale of ["en", "ru"] as const)
     await expect(table(page).locator("tbody tr")).toHaveCount(5);
     expect(mock.lists.at(-1)?.toString()).toBe("scope=review&hold=true&order=asc&limit=25");
     await expect(
-      table(page).getByRole("columnheader", { name: locale === "en" ? "Revision" : "Ревизия" }),
+      table(page).getByRole("columnheader", { name: locale === "en" ? "Revision" : "Редакция" }),
     ).toBeVisible();
     await expect(rowOf(page, reviewIds.own)).toContainText(text[locale].you);
     await expect(rowOf(page, reviewIds.over).locator(".review-flag")).toHaveAttribute(
@@ -530,15 +528,16 @@ test("R9 empty, filtered, failed, missing and forbidden states offer a next step
   const decided = page.getByRole("button", { name: "Show decided trips", exact: true });
   await capture(page, info, "review-empty-en");
   await decided.click();
-  await expect(page.getByRole("button", { name: text.en.decided, exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // The empty-state button unmounts; focus moves to the chosen tab rather than the document.
+  const decidedTab = page.getByRole("button", { name: text.en.decided, exact: true });
+  await expect(decidedTab).toHaveAttribute("aria-pressed", "true");
+  await expect(decidedTab).toBeFocused();
   await expect.poll(() => mock.lists.at(-1)?.get("hold")).toBe("false");
   await page.locator("#review-game").selectOption("ats");
   await expect(queue(page).getByText("No trips match these filters.")).toBeVisible();
   await page.getByRole("button", { name: "Reset filters", exact: true }).click();
   await expect(page.locator("#review-game")).toHaveValue("");
+  await expect(page.locator("#review-game")).toBeFocused();
   await expect.poll(() => mock.lists.at(-1)?.has("game")).toBe(false);
   await page.unrouteAll({ behavior: "ignoreErrors" });
   const failing = await open(page, "/account/review", { awaiting: 503 });
@@ -657,3 +656,147 @@ for (const locale of ["en", "ru"] as const)
       rejection.split("\n")[0] ?? "",
     );
   });
+
+const factsText = {
+  en: { facts: "Trip facts", held: "Why it is held:", unavailable: "Unavailable" },
+  ru: { facts: "Факты рейса", held: "Почему на проверке:", unavailable: "Недоступно" },
+} as const;
+for (const locale of ["en", "ru"] as const)
+  test(`R13 ${locale} telemetry and late-telemetry reviews show trip facts and hold reasons`, async ({
+    page,
+  }, info) => {
+    await open(page, "/account/review", { locale });
+    const words = factsText[locale];
+    await openTrip(page, info, reviewIds.telemetry);
+    await settled(page);
+    const hold = panel(page).locator(".review-hold");
+    await expect(hold).toContainText(words.held);
+    await expect(hold).toContainText(
+      locale === "en" ? "Qualification history is unknown" : "История квалификации неизвестна",
+    );
+    await expect(hold).toContainText(
+      locale === "en"
+        ? "The game clock looks inconsistent"
+        : "Игровые часы выглядят несогласованными",
+    );
+    // A code without a label stays readable as the code itself.
+    await expect(hold.locator("code")).toHaveText("fictional_unlabeled_hold");
+    const facts = panel(page).getByRole("region", { name: words.facts });
+    const fact = (label: string) =>
+      facts
+        .locator(".review-facts > div")
+        .filter({ has: page.locator("dt").getByText(label, { exact: true }) })
+        .locator("dd");
+    await expect(fact(locale === "en" ? "Cargo" : "Груз")).toContainText(
+      locale === "en" ? "Fictional lumber" : "Вымышленный лес",
+    );
+    await expect(fact(locale === "en" ? "Origin city" : "Город отправления")).toContainText(
+      locale === "en" ? "Fictional Mesa" : "Вымышленная Меса",
+    );
+    // Unknown mass and planned distance read as unavailable, never as zero.
+    await expect(fact(locale === "en" ? "Cargo mass" : "Масса груза")).toHaveText(
+      words.unavailable,
+    );
+    await expect(fact(locale === "en" ? "Planned distance" : "Плановая дистанция")).toHaveText(
+      words.unavailable,
+    );
+    await expect(
+      fact(locale === "en" ? "Actual driven distance" : "Фактический пробег"),
+    ).not.toHaveText(words.unavailable);
+    await expect(facts).not.toContainText(/(^|\s)0 (t|т|km|км)/);
+    await expect(panel(page).locator(".review-diff")).toHaveCount(0);
+    await wrapsBetweenWords(panel(page));
+    expect(await brokenWords(panel(page))).toEqual([]);
+    await capture(page, info, `review-telemetry-${locale}`);
+    await page.goto(`/account/review/${reviewIds.telemetry}`);
+    await settled(page);
+    await expect(panel(page).getByRole("region", { name: words.facts })).toBeVisible();
+    await expect(panel(page).locator(".review-hold")).toContainText(words.held);
+    await capture(page, info, `review-telemetry-page-${locale}`);
+    // Late telemetry: the confirmed facts sit beside the diff of the earlier manual revision.
+    await page.goto(`/account/review/${reviewIds.late}`);
+    await settled(page);
+    await expect(panel(page).locator(".review-hold")).toContainText(
+      locale === "en"
+        ? "Confirmed facts changed after the decision"
+        : "Подтверждённые факты изменились",
+    );
+    const late = panel(page).getByRole("region", { name: words.facts });
+    await expect(late.locator("dd").filter({ hasText: /^21 (t|т)$/ })).toHaveCount(1);
+    await expect(panel(page).locator(".review-diff")).toBeVisible();
+    expect(await brokenWords(panel(page))).toEqual([]);
+    await capture(page, info, `review-late-page-${locale}`);
+    if (wide(info)) {
+      await page.goto(`/account/review?trip=${reviewIds.late}`);
+      await settled(page);
+      await expect(panel(page).getByRole("region", { name: words.facts })).toBeVisible();
+      await capture(page, info, `review-late-${locale}`);
+    }
+  });
+
+test("R14 Escape inside the decision form keeps the draft; elsewhere it closes the panel", async ({
+  page,
+}, info) => {
+  test.skip(!wide(info), "The side panel needs at least 1200px.");
+  await open(page);
+  await openTrip(page, info, reviewIds.over);
+  await settled(page);
+  await page.locator("#review-choice-accept").click();
+  await page.locator("#review-choice-accept").press("Escape");
+  await page.locator("#review-reason").fill("Fictional draft kept");
+  await page.locator("#review-reason").press("Escape");
+  await page.locator("#review-confirm-limits").check();
+  await page.locator("#review-confirm-limits").press("Escape");
+  await expect(panel(page)).toBeVisible();
+  await expect(page.locator("#review-reason")).toHaveValue("Fictional draft kept");
+  await expect(page.locator("#review-choice-accept")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#review-confirm-limits")).toBeChecked();
+  // An IME composition's Escape never closes the panel either, even outside the form.
+  const heading = panel(page).getByRole("heading", { level: 2 });
+  await heading.focus();
+  await heading.evaluate((node) =>
+    node.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true }),
+    ),
+  );
+  await expect(panel(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.locator(`#trip-link-${reviewIds.over}`)).toBeFocused();
+});
+
+// A tab switch and a filter change in quick succession keep both (router updates are
+// transitions, so each update must start from the committed URL). No waits in between.
+test("R15a Awaiting then an immediate order change keeps both", async ({ page }) => {
+  await open(page, "/account/review?tab=decided&order=asc");
+  await page.getByRole("button", { name: text.en.awaiting, exact: true }).click();
+  await page.locator("#review-order").selectOption("desc");
+  await expect(page).toHaveURL(/\/account\/review\?order=desc$/);
+  await expect(page.getByRole("button", { name: text.en.awaiting, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+});
+
+test("R15b Decided then an immediate game change keeps both", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: text.en.decided, exact: true }).click();
+  await page.locator("#review-game").selectOption("ats");
+  await expect(page).toHaveURL(/\/account\/review\?tab=decided&game=ats$/);
+  await expect(page.locator("#review-game")).toHaveValue("ats");
+});
+
+test("R15c a tab click and an order change dispatched in one task keep both", async ({ page }) => {
+  await open(page, "/account/review?tab=decided&order=asc");
+  await page.evaluate(() => {
+    const [awaiting] = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".review-tabs button"),
+    );
+    const order = document.getElementById("review-order") as HTMLSelectElement;
+    awaiting?.click();
+    order.value = "desc";
+    order.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page).toHaveURL(/\/account\/review\?order=desc$/);
+  await expect(page.locator("#review-order")).toHaveValue("desc");
+});

@@ -164,7 +164,6 @@ export function TripsPage() {
         <TripPanel
           key={selected}
           tripId={selected}
-          review={false}
           fallback={items?.find((trip) => trip.id === selected)}
           headingRef={heading}
           onClose={() => close(selected)}

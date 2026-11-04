@@ -392,6 +392,26 @@
   color: var(--muted);
   font-size: var(--font-small);
 }
+.review-decision .review-hold {
+  margin: 4px 0 0;
+  font-size: var(--font-small);
+}
+.review-decision .review-facts {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+}
+.review-decision .review-facts > div {
+  display: contents;
+}
+.review-decision .review-facts dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.review-decision .review-facts dd {
+  margin: 0;
+}
 .review-decision .review-decision-body {
   display: grid;
   gap: 14px;

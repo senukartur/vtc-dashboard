@@ -57,14 +57,15 @@ export function ReviewQueuePage() {
     focusPanel.current = false;
     heading.current?.focus({ preventScroll: true });
   }, [selected]);
+  // Router location updates run in a transition, so the hook's search params can trail the URL
+  // when two changes follow each other quickly; every update starts from the committed URL.
+  const current = () => new URLSearchParams(window.location.search);
   function change(update: (next: URLSearchParams) => void) {
-    setSearch((previous) => {
-      const next = new URLSearchParams(previous);
-      update(next);
-      next.delete("cursor");
-      next.delete("trip");
-      return next;
-    });
+    const next = current();
+    update(next);
+    next.delete("cursor");
+    next.delete("trip");
+    setSearch(next);
   }
   function filter(key: string, value: string) {
     change((next) => {
@@ -73,7 +74,7 @@ export function ReviewQueuePage() {
     });
   }
   function tab(value: QueueTab) {
-    if (value === params.tab) return;
+    if (value === queueParams(current()).tab) return;
     change((next) => {
       if (value === "decided") next.set("tab", "decided");
       else next.delete("tab");
@@ -103,11 +104,9 @@ export function ReviewQueuePage() {
       document.getElementById("review-queue-table") ??
       document.getElementById("main-content")
     )?.focus();
-    setSearch((previous) => {
-      const next = new URLSearchParams(previous);
-      next.delete("trip");
-      return next;
-    });
+    const next = current();
+    next.delete("trip");
+    setSearch(next);
   }
   if (!staff)
     return (
@@ -130,6 +129,7 @@ export function ReviewQueuePage() {
       <div className="review-toolbar">
         <SegmentedControl
           aria-label={t("queueTabs")}
+          className="review-tabs"
           size="sm"
           value={params.tab}
           onValueChange={tab}
@@ -214,7 +214,16 @@ export function ReviewQueuePage() {
             ) : params.tab === "awaiting" && !filtered && !cursor ? (
               <div className="review-empty">
                 <p>{t("emptyAwaiting")}</p>
-                <Button type="button" variant="outline" size="xs" onClick={() => tab("decided")}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    // This button unmounts with the empty state; keep focus on the chosen tab.
+                    document.querySelector<HTMLElement>(".review-tabs button:last-child")?.focus();
+                    tab("decided");
+                  }}
+                >
                   {t("showDecided")}
                 </Button>
               </div>
@@ -222,7 +231,16 @@ export function ReviewQueuePage() {
               <div className="review-empty">
                 <p>{t("emptyFiltered")}</p>
                 {filtered && (
-                  <Button type="button" variant="outline" size="xs" onClick={reset}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => {
+                      // This button unmounts with the empty state; keep focus on the first filter.
+                      document.getElementById("review-game")?.focus();
+                      reset();
+                    }}
+                  >
                     {t("resetFilters")}
                   </Button>
                 )}

@@ -31,8 +31,12 @@ export const entities = {
   lowboy: entity(6),
   curtain: entity(7),
   unknown: entity(8),
+  mesa: entity(9),
+  canyon: entity(10),
+  lumber: entity(11),
+  flatbed: entity(12),
 } as const;
-const labels: Record<string, { kind: string; en: string; ru: string }> = {
+const labels: Record<string, { kind: string; en: string; ru: string; game?: "ats" }> = {
   [entities.north]: { kind: "city", en: "Fictional Northport", ru: "Вымышленный Северопортск" },
   [entities.south]: {
     kind: "city",
@@ -55,6 +59,20 @@ const labels: Record<string, { kind: string; en: string; ru: string }> = {
     kind: "trailer_type",
     en: "Fictional curtainsider",
     ru: "Вымышленный шторный",
+  },
+  [entities.mesa]: { kind: "city", en: "Fictional Mesa", ru: "Вымышленная Меса", game: "ats" },
+  [entities.canyon]: {
+    kind: "city",
+    en: "Fictional Canyon",
+    ru: "Вымышленный Каньон",
+    game: "ats",
+  },
+  [entities.lumber]: { kind: "cargo", en: "Fictional lumber", ru: "Вымышленный лес", game: "ats" },
+  [entities.flatbed]: {
+    kind: "trailer_type",
+    en: "Fictional flatbed",
+    ru: "Вымышленная платформа",
+    game: "ats",
   },
 };
 export const evidence = {
@@ -229,7 +247,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
       resubmission: [entities.harbor, entities.ridge],
       own: [entities.ridge, entities.harbor],
       late: [entities.south, entities.north],
-      telemetry: [entities.harbor, entities.south],
+      telemetry: [entities.mesa, entities.canyon],
     }[key] as [string, string];
   const summary: S["TripSummary"] = {
     ...base.trip.summary,
@@ -239,7 +257,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
     decision: key === "late" ? "accepted" : "pending_review",
     origin: label(route[0], locale),
     destination: label(route[1], locale),
-    cargo: label(entities.transformer, locale),
+    cargo: label(key === "telemetry" ? entities.lumber : entities.transformer, locale),
     sourceKinds:
       key === "telemetry"
         ? ["ets2telemetry"]
@@ -259,7 +277,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
         rule("allowed_trailer_types", "fail", "rule_trailer_type_disallowed", {
           entityIds: [entities.lowboy],
         }),
-        rule("allowed_adr_categories", "unknown", "rule_adr_category_unknown"),
+        rule("allowed_adr_categories", "pass", "rule_passed"),
       ],
     },
     resubmission: {
@@ -287,6 +305,51 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
       rules: [],
     },
   };
+  // Stored hold reasons of the trip itself; the telemetry trip also has an unlabeled code.
+  const holds: Record<ReviewTrip, string[]> = {
+    over: ["rule_mass_exceeded", "rule_trailer_type_disallowed"],
+    resubmission: [],
+    own: [],
+    late: ["confirmed_facts_require_review"],
+    telemetry: ["qualification_history_unknown", "clock_anomaly", "fictional_unlabeled_hold"],
+  };
+  const effective = (
+    pins: [string, string, string, string],
+    values: Partial<S["EffectiveTripFacts"]>,
+  ): S["EffectiveTripFacts"] => {
+    const factRevisionId = uuid("47900000", Object.keys(reviewIds).indexOf(key) + 1),
+      at = (entityId: string) => ({ entityId, catalogRevisionId, factRevisionId });
+    return {
+      factRevisionId,
+      provider: "ets2telemetry",
+      actualStartAt: "2026-10-28T13:05:00.000Z",
+      actualCompletedAt: "2026-10-28T15:47:00.000Z",
+      actualDistanceM: "812400",
+      plannedDistanceM: null,
+      cargoMassKg: "19500",
+      origin: at(pins[0]),
+      destination: at(pins[1]),
+      cargo: at(pins[2]),
+      trailers: [at(pins[3])],
+      trailersComplete: true,
+      wholeTripDistanceSupported: true,
+      ruleContextComplete: true,
+      ...values,
+    };
+  };
+  // Telemetry-only facts keep an unknown mass and planned distance unavailable, never zero.
+  const facts: Partial<Record<ReviewTrip, S["EffectiveTripFacts"]>> = {
+    telemetry: effective([entities.mesa, entities.canyon, entities.lumber, entities.flatbed], {
+      cargoMassKg: null,
+      ruleContextComplete: false,
+    }),
+    late: effective([entities.south, entities.north, entities.transformer, entities.curtain], {
+      actualStartAt: "2026-10-20T05:10:00.000Z",
+      actualCompletedAt: "2026-10-20T07:42:00.000Z",
+      actualDistanceM: "702300",
+      cargoMassKg: "21000",
+    }),
+  };
   const review: S["Review"] = {
     ...base,
     trip: {
@@ -301,7 +364,8 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
           : key === "late"
             ? [decision(2, "accepted", "Fictional waiver", "2026-10-21T10:00:00.000Z", true)]
             : [],
-      reviewReasonCodes: key === "late" ? ["confirmed_facts_require_review"] : [],
+      reviewReasonCodes: holds[key],
+      ...(facts[key] ? { effectiveFacts: facts[key] } : {}),
     },
     factRevisionId: uuid("47900000", Object.keys(reviewIds).indexOf(key) + 1),
     qualificationCheck: checks[key],
@@ -324,7 +388,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
           : key === "late"
             ? ["confirmed_facts_require_review", "rule_adr_category_unknown"]
             : key === "telemetry"
-              ? ["qualification_history_unknown"]
+              ? ["qualification_history_unknown", "clock_anomaly"]
               : [],
       createdAt: current?.submittedAt ?? "2026-10-28T16:00:00.000Z",
       manualRevision: current ? { number: current.number, submittedAt: current.submittedAt } : null,
@@ -454,7 +518,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         json: envelope({
           id,
           revisionId: catalogRevisionId,
-          game: "ets2",
+          game: known.game ?? "ets2",
           kind: known.kind,
           mapNamespace: "base",
           display: { ...label(id, requested), label: known[requested] },
