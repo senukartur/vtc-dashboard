@@ -15,6 +15,7 @@ export function groupSelection(
 export function serializeSelection(tokens: string[]): string;
 export function parseSelection(value: string | undefined): string[];
 export function validProject(value: string | undefined): boolean;
+export const shardableLanes: readonly string[];
 export function validShard(value: string | undefined): boolean;
 export const ciGroups: Record<"core" | "integration" | "persistence-recovery" | "e2e", string[]>;
 export function parseLocalArguments(argv: string[]): {

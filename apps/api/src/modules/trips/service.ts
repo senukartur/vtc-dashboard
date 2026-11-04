@@ -26,6 +26,8 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
+import { exists, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/mysql-core";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
@@ -101,15 +103,43 @@ export interface SourceContext {
   // Explicit trusted coordinator selection; never copied from source payloads or inferred.
   canonical?: { tripId: string; expectedVersion: number };
 }
+export type TripSource = S["TripSummary"]["sourceKinds"][number];
+// The route schema uses this list too, so the contract parity test catches a missing value.
+export const tripSources = ["ets2telemetry", "manual"] as const satisfies readonly TripSource[];
 export interface ListOptions {
   scope?: "company" | "mine" | "review";
   game?: "ets2" | "ats";
   decision?: Trip["decision"];
+  // Every scope: the canonical group (root and alias members) has a source of this kind.
+  source?: TripSource;
   // Review queue only (scope=review).
   hold?: boolean;
   order?: "asc" | "desc";
   cursor?: string;
   limit?: number;
+}
+const sourceMember = alias(trips, "source_member");
+/**
+ * Root trips whose canonical group has a source of the given kind, matching the summary's
+ * sourceKinds derivation (root plus alias members). Two correlated EXISTS probes keep the
+ * outer page index and probe source_canonical / trip_group_members per candidate row.
+ */
+export function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
+  return or(
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(sourceTrips)
+        .where(and(eq(sourceTrips.canonicalTripId, trips.id), eq(sourceTrips.provider, source))),
+    ),
+    exists(
+      db
+        .select({ one: sql`1` })
+        .from(sourceMember)
+        .innerJoin(sourceTrips, eq(sourceTrips.canonicalTripId, sourceMember.id))
+        .where(and(eq(sourceMember.aliasOf, trips.id), eq(sourceTrips.provider, source))),
+    ),
+  ) as SQL;
 }
 function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidence): string[] {
   const reasons: string[] = [];
@@ -681,8 +711,10 @@ export function createTrips(
       options.game ?? null,
       options.decision ?? null,
       options.order === "asc" ? "createdAt/id:asc" : "createdAt/id:desc",
-      // Appended only when set, so cursors issued before the review filters stay valid.
+      // Optional filters are appended only when set, so cursors issued before the review
+      // filters (hold) and the source filter stay valid while omitted.
       ...(options.hold === undefined ? [] : [`hold:${options.hold}`]),
+      ...(options.source === undefined ? [] : [`source:${options.source}`]),
     ];
   }
   function readCursor(
@@ -937,6 +969,7 @@ export function createTrips(
         !["company", "mine", "review"].includes(scope) ||
         (options.hold !== undefined && typeof options.hold !== "boolean") ||
         (options.order !== undefined && !["asc", "desc"].includes(options.order)) ||
+        (options.source !== undefined && !tripSources.includes(options.source)) ||
         (scope !== "review" && (options.hold !== undefined || options.order !== undefined))
       )
         throw identityError(422);
@@ -958,6 +991,7 @@ export function createTrips(
               options.game ? eq(trips.game, options.game) : undefined,
               options.decision ? eq(trips.decision, options.decision) : undefined,
               options.hold === undefined ? undefined : eq(trips.reviewHold, options.hold),
+              options.source ? tripSourceCondition(c(tx), options.source) : undefined,
               after
                 ? ascending
                   ? or(

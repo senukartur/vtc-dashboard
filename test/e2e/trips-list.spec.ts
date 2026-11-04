@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage, entityId, envelope, list } from "./support/catalogs.ts";
@@ -87,7 +88,7 @@ function routeName(tripId: string) {
   return name;
 }
 const reason = "Fictional screenshot does not support the submitted distance";
-const listKeys = new Set(["scope", "game", "decision", "limit", "cursor"]);
+const listKeys = new Set(["scope", "game", "decision", "source", "limit", "cursor"]);
 
 async function mockList(page: Page, { paged = false } = {}) {
   await mockTrips(page);
@@ -103,12 +104,18 @@ async function mockList(page: Page, { paged = false } = {}) {
     } else if (url.pathname.startsWith("/api/v1/evidence")) others.push(url.pathname);
   });
   await page.route("**/api/v1/trips?*", (route) => {
-    const q = new URL(route.request().url()).searchParams;
-    if (q.get("scope") === "company") return route.fulfill({ json: list([summary(colleague)]) });
+    const q = new URL(route.request().url()).searchParams,
+      source = q.get("source"),
+      only = (tripIds: string[]) =>
+        tripIds
+          .map(summary)
+          .filter((trip) => !source || (trip.sourceKinds as string[]).includes(source));
+    if (q.get("scope") === "company") return route.fulfill({ json: list(only([colleague])) });
+    // Page two holds the mixed-source trip when filtered, so every source has a second page.
     if (paged && q.get("cursor") === "page-2")
-      return route.fulfill({ json: list([summary(first)]) });
+      return route.fulfill({ json: list(only([source ? third : first])) });
     return route.fulfill({
-      json: list([first, second, third].map(summary), paged ? "page-2" : null),
+      json: list(only([first, second, third]), paged ? "page-2" : null),
     });
   });
   await page.route("**/api/v1/trips/*", (route) => {
@@ -182,17 +189,25 @@ test("trip list layout: tabs, compact filters, dense table or phone cards in RU 
   );
   const filters = page.getByRole("group", { name: "Filters", exact: true });
   const game = filters.getByRole("combobox", { name: "Game", exact: true }),
-    decision = filters.getByRole("combobox", { name: "Company decision", exact: true });
+    decision = filters.getByRole("combobox", { name: "Company decision", exact: true }),
+    source = filters.getByRole("combobox", { name: "Source", exact: true });
   await expect(game).toHaveValue("");
   await expect(game.locator("option").first()).toHaveText("ETS2 and ATS");
   await expect(decision.locator("option").first()).toHaveText("Any decision");
-  const [gameBox, decisionBox] = [await game.boundingBox(), await decision.boundingBox()];
-  if (!gameBox || !decisionBox) throw new Error("FILTERS_NOT_RENDERED");
+  await expect(source).toHaveValue("");
+  await expect(source.locator("option")).toHaveText(["Any source", "Telemetry", "Manual report"]);
+  const [gameBox, decisionBox, sourceBox] = [
+    await game.boundingBox(),
+    await decision.boundingBox(),
+    await source.boundingBox(),
+  ];
+  if (!gameBox || !decisionBox || !sourceBox) throw new Error("FILTERS_NOT_RENDERED");
   if (!phone)
-    expect(
-      Math.abs(gameBox.y + gameBox.height / 2 - (decisionBox.y + decisionBox.height / 2)),
-    ).toBeLessThanOrEqual(4);
-  for (const box of [gameBox, decisionBox])
+    for (const box of [decisionBox, sourceBox])
+      expect(
+        Math.abs(gameBox.y + gameBox.height / 2 - (box.y + box.height / 2)),
+      ).toBeLessThanOrEqual(4);
+  for (const box of [gameBox, decisionBox, sourceBox])
     if (touch) expect(box.height).toBeGreaterThanOrEqual(40);
     else expect(Math.abs(box.height - 32)).toBeLessThanOrEqual(0.5);
   await expect(page.getByText("Times in UTC", { exact: true })).toBeVisible();
@@ -248,6 +263,15 @@ test("trip list layout: tabs, compact filters, dense table or phone cards in RU 
       expect(routeBox.y + routeBox.height).toBeLessThanOrEqual(cargoBox.y + 1);
       expect(Math.abs(rowBox.width - listBox.width)).toBeLessThanOrEqual(2);
     } else await expect(current.getByRole("columnheader")).toHaveText(names);
+    const localizedSource = page.getByRole("combobox", {
+      name: ru ? "Источник" : "Source",
+      exact: true,
+    });
+    await expect(localizedSource.locator("option")).toHaveText(
+      ru
+        ? ["Любой источник", "Телеметрия", "Ручной отчёт"]
+        : ["Any source", "Telemetry", "Manual report"],
+    );
     if (ru) {
       const fallbackRow = current.locator("tbody tr").nth(2);
       await expect(fallbackRow.getByText("Показано на английском", { exact: false })).toHaveCount(
@@ -409,6 +433,8 @@ test("keyboard reaches filters, rows and the panel in order; tabs activate manua
   await page.keyboard.press("Tab");
   await expect(page.getByRole("combobox", { name: "Company decision", exact: true })).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(page.getByRole("combobox", { name: "Source", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(page.getByRole("tabpanel")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(rowLink(page, first)).toBeFocused();
@@ -473,12 +499,15 @@ test("list requests keep server scope rules and review stays permission gated", 
   const { lists } = await mockList(page);
   await page.goto("/account/trips?scope=company&decision=rejected&source=manual&trip=nope");
   await catalogLanguage(page);
-  await expect(table(page)).toBeVisible();
+  // The only synthetic company trip is telemetry-only, so the filtered page is empty.
+  await expect(page.getByText("No records match this view.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Source", exact: true })).toHaveValue("manual");
   await expect.poll(() => lists.length).toBeGreaterThan(0);
+  // Company scope drops the decision filter but keeps the server-side source filter.
   for (const q of lists) {
     expect(q.get("scope")).toBe("company");
     expect(q.has("decision")).toBe(false);
-    expect(q.has("source")).toBe(false);
+    expect(q.get("source")).toBe("manual");
     expect(q.has("trip")).toBe(false);
   }
   expectListParams(lists);
@@ -496,4 +525,152 @@ test("list requests keep server scope rules and review stays permission gated", 
   await page.waitForTimeout(250);
   expect(lists).toEqual([]);
   expect(lists.some((q) => q.get("scope") === "review")).toBe(false);
+});
+
+test("source filter: request query, URL state, cursor reset and focus", async ({ page }, info) => {
+  const desktop = info.project.name === "desktop-chromium";
+  const { lists } = await mockList(page, { paged: true });
+  const last = () => lists.at(-1)?.toString();
+  await page.goto(desktop ? `/account/trips?trip=${second}` : "/account/trips");
+  await catalogLanguage(page);
+  await expect(table(page)).toBeVisible();
+  if (desktop) await expect(panel(page, second)).toBeVisible();
+  const source = page.getByRole("combobox", { name: "Source", exact: true });
+  await source.focus();
+  await source.selectOption("manual");
+  await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
+  await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
+  await expect.poll(last).toBe("scope=mine&source=manual&limit=25");
+  // The select stays mounted while the list reloads, so focus is not lost.
+  await expect(source).toBeFocused();
+  await expect(page.getByRole("region")).toHaveCount(0);
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect.poll(last).toBe("scope=mine&source=manual&limit=25&cursor=page-2");
+  const previous = page.getByRole("button", { name: "Previous page", exact: true });
+  await expect(previous).toBeEnabled();
+  if (desktop) {
+    await rowLink(page, third).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]trip=${third}`));
+  }
+  await source.selectOption("ets2telemetry");
+  await expect.poll(last).toBe("scope=mine&source=ets2telemetry&limit=25");
+  await expect(previous).toBeDisabled();
+  await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
+  await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
+  await expect(page.getByRole("region")).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
+  await expect.poll(last).toBe("scope=company&source=ets2telemetry&limit=25");
+  await expect(source).toHaveValue("ets2telemetry");
+  await expect(rowLink(page, colleague)).toBeVisible();
+  await source.selectOption("");
+  await expect.poll(last).toBe("scope=company&limit=25");
+  await expect(page).not.toHaveURL(/source=/);
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
+  await expect(source).toHaveValue("ets2telemetry");
+
+  await page.goto("/account/trips?source=bogus");
+  await expect(table(page)).toBeVisible();
+  await expect(source).toHaveValue("");
+  await expect.poll(last).toBe("scope=mine&limit=25");
+  // Two changes in one task: the second must build on the first, not on stale router params.
+  await page.evaluate(() => {
+    for (const [id, value] of [
+      ["trip-game", "ats"],
+      ["trip-source", "manual"],
+    ] as const) {
+      const select = document.getElementById(id);
+      if (!(select instanceof HTMLSelectElement)) throw new Error("FILTER_NOT_RENDERED");
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  await expect(page).toHaveURL(/[?&]game=ats(&|$)/);
+  await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
+  await expect.poll(last).toBe("scope=mine&game=ats&source=manual&limit=25");
+  expect(lists.some((q) => q.get("source") === "bogus")).toBe(false);
+  expectListParams(lists);
+});
+
+const wideFont = ".trips-toolbar, .trips-toolbar * { letter-spacing: 0.06em !important; }";
+/** Toolbar geometry: spare width after children and gaps, and row alignment of the children. */
+function toolbarBudget(page: Page) {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
+    const bar = document.querySelector(".trip-page .trips-toolbar");
+    if (!bar) throw new Error("TOOLBAR_NOT_RENDERED");
+    const box = (element: Element) => element.getBoundingClientRect(),
+      children = Array.from(bar.children),
+      filters = children.filter((child) => child.classList.contains("trips-filter")),
+      selects = Array.from(bar.querySelectorAll("select")),
+      gap = Number.parseFloat(getComputedStyle(bar).columnGap) || 0,
+      width = box(bar).width;
+    const used = (list: Element[]) =>
+      list.reduce((total, element) => total + box(element).width, 0) +
+      gap * Math.max(0, list.length - 1);
+    const spread = (list: Element[]) => {
+      const centres = list.map((element) => box(element).top + box(element).height / 2);
+      return Math.max(...centres) - Math.min(...centres);
+    };
+    const round = (value: number) => Math.round(value * 10) / 10;
+    return {
+      width: round(width),
+      children: children.length,
+      spareAll: round(width - used(children)),
+      spareSelects: round(width - used(filters)),
+      rowSpreadAll: round(spread(children)),
+      rowSpreadSelects: round(spread(filters)),
+      selectHeights: selects.map((select) => round(box(select).height)),
+      selectsInside: selects.every(
+        (select) =>
+          box(select).left >= box(bar).left - 0.5 &&
+          box(select).right <= box(bar).right + 0.5 &&
+          box(select).right <= window.innerWidth,
+      ),
+    };
+  });
+}
+test("toolbar budget with wide-font spare in RU and EN for own and company trips", async ({
+  page,
+}, info) => {
+  await mockList(page);
+  const project = info.project.name,
+    touch = project === "mobile-chromium";
+  const results: Record<string, unknown>[] = [];
+  for (const scope of ["mine", "company"] as const) {
+    await page.goto(scope === "company" ? "/account/trips?scope=company" : "/account/trips");
+    await catalogLanguage(page);
+    await expect(table(page)).toBeVisible();
+    for (const locale of ["en", "ru"] as const) {
+      await catalogLanguage(page, locale);
+      await expect(page.locator("#trip-source option").first()).toHaveText(
+        locale === "ru" ? "Любой источник" : "Any source",
+      );
+      for (const wide of [false, true]) {
+        const style = wide ? await page.addStyleTag({ content: wideFont }) : null,
+          budget = await toolbarBudget(page),
+          label = JSON.stringify({ project, scope, locale, wide, ...budget });
+        results.push({ scope, locale, wide, ...budget });
+        expect(budget.children, label).toBe(scope === "mine" ? 4 : 3);
+        for (const height of budget.selectHeights)
+          if (touch) expect(height, label).toBeGreaterThanOrEqual(40);
+          else expect(Math.abs(height - 32), label).toBeLessThanOrEqual(0.5);
+        if (project === "desktop-chromium") {
+          // Selects and the timezone note share one row with at least 4px to spare.
+          expect(budget.rowSpreadAll, label).toBeLessThanOrEqual(4);
+          expect(budget.spareAll, label).toBeGreaterThanOrEqual(4);
+        } else if (project === "tablet-chromium") {
+          expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
+          expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
+        }
+        expect(budget.selectsInside, label).toBe(true);
+        await noOverflow(page);
+        if (touch)
+          await capture(page, info, `trips-toolbar-${scope}-${locale}${wide ? "-wide" : ""}`);
+        await style?.evaluate((node) => node.parentNode?.removeChild(node));
+      }
+    }
+  }
+  await writeFile(info.outputPath("toolbar-budget.json"), JSON.stringify(results, null, 2));
 });

@@ -94,7 +94,13 @@ test("only successful canonical main-push artifacts are eligible, including expl
       value.artifacts = value.artifacts.map((artifact) => ({ ...artifact, expired: true }));
     },
     (value) => {
-      value.run.run_attempt++;
+      value.run.run_attempt--;
+    },
+    (value) => {
+      value.artifacts = value.artifacts.map((artifact) => ({
+        ...artifact,
+        name: `development-124-2-${revision}`,
+      }));
     },
   ];
   for (const mutation of mutations) {
@@ -109,6 +115,52 @@ test("only successful canonical main-push artifacts are eligible, including expl
     );
     expect(() => requireRelease(value)).toThrow();
   }
+});
+test("a re-run of failed jobs selects the artifact of the attempt that built it", () => {
+  const artifact = (
+    attempt: number,
+    id = 70 + attempt,
+    name = `development-123-${attempt}-${revision}`,
+  ) => ({
+    id,
+    name,
+    expired: false,
+    size_in_bytes: 123,
+    workflow_run: { id: 123, head_sha: revision },
+  });
+  type Artifact = ReturnType<typeof artifact>;
+  const quality = artifact(0, 60, "quality-core-0-123-2");
+  const rerun = fixture();
+  rerun.artifacts = [quality, artifact(1)];
+  expect(requireRelease(rerun)).toMatchObject({ runId: 123, attempt: 1, artifactId: 71 });
+  const rebuilt = fixture();
+  rebuilt.artifacts = [artifact(1), quality, artifact(2)];
+  expect(requireRelease(rebuilt)).toMatchObject({ attempt: 2, artifactId: 72 });
+  const later = fixture();
+  later.artifacts = [artifact(1), artifact(3)];
+  expect(requireRelease(later)).toMatchObject({ attempt: 1 });
+  const rejected: Artifact[][] = [
+    [quality],
+    [artifact(2), artifact(2, 99)],
+    [artifact(1), { ...artifact(2), expired: true }],
+    [{ ...artifact(1), name: `development-123-01-${revision}` }],
+  ];
+  for (const artifacts of rejected) {
+    const value = fixture();
+    value.artifacts = artifacts;
+    expect(() => requireRelease(value)).toThrow();
+  }
+  const manifest = {
+    version: 1,
+    revision,
+    runId: 123,
+    attempt: 1,
+    bytes: 100,
+    imageId: `sha256:${"b".repeat(64)}`,
+    sha256: "c".repeat(64),
+  };
+  expect(validateManifest(manifest, requireRelease(rerun))).toEqual(manifest);
+  expect(() => validateManifest({ ...manifest, attempt: 2 }, requireRelease(rerun))).toThrow();
 });
 test("manifest is closed, bounded and bound to exact revision/run/attempt", () => {
   const selected = requireRelease(fixture());

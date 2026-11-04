@@ -59,6 +59,9 @@ export function validProject(value) {
   return browserProjects.includes(value);
 }
 
+// CI splits these lanes into parallel jobs (Playwright and Vitest --shard).
+export const shardableLanes = ["integration", "e2e"];
+
 // A shard is "<index>/<total>" with 1 <= index <= total <= 8.
 export function validShard(value) {
   const match = /^([1-8])\/([1-8])$/.exec(value ?? "");
@@ -111,7 +114,7 @@ export function parseLocalArguments(argv) {
   }
   // The core group owns the check stage, so it may never skip it.
   if (options.skipCheck && focus === "core") throw new Error("INVALID_TEST_ARGUMENTS");
-  if (options.shard && focus !== "e2e") throw new Error("INVALID_TEST_ARGUMENTS");
+  if (options.shard && !shardableLanes.includes(focus)) throw new Error("INVALID_TEST_ARGUMENTS");
   if ((focus === "selected") !== options.tokens.length > 0)
     throw new Error("INVALID_TEST_ARGUMENTS");
   if (options.skipCheck && ["all", "failure-reporting"].includes(focus))

@@ -1,4 +1,4 @@
-import { type DTO, revisionFields } from "../trips/transport.js";
+import { type DTO, revisionFields, type TripSource, tripSources } from "../trips/transport.js";
 
 /** Pure view model of the dispatch review queue and decision panel (VTC-059). */
 export type QueueTab = "awaiting" | "decided";
@@ -8,6 +8,8 @@ export type QueueDecision = DTO["TripSummary"]["decision"];
 export type QueueParams = {
   tab: QueueTab;
   game: QueueGame | undefined;
+  /** Shared listTrips source filter (VTC-054) on both tabs. */
+  source: TripSource | undefined;
   decision: QueueDecision | undefined;
   order: QueueOrder;
   trip: string | null;
@@ -37,16 +39,21 @@ export const pageSize = 25;
 /** Default order: Awaiting clears the oldest held report first, Decided shows the newest. */
 export const defaultOrder = (tab: QueueTab): QueueOrder => (tab === "awaiting" ? "asc" : "desc");
 
-/** Validated queue state from the URL; unknown values fall back to the defaults. */
+/**
+ * Validated queue state from the URL; unknown values fall back to the defaults. An unknown source
+ * means any source and is never sent.
+ */
 export function queueParams(search: URLSearchParams): QueueParams {
   const tab: QueueTab = search.get("tab") === "decided" ? "decided" : "awaiting",
     game = search.get("game"),
+    source = search.get("source"),
     decision = search.get("decision"),
     order = search.get("order"),
     trip = search.get("trip");
   return {
     tab,
     game: game === "ets2" || game === "ats" ? game : undefined,
+    source: tripSources.find((value) => value === source),
     decision:
       tab === "decided" && decisions.includes(decision as QueueDecision)
         ? (decision as QueueDecision)
@@ -62,6 +69,7 @@ export function listQuery(params: QueueParams, cursor: string | null) {
     scope: "review",
     hold: params.tab === "awaiting" ? "true" : "false",
     game: params.game,
+    source: params.source,
     decision: params.tab === "decided" ? params.decision : undefined,
     order: params.order,
     limit: pageSize,
@@ -75,6 +83,7 @@ export function queueSearch(search: URLSearchParams): string {
     next = new URLSearchParams();
   if (params.tab === "decided") next.set("tab", "decided");
   if (params.game) next.set("game", params.game);
+  if (params.source) next.set("source", params.source);
   if (params.decision) next.set("decision", params.decision);
   if (params.order !== defaultOrder(params.tab)) next.set("order", params.order);
   const value = next.toString();
