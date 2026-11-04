@@ -39,3 +39,32 @@ export function runRehearsalChild(
     ) => EventEmitter & Pick<ChildProcess, "kill"> & { unref?: () => void };
   },
 ): Promise<RehearsalChildOutcome>;
+export type RehearsalTiming = {
+  event: "deployment_rehearsal_timing";
+  scenarios: { ordinal: number; startOffsetMs: number; durationMs: number }[];
+  ticks: { count: number; busySeconds: number };
+};
+export function rehearsalTiming(bundle: unknown): RehearsalTiming | null;
+export const windowShards: readonly (readonly number[])[];
+export function rehearsalPlan(args: readonly string[]): {
+  mode: "full" | "manual-only";
+  groups: ("core" | "window" | "recovery")[];
+  requireWindow: boolean;
+  fullCoverage: boolean;
+  scenarios: readonly number[];
+};
+export function retainRehearsalEvidence(
+  bytes: Buffer,
+  path: string,
+  options: {
+    requireWindow: boolean;
+    scenarios?: readonly number[];
+    requiredGroups?: readonly string[];
+    sourceSha: string;
+    sourceFingerprint: string;
+    project: string;
+    revision: string;
+    volume: string;
+    expectedImageId: string;
+  },
+): Promise<number>;

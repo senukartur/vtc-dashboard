@@ -39,9 +39,13 @@ export function rehearsalPath(path) {
   );
 }
 
-// Returns "true" or "false" for the workflow output.
+// Returns "true" or "false" for the workflow output. Owner-approved policy (VTC-072): a main push
+// skips it because the strict ruleset already rehearsed the same merge candidate on its PR when
+// the path rule required it; the weekly schedule and manual dispatch always run it in full.
 export function rehearsalScope(event, paths) {
-  if (event !== "pull_request") return "true";
+  if (event === "push") return "false";
+  if (event === "schedule" || event === "workflow_dispatch") return "true";
+  if (event !== "pull_request") throw new Error("CI_SCOPE_EVENT_INVALID");
   if (!Array.isArray(paths)) throw new Error("CI_SCOPE_PATHS_INVALID");
   return paths.some(rehearsalPath) ? "true" : "false";
 }
@@ -67,7 +71,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const rehearsal = rehearsalScope(event, paths);
   const matched = paths.filter(rehearsalPath);
   console.log(
-    `Deployment rehearsal: ${rehearsal === "true" ? "required" : "skipped by path rule"} (${event}, ${paths.length} changed, ${matched.length} matched)`,
+    `Deployment rehearsal: ${rehearsal === "true" ? "required" : "skipped by scope rule"} (${event}, ${paths.length} changed, ${matched.length} matched)`,
   );
   for (const path of matched.slice(0, 20)) console.log(`  ${path}`);
   if (!process.env.GITHUB_OUTPUT) throw new Error("CI_SCOPE_OUTPUT_REQUIRED");

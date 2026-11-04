@@ -357,10 +357,11 @@ class RehearsalDiagnosticsTests(unittest.TestCase):
         module = pathlib.Path(__file__).with_name('rehearsal-child.mjs').as_uri()
         program = '''import assert from 'node:assert/strict';
 import {rehearsalPlan} from MODULE;
-assert.deepEqual(rehearsalPlan([]),{mode:'full',groups:['core','window','recovery'],requireWindow:true,fullCoverage:true});
-assert.deepEqual(rehearsalPlan(['--manual-only']),{mode:'manual-only',groups:['core'],requireWindow:false,fullCoverage:false});
-assert.deepEqual(rehearsalPlan(['--core-recovery']),{mode:'full',groups:['core','recovery'],requireWindow:false,fullCoverage:false});
-for(const args of [['--unknown'],['--manual-only','--core-recovery'],[null],null])assert.throws(()=>rehearsalPlan(args),/REHEARSAL_MODE_INVALID/);
+assert.deepEqual(rehearsalPlan([]),{mode:'full',groups:['core','window','recovery'],requireWindow:true,fullCoverage:true,scenarios:[1,2,3,4,5,6,7,8,9]});
+assert.deepEqual(rehearsalPlan(['--manual-only']),{mode:'manual-only',groups:['core'],requireWindow:false,fullCoverage:false,scenarios:[]});
+assert.deepEqual(rehearsalPlan(['--core-recovery']),{mode:'full',groups:['core','recovery'],requireWindow:false,fullCoverage:false,scenarios:[]});
+assert.deepEqual(rehearsalPlan(['--window-shard','2/3']),{mode:'full',groups:['core','window'],requireWindow:true,fullCoverage:false,scenarios:[4,6,9]});
+for(const args of [['--unknown'],['--manual-only','--core-recovery'],[null],null,['--window-shard'],['--window-shard','4/3'],['--window-shard','1/2']])assert.throws(()=>rehearsalPlan(args),/REHEARSAL_MODE_INVALID/);
 '''.replace('MODULE', json.dumps(module))
         subprocess.run(['node', '--input-type=module', '-e', program], check=True, timeout=10,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)

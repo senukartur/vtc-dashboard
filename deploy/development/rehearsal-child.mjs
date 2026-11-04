@@ -10,6 +10,17 @@ const evidenceNames = new Set([
   "rehearsal-recovery.json",
 ]);
 
+const allScenarios = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+// Owner-approved split (VTC-072, 2026-11-04): CI runs the window as three parallel shards,
+// each after its own core group. Shards keep the original ascending order (scenario 1 reads
+// the whole feed, 4 relies on actor roles that 5 later changes) and are balanced by the
+// hosted durations; together they cover every scenario exactly once.
+export const windowShards = [
+  [2, 3, 5],
+  [4, 6, 9],
+  [1, 7, 8],
+];
+
 export function validateEvidenceCollector(actual, expected) {
   if (
     !actual ||
@@ -38,6 +49,7 @@ export async function retainRehearsalEvidence(
   path,
   {
     requireWindow,
+    scenarios = allScenarios,
     requiredGroups = [],
     sourceSha,
     sourceFingerprint,
@@ -86,7 +98,7 @@ export async function retainRehearsalEvidence(
     requireWindow &&
     (bundle.windowFenced ||
       bundle.files["notifications-acceptance-last.json"]?.result !== "cleaned" ||
-      bundle.files["notifications-acceptance-last.json"]?.scenario !== 9 ||
+      bundle.files["notifications-acceptance-last.json"]?.scenario !== scenarios.at(-1) ||
       bundle.files["notifications-acceptance-last.json"]?.sharedGrantsUnchanged !== true ||
       bundle.files["notifications-acceptance-last.json"]?.sharedFilesUnchanged !== true ||
       bundle.files["notifications-acceptance-last.json"]?.evidenceSha256 !==
@@ -104,9 +116,15 @@ export async function retainRehearsalEvidence(
           row.ordinal,
           row.status,
         ]),
-      ) !== JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 9].map((ordinal) => [ordinal, "pass"])))
+      ) !== JSON.stringify(scenarios.map((ordinal) => [ordinal, "pass"])))
   )
     throw new Error("REHEARSAL_WINDOW_EVIDENCE_MISSING");
+  // The window receipt names the scenario list this leg was asked to run.
+  if (
+    requiredGroups.includes("window") &&
+    JSON.stringify(bundle.files["rehearsal-window.json"].scenarios) !== JSON.stringify(scenarios)
+  )
+    throw new Error("REHEARSAL_GROUP_EVIDENCE_BINDING_INVALID");
   const handle = await open(path, "wx", 0o600);
   try {
     await handle.writeFile(JSON.stringify({ sourceSha, sourceFingerprint, ...bundle }) + "\n");
@@ -117,7 +135,64 @@ export async function retainRehearsalEvidence(
   return Object.keys(bundle.files).length;
 }
 
+const isoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const boundedMs = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 7_200_000;
+
+// Public window timing is rebuilt from fixed numeric fields of the private evidence; names,
+// identifiers, samples and worker metrics never leave the runner. Partial evidence still
+// yields the scenarios that passed, so a slow or failed window can be located.
+export function rehearsalTiming(bundle) {
+  const evidence = bundle?.files?.["notifications-acceptance-evidence.json"];
+  const fixture = evidence?.fixture;
+  if (!isoInstant.test(fixture?.startedUtc ?? "") || !Array.isArray(fixture.scenarios)) return null;
+  const started = Date.parse(fixture.startedUtc);
+  const scenarios = [];
+  for (const row of fixture.scenarios.slice(0, 9)) {
+    const offset = isoInstant.test(row?.startedUtc ?? "")
+      ? Date.parse(row.startedUtc) - started
+      : -1;
+    // A window shard runs an ascending subset of 1..9, so ordinals must only strictly increase.
+    const previous = scenarios.at(-1)?.ordinal ?? 0;
+    if (
+      !Number.isSafeInteger(row?.ordinal) ||
+      row.ordinal <= previous ||
+      row.ordinal > 9 ||
+      !boundedMs(row?.durationMs) ||
+      !boundedMs(offset)
+    )
+      return null;
+    scenarios.push({ ordinal: row.ordinal, startOffsetMs: offset, durationMs: row.durationMs });
+  }
+  const ticks = Array.isArray(evidence.ticks) ? evidence.ticks.slice(0, 240) : [];
+  let busySeconds = 0;
+  for (const tick of ticks) {
+    const busy = tick?.finishedUtc - tick?.startedUtc;
+    if (Number.isSafeInteger(busy) && busy >= 0 && busy <= 120) busySeconds += busy;
+  }
+  return {
+    event: "deployment_rehearsal_timing",
+    scenarios,
+    ticks: { count: ticks.length, busySeconds },
+  };
+}
+
 export function rehearsalPlan(args) {
+  if (Array.isArray(args) && args.length === 2 && args[0] === "--window-shard") {
+    const match = /^([1-9])\/([1-9])$/.exec(typeof args[1] === "string" ? args[1] : "");
+    if (
+      !match ||
+      Number(match[2]) !== windowShards.length ||
+      Number(match[1]) > windowShards.length
+    )
+      throw new Error("REHEARSAL_MODE_INVALID");
+    return {
+      mode: "full",
+      groups: ["core", "window"],
+      requireWindow: true,
+      fullCoverage: false,
+      scenarios: windowShards[Number(match[1]) - 1],
+    };
+  }
   if (
     !Array.isArray(args) ||
     args.length > 1 ||
@@ -130,6 +205,7 @@ export function rehearsalPlan(args) {
     groups: manual ? ["core"] : args.length ? ["core", "recovery"] : ["core", "window", "recovery"],
     requireWindow: args.length === 0,
     fullCoverage: args.length === 0,
+    scenarios: args.length ? [] : allScenarios,
   };
 }
 

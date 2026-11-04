@@ -26,6 +26,18 @@ PROTECTED = ('compose.yaml', 'activation-grants.json', 'Caddyfile', 'receive.sh'
              'private/admin.cnf', 'private/export.cnf', 'private/migrator.env', 'private/operator.env',
              'state/current.json', 'state/previous.json')
 ROLES = ('api', 'proxy', 'probe', 'fixture', 'migrator', 'worker', 'overlap', 'interrupted')
+ALL_SCENARIOS = list(range(1, 10))
+
+
+def scenario_selection(o, value):
+    # Hosted acceptance runs all nine scenarios. Only a disposable rehearsal project may run a
+    # non-empty ascending subset; VTC-072 CI shards cover all nine across parallel jobs.
+    if value == ALL_SCENARIOS:
+        return value
+    o.require(re.fullmatch(r'vtc011-[a-f0-9]{16}', o.PROJECT) is not None and type(value) is list and value and
+              all(type(v) is int and 1 <= v <= 9 for v in value) and value == sorted(set(value)),
+              'NOTIFICATIONS_REVIEWED_INPUT_REQUIRED')
+    return value
 
 
 def private_json(o, path, *, maximum=65536):
@@ -518,8 +530,8 @@ class Window:
         input_value = private_json(o, o.BASE / 'private/notifications-acceptance-input.json')
         o.require(set(input_value) == {'revision', 'imageId', 'controls', 'scenarios'} and
                   input_value['revision'] == self.revision and input_value['imageId'] == self.image_id and
-                  input_value['controls'] == hashes(o, FILES) and input_value['scenarios'] == list(range(1, 10)),
-                  'NOTIFICATIONS_REVIEWED_INPUT_REQUIRED')
+                  input_value['controls'] == hashes(o, FILES), 'NOTIFICATIONS_REVIEWED_INPUT_REQUIRED')
+        scenarios = scenario_selection(o, input_value['scenarios'])
         active = o.current()
         o.require(active and active['imageId'] == self.image_id and active['revision'] == self.revision and
                   type(active.get('runId')) is int and active['runId'] > 0, 'NOTIFICATIONS_CURRENT_RELEASE_REQUIRED')
@@ -535,7 +547,7 @@ class Window:
         state = dict(runId=self.run_id, schema=self.schema, accounts=self.accounts, revision=self.revision,
                      imageId=self.image_id, directory=str(self.directory), controls=hashes(o, FILES),
                      protected=hashes(o, PROTECTED), phase='allocating', schedule=False, containers={},
-                     allocations={}, ticks=[], scenario=0, expiresUtc=int(time.time()) + WINDOW_SECONDS,
+                     allocations={}, ticks=[], scenario=0, scenarios=scenarios, expiresUtc=int(time.time()) + WINDOW_SECONDS,
                      databaseNetworkId=database['Id'], sharedGrantsSha256=self.shared_grants())
         self.save(state)
         self.directory.mkdir(mode=0o700)
@@ -976,7 +988,9 @@ class Window:
         self.o.require(state['phase'] == 'running' and state['schedule'], 'NOTIFICATIONS_PHASE_INVALID')
         identity = self.containers.create('fixture', [*self.environment('runtime'), '--mount',
             mount(self.o, self.directory / 'exchange', '/acceptance', False), '-e',
-            'NODE_EXTRA_CA_CERTS=/acceptance/ca.crt', self.image_id, 'node', 'dist/notifications-acceptance.js', 'exercise'], wait=False)
+            'NODE_EXTRA_CA_CERTS=/acceptance/ca.crt', '-e',
+            'VTC_NOTIFICATIONS_SCENARIOS=' + ','.join(map(str, scenario_selection(self.o, state.get('scenarios', ALL_SCENARIOS)))),
+            self.image_id, 'node', 'dist/notifications-acceptance.js', 'exercise'], wait=False)
         self.o.run(['docker', 'network', 'connect', self.network, identity], timeout=10)
         state = self.bound(); state['phase'] = 'exercising'; self.save(state)
         self.o.run(['docker', 'start', identity], timeout=10)
@@ -995,10 +1009,11 @@ class Window:
                 self.o.require(stat.S_ISREG(info.st_mode) and info.st_uid == 1000 and not info.st_mode & 0o077 and info.st_size <= 32768,
                                'NOTIFICATIONS_EVIDENCE_INVALID')
                 evidence = json.loads(path.read_text())
+                selected = scenario_selection(self.o, state.get('scenarios', ALL_SCENARIOS))
                 self.o.require(evidence.get('runId') == self.run_id and evidence.get('status') == 'pass' and
-                               [r.get('ordinal') for r in evidence.get('scenarios', [])] == list(range(1, 10)) and
+                               [r.get('ordinal') for r in evidence.get('scenarios', [])] == selected and
                                all(r.get('status') == 'pass' for r in evidence['scenarios']), 'NOTIFICATIONS_SCENARIOS_INCOMPLETE')
-                state.update(phase='completed', schedule=False, scenario=9); self.save(state)
+                state.update(phase='completed', schedule=False, scenario=selected[-1]); self.save(state)
         print(json.dumps({'event': 'notifications_acceptance', 'phase': state['phase'], 'scenario': state['scenario'], 'ticks': len(state['ticks']), 'result': 'inspected'}), flush=True)
 
     def account_owned(self, role, state):
@@ -1137,14 +1152,14 @@ def tick(o, revision, image_id):
     Window(o, revision, image_id, state['runId']).tick()
 
 
-def rehearse(o):
+def rehearse(o, scenarios=ALL_SCENARIOS):
     """Required local group: real TLS and wall-clock minute ticks, with no external provider."""
     active = o.current()
     o.require(active is not None, 'RELEASE_REQUIRED')
     revision, image_id = active['revision'], active['imageId']
     import uuid
     run_id = str(uuid.uuid4())
-    reviewed = {'revision': revision, 'imageId': image_id, 'controls': hashes(o, FILES), 'scenarios': list(range(1, 10))}
+    reviewed = {'revision': revision, 'imageId': image_id, 'controls': hashes(o, FILES), 'scenarios': scenario_selection(o, scenarios)}
     o.atomic_json(o.BASE / 'private/notifications-acceptance-input.json', reviewed)
     window = Window(o, revision, image_id, run_id)
     original = hashes(o, PROTECTED)

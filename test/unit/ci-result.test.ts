@@ -13,16 +13,41 @@ test("required aggregate accepts only explicit success and rejects every other r
     scope: "success",
     rehearsal: "true",
     deployment: "success",
+    artifact: "skipped",
+    event: "schedule",
+    ref: "refs/heads/main",
+  };
+  expect(requiredCi(valid)).toBe(0);
+  expect(requiredCi({ ...valid, event: "workflow_dispatch" })).toBe(0);
+  expect(requiredCi({ ...valid, event: "pull_request" })).toBe(0);
+  for (const field of ["quality", "scope", "rehearsal", "deployment", "event", "ref"])
+    for (const value of ["failure", "cancelled", "skipped", "unknown", undefined])
+      expect(requiredCi({ ...valid, [field]: value })).toBe(1);
+  for (const artifact of ["success", "failure", "cancelled", undefined])
+    expect(requiredCi({ ...valid, artifact })).toBe(1);
+  expect(requiredCi({ ...valid, event: "pull_request", artifact: "success" })).toBe(1);
+  // A scheduled or dispatched run must be the full rehearsal on main.
+  expect(requiredCi({ ...valid, ref: "refs/heads/feature" })).toBe(1);
+  expect(requiredCi({ ...valid, rehearsal: "false", deployment: "skipped" })).toBe(1);
+});
+
+test("a main push skips the rehearsal and must publish the artifact", () => {
+  const push = {
+    quality: "success",
+    scope: "success",
+    rehearsal: "false",
+    deployment: "skipped",
     artifact: "success",
     event: "push",
     ref: "refs/heads/main",
   };
-  expect(requiredCi(valid)).toBe(0);
-  expect(requiredCi({ ...valid, event: "pull_request", artifact: "skipped" })).toBe(0);
-  for (const field of ["quality", "scope", "rehearsal", "deployment", "artifact", "event", "ref"])
-    for (const value of ["failure", "cancelled", "skipped", "unknown", undefined])
-      expect(requiredCi({ ...valid, [field]: value })).toBe(1);
-  expect(requiredCi({ ...valid, event: "pull_request", artifact: "success" })).toBe(1);
+  expect(requiredCi(push)).toBe(0);
+  for (const artifact of ["skipped", "failure", "cancelled", undefined])
+    expect(requiredCi({ ...push, artifact })).toBe(1);
+  for (const deployment of ["success", "failure", "cancelled", undefined])
+    expect(requiredCi({ ...push, deployment })).toBe(1);
+  expect(requiredCi({ ...push, rehearsal: "true", deployment: "success" })).toBe(1);
+  expect(requiredCi({ ...push, ref: "refs/heads/feature" })).toBe(1);
 });
 
 test("the rehearsal may be skipped only by the path rule on a pull request", () => {
@@ -40,14 +65,12 @@ test("the rehearsal may be skipped only by the path rule on a pull request", () 
     expect(requiredCi({ ...pull, deployment })).toBe(1);
   for (const deployment of ["skipped", "failure", "cancelled", undefined])
     expect(requiredCi({ ...pull, rehearsal: "true", deployment })).toBe(1);
-  // A failed scope job never authorizes a skip, and main never skips.
+  // A failed scope job never authorizes a skip, and the schedule never skips.
   for (const scope of ["failure", "cancelled", "skipped", undefined])
     expect(requiredCi({ ...pull, scope })).toBe(1);
   for (const rehearsal of ["", "TRUE", "0", true, false, undefined])
     expect(requiredCi({ ...pull, rehearsal })).toBe(1);
-  expect(requiredCi({ ...pull, event: "push", ref: "refs/heads/main", artifact: "success" })).toBe(
-    1,
-  );
+  expect(requiredCi({ ...pull, event: "schedule", ref: "refs/heads/main" })).toBe(1);
   for (const quality of ["failure", "cancelled", "skipped", "", "unknown", undefined, null, true])
     expect(requiredCi({ quality })).toBe(1);
   for (const missing of [undefined, null, {}, []]) expect(requiredCi(missing)).toBe(1);
