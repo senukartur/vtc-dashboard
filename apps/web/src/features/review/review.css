@@ -73,8 +73,7 @@
   font-size: var(--font-small);
 }
 
-/* Queue beside the decision panel from 1200px (WIDE_QUERY in trips/layout.ts). The panel takes
-   six thirteenths so the six queue columns keep room for their longest words and badges. */
+/* Queue beside the decision panel from 1200px (WIDE_QUERY in trips/layout.ts). */
 .review-queue .review-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
