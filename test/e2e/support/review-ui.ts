@@ -156,6 +156,8 @@ export const revisions: Record<ReviewTrip, S["ManualReportRevision"][]> = {
       4,
       2,
       {
+        origin: pin(entities.harbor),
+        destination: pin(entities.ridge),
         cargoMassKg: "12200",
         actualDistanceM: "1018000",
         comment: "Fixed the mass from the screenshot",
@@ -165,12 +167,32 @@ export const revisions: Record<ReviewTrip, S["ManualReportRevision"][]> = {
     revision(
       3,
       1,
-      { cargo: pin(entities.unknown), cargoMassKg: "21200", actualDistanceM: "1108000" },
+      {
+        origin: pin(entities.harbor),
+        destination: pin(entities.ridge),
+        cargo: pin(entities.unknown),
+        cargoMassKg: "21200",
+        actualDistanceM: "1108000",
+      },
       "2026-10-29T00:31:00.000Z",
     ),
   ],
-  own: [revision(5, 1, {}, "2026-10-31T05:58:00.000Z")],
-  late: [revision(7, 1, { cargoMassKg: "21000" }, "2026-10-20T08:00:00.000Z")],
+  own: [
+    revision(
+      5,
+      1,
+      { origin: pin(entities.ridge), destination: pin(entities.harbor) },
+      "2026-10-31T05:58:00.000Z",
+    ),
+  ],
+  late: [
+    revision(
+      7,
+      1,
+      { origin: pin(entities.south), destination: pin(entities.north), cargoMassKg: "21000" },
+      "2026-10-20T08:00:00.000Z",
+    ),
+  ],
   telemetry: [],
 };
 const evidenceItems: S["Evidence"][] = [
@@ -338,7 +360,18 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
     };
   };
   // Telemetry-only facts keep an unknown mass and planned distance unavailable, never zero.
+  // The resubmission's manual facts carry a staff-resolved distance that differs from its revision.
   const facts: Partial<Record<ReviewTrip, S["EffectiveTripFacts"]>> = {
+    resubmission: effective(
+      [entities.harbor, entities.ridge, entities.transformer, entities.curtain],
+      {
+        provider: "manual",
+        actualStartAt: null,
+        actualCompletedAt: null,
+        actualDistanceM: "1012000",
+        cargoMassKg: "12200",
+      },
+    ),
     telemetry: effective([entities.mesa, entities.canyon, entities.lumber, entities.flatbed], {
       cargoMassKg: null,
       ruleContextComplete: false,

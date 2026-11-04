@@ -658,8 +658,8 @@ for (const locale of ["en", "ru"] as const)
   });
 
 const factsText = {
-  en: { facts: "Trip facts", held: "Why it is held:", unavailable: "Unavailable" },
-  ru: { facts: "Факты рейса", held: "Почему на проверке:", unavailable: "Недоступно" },
+  en: { facts: "Effective facts", held: "Why it is held:", unavailable: "Unavailable" },
+  ru: { facts: "Действующие факты", held: "Почему на проверке:", unavailable: "Недоступно" },
 } as const;
 for (const locale of ["en", "ru"] as const)
   test(`R13 ${locale} telemetry and late-telemetry reviews show trip facts and hold reasons`, async ({
@@ -734,6 +734,30 @@ for (const locale of ["en", "ru"] as const)
     }
   });
 
+for (const locale of ["en", "ru"] as const)
+  test(`R16 ${locale} manual trips show the revision diff first, then effective facts`, async ({
+    page,
+  }, info) => {
+    await open(page, "/account/review", { locale });
+    const words = factsText[locale];
+    await openTrip(page, info, reviewIds.resubmission);
+    await settled(page);
+    const diff = panel(page).locator(".review-diff"),
+      facts = panel(page).getByRole("region", { name: words.facts });
+    await expect(diff).toBeVisible();
+    await expect(facts).toContainText(locale === "en" ? "Source: Manual" : "Источник: Ручной");
+    // A staff resolution changed the distance without a new revision; the facts show it.
+    await expect(facts).toContainText(/1[,\s]012 (km|км)/);
+    expect((await box(facts)).y).toBeGreaterThan((await box(diff)).y);
+    expect(await brokenWords(panel(page))).toEqual([]);
+    await capture(page, info, `review-manual-${locale}`);
+    // A manual trip whose read has no effective facts shows only its revision.
+    await page.goto(`/account/review/${reviewIds.over}`);
+    await settled(page);
+    await expect(panel(page).locator(".review-diff")).toBeVisible();
+    await expect(panel(page).getByRole("region", { name: words.facts })).toHaveCount(0);
+  });
+
 test("R14 Escape inside the decision form keeps the draft; elsewhere it closes the panel", async ({
   page,
 }, info) => {
@@ -763,6 +787,21 @@ test("R14 Escape inside the decision form keeps the draft; elsewhere it closes t
   await page.keyboard.press("Escape");
   await expect(panel(page)).toHaveCount(0);
   await expect(page.locator(`#trip-link-${reviewIds.over}`)).toBeFocused();
+  // After a decision focus lands on the form heading; Escape there closes the panel. The decided
+  // trip left Awaiting, so focus falls back to the queue table.
+  await page.locator(`#trip-link-${reviewIds.over}`).press("Enter");
+  await settled(page);
+  await page.locator("#review-choice-accept").click();
+  await page.locator("#review-reason").fill("Fictional waiver");
+  await page.locator("#review-confirm-limits").check();
+  await form(page).getByRole("button", { name: "Accept trip", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(form(page).getByRole("status")).toBeVisible();
+  const decisionHeading = form(page).getByRole("heading", { level: 3 }).first();
+  await expect(decisionHeading).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toHaveCount(0);
+  await expect(table(page)).toBeFocused();
 });
 
 // A tab switch and a filter change in quick succession keep both (router updates are

@@ -97,8 +97,13 @@ export function DecisionPanel({
     // section; their Escape only closes the dialog, never the panel.
     const target = event.target as Node;
     if (!event.currentTarget.contains(target)) return;
-    // Escape inside the decision form never discards a draft choice, reason or confirmation.
-    if (target instanceof Element && target.closest(".review-form")) return;
+    // Escape on a decision control never discards a draft choice, reason or confirmation; the
+    // form's heading (focused after a result) and other text still close the panel.
+    if (
+      target instanceof Element &&
+      target.closest(".review-form :is(textarea, input, select, button)")
+    )
+      return;
     event.stopPropagation();
     onClose();
   }
@@ -106,11 +111,17 @@ export function DecisionPanel({
     history = review
       ? historyItems(revisions.isError ? [] : revisionItems, review.trip.decisions)
       : [],
-    // Telemetry-only trips have no revision to compare, and late telemetry changed the confirmed
-    // facts, so both show the trip's effective facts.
-    facts = review && (!revision || review.trip.summary.sourceKinds.includes("ets2telemetry")) && (
+    // Effective facts can differ from the manual revision (telemetry, an approved staff
+    // resolution), so they show whenever the read has them; a trip without facts or a manual
+    // revision still states that its facts are unavailable.
+    facts = review && (review.trip.effectiveFacts || !revision) && (
       <TripFacts facts={review.trip.effectiveFacts} game={review.trip.summary.game} />
     ),
+    // Telemetry facts lead on trips with a telemetry source (late telemetry changed them); a
+    // manual trip shows its revision diff first.
+    telemetryFirst = !!review?.trip.summary.sourceKinds.includes("ets2telemetry"),
+    leading = telemetryFirst ? facts : null,
+    trailing = telemetryFirst ? null : facts,
     diff = review && revision && (
       <RevisionDiff
         revision={revision}
@@ -209,8 +220,9 @@ export function DecisionPanel({
           (variant === "page" ? (
             <div className="review-decision-columns">
               <div className="review-column">
-                {facts}
+                {leading}
                 {diff}
+                {trailing}
                 {evidence}
                 {check}
               </div>
@@ -221,8 +233,9 @@ export function DecisionPanel({
             </div>
           ) : (
             <>
-              {facts}
+              {leading}
               {diff}
+              {trailing}
               {evidence}
               {check}
               {log}

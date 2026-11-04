@@ -220,7 +220,10 @@ export function ReviewQueuePage() {
                   size="xs"
                   onClick={() => {
                     // This button unmounts with the empty state; keep focus on the chosen tab.
-                    document.querySelector<HTMLElement>(".review-tabs button:last-child")?.focus();
+                    const label = t("decidedTab");
+                    Array.from(document.querySelectorAll<HTMLElement>(".review-tabs button"))
+                      .find((button) => button.textContent === label)
+                      ?.focus();
                     tab("decided");
                   }}
                 >
