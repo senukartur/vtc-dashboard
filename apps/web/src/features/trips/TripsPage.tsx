@@ -15,16 +15,12 @@ import {
   queryString,
   selectedTrip,
   selectionSearch,
-  type TripSource,
   tripFilters,
+  tripSourceLabels,
   tripSources,
 } from "./transport.js";
 import "./trips.css";
 import "./trips-list.css";
-const sourceLabels: Record<TripSource, "sourceTelemetry" | "sourceManual"> = {
-  ets2telemetry: "sourceTelemetry",
-  manual: "sourceManual",
-};
 export function TripsPage() {
   const { t } = useTranslation("trips"),
     session = useSession(),
@@ -133,7 +129,7 @@ export function TripsPage() {
           <option value="">{t("anySource")}</option>
           {tripSources.map((source) => (
             <option value={source} key={source}>
-              {t(sourceLabels[source])}
+              {t(tripSourceLabels[source])}
             </option>
           ))}
         </Select>

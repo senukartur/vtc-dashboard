@@ -119,6 +119,11 @@ export function attemptFor(fingerprint: string, previous: Attempt | null): Attem
 export type TripSource = DTO["TripSummary"]["sourceKinds"][number];
 /** The listTrips `source` vocabulary, typed against TripSummary.sourceKinds. */
 export const tripSources = ["ets2telemetry", "manual"] as const satisfies readonly TripSource[];
+/** Translation keys ("trips" namespace) of the source filter options. */
+export const tripSourceLabels: Record<TripSource, "sourceTelemetry" | "sourceManual"> = {
+  ets2telemetry: "sourceTelemetry",
+  manual: "sourceManual",
+};
 export function tripFilters(params: URLSearchParams) {
   const scope = params.get("scope");
   const game = params.get("game");
