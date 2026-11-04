@@ -51,6 +51,7 @@ describe("queue parameters", () => {
     expect(queueParams(new URLSearchParams())).toEqual({
       tab: "awaiting",
       game: undefined,
+      source: undefined,
       decision: undefined,
       order: "asc",
       trip: null,
@@ -60,12 +61,35 @@ describe("queue parameters", () => {
       queueParams(
         new URLSearchParams("tab=wrong&game=gta&decision=accepted&order=up&trip=not-a-uuid"),
       ),
-    ).toEqual({ tab: "awaiting", game: undefined, decision: undefined, order: "asc", trip: null });
+    ).toEqual({
+      tab: "awaiting",
+      game: undefined,
+      source: undefined,
+      decision: undefined,
+      order: "asc",
+      trip: null,
+    });
     expect(
       queueParams(
         new URLSearchParams(`tab=decided&game=ats&decision=rejected&order=asc&trip=${trip}`),
       ),
-    ).toEqual({ tab: "decided", game: "ats", decision: "rejected", order: "asc", trip });
+    ).toEqual({
+      tab: "decided",
+      game: "ats",
+      source: undefined,
+      decision: "rejected",
+      order: "asc",
+      trip,
+    });
+  });
+  test("source is validated on both tabs; unknown values mean any source", () => {
+    expect(queueParams(new URLSearchParams("source=manual")).source).toBe("manual");
+    expect(queueParams(new URLSearchParams("tab=decided&source=ets2telemetry"))).toMatchObject({
+      tab: "decided",
+      source: "ets2telemetry",
+    });
+    for (const value of ["bogus", "MANUAL", ""])
+      expect(queueParams(new URLSearchParams({ source: value })).source).toBeUndefined();
   });
   test("list queries bind hold, order and the decided-only decision", () => {
     const awaiting = queueParams(new URLSearchParams("game=ets2&decision=accepted"));
@@ -77,11 +101,32 @@ describe("queue parameters", () => {
       "scope=review&hold=false&decision=accepted&order=desc&limit=25&cursor=next",
     );
   });
+  test("list queries send a valid source after the game on both tabs", () => {
+    const awaiting = queueParams(new URLSearchParams("game=ets2&source=manual&order=asc"));
+    expect(queryString(listQuery(awaiting, null))).toBe(
+      "scope=review&hold=true&game=ets2&source=manual&order=asc&limit=25",
+    );
+    const decided = queueParams(
+      new URLSearchParams(`tab=decided&source=ets2telemetry&decision=accepted&trip=${trip}`),
+    );
+    expect(queryString(listQuery(decided, "next"))).toBe(
+      "scope=review&hold=false&source=ets2telemetry&decision=accepted&order=desc&limit=25&cursor=next",
+    );
+    expect(queryString(listQuery(queueParams(new URLSearchParams("source=bogus")), null))).toBe(
+      "scope=review&hold=true&order=asc&limit=25",
+    );
+  });
   test("back links keep validated non-default filters only", () => {
     expect(queueSearch(new URLSearchParams(`trip=${trip}&cursor=x&order=asc`))).toBe("");
     expect(queueSearch(new URLSearchParams("tab=decided&game=ats&order=asc&secret=1"))).toBe(
       "?tab=decided&game=ats&order=asc",
     );
+    expect(
+      queueSearch(
+        new URLSearchParams(`tab=decided&game=ats&source=manual&order=asc&trip=${trip}&cursor=x`),
+      ),
+    ).toBe("?tab=decided&game=ats&source=manual&order=asc");
+    expect(queueSearch(new URLSearchParams("source=bogus&game=ets2"))).toBe("?game=ets2");
   });
 });
 
