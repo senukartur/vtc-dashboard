@@ -66,9 +66,15 @@ function DashboardContent() {
   const [period, setPeriod] = useState<PeriodFilter>("thisMonth");
   const [granularity, setGranularity] = useState<"day" | "month">("day");
 
-  // Period data waits for the reporting timezone, so the first request already has its dates.
+  // Overview reads wait for the reporting timezone, so the first period request already has its
+  // dates and, on a cold load, analytics and the leaderboard enter the read queue first. A failed
+  // read that is being retried still waits, so no request uses the fallback dates first.
   const timezoneQuery = useReportingTimezoneSource();
-  const reportingTimezone = periodTimeZone(timezoneQuery.data, timezoneQuery.isError);
+  const reportingTimezone = periodTimeZone(
+    timezoneQuery.data,
+    timezoneQuery.isError && !timezoneQuery.isFetching,
+  );
+  const anchored = reportingTimezone !== undefined;
   const dates = computePeriodDates(
     period,
     new Date(),
@@ -81,7 +87,7 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     granularity,
-    enabled: reportingTimezone !== undefined,
+    enabled: anchored,
   });
 
   // Contract maximum: the widget shows the top ten, the KPI counts every returned driver.
@@ -90,15 +96,30 @@ function DashboardContent() {
     toDateExclusive: dates.toDateExclusive,
     game: effectiveGame,
     limit: 100,
-    enabled: reportingTimezone !== undefined,
+    enabled: anchored,
   });
 
-  const ets2ProgressQuery = useMyQualificationProgress("ets2");
-  const atsProgressQuery = useMyQualificationProgress("ats");
-  const upcomingEventQuery = useUpcomingEvent();
-  const reviewTripsQuery = useReviewQueueTrips();
+  // Enabled in the same render as the period reads and after them in hook order. The shell chip
+  // keeps its own enabled observer of the nearest event.
+  const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
+  const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
+  const upcomingEventQuery = useUpcomingEvent({ enabled: anchored });
+  const reviewTripsQuery = useReviewQueueTrips({ enabled: anchored });
   // Follows the game filter only: the trips list has no date filter for the period.
-  const recentTripsQuery = useRecentCompanyTrips(effectiveGame);
+  const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
+
+  /**
+   * Retry rereads a failed or zone-less stats read first. A new zone changes the period keys and
+   * those queries fetch on their own; refetching the current ones would repeat the old dates.
+   */
+  const retryPeriodData = async () => {
+    if (timezoneQuery.isError || timezoneQuery.data?.currentMonth.status === "unavailable") {
+      const result = await timezoneQuery.refetch({ cancelRefetch: false });
+      if (periodTimeZone(result.data, result.isError) !== reportingTimezone) return;
+    }
+    void analyticsQuery.refetch({ cancelRefetch: false });
+    void leaderboardQuery.refetch({ cancelRefetch: false });
+  };
 
   const canReview = capabilities.includes("trips.review");
   const analytics = analyticsQuery.data;
@@ -172,9 +193,7 @@ function DashboardContent() {
             variant="outline"
             onClick={() => {
               titleRef.current?.focus();
-              if (timezoneQuery.isError) void timezoneQuery.refetch();
-              void analyticsQuery.refetch();
-              void leaderboardQuery.refetch();
+              void retryPeriodData();
             }}
           >
             {t("states.retry")}

@@ -168,7 +168,8 @@ export function useTripStatusSummary(game?: "ets2" | "ats") {
   });
 }
 
-export function useUpcomingEvent() {
+/** The shell chip calls this without options; the overview gates its own observer. */
+export function useUpcomingEvent(options?: { enabled?: boolean | undefined }) {
   const session = useSession();
   const path = "/me/upcoming-event";
 
@@ -182,7 +183,7 @@ export function useUpcomingEvent() {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 60000,
     queryFn: async ({ signal }) => {
@@ -198,7 +199,10 @@ export function useUpcomingEvent() {
   });
 }
 
-export function useMyQualificationProgress(game: "ets2" | "ats") {
+export function useMyQualificationProgress(
+  game: "ets2" | "ats",
+  options?: { enabled?: boolean | undefined },
+) {
   const session = useSession();
   const { i18n } = useTranslation();
   const path = `/me/qualification-progress?game=${game}`;
@@ -215,7 +219,8 @@ export function useMyQualificationProgress(game: "ets2" | "ats") {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("trips.submit_own"),
+    enabled:
+      options?.enabled !== false && !!session.self?.capabilities.includes("trips.submit_own"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -235,7 +240,10 @@ export function useMyQualificationProgress(game: "ets2" | "ats") {
  * Latest accepted company trips for the overview. It follows the page game filter; the period
  * filter does not apply because the trips list has no date filter.
  */
-export function useRecentCompanyTrips(game?: "ets2" | "ats") {
+export function useRecentCompanyTrips(
+  game?: "ets2" | "ats",
+  options?: { enabled?: boolean | undefined },
+) {
   const session = useSession();
   const client = useQueryClient();
   const { i18n } = useTranslation();
@@ -252,7 +260,7 @@ export function useRecentCompanyTrips(game?: "ets2" | "ats") {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("company.read"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("company.read"),
     retry: false,
     staleTime: 30000,
     queryFn: async ({ signal }) => {
@@ -275,7 +283,7 @@ export function useRecentCompanyTrips(game?: "ets2" | "ats") {
   });
 }
 
-export function useReviewQueueTrips() {
+export function useReviewQueueTrips(options?: { enabled?: boolean | undefined }) {
   const session = useSession();
   const { i18n } = useTranslation();
   const path = "/trips?scope=review&decision=pending_review&limit=5";
@@ -291,7 +299,7 @@ export function useReviewQueueTrips() {
       path,
     ],
     meta: { private: true },
-    enabled: !!session.self?.capabilities.includes("trips.review"),
+    enabled: options?.enabled !== false && !!session.self?.capabilities.includes("trips.review"),
     retry: false,
     staleTime: 15000,
     queryFn: async ({ signal }) => {

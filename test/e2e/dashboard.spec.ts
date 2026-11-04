@@ -54,6 +54,9 @@ function lastRequest(state: DashboardMockState, path: string) {
 }
 const statsPath = "/api/v1/public/company-stats";
 const periodPaths = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"] as const;
+// Overview reads gated on the reporting timezone besides the period reads (review queue and recent
+// trips both read /trips).
+const secondaryPaths = ["/api/v1/me/qualification-progress", "/api/v1/trips"] as const;
 /** Period requests to one or both period endpoints, optionally for one date range. */
 function periodRequests(
   state: DashboardMockState,
@@ -251,14 +254,17 @@ test.describe("Company Dashboard E2E", () => {
     for (const path of periodPaths) expect(periodRequests(state, path)).toHaveLength(4);
   });
 
-  test("waits for the reporting timezone before requesting period data", async ({ page }) => {
+  test("waits for the reporting timezone before requesting overview data", async ({ page }) => {
     await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
     const state = await mockDashboardRoutes(page, { filterAware: true });
     state.hold("stats");
     await page.goto("/account/dashboard");
     await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
+    // Reads outside the gate still run: the shell chip's nearest event and the level names.
     await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
-    expect(requestsTo(state, "/api/v1/analytics/")).toEqual([]);
+    await expect.poll(() => requestsTo(state, "/api/v1/qualification-levels").length).toBe(2);
+    for (const path of [...periodPaths, ...secondaryPaths])
+      expect(requestsTo(state, path)).toEqual([]);
     await expect(loadingStatus(page)).toHaveCount(1);
     for (const button of await gameGroup(page).getByRole("button").all())
       await expect(button).toBeEnabled();
@@ -272,6 +278,15 @@ test.describe("Company Dashboard E2E", () => {
       expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
       expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
     }
+    // Progress for both games, the review queue and the recent trips follow the period reads.
+    await expect.poll(() => requestsTo(state, "/api/v1/me/qualification-progress").length).toBe(2);
+    await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(2);
+    const firstIndex = (path: string) =>
+      state.requests.findIndex((url) => url.pathname.startsWith(path));
+    const lastPeriod = Math.max(...periodPaths.map(firstIndex));
+    const firstSecondary = Math.min(...secondaryPaths.map(firstIndex));
+    expect(lastPeriod).toBeGreaterThanOrEqual(0);
+    expect(firstSecondary).toBeGreaterThan(lastPeriod);
   });
 
   for (const variant of ["failed", "unavailable"] as const) {
@@ -293,6 +308,103 @@ test.describe("Company Dashboard E2E", () => {
       }
     });
   }
+
+  test("rereads a failed timezone on Retry and requests only the new dates", async ({ page }) => {
+    // Moscow is already in November; the UTC fallback is still in October.
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, {
+      filterAware: true,
+      failures: { stats: 503, analytics: 503 },
+    });
+    await page.goto("/account/dashboard");
+    const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+    await expect(alert).toBeVisible();
+    expect(requestsTo(state, statsPath)).toHaveLength(1);
+    expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("fromDate")).toBe(
+      "2026-10-01",
+    );
+
+    delete state.failures.stats;
+    delete state.failures.analytics;
+    const before = state.requests.length;
+    await alert.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    await loaded(page);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    expect(requestsTo(state, statsPath)).toHaveLength(2);
+    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+    for (const path of periodPaths)
+      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+    for (const url of after) {
+      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+    }
+  });
+
+  test("waits for a failed timezone that is reread when the overview remounts", async ({
+    page,
+  }) => {
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, {
+      filterAware: true,
+      failures: { stats: 503, analytics: 503 },
+    });
+    await page.goto("/account/dashboard");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" }),
+    ).toBeVisible();
+
+    // Leave and return in the same document, so the failed queries stay cached.
+    delete state.failures.stats;
+    delete state.failures.analytics;
+    await page.evaluate(() => {
+      history.pushState(null, "", "/account/drivers");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(page.getByRole("heading", { name: "Company Overview", exact: true })).toHaveCount(
+      0,
+    );
+    const before = state.requests.length;
+    await page.goBack();
+    await loaded(page);
+    expect(requestsTo(state, statsPath)).toHaveLength(2);
+    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+    for (const path of periodPaths)
+      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+    for (const url of after) {
+      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+    }
+  });
+
+  test("rereads an unavailable timezone on Retry after the zone is set", async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+    const state = await mockDashboardRoutes(page, {
+      filterAware: true,
+      reportingTimezone: null,
+      failures: { analytics: 409 },
+    });
+    await page.goto("/account/dashboard");
+    const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+    await expect(alert).toBeVisible();
+    expect(requestsTo(state, statsPath)).toHaveLength(1);
+
+    // A director sets the zone; the next stats read carries it.
+    state.reportingTimezone = "Europe/Moscow";
+    delete state.failures.analytics;
+    const before = state.requests.length;
+    await alert.getByRole("button", { name: "Retry", exact: true }).click();
+    await loaded(page);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    expect(requestsTo(state, statsPath)).toHaveLength(2);
+    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+    for (const path of periodPaths)
+      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+    for (const url of after) {
+      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+    }
+  });
 
   test("shows the assigned qualification names for each game instead of UUIDs", async ({
     page,
