@@ -76,6 +76,10 @@ test("the review job publishes the status the main ruleset requires", () => {
   expect(review).toContain("context: 'Advisory review'");
   // A cancelled review publishes nothing, so a newer run decides the status.
   expect(review).toContain("!cancelled() && (steps.target.outputs.eligible == 'true'");
+  // Reviews of different heads never cancel each other (VTC-075).
+  expect(review).toMatch(
+    /group: claude-review-\$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \}\}-\$\{\{ github\.event\.workflow_run\.head_sha \}\}/,
+  );
   // The on-demand job must not publish the required status.
   expect(workflow.split(/\r?\n {2}mention:/)[1]).not.toContain("createCommitStatus");
 });

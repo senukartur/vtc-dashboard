@@ -13,7 +13,9 @@ on:
 permissions:
   contents: read
 
-# A newer review request for a PR intentionally cancels its older in-flight review.
+# A newer on-demand request for a PR cancels its older in-flight on-demand review. Automatic
+# reviews are keyed by the reviewed head (VTC-075): a late event for an older head must not
+# cancel the review that publishes the required status for the current head.
 jobs:
   review:
     name: Automatic PR review
@@ -23,7 +25,7 @@ jobs:
       github.event.workflow_run.pull_requests[0].number &&
       github.event.workflow_run.head_repository.full_name == github.repository
     concurrency:
-      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
+      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20

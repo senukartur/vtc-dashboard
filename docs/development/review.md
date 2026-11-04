@@ -26,9 +26,9 @@ The owner made the automatic review a merge gate on 2026-11-04 ([VTC-075](https:
 - **success** when the review was published for that head;
 - **failure** when the review or its publication failed; re-run the workflow run to retry;
 - **success** with "advisory review not run" for Dependabot PRs, which the review excludes;
-- **nothing** when the run was cancelled or the PR head changed; the newer run decides.
+- **nothing** when the run was cancelled or the PR head had already changed; the newer run decides. If the head changes while the review runs, publication fails and the old head gets **failure**, which no longer affects the PR.
 
-The main ruleset requires that status from GitHub Actions (app `15368`) next to **Required CI**. Inline findings then block merge through the resolved-conversations rule until they are resolved. The review stays advisory in content. Findings outside the diff appear only in the summary and do not block. Fork PRs get no automatic review and stay blocked, and an `@claude` on-demand review does not publish the status. A Claude outage blocks merges until the run is re-run.
+The main ruleset requires that status from GitHub Actions (app `15368`) next to **Required CI**. Inline findings then block merge through the resolved-conversations rule until they are resolved. The review stays advisory in content. Findings outside the diff appear only in the summary and do not block. Fork PRs get no automatic review and stay blocked, and an `@claude` on-demand review does not publish the status. Automatic reviews share a concurrency group only per PR head, so a late CI event for an older head cannot cancel the review of the current head; repeated CI runs of the same head still cancel each other, and the last one publishes. A Claude outage blocks merges until the run is re-run.
 
 Apply order: merge the workflow change first, because `workflow_run` loads it from main, and only then apply the ruleset. Open PRs at that moment need their review re-run to receive the status.
 
