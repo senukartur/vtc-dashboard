@@ -25,7 +25,10 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "required_status_checks": [{ "context": "Required CI", "integration_id": 15368 }],
+        "required_status_checks": [
+          { "context": "Required CI", "integration_id": 15368 },
+          { "context": "Advisory review", "integration_id": 15368 }
+        ],
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false
       }

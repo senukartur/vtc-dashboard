@@ -13,7 +13,9 @@ on:
 permissions:
   contents: read
 
-# A newer review request for a PR intentionally cancels its older in-flight review.
+# A newer on-demand request for a PR cancels its older in-flight on-demand review. Automatic
+# reviews are keyed by the reviewed head (VTC-075): a late event for an older head must not
+# cancel the review that publishes the required status for the current head.
 jobs:
   review:
     name: Automatic PR review
@@ -23,13 +25,20 @@ jobs:
       github.event.workflow_run.pull_requests[0].number &&
       github.event.workflow_run.head_repository.full_name == github.repository
     concurrency:
-      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number || github.event.issue.number }}
+      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # No commit-status permission here: the Claude step reads untrusted PR content, so the
+    # merge-gate status is published by the separate status job below (VTC-075).
     permissions:
       contents: read
       pull-requests: write
+    outputs:
+      eligible: ${{ steps.target.outputs.eligible }}
+      exempt: ${{ steps.target.outputs.exempt }}
+      head_sha: ${{ steps.target.outputs.head_sha }}
+      published: ${{ steps.publish.outcome == 'success' }}
     steps:
       - name: Check review target
         id: target
@@ -46,12 +55,18 @@ jobs:
             --jq '[.author.login, .isCrossRepository, .isDraft, .state, .headRefOid, .baseRefOid, .baseRefName] | @tsv')
           IFS=$'\t' read -r author_login is_cross_repository is_draft state head_sha base_sha base_ref <<< "$target"
           eligible=false
+          exempt=false
+          # Dependabot PRs are not reviewed; their required status records that instead (VTC-075).
+          if [[ "$author_login" == "dependabot[bot]" && "$is_cross_repository" == "false" &&                 "$state" == "OPEN" && "$head_sha" == "$REVIEWED_HEAD_SHA" ]]; then
+            exempt=true
+          fi
           if [[ "$author_login" != "dependabot[bot]" && "$is_cross_repository" == "false" && "$is_draft" == "false" && \
                 "$state" == "OPEN" && "$head_sha" == "$REVIEWED_HEAD_SHA" && \
                 "$base_ref" == "$DEFAULT_BRANCH" ]]; then
             eligible=true
           fi
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "exempt=$exempt" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,6 +135,7 @@ jobs:
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Grep(./.git/**),Glob(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        id: publish
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
@@ -228,6 +244,58 @@ jobs:
               body,
               event: 'COMMENT',
               comments,
+            });
+
+  # Required by the main ruleset (VTC-075), so auto-merge waits for this review and its inline
+  # threads. Only this job may write commit statuses, and it runs no PR-controlled input: it reads the
+  # review job's validated target and step outcome. It also runs after a cancelled or timed-out
+  # review, so that head shows a visible failure instead of a missing status.
+  review-status:
+    name: Required review status
+    needs: [review]
+    if: >-
+      always() &&
+      (needs.review.outputs.eligible == 'true' || needs.review.outputs.exempt == 'true')
+    # The latest run for a head publishes last: a newer status job waits for an older one.
+    concurrency:
+      group: claude-review-status-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish required review status
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          REVIEW_HEAD_SHA: ${{ needs.review.outputs.head_sha }}
+          EXEMPT: ${{ needs.review.outputs.exempt }}
+          PUBLISHED: ${{ needs.review.outputs.published }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+        with:
+          script: |
+            const sha = process.env.REVIEW_HEAD_SHA || '';
+            if (!/^[0-9a-f]{40}$/i.test(sha)) {
+              core.setFailed('No valid pull request head SHA was provided.');
+              return;
+            }
+            const exempt = process.env.EXEMPT === 'true';
+            const published = process.env.PUBLISHED === 'true' && process.env.REVIEW_RESULT === 'success';
+            const cancelled = process.env.REVIEW_RESULT === 'cancelled';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              context: 'Advisory review',
+              state: exempt || published ? 'success' : 'failure',
+              description: exempt
+                ? 'Dependabot PR: advisory review not run'
+                : published
+                  ? 'Advisory review published for this head'
+                  : cancelled
+                    ? 'Advisory review cancelled or timed out; re-run the workflow'
+                    : 'Advisory review failed; re-run the workflow',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 
   mention:
