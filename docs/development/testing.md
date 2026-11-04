@@ -36,7 +36,7 @@ pnpm test:local selected --skip-check --project desktop-chromium -- test/integra
 pnpm test:local e2e --project mobile-chromium
 ```
 
-`selected` takes lane names (whole lane) and test files under `test/{unit,contracts,integration}/*.test.ts`, `test/e2e/*.spec.ts` or the two persistence files. Files are grouped into lanes in the usual order; every selected lane runs even after a failure, and the run exits nonzero if any failed. `--project` restricts Playwright to one configured project. `--skip-check` skips `pnpm check` inside the stack but still runs `pnpm build`; run `pnpm check` yourself before publishing. The launcher and the in-stack runner both validate the selection; the full suite, `failure-reporting` and probes refuse these options, and `scripts/test-ci.mjs` accepts none of them (only a CI group and an e2e shard).
+`selected` takes lane names (whole lane) and test files under `test/{unit,contracts,integration}/*.test.ts`, `test/e2e/*.spec.ts` or the two persistence files. Files are grouped into lanes in the usual order; every selected lane runs even after a failure, and the run exits nonzero if any failed. `--project` restricts Playwright to one configured project. `--skip-check` skips `pnpm check` inside the stack but still runs `pnpm build`; run `pnpm check` yourself before publishing. The launcher and the in-stack runner both validate the selection; the full suite, `failure-reporting` and probes refuse these options, and `scripts/test-ci.mjs` accepts none of them (only a CI group and an integration or e2e shard).
 
 ### CI groups
 
@@ -44,12 +44,12 @@ CI splits the aggregate into parallel groups, each in its own isolated stack (se
 
 ```sh
 pnpm test:local core                                    # check, build, isolation, unit, contracts, failure-reporting
-pnpm test:local integration --skip-check
+pnpm test:local integration --skip-check --shard 1/2     # one Vitest shard of the integration files
 pnpm test:local persistence-recovery --skip-check
-pnpm test:local e2e --skip-check --shard 2/4            # one Playwright shard of all three projects
+pnpm test:local e2e --skip-check --shard 2/6            # one Playwright shard of all three projects
 ```
 
-`ciGroups` in [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) defines the groups; a unit test proves that together they run every stage of `all` exactly once. `core` always runs `pnpm check` and refuses `--skip-check`; the other groups leave check to `core` and still build. `--shard <i/n>` (1 ≤ i ≤ n ≤ 8) is accepted only by `e2e` and passes `--shard=i/n` to Playwright; probes refuse it. A group stops at its first failed stage, like `all`.
+`ciGroups` in [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) defines the groups; a unit test proves that together they run every stage of `all` exactly once. `core` always runs `pnpm check` and refuses `--skip-check`; the other groups leave check to `core` and still build. `--shard <i/n>` (1 ≤ i ≤ n ≤ 8) is accepted only by `integration` and `e2e` and passes `--shard=i/n` to Vitest or Playwright; probes refuse it. Both split by file count, not by duration. A group stops at its first failed stage, like `all`.
 
 `pnpm test:affected` compares the working tree (committed, staged, unstaged and untracked) with the merge base of `origin/main` (or `--base <ref>`). [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) maps each changed path: a changed test selects itself; a feature area selects its tests on every layer by name prefix; `test/e2e/support/` selects the e2e lane and `test/persistence/` the persistence and recovery lanes; Markdown, `docs/`, `.github/`, `.claude/` and `.agents/` select nothing. Any other path, including migrations, shared packages, the app shell, `test/support/`, configuration and the harness itself, selects every lane. Add new modules to the area map; a unit test fails when a contract, integration or browser test cannot be reached from any area. Unit and contract files can also run natively with `VTC_TEST_SELECTION="<files>" pnpm test:selected` after `pnpm build:packages`, without Docker's network boundary.
 
