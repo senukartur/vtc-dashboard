@@ -27,7 +27,13 @@ async function run(args, env = base) {
     console.log(eventLine(args[0], code, Date.now() - started));
   return code;
 }
-const check = await run(["check"]);
+// Only a focused local run may skip check; the full suite and probes always run it.
+const skipCheck =
+  process.env.VTC_TEST_SKIP_CHECK === "1" &&
+  !["all", "failure-reporting"].includes(process.env.VTC_TEST_FOCUS) &&
+  !process.env.VTC_TEST_PROBE;
+if (skipCheck) console.log("STACK check: SKIPPED (focused local run)");
+const check = skipCheck ? 0 : await run(["check"]);
 const build = interrupted ? 130 : await run(["build"]);
 let tests = 1;
 if (build === 0 && !interrupted)
@@ -44,6 +50,8 @@ if (build === 0 && !interrupted)
       VTC_TEST_ROOT_PASSWORD: process.env.VTC_TEST_ROOT_PASSWORD,
       VTC_TEST_LAUNCH: process.env.VTC_TEST_LAUNCH,
       VTC_TEST_PROBE: process.env.VTC_TEST_PROBE,
+      VTC_TEST_SELECTION: process.env.VTC_TEST_SELECTION,
+      VTC_TEST_PROJECT: process.env.VTC_TEST_PROJECT,
     },
   );
 process.exitCode = check || build || tests;
