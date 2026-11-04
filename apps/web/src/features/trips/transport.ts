@@ -116,17 +116,35 @@ export function attemptFor(fingerprint: string, previous: Attempt | null): Attem
     ? previous
     : { fingerprint, key: crypto.randomUUID() };
 }
+export type TripSource = DTO["TripSummary"]["sourceKinds"][number];
+/** The listTrips `source` vocabulary, typed against TripSummary.sourceKinds. */
+export const tripSources = ["ets2telemetry", "manual"] as const satisfies readonly TripSource[];
 export function tripFilters(params: URLSearchParams) {
   const scope = params.get("scope");
   const game = params.get("game");
   const decision = params.get("decision");
+  const source = params.get("source");
   return {
     scope: scope === "company" ? "company" : "mine",
     game: game === "ats" || game === "ets2" ? game : undefined,
     decision: ["unassessed", "pending_review", "accepted", "rejected"].includes(decision ?? "")
       ? decision
       : undefined,
+    // Unknown values mean "any source" and are never sent.
+    source: tripSources.find((value) => value === source),
   };
+}
+/**
+ * Next search after a filter change: set or clear one key and drop the cursor and selection.
+ * Built from the current location string so rapid successive changes never read stale params.
+ */
+export function filterSearch(search: string, key: string, value: string): URLSearchParams {
+  const next = new URLSearchParams(search);
+  if (value) next.set(key, value);
+  else next.delete(key);
+  next.delete("cursor");
+  next.delete("trip");
+  return next;
 }
 export function canonicalDecimal(value: string): string | undefined {
   const clean = value.trim().replace(",", ".");

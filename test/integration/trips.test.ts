@@ -2,9 +2,16 @@ import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { membership, roles } from "@vtc/db/identity-schema";
 import {
+  and,
+  asc,
+  desc,
   eq,
+  isNull,
+  lt,
+  or,
   sourceMessages,
   sourcePayloads,
+  sourceTrips,
   tripFacts,
   tripFactTrailers,
   tripHistory,
@@ -32,6 +39,7 @@ import {
   createTrips,
   type SourceContext,
   type Trips,
+  tripSourceCondition,
 } from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
@@ -134,6 +142,8 @@ beforeAll(async () => {
   service = createTrips(unit, config, { identity }, now);
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
+  // Alias members reference their root; detach them so the restrictive self-reference allows cleanup.
+  await control.query("UPDATE trips SET alias_of=NULL");
   for (const table of [
     "trip_history",
     "trip_fact_trailers",
@@ -1423,6 +1433,359 @@ test("representative mixed history uses bounded ordered company, owner and revie
   expect(Number(company[0]?.rows)).toBeLessThan(600);
   expect(Number(mine[0]?.rows)).toBeLessThan(600);
   expect(Number(queue[0]?.rows)).toBeLessThan(600);
+});
+
+type SourceKind = "ets2telemetry" | "manual";
+type Decision = (typeof trips.$inferInsert)["decision"];
+const sourceRow = (
+  tripId: string,
+  ownerId: string,
+  game: "ets2" | "ats",
+  provider: SourceKind,
+) => ({
+  id: newId(),
+  provider,
+  game,
+  sessionKey: Buffer.from(newId(), "ascii"),
+  tripKey: Buffer.from(newId(), "ascii"),
+  ownerId,
+  canonicalTripId: tripId,
+  latestRevision: "1",
+  connectionContext: {},
+  createdAt: new Date(instant).toISOString(),
+});
+const tripRow = (
+  id: string,
+  ownerId: string,
+  spec: { game?: "ets2" | "ats"; decision?: Decision; hold?: boolean },
+  aliasOf: string | null = null,
+) => {
+  // Every synthetic trip is one second newer than the previous one.
+  instant += 1000;
+  return {
+    id,
+    ownerId,
+    game: spec.game ?? ("ets2" as const),
+    aliasOf,
+    version: 1,
+    outcome: "delivered" as const,
+    recording: "complete" as const,
+    decision: spec.decision ?? ("unassessed" as const),
+    reviewHold: spec.hold ?? false,
+    reviewReasons: [],
+    createdAt: new Date(instant).toISOString(),
+  };
+};
+/** Synthetic root trip with root sources and an optional alias member carrying more sources. */
+async function seedSourced(
+  ownerId: string,
+  spec: {
+    game?: "ets2" | "ats";
+    decision?: Decision;
+    hold?: boolean;
+    sources?: SourceKind[];
+    aliasSources?: SourceKind[];
+  },
+) {
+  const id = newId(),
+    member = spec.aliasSources ? newId() : null,
+    game = spec.game ?? "ets2";
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(trips).values(tripRow(id, ownerId, spec));
+    if (member) await db.insert(trips).values(tripRow(member, ownerId, { game }, id));
+    const sources = [
+      ...(spec.sources ?? []).map((p) => sourceRow(id, ownerId, game, p)),
+      ...(member ? (spec.aliasSources ?? []).map((p) => sourceRow(member, ownerId, game, p)) : []),
+    ];
+    if (sources.length) await db.insert(sourceTrips).values(sources);
+  });
+  return { id, member };
+}
+/** T1..T8 and newer fillers F (newest first) for the source-filter matrix. */
+async function sourceMatrix() {
+  const o = owner.userId,
+    x = other.userId;
+  const T1 = (await seedSourced(o, { decision: "accepted", sources: ["ets2telemetry"] })).id;
+  const T2 = (await seedSourced(o, { decision: "pending_review", hold: true, sources: ["manual"] }))
+    .id;
+  const T3 = (
+    await seedSourced(o, {
+      decision: "accepted",
+      game: "ats",
+      sources: ["ets2telemetry", "manual"],
+    })
+  ).id;
+  const T4 = (await seedSourced(o, {})).id;
+  const t5 = await seedSourced(o, {
+    decision: "accepted",
+    sources: ["ets2telemetry"],
+    aliasSources: ["manual"],
+  });
+  const T5 = t5.id,
+    A5 = t5.member as string;
+  const T6 = (await seedSourced(x, { decision: "accepted", game: "ats", sources: ["manual"] })).id;
+  const T7 = (await seedSourced(x, { decision: "rejected", hold: true, sources: ["manual"] })).id;
+  const T8 = (
+    await seedSourced(x, { decision: "pending_review", hold: true, sources: ["ets2telemetry"] })
+  ).id;
+  const F: string[] = [];
+  for (let n = 0; n < 6; n++) F.unshift((await seedSourced(o, { sources: ["ets2telemetry"] })).id);
+  return { T1, T2, T3, T4, T5, A5, T6, T7, T8, F };
+}
+type ListArgs = NonNullable<Parameters<Trips["list"]>[1]>;
+const ids = (page: { items: { id: string }[] }) => page.items.map((item) => item.id);
+const binding = (cursor: string) =>
+  JSON.parse(Buffer.from(cursor.split(".")[0] as string, "base64url").toString())
+    .binding as unknown[];
+async function walk(actor: Actor, options: ListArgs, limit: number) {
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let n = 0; n < 50; n++) {
+    const page = await service.list(actor, { ...options, limit, ...(cursor ? { cursor } : {}) });
+    seen.push(...ids(page));
+    if (!page.nextCursor) {
+      expect(page.items.length).toBeLessThanOrEqual(limit);
+      return seen;
+    }
+    expect(page.items.length, "a page with a next cursor is full").toBe(limit);
+    cursor = page.nextCursor;
+  }
+  throw new Error("CURSOR_WALK_UNBOUNDED");
+}
+test("source filter matches the canonical group per scope, combines with filters and keeps omitted unchanged", async () => {
+  const m = await sourceMatrix();
+  // Omitted: no source predicate, sourceless trips included, alias members never listed.
+  const all = await service.list(owner, { scope: "mine" });
+  expect(ids(all)).toEqual([...m.F, m.T5, m.T4, m.T3, m.T2, m.T1]);
+  expect(all.items.find((item) => item.id === m.T4)?.sourceKinds).toEqual([]);
+  const omitted = await service.list(owner, { scope: "mine", limit: 2 });
+  expect(binding(omitted.nextCursor as string).some((part) => /^source:/.test(String(part)))).toBe(
+    false,
+  );
+  expect(
+    ids(
+      await service.list(owner, { scope: "mine", limit: 2, cursor: omitted.nextCursor as string }),
+    ),
+  ).toEqual([m.F[2], m.F[3]]);
+  const cases: [Actor, ListArgs, string[]][] = [
+    [owner, { scope: "mine", source: "manual" }, [m.T5, m.T3, m.T2]],
+    [owner, { scope: "mine", source: "ets2telemetry" }, [...m.F, m.T5, m.T3, m.T1]],
+    [other, { scope: "company", source: "manual" }, [m.T6, m.T5, m.T3]],
+    [other, { scope: "company", source: "ets2telemetry" }, [m.T5, m.T3, m.T1]],
+    [staff, { scope: "review", source: "manual" }, [m.T7, m.T6, m.T5, m.T3, m.T2]],
+    [staff, { scope: "review", source: "ets2telemetry" }, [...m.F, m.T8, m.T5, m.T3, m.T1]],
+    [owner, { scope: "mine", decision: "pending_review", source: "manual" }, [m.T2]],
+    [owner, { scope: "company", game: "ats", source: "manual" }, [m.T6, m.T3]],
+    [staff, { scope: "review", hold: true, source: "manual" }, [m.T7, m.T2]],
+    [staff, { scope: "review", hold: true, order: "asc", source: "manual" }, [m.T2, m.T7]],
+    [staff, { scope: "review", hold: true, source: "ets2telemetry" }, [m.T8]],
+    // Permission filtering is unchanged: other members' unaccepted trips stay private.
+    [other, { scope: "mine", source: "manual" }, [m.T7, m.T6]],
+  ];
+  for (const [actor, options, expected] of cases) {
+    const page = await service.list(actor, options);
+    expect(ids(page), JSON.stringify(options)).toEqual(expected);
+    for (const item of page.items) expect(item.sourceKinds).toContain(options.source);
+    expect(ids(page)).not.toContain(m.A5);
+    expect(ids(page)).not.toContain(m.T4);
+  }
+  for (const source of ["manual", "ets2telemetry"] as const) {
+    const company = ids(await service.list(owner, { scope: "company", source }));
+    for (const hidden of [m.T2, m.T4, m.T7, m.T8]) expect(company).not.toContain(hidden);
+  }
+  const mixed = (await service.list(owner, { scope: "mine", source: "manual" })).items[0];
+  expect(mixed?.id).toBe(m.T5);
+  expect([...(mixed?.sourceKinds ?? [])].sort()).toEqual(["ets2telemetry", "manual"]);
+  await expect(service.list(owner, { scope: "review", source: "manual" })).rejects.toMatchObject({
+    statusCode: 403,
+  });
+  for (const source of ["telemetry", "", "x"])
+    await expect(
+      service.list(owner, { scope: "mine", source: source as never }),
+    ).rejects.toMatchObject({ statusCode: 422 });
+});
+test("source filter applies before keyset limits and binds the cursor to the source", async () => {
+  const m = await sourceMatrix();
+  expect(await walk(owner, { scope: "mine", source: "manual" }, 2)).toEqual([m.T5, m.T3, m.T2]);
+  expect(await walk(staff, { scope: "review", source: "manual" }, 2)).toEqual([
+    m.T7,
+    m.T6,
+    m.T5,
+    m.T3,
+    m.T2,
+  ]);
+  const telemetry = await walk(owner, { scope: "mine", source: "ets2telemetry" }, 3);
+  expect(telemetry).toEqual(
+    ids(await service.list(owner, { scope: "mine", source: "ets2telemetry", limit: 100 })),
+  );
+  expect(new Set(telemetry).size).toBe(telemetry.length);
+  const manual = await service.list(owner, { scope: "mine", source: "manual", limit: 1 }),
+    plain = await service.list(owner, { scope: "mine", limit: 1 }),
+    held = await service.list(staff, { scope: "review", hold: true, source: "manual", limit: 1 });
+  expect(binding(manual.nextCursor as string)).toContain("source:manual");
+  const replays: [Actor, ListArgs][] = [
+    [owner, { scope: "mine", source: "ets2telemetry", cursor: manual.nextCursor as string }],
+    [owner, { scope: "mine", cursor: manual.nextCursor as string }],
+    [owner, { scope: "mine", source: "manual", cursor: plain.nextCursor as string }],
+    [
+      staff,
+      { scope: "review", hold: true, source: "ets2telemetry", cursor: held.nextCursor as string },
+    ],
+    [staff, { scope: "review", hold: true, cursor: held.nextCursor as string }],
+  ];
+  for (const [actor, options] of replays)
+    await expect(service.list(actor, options), JSON.stringify(options)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+  expect(
+    ids(
+      await service.list(staff, {
+        scope: "review",
+        hold: true,
+        source: "manual",
+        limit: 1,
+        cursor: held.nextCursor as string,
+      }),
+    ),
+  ).toEqual([m.T2]);
+});
+test("HTTP source query is validated, permission filtered and cursor bound", async () => {
+  const m = await sourceMatrix();
+  const app = await createApp({ checkReadiness: async () => true, identity, trips: service });
+  const get = (query: string, cookie: string | null = ownerCookie) =>
+    app.inject({ url: `/api/v1/trips?${query}`, headers: cookie ? { cookie } : {} });
+  try {
+    const ok = await get("scope=mine&source=manual");
+    expect(ok.statusCode).toBe(200);
+    expect(ok.headers["cache-control"]).toBe("no-store");
+    expect(ok.json().data.items.map((item: { id: string }) => item.id)).toEqual([m.T5, m.T3, m.T2]);
+    for (const query of [
+      "scope=mine&source=telemetry",
+      "scope=mine&source=Manual",
+      "scope=mine&source=",
+      "scope=mine&source=manual&source=ets2telemetry",
+    ]) {
+      const invalid = await get(query);
+      expect(invalid.statusCode, query).toBe(422);
+      expect(invalid.json().error.code, query).toBe("INVALID_PAYLOAD");
+      expect(invalid.json(), query).not.toHaveProperty("data");
+    }
+    expect((await get("scope=mine&source=manual", null)).statusCode).toBe(401);
+    expect((await get("scope=review&source=manual")).statusCode).toBe(403);
+    const first = (await get("scope=mine&source=manual&limit=1")).json().data.nextCursor;
+    const replay = await get(
+      `scope=mine&source=ets2telemetry&limit=1&cursor=${encodeURIComponent(first)}`,
+    );
+    expect(replay.statusCode).toBe(409);
+    expect(replay.json().error.code).toBe("VERSION_CONFLICT");
+    const next = await get(`scope=mine&source=manual&limit=1&cursor=${encodeURIComponent(first)}`);
+    expect(next.json().data.items.map((item: { id: string }) => item.id)).toEqual([m.T3]);
+  } finally {
+    await app.close();
+  }
+});
+test("source filter keeps each scope's page index with ref probes and no outer filesort", async () => {
+  const rows = Array.from({ length: 600 }, (_, i) =>
+    // Same shape as the guard above: a small owner/accepted/held share of a mixed history.
+    tripRow(newId(), i % 20 ? other.userId : owner.userId, {
+      game: i % 3 ? "ets2" : "ats",
+      decision: i % 10 ? "unassessed" : "accepted",
+      hold: i >= 570,
+    }),
+  );
+  const members = Array.from({ length: 20 }, (_, i) => {
+    const root = rows[i * 30] as (typeof rows)[number];
+    return tripRow(newId(), root.ownerId, { game: root.game }, root.id);
+  });
+  const sources = [
+    ...rows.map((row) => sourceRow(row.id, row.ownerId, row.game, "ets2telemetry")),
+    ...rows
+      .filter((_, i) => i % 10 === 0)
+      .map((row) => sourceRow(row.id, row.ownerId, row.game, "manual")),
+    ...members.map((row) => sourceRow(row.id, row.ownerId, row.game, "manual")),
+  ];
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(trips).values(rows);
+    await db.insert(trips).values(members);
+    for (let n = 0; n < sources.length; n += 200)
+      await db.insert(sourceTrips).values(sources.slice(n, n + 200));
+  });
+  await control.query("ANALYZE TABLE trips, source_trips");
+  const last = rows[300] as (typeof rows)[number];
+  // The service's list predicate, built from the same drizzle helpers and source condition.
+  const plan = async (
+    scope: "company" | "mine" | "review",
+    source: SourceKind,
+    extra: { game?: "ats"; hold?: boolean; order?: "asc"; after?: boolean } = {},
+  ) => {
+    const query = await unit.run(async (tx) => {
+      const db = unit.client(tx);
+      return db
+        .select()
+        .from(trips)
+        .where(
+          and(
+            isNull(trips.aliasOf),
+            scope === "company"
+              ? eq(trips.decision, "accepted")
+              : scope === "mine"
+                ? eq(trips.ownerId, owner.userId)
+                : undefined,
+            extra.game ? eq(trips.game, extra.game) : undefined,
+            extra.hold === undefined ? undefined : eq(trips.reviewHold, extra.hold),
+            tripSourceCondition(db, source),
+            extra.after
+              ? or(
+                  lt(trips.createdAt, last.createdAt),
+                  and(eq(trips.createdAt, last.createdAt), lt(trips.id, last.id)),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(
+          ...(extra.order === "asc"
+            ? [asc(trips.createdAt), asc(trips.id)]
+            : [desc(trips.createdAt), desc(trips.id)]),
+        )
+        .limit(26)
+        .toSQL();
+    });
+    const [table] = await control.query<RowDataPacket[]>(`EXPLAIN ${query.sql}`, query.params);
+    const [tree] = await control.query<RowDataPacket[]>(
+      `EXPLAIN FORMAT=TREE ${query.sql}`,
+      query.params,
+    );
+    return { table, tree: String(Object.values(tree[0] ?? {})[0]) };
+  };
+  const checked = async (name: string, keys: string[], ...args: Parameters<typeof plan>) => {
+    const { table, tree } = await plan(...args),
+      evidence = `${name}\n${JSON.stringify(table)}\n${tree}`;
+    const [outer, ...dependent] = table;
+    expect(keys, evidence).toContain(outer?.key);
+    expect(String(outer?.Extra ?? ""), evidence).not.toMatch(/filesort|temporary/i);
+    expect(dependent.length, evidence).toBe(3);
+    for (const row of dependent) {
+      expect(row.select_type, evidence).toBe("DEPENDENT SUBQUERY");
+      expect(row.type, evidence).toBe("ref");
+      expect(row.key, evidence).toBe(
+        row.table === "source_member" ? "trip_group_members" : "source_canonical",
+      );
+    }
+    for (const row of table) expect(row.type, evidence).not.toBe("ALL");
+    expect(tree, evidence).not.toMatch(/semijoin|materializ/i);
+  };
+  await checked("E1", ["trip_company_page"], "company", "manual");
+  await checked("E2", ["trip_game_page", "trip_company_page"], "company", "manual", {
+    game: "ats",
+  });
+  await checked("E3", ["trip_owner_page"], "mine", "manual");
+  await checked("E4", ["trip_review_queue"], "review", "manual", { hold: true, order: "asc" });
+  await checked("E6", ["trip_owner_page"], "mine", "ets2telemetry", { after: true });
+  // Review without hold has no page index today; its source probes must still be ref lookups.
+  const { table: unheld } = await plan("review", "ets2telemetry");
+  for (const row of unheld.slice(1)) expect(row.type).toBe("ref");
 });
 
 test("private normalized telemetry facts retain supported actual timing, zero, planned distance and unknown completeness", async () => {
