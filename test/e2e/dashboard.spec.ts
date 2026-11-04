@@ -326,9 +326,24 @@ test.describe("Company Dashboard E2E", () => {
 
     delete state.failures.stats;
     delete state.failures.analytics;
+    state.hold("stats");
     const before = state.requests.length;
-    await alert.getByRole("button", { name: "Retry", exact: true }).click();
+    // Two presses in one task: both reach the handler before the page rerenders, and the second
+    // reuses the stats read in flight.
+    await alert
+      .getByRole("button", { name: "Retry", exact: true })
+      .evaluate((button: HTMLElement) => {
+        button.click();
+        button.click();
+      });
     await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
+    // While the zone is reread the page waits: no alert, no Retry to press again, no period read.
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(loadingStatus(page)).toHaveCount(1);
+    expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
+
+    state.release("stats");
     await loaded(page);
     await expect(page.getByRole("alert")).toHaveCount(0);
     expect(requestsTo(state, statsPath)).toHaveLength(2);
@@ -364,9 +379,23 @@ test.describe("Company Dashboard E2E", () => {
     await expect(page.getByRole("heading", { name: "Company Overview", exact: true })).toHaveCount(
       0,
     );
+    state.hold("stats");
     const before = state.requests.length;
     await page.goBack();
+    await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
+    // The cached failure and the October leaderboard of the fallback keys stay hidden.
+    await expect(
+      page.getByRole("heading", { name: "Company Overview", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(loadingStatus(page)).toHaveCount(1);
+    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toHaveCount(0);
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+    expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
+
+    state.release("stats");
     await loaded(page);
+    await expect(page.getByRole("alert")).toHaveCount(0);
     expect(requestsTo(state, statsPath)).toHaveLength(2);
     const after = periodRequests({ ...state, requests: state.requests.slice(before) });
     for (const path of periodPaths)
