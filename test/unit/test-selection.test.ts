@@ -206,6 +206,16 @@ describe("duration-weighted shards", () => {
     }
   });
 
+  test("pass file filters that match only their own file", () => {
+    // Vitest matches a filter as a substring of the path, Playwright as a regular expression.
+    for (const filter of inventory.filter((path) => shardableLanes.includes(laneOf(path) ?? "")))
+      for (const path of inventory) {
+        const matches =
+          laneOf(filter) === "e2e" ? new RegExp(filter).test(path) : path.includes(filter);
+        expect(matches).toBe(path === filter);
+      }
+  });
+
   test("refuse invalid or empty shards", () => {
     expect(() => shardFiles(files, "3/2")).toThrow("TEST_SHARD_INVALID");
     expect(() => shardFiles([a], "2/2")).toThrow("TEST_SHARD_EMPTY");
