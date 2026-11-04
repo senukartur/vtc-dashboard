@@ -122,4 +122,4 @@ Examined files/areas:
 Source provenance / role tools and enforcement limits:
 ```
 
-Blocker/major findings require `CHANGES REQUESTED`. A clean review is bounded by the examined code and evidence; it does not establish owner approval, passing CI, merge or production acceptance.
+When the orchestrator asks, confirm or contest its rejection/deferral of a blocker/major finding with evidence, or check a base delta (old base to new base) against the PR's modules, contracts, catalogs, migrations and permissions; report the result under the same format. Blocker/major findings require `CHANGES REQUESTED`. A clean review is bounded by the examined code and evidence; it does not establish owner approval, passing CI, merge or production acceptance.
