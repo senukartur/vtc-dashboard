@@ -12,6 +12,7 @@ import {
   reviewer,
   reviewIds,
 } from "./support/review-ui.ts";
+import { countInsertedAlerts } from "./support/trip-ui.ts";
 
 // Controlled synthetic review queue and decision panel (VTC-059); all data is fictional.
 const text = {
@@ -1033,6 +1034,34 @@ function toolbarBudget(page: Page) {
     };
   });
 }
+test("R17d a rejected cursor restarts the same filters at the first page without an error", async ({
+  page,
+}, info) => {
+  const search = `?source=manual${wide(info) ? `&trip=${reviewIds.over}` : ""}`;
+  const mock = await open(page, `/account/review${search}`, { paged: true });
+  await expect(table(page).locator("tbody tr")).toHaveCount(2);
+  if (wide(info)) await expect(panel(page)).toBeVisible();
+  const alerts = await countInsertedAlerts(page, ".review-list-area");
+  // The server rejects an expired, rotated or mismatched cursor with 409 VERSION_CONFLICT.
+  mock.expire();
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  const first = "scope=review&hold=true&source=manual&order=asc&limit=25";
+  await expect
+    .poll(() => mock.lists.slice(-2).map(String))
+    .toEqual([`${first}&cursor=page-2.manual`, first]);
+  await expect(table(page).locator("tbody tr")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+  // The filters and the open decision panel stay; only the page restarts.
+  expect(new URL(page.url()).search).toBe(search);
+  if (wide(info)) await expect(panel(page)).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(await alerts()).toBe(0);
+  // One rejected cursor costs one first-page request, not a loop.
+  expect(mock.lists.filter((q) => q.has("cursor"))).toHaveLength(1);
+  expect(mock.lists.at(-1)?.toString()).toBe(first);
+});
+
 test("R18 toolbar budget with wide-font spare in RU and EN on both tabs and beside the panel", async ({
   page,
 }, info) => {
