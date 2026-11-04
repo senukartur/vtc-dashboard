@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import {
   rehearsalPlan,
+  rehearsalTiming,
   retainRehearsalEvidence,
   runRehearsalChild,
   validateEvidenceCollector,
@@ -222,6 +223,8 @@ async function collectEvidence() {
     },
   );
   console.log(JSON.stringify({ event: "deployment_rehearsal_evidence", result: "pass", files }));
+  const timing = rehearsalTiming(snapshot);
+  if (timing) console.log(JSON.stringify(timing));
 }
 try {
   await docker([

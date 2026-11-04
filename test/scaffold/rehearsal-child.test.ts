@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import { runRehearsalChild } from "../../deploy/development/rehearsal-child.mjs";
+import { rehearsalTiming, runRehearsalChild } from "../../deploy/development/rehearsal-child.mjs";
 const stdio = "ignore";
 test("rehearsal child retains completed and failed native outcomes", async () => {
   for (const code of [0, 7]) {
@@ -176,4 +176,60 @@ test("rehearsal handles repeated TERM and KILL errors through unconfirmed settle
   child.emit("close", 0, null);
   assert.equal(result.settledByClose, false);
   assert.ok(!JSON.stringify(result).includes("private-"));
+});
+test("rehearsal timing publishes only fixed numeric window fields", () => {
+  const secret = "SYNTHETIC_PRIVATE_VALUE";
+  const scenario = (ordinal: number) => ({
+    ordinal,
+    status: "pass",
+    startedUtc: `2026-11-04T04:0${ordinal}:00.000Z`,
+    finishedUtc: secret,
+    durationMs: ordinal * 1000,
+    samplesMs: [secret],
+  });
+  const bundle = (scenarios: unknown[], ticks: unknown = []) => ({
+    files: {
+      "notifications-acceptance-evidence.json": {
+        runId: secret,
+        ticks,
+        fixture: { runId: secret, startedUtc: "2026-11-04T04:00:30.000Z", scenarios },
+      },
+    },
+  });
+  const ticks = [
+    { startedUtc: 100, finishedUtc: 103, worker: secret },
+    { startedUtc: 160, finishedUtc: 170 },
+    { startedUtc: 220, finishedUtc: secret },
+    { startedUtc: 280, finishedUtc: 1000 },
+  ];
+  const timing = rehearsalTiming(bundle([1, 2, 3].map(scenario), ticks));
+  assert.deepEqual(timing, {
+    event: "deployment_rehearsal_timing",
+    scenarios: [
+      { ordinal: 1, startOffsetMs: 30000, durationMs: 1000 },
+      { ordinal: 2, startOffsetMs: 90000, durationMs: 2000 },
+      { ordinal: 3, startOffsetMs: 150000, durationMs: 3000 },
+    ],
+    ticks: { count: 4, busySeconds: 13 },
+  });
+  assert.ok(!JSON.stringify(timing).includes(secret));
+  // Gaps, foreign ordinals, malformed instants and unbounded durations publish nothing.
+  for (const rows of [
+    [scenario(2)],
+    [scenario(1), scenario(3)],
+    [{ ...scenario(1), startedUtc: secret }],
+    [{ ...scenario(1), startedUtc: "2026-11-04T03:59:00.000Z" }],
+    [{ ...scenario(1), durationMs: -1 }],
+    [{ ...scenario(1), durationMs: 1.5 }],
+    [{ ...scenario(1), durationMs: 7_200_001 }],
+    [null],
+  ])
+    assert.equal(rehearsalTiming(bundle(rows)), null);
+  for (const missing of [undefined, null, {}, { files: {} }, bundle(secret as never)])
+    assert.equal(rehearsalTiming(missing), null);
+  assert.deepEqual(rehearsalTiming(bundle([])), {
+    event: "deployment_rehearsal_timing",
+    scenarios: [],
+    ticks: { count: 0, busySeconds: 0 },
+  });
 });

@@ -117,6 +117,39 @@ export async function retainRehearsalEvidence(
   return Object.keys(bundle.files).length;
 }
 
+const isoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const boundedMs = (value) => Number.isSafeInteger(value) && value >= 0 && value <= 7_200_000;
+
+// Public window timing is rebuilt from fixed numeric fields of the private evidence; names,
+// identifiers, samples and worker metrics never leave the runner. Partial evidence still
+// yields the scenarios that passed, so a slow or failed window can be located.
+export function rehearsalTiming(bundle) {
+  const evidence = bundle?.files?.["notifications-acceptance-evidence.json"];
+  const fixture = evidence?.fixture;
+  if (!isoInstant.test(fixture?.startedUtc ?? "") || !Array.isArray(fixture.scenarios)) return null;
+  const started = Date.parse(fixture.startedUtc);
+  const scenarios = [];
+  for (const row of fixture.scenarios.slice(0, 9)) {
+    const offset = isoInstant.test(row?.startedUtc ?? "")
+      ? Date.parse(row.startedUtc) - started
+      : -1;
+    if (row?.ordinal !== scenarios.length + 1 || !boundedMs(row?.durationMs) || !boundedMs(offset))
+      return null;
+    scenarios.push({ ordinal: row.ordinal, startOffsetMs: offset, durationMs: row.durationMs });
+  }
+  const ticks = Array.isArray(evidence.ticks) ? evidence.ticks.slice(0, 240) : [];
+  let busySeconds = 0;
+  for (const tick of ticks) {
+    const busy = tick?.finishedUtc - tick?.startedUtc;
+    if (Number.isSafeInteger(busy) && busy >= 0 && busy <= 120) busySeconds += busy;
+  }
+  return {
+    event: "deployment_rehearsal_timing",
+    scenarios,
+    ticks: { count: ticks.length, busySeconds },
+  };
+}
+
 export function rehearsalPlan(args) {
   if (
     !Array.isArray(args) ||

@@ -39,3 +39,9 @@ export function runRehearsalChild(
     ) => EventEmitter & Pick<ChildProcess, "kill"> & { unref?: () => void };
   },
 ): Promise<RehearsalChildOutcome>;
+export type RehearsalTiming = {
+  event: "deployment_rehearsal_timing";
+  scenarios: { ordinal: number; startOffsetMs: number; durationMs: number }[];
+  ticks: { count: number; busySeconds: number };
+};
+export function rehearsalTiming(bundle: unknown): RehearsalTiming | null;
