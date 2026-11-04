@@ -9,6 +9,21 @@ const object = (properties: Record<string, unknown>) => ({
 });
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const game = { type: "string", enum: ["ets2", "ats"] };
+// Wire schema of the listTrips query, exported for the OpenAPI parity contract test.
+export const listTripsQuerystring = object({
+  limit: { type: "integer", minimum: 1, maximum: 100 },
+  cursor: { type: "string", minLength: 1, maxLength: 2048 },
+  scope: { type: "string", enum: ["company", "mine", "review"] },
+  game,
+  decision: {
+    type: "string",
+    enum: ["unassessed", "pending_review", "accepted", "rejected"],
+  },
+  // TripSummary.sourceKinds vocabulary; applies to every scope.
+  source: { type: "string", enum: ["ets2telemetry", "manual"] },
+  hold: { type: "boolean" },
+  order: { type: "string", enum: ["asc", "desc"] },
+});
 export async function registerTripRoutes(app: FastifyInstance, identity: Identity, trips: Trips) {
   const actor = (request: FastifyRequest) =>
     identity.authenticate(new Headers({ cookie: request.headers.cookie ?? "" }));
@@ -20,18 +35,7 @@ export async function registerTripRoutes(app: FastifyInstance, identity: Identit
     "/api/v1/trips",
     {
       schema: {
-        querystring: object({
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-          cursor: { type: "string", minLength: 1, maxLength: 2048 },
-          scope: { type: "string", enum: ["company", "mine", "review"] },
-          game,
-          decision: {
-            type: "string",
-            enum: ["unassessed", "pending_review", "accepted", "rejected"],
-          },
-          hold: { type: "boolean" },
-          order: { type: "string", enum: ["asc", "desc"] },
-        }),
+        querystring: listTripsQuerystring,
         response: { 200: ref("EnvelopeListTripSummary") },
       },
     },
