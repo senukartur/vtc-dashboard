@@ -5,12 +5,17 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  # Owner-approved safety net (VTC-072): a weekly full rehearsal of main, plus manual starts.
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # The event keeps a main push from cancelling the scheduled or manual rehearsal of main.
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -57,7 +62,8 @@ jobs:
           retention-days: 3
   scope:
     # Owner-approved path rule (VTC-070): PRs skip the rehearsal unless scripts/ci-scope.mjs
-    # matches a changed path; main always runs it. Required CI accepts a skip only from here.
+    # matches a changed path. Since VTC-072 a main push skips it and the weekly schedule or a
+    # manual dispatch runs it in full. Required CI accepts a skip only from here.
     name: Rehearsal scope
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -74,11 +80,22 @@ jobs:
       - id: scope
         run: node scripts/ci-scope.mjs
   deployment:
-    name: Deployment rehearsal
+    # Owner-approved split (VTC-072): each leg runs its own allocation and core group; the window
+    # shards in rehearsal-child.mjs cover all nine scenarios. needs.deployment.result is success
+    # only when every leg succeeds.
+    name: Deployment rehearsal (${{ matrix.name }})
     needs: [scope]
     if: ${{ needs.scope.outputs.rehearsal == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: window 1-3, args: --window-shard 1/3 }
+          - { name: window 2-3, args: --window-shard 2/3 }
+          - { name: window 3-3, args: --window-shard 3/3 }
+          - { name: recovery, args: --core-recovery }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -86,10 +103,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24.22.2
-      - run: node deploy/development/test.mjs
+      - env:
+          REHEARSAL_ARGS: ${{ matrix.args }}
+        run: node deploy/development/test.mjs $REHEARSAL_ARGS
   artifact:
+    # A main push has no rehearsal leg (VTC-072); the merge candidate was rehearsed on its PR
+    # when the path rule required it.
     name: Production release artifact
-    needs: [quality, deployment]
+    needs: [quality]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20

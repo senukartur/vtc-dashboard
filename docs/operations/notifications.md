@@ -20,7 +20,7 @@ An interrupted update retains `state/notifications-controls-update.json`, its ow
 
 ### Fixed modes and allocation
 
-After the reviewed installation, create root-owned mode-0600 `private/notifications-acceptance-input.json` with exactly `revision`, `imageId`, `controls`, and `scenarios`. Controls maps the fixed set above to reviewed installed hashes; scenarios is exactly `[1,2,3,4,5,6,7,8,9]`. Choose a new synthetic UUIDv4 and use only these fixed root operations:
+After the reviewed installation, create root-owned mode-0600 `private/notifications-acceptance-input.json` with exactly `revision`, `imageId`, `controls`, and `scenarios`. Controls maps the fixed set above to reviewed installed hashes; scenarios is exactly `[1,2,3,4,5,6,7,8,9]`. Only a disposable `vtc011-*` rehearsal project may name an ascending subset, which CI uses for its parallel window shards (VTC-072). Choose a new synthetic UUIDv4 and use only these fixed root operations:
 
 ```sh
 python3 /opt/vtc-development/operations.py notifications-acceptance prepare <synthetic-run-uuid>

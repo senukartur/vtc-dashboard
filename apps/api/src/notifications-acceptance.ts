@@ -92,6 +92,20 @@ const events = composed.events!,
   trips = composed.trips!,
   notifications = composed.notifications!;
 const watchdog = setTimeout(() => process.exit(1), mode === "exercise" ? 1_700_000 : 50_000);
+// The rehearsal window may run an ascending subset of the nine scenarios (VTC-072); the
+// harness passes the reviewed list, and hosted acceptance always passes all nine.
+const selectedScenarios = (process.env.VTC_NOTIFICATIONS_SCENARIOS ?? "1,2,3,4,5,6,7,8,9")
+  .split(",")
+  .map(Number);
+assert.ok(
+  selectedScenarios.every(
+    (ordinal, index) =>
+      Number.isInteger(ordinal) &&
+      ordinal >= 1 &&
+      ordinal <= 9 &&
+      (index === 0 || ordinal > selectedScenarios[index - 1]!),
+  ),
+);
 const path = (name: string) => `/acceptance/${name}`;
 const instant = () => new Date().toISOString();
 const streamIdentities = new Map<string, ReturnType<typeof acceptanceSourceStream>>();
@@ -586,6 +600,7 @@ try {
       }
     }
     async function one(ordinal: number, work: (samples: number[]) => Promise<void>) {
+      if (!selectedScenarios.includes(ordinal)) return;
       phase = ordinal;
       operationStep = "scenario";
       const start = Date.now(),

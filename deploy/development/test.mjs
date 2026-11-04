@@ -5,13 +5,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import {
   rehearsalPlan,
+  rehearsalTiming,
   retainRehearsalEvidence,
   runRehearsalChild,
   validateEvidenceCollector,
 } from "./rehearsal-child.mjs";
 
 const args = process.argv.slice(2);
-const { mode, groups, requireWindow } = rehearsalPlan(args);
+const { mode, groups, requireWindow, scenarios } = rehearsalPlan(args);
 const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const fingerprint = createHash("sha256");
 for (const path of execFileSync(
@@ -209,6 +210,7 @@ async function collectEvidence() {
     `.local/development/${identity}/evidence.json`,
     {
       requireWindow: passed && requireWindow,
+      scenarios,
       requiredGroups:
         passed && mode === "full"
           ? groups.filter((group) => ["core", "window", "recovery"].includes(group))
@@ -222,6 +224,8 @@ async function collectEvidence() {
     },
   );
   console.log(JSON.stringify({ event: "deployment_rehearsal_evidence", result: "pass", files }));
+  const timing = rehearsalTiming(snapshot);
+  if (timing) console.log(JSON.stringify(timing));
 }
 try {
   await docker([
@@ -297,6 +301,8 @@ try {
         `REHEARSAL_GROUP=${group}`,
         "-e",
         `REHEARSAL_REQUIRE_WINDOW=${requireWindow}`,
+        "-e",
+        `REHEARSAL_SCENARIOS=${scenarios.join(",")}`,
         "-e",
         `REHEARSAL_SOURCE_SHA=${sourceSha}`,
         "-e",
@@ -452,8 +458,10 @@ if (passed)
   console.log(
     args[0] === "--core-recovery"
       ? "Focused deployment core/recovery passed; required window group NOT RUN"
-      : mode === "full"
-        ? "Deployment rehearsal: required core/window/recovery groups, evidence retention and cleanup passed; SQL privileges, persistence, consistent export/restore, dirty migration, auth, TLS, archive and operation-lock cases passed"
-        : "Focused manual deployment rehearsal: codec, notices, persistent bytes and restricted manual role proof passed; remaining baseline NOT RUN",
+      : args[0] === "--window-shard"
+        ? `Deployment rehearsal window shard ${args[1]}: core and window scenarios ${scenarios.join(",")} passed; recovery and other scenarios run in parallel CI legs`
+        : mode === "full"
+          ? "Deployment rehearsal: required core/window/recovery groups, evidence retention and cleanup passed; SQL privileges, persistence, consistent export/restore, dirty migration, auth, TLS, archive and operation-lock cases passed"
+          : "Focused manual deployment rehearsal: codec, notices, persistent bytes and restricted manual role proof passed; remaining baseline NOT RUN",
   );
 process.exitCode = passed ? 0 : 1;
