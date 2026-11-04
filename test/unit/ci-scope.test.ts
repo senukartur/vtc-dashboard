@@ -9,6 +9,7 @@ test("pushes always require the deployment rehearsal", () => {
 test("pull requests require it only for paths the rehearsal exercises", () => {
   for (const path of [
     "deploy/development/rehearsal.py",
+    "third_party/sharp-libvips-1.3.4/lib/libvips-cpp.so",
     "Dockerfile",
     ".dockerignore",
     "package.json",

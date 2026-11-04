@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 // path skips it, so keep this list broad.
 const rehearsalPrefixes = [
   "deploy/",
+  "third_party/",
   "packages/db/",
   "packages/jobs/",
   "packages/outbox/",
