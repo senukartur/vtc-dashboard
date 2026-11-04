@@ -116,12 +116,12 @@ export function attemptFor(fingerprint: string, previous: Attempt | null): Attem
     ? previous
     : { fingerprint, key: crypto.randomUUID() };
 }
-export function tripFilters(params: URLSearchParams, staff = false) {
+export function tripFilters(params: URLSearchParams) {
   const scope = params.get("scope");
   const game = params.get("game");
   const decision = params.get("decision");
   return {
-    scope: scope === "company" ? "company" : scope === "review" && staff ? "review" : "mine",
+    scope: scope === "company" ? "company" : "mine",
     game: game === "ats" || game === "ets2" ? game : undefined,
     decision: ["unassessed", "pending_review", "accepted", "rejected"].includes(decision ?? "")
       ? decision

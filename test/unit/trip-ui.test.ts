@@ -42,8 +42,9 @@ test("URL scope validation cannot grant review or invent unsupported filters", (
   expect(
     tripFilters(new URLSearchParams("scope=review&game=ets2&decision=accepted&search=secret")),
   ).toEqual({ scope: "mine", game: "ets2", decision: "accepted" });
-  expect(tripFilters(new URLSearchParams("scope=review&game=wrong&decision=wrong"), true)).toEqual({
-    scope: "review",
+  // The review queue has its own page and query; the member list never selects the review scope.
+  expect(tripFilters(new URLSearchParams("scope=review&game=wrong&decision=wrong"))).toEqual({
+    scope: "mine",
     game: undefined,
     decision: undefined,
   });

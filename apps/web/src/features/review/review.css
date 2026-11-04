@@ -1,0 +1,794 @@
+/* Dispatch review queue and decision panel (VTC-059). Every selector is scoped to .review-queue,
+   .review-detail or .review-decision; portaled dialogs are reached through .dialog-content:has().
+   The shared .trip-page and .table rules break anywhere; text here wraps only between words, and
+   only .review-break (nicknames, IDs, file names) may break anywhere. */
+.review-queue,
+.review-detail,
+.review-decision,
+.review-queue .review-table :is(th, td),
+.review-decision .review-diff :is(th, td) {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+:is(.review-queue, .review-decision) .review-break {
+  overflow-wrap: anywhere;
+}
+:is(.review-queue, .review-decision) .review-muted {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+:is(.review-queue, .review-decision) small.review-muted {
+  display: block;
+}
+.review-decision .review-multiline,
+.trip-page .trip-revision .review-multiline {
+  white-space: pre-line;
+}
+
+/* Queue header and toolbar: the Awaiting/Decided pressed group, compact selects, timezone. */
+.review-queue .review-queue-header {
+  display: grid;
+  gap: 4px;
+}
+.review-queue .review-queue-header h1 {
+  margin: 0;
+}
+.review-queue .review-queue-header p {
+  margin: 0;
+}
+.review-queue .review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+/* The shared .trip-page fieldset frame does not apply to these control groups. */
+.review-queue .review-toolbar .segmented {
+  padding: 2px;
+  border-color: var(--control-border);
+  border-radius: var(--radius-control);
+}
+.review-queue .review-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review-queue .review-filter {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.review-queue .review-filters select {
+  width: auto;
+  max-width: 100%;
+}
+.review-queue .review-timezone {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+/* Queue beside the decision panel from 1200px (WIDE_QUERY in trips/layout.ts). */
+.review-queue .review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+@media (min-width: 1200px) {
+  /* Three fifths for the queue: with the panel open every column keeps room to spare even
+     where fonts render wider (Linux CI); the panel's sections wrap between words. */
+  .review-queue .review-layout[data-panel] {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+.review-queue .review-list-area {
+  /* Containing block of last resort: a row-link overlay never covers the app chrome. */
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.review-queue .review-list-area > .button {
+  justify-self: start;
+}
+.review-queue .review-empty {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding-block: 8px;
+}
+.review-queue .review-empty p {
+  margin: 0;
+  color: var(--secondary);
+}
+.review-queue .review-list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.review-queue .review-list-footer > small {
+  flex: 1 1 240px;
+}
+.review-queue .review-list-footer .trip-actions {
+  gap: 6px;
+}
+
+/* Queue table: fixed column shares keep the layout independent of long names. */
+.review-queue .review-table {
+  table-layout: fixed;
+}
+.review-queue .review-table:focus-visible {
+  outline-offset: 2px;
+}
+.review-queue .review-table :is(th, td) {
+  padding-inline: 6px;
+  vertical-align: middle;
+}
+.review-queue .review-table th {
+  padding-block: 8px;
+  vertical-align: bottom;
+}
+.review-queue .review-table td {
+  padding-block: 4px;
+}
+.review-queue .review-table :is(th, td):first-child {
+  padding-left: 8px;
+}
+.review-queue .review-col-driver {
+  width: 17%;
+}
+.review-queue .review-col-route {
+  width: 24%;
+}
+.review-queue .review-col-type {
+  width: 18%;
+}
+.review-queue .review-col-revision {
+  width: 9%;
+}
+.review-queue .review-col-rules {
+  width: 17%;
+}
+.review-queue .review-col-filed {
+  width: 15%;
+}
+.review-queue .review-driver {
+  font-weight: 600;
+}
+.review-queue .review-you {
+  color: var(--muted);
+  font-size: var(--font-badge);
+  font-weight: 400;
+}
+.review-queue .review-filed time {
+  display: block;
+}
+.review-queue td.review-route {
+  position: relative;
+}
+/* The link never shrinks below its longest word: a narrow cell wraps it below the game chip. */
+.review-queue .review-route-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+}
+.review-queue .review-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: none;
+}
+.review-queue .review-link:focus-visible {
+  outline-offset: 2px;
+}
+/* The route link is the row's only control; its overlay fills the route cell (the whole card on
+   phones), because WebKit ignores position: relative on table rows. */
+.review-queue .review-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.review-queue [data-selected] > td {
+  background: var(--accent-soft);
+}
+.review-queue .review-row[data-selected] td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.review-queue .review-row[data-selected] .review-link {
+  color: var(--focus);
+}
+@media (hover: hover) {
+  .review-queue .review-link:hover {
+    color: var(--focus);
+  }
+}
+@media (hover: hover) and (min-width: 761px) {
+  .review-queue .review-row td.review-route:hover {
+    background: var(--surface-hover);
+  }
+  .review-queue .review-row[data-selected] td.review-route:hover {
+    background: var(--accent-soft);
+  }
+}
+.review-queue .review-type,
+.review-queue .review-revision,
+.review-queue .review-filed {
+  font-size: var(--font-small);
+}
+.review-queue .review-flag {
+  max-width: 100%;
+  white-space: nowrap;
+}
+.review-queue .review-flag[data-flag="exceeded"] {
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+.review-queue .review-flag[data-flag="check"] {
+  background: var(--pending-surface);
+  color: var(--pending);
+}
+.review-queue .review-flag[data-flag="none"] {
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+
+/* Phone cards: line 1 driver and rules flag, line 2 route, line 3 type, revision and time. The
+   header row stays available to assistive technology only. */
+@media (max-width: 760px) {
+  .review-queue .review-list-area {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .review-queue .review-table,
+  .review-queue .review-table tbody,
+  .review-queue .review-table td {
+    display: block;
+  }
+  .review-queue .review-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .review-queue .review-table tr.review-row {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    margin-bottom: 8px;
+    padding: 8px 12px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .review-queue .review-table tr.review-row td,
+  .review-queue .review-table tr.review-row td:first-child,
+  .review-queue .review-table tr.review-row[data-selected] td {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .review-queue .review-driver {
+    order: 1;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .review-queue .review-driver .review-you {
+    display: inline;
+    margin-left: 4px;
+  }
+  .review-queue .review-rules {
+    order: 2;
+  }
+  .review-queue .review-table td.review-route {
+    position: static;
+    order: 3;
+    flex: 1 1 100%;
+  }
+  .review-queue .review-type {
+    order: 4;
+  }
+  .review-queue .review-revision {
+    order: 5;
+  }
+  .review-queue .review-filed {
+    order: 6;
+  }
+  /* The separator ends the previous item, so a wrapped item never starts with it. */
+  .review-queue .review-type::after,
+  .review-queue .review-revision::after {
+    content: "·" / "";
+    margin-left: 6px;
+    color: var(--muted);
+  }
+  .review-queue .review-type,
+  .review-queue .review-revision,
+  .review-queue .review-filed,
+  .review-queue .review-filed time {
+    display: inline-flex;
+  }
+  .review-queue .review-timezone {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+  .review-queue .review-list-footer .trip-actions {
+    flex: 1 1 100%;
+  }
+}
+
+/* Decision workspace: the side panel beside the queue or the full review page. */
+.review-decision {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.review-decision-side {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+.review-decision .review-decision-header {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.review-decision .review-decision-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.review-decision .review-decision-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+/* Icon-only close: square target, 40px under a coarse pointer via the shared tokens. */
+.review-decision .review-close {
+  min-width: var(--target-min);
+  padding-inline: 0;
+}
+.review-decision h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.review-decision :is(h2, h3):focus {
+  outline: none;
+}
+.review-decision :is(h2, h3):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.review-decision .review-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.review-decision .review-hold {
+  margin: 4px 0 0;
+  font-size: var(--font-small);
+}
+.review-decision .review-facts {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+}
+.review-decision .review-facts > div {
+  display: contents;
+}
+.review-decision .review-facts dt {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.review-decision .review-facts dd {
+  margin: 0;
+}
+.review-decision .review-decision-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 12px 14px 14px;
+}
+.review-decision .review-decision-body > .button {
+  justify-self: start;
+}
+.review-decision .review-decision-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+@media (min-width: 1200px) {
+  .review-decision-page .review-decision-columns {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 20px;
+  }
+}
+.review-decision .review-column {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+.review-decision .review-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.review-decision .review-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.review-decision .review-section h3 {
+  margin: 0;
+  color: var(--secondary);
+  font-size: var(--font-small);
+  font-weight: 700;
+}
+.review-decision .review-section-note {
+  color: var(--muted);
+  font-size: var(--font-badge);
+}
+.review-decision .review-section p {
+  margin: 0;
+}
+.review-decision ul,
+.review-decision ol {
+  margin: 0;
+}
+.review-decision .review-note {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  color: var(--secondary);
+  font-size: var(--font-small);
+}
+.review-decision .review-note ul {
+  padding-left: 1.1rem;
+}
+
+/* Revision diff: field, current revision, previous revision of the same report. */
+.review-decision .review-diff {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--font-small);
+}
+.review-decision .review-diff th,
+.review-decision .review-diff td {
+  padding: 3px 6px;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.review-decision .review-diff td {
+  font-weight: 500;
+}
+.review-decision .review-diff thead th {
+  border-top: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.review-decision .review-diff tbody th {
+  padding-left: 0;
+  color: var(--muted);
+  font-weight: 400;
+}
+.review-decision .review-diff .review-previous {
+  color: var(--muted);
+  font-weight: 400;
+}
+.review-decision .review-diff tr[data-changed] td:not(.review-previous) {
+  background: var(--accent-soft);
+}
+.review-decision .review-diff thead th:first-child {
+  width: 32%;
+}
+.review-decision .review-changed {
+  margin-left: 4px;
+  background: var(--surface-active);
+  color: var(--focus);
+  vertical-align: baseline;
+}
+
+/* Evidence: names and states; images open on demand in a dialog. */
+.review-decision .review-evidence {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.review-decision .review-evidence li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+.review-decision .review-evidence-name {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+/* Qualification check: symbol plus visible state text for every rule. */
+.review-decision .review-checks {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.review-decision .review-checks li {
+  display: grid;
+  grid-template-columns: 1.25em minmax(0, 1fr);
+  gap: 6px;
+  align-items: start;
+}
+.review-decision .review-check-symbol {
+  font-weight: 700;
+  text-align: center;
+}
+.review-decision .review-checks [data-state="pass"] .review-check-symbol {
+  color: var(--accepted);
+}
+.review-decision .review-checks [data-state="fail"] .review-check-symbol {
+  color: var(--destructive);
+}
+.review-decision
+  .review-checks
+  :is([data-state="unknown"], [data-state="unavailable"])
+  .review-check-symbol {
+  color: var(--pending);
+}
+.review-decision .review-checks [data-state="bypassed"] .review-check-symbol {
+  color: var(--focus);
+}
+.review-decision .review-check-text {
+  display: grid;
+  min-width: 0;
+}
+.review-decision .review-check-title {
+  font-weight: 500;
+}
+.review-decision .review-check-state {
+  display: inline;
+  color: var(--muted);
+  font-size: var(--font-badge);
+  font-weight: 400;
+}
+.review-decision .review-check-detail {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+
+/* History timeline, newest first. */
+.review-decision .review-history {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--border-strong);
+  list-style: none;
+}
+.review-decision .review-history li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.review-decision .review-history-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.review-decision .review-history p {
+  color: var(--secondary);
+}
+:is(.review-decision, .trip-page) .review-marker {
+  background: var(--pending-surface);
+  color: var(--pending);
+  white-space: normal;
+}
+
+/* Decision form. */
+.review-decision-side .review-form {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.review-decision .review-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.review-decision .review-choice-item {
+  min-height: var(--control-h-sm);
+  padding: 4px 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  color: var(--foreground);
+  font-size: var(--font-body);
+  font-weight: 600;
+}
+.review-decision .review-choice-item[data-choice="accept"][aria-pressed="true"] {
+  border-color: var(--accepted);
+  background: var(--accepted-surface);
+  color: var(--accepted);
+}
+.review-decision .review-choice-item[data-choice="reject"][aria-pressed="true"] {
+  border-color: var(--destructive);
+  background: var(--rejected-surface);
+  color: var(--destructive);
+}
+/* Unavailable acceptance stays focusable so focus never drops when it becomes unavailable. */
+.review-decision .review-choice-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .review-decision .review-choice-item:not([aria-pressed="true"], [aria-disabled="true"]):hover {
+    background: var(--surface-hover);
+  }
+}
+.review-decision .review-field {
+  display: grid;
+  gap: 4px;
+}
+.review-decision .review-field label {
+  font-weight: 600;
+}
+.review-decision .review-field textarea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  font: inherit;
+}
+.review-decision .review-over-limits {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--destructive);
+  border-radius: var(--radius-control);
+  background: var(--rejected-surface);
+}
+.review-decision .review-over-title {
+  color: var(--destructive);
+  font-weight: 700;
+}
+.review-decision .review-limits {
+  display: grid;
+  gap: 2px;
+  padding-left: 1.1rem;
+  font-size: var(--font-small);
+}
+.review-decision .review-check-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  min-height: var(--target-min);
+  font-weight: 600;
+}
+.review-decision .review-check-option input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.review-decision .review-submit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.review-decision .review-submit > small {
+  flex: 1 1 160px;
+}
+.review-decision .review-corrections {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Full review page header and trip detail history. */
+.review-detail .review-detail-header {
+  align-items: center;
+}
+.review-detail .review-detail-header h1 {
+  margin: 0;
+}
+.trip-page .trip-revision .review-decision-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--muted);
+}
+
+/* Portaled dialogs: the evidence viewer and the decision confirmation. */
+.dialog-content:has(.review-evidence-viewer) {
+  width: min(960px, calc(100% - 32px));
+  overflow-wrap: break-word;
+}
+.dialog-content .review-evidence-viewer {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.dialog-content .review-evidence-viewer .button {
+  justify-self: end;
+}
+.dialog-content .review-evidence-image {
+  display: block;
+  justify-self: center;
+  max-width: 100%;
+  max-height: calc(100dvh - 240px);
+  object-fit: contain;
+}
+.dialog-content .review-break {
+  overflow-wrap: anywhere;
+}
+.dialog-content .review-confirm {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.dialog-content .review-confirm .review-multiline {
+  white-space: pre-line;
+}
+.dialog-content .review-confirm ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+/* The choice group and the over-limit box are fieldsets without the shared .trip-page frame. */
+.review-decision .review-choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.review-decision fieldset.review-over-limits {
+  min-width: 0;
+  margin: 0;
+}
+.review-decision .review-over-limits legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+}

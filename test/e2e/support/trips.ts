@@ -159,8 +159,11 @@ export async function tripBrowserFixture() {
     async function telemetry(
       target?: { tripId: string; expectedVersion: number },
       kind: "started" | "completed" = "completed",
+      cargoMassKg?: number,
     ) {
       const p = telemetryFixture(kind) as unknown as Telemetry;
+      if (cargoMassKg !== undefined && p.snapshot.job.cargoMass.available)
+        p.snapshot.job.cargoMass.value = cargoMassKg;
       p.eventId = randomUUID();
       p.source.tripId = randomUUID();
       p.source.pluginSessionId = randomUUID();
