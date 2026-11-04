@@ -1,14 +1,20 @@
 import { describe, expect, test } from "vitest";
+import type { PinnedEntity } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
+  acceptance,
   classify,
   evaluationSnapshot,
   type Historical,
+  qualificationCheck,
 } from "../../apps/api/src/modules/trip-decisions/evaluation.ts";
 import {
   createSyntheticManualEvidence,
   createSyntheticTripEvidence,
+  knownFact,
+  pinnedEntityFact,
   unknownFact,
 } from "../fixtures/qualification-rules/fixtures.ts";
+import { SYNTHETIC_IDS } from "../fixtures/qualification-rules/synthetic-rules.ts";
 
 const history: Historical = {
   status: "resolved",
@@ -175,6 +181,207 @@ describe("trip decision knowledge/lifecycle gates", () => {
     telemetry.start.basis = "staff-resolution";
     expect(evaluationSnapshot(telemetry, history, null, "ignored").attributionBasis).toBe(
       "staff_resolution",
+    );
+  });
+});
+
+describe("over-limit acceptance and qualification check details", () => {
+  const ids = SYNTHETIC_IDS,
+    limits: Historical = {
+      ...history,
+      rules: [
+        { type: "max_mass", maxKg: "20000" },
+        { type: "allowed_trailer_types", entityIds: [ids.TRAILER_STANDARD] },
+        { type: "allowed_adr_categories", entityIds: [ids.ADR_GASES_CLASS_2] },
+      ],
+    },
+    manualOnly = { hasTelemetrySource: false, eventInvalid: false, eventReviewRequired: false },
+    mass = (value: string) => knownFact(value, "manual.cargoMassKg"),
+    overMass = () => createSyntheticManualEvidence({ cargoMassKg: mass("21000") }),
+    event = {
+      eventId: ids.EVENT_ID,
+      eventRevisionId: ids.EVENT_REVISION_ID,
+      attendanceRevisionId: ids.ATTENDANCE_REVISION_ID,
+      attendanceStatus: "confirmed" as const,
+      prescribedCargoId: null,
+      prescribedMassKg: "21000",
+      prescribedTrailerTypeId: null,
+    };
+  test("a manual report breaking only the mass limit is acceptable over limits with exact details", () => {
+    const e = overMass();
+    expect(acceptance(e, limits, null, manualOnly)).toEqual({
+      mode: "over_limits",
+      exceeded: ["rule_mass_exceeded"],
+      blockedReasonCodes: [],
+    });
+    expect(qualificationCheck(e, limits, null)).toEqual({
+      status: "resolved",
+      reasonCode: null,
+      rules: [
+        {
+          ruleType: "max_mass",
+          outcome: "fail",
+          reasonCode: "rule_mass_exceeded",
+          bypassedByEvent: false,
+          observedMassKg: "21000",
+          limitMassKg: "20000",
+          entityIds: [],
+        },
+        {
+          ruleType: "allowed_trailer_types",
+          outcome: "pass",
+          reasonCode: "rule_passed",
+          bypassedByEvent: false,
+          observedMassKg: null,
+          limitMassKg: null,
+          entityIds: [],
+        },
+        {
+          ruleType: "allowed_adr_categories",
+          outcome: "pass",
+          reasonCode: "rule_passed",
+          bypassedByEvent: false,
+          observedMassKg: null,
+          limitMassKg: null,
+          entityIds: [],
+        },
+      ],
+    });
+    expect(acceptance(createSyntheticManualEvidence(), limits, null, manualOnly)).toEqual({
+      mode: "ordinary",
+      exceeded: [],
+      blockedReasonCodes: [],
+    });
+  });
+  test("every exceeded limit is listed with the offending trailer and ADR entities", () => {
+    const e = createSyntheticManualEvidence({
+      cargoMassKg: mass("21000"),
+      trailers: {
+        complete: true,
+        items: [
+          pinnedEntityFact(ids.TRAILER_STANDARD, "trailer_type"),
+          pinnedEntityFact(ids.TRAILER_DISALLOWED, "trailer_type"),
+        ],
+      },
+      adrCategory: pinnedEntityFact(ids.ADR_DISALLOWED_RADIOACTIVE, "adr"),
+    });
+    expect(acceptance(e, limits, null, manualOnly)).toEqual({
+      mode: "over_limits",
+      exceeded: [
+        "rule_adr_category_disallowed",
+        "rule_mass_exceeded",
+        "rule_trailer_type_disallowed",
+      ],
+      blockedReasonCodes: [],
+    });
+    const rules = qualificationCheck(e, limits, null).rules;
+    expect(rules.map((r) => [r.ruleType, r.outcome, r.entityIds])).toEqual([
+      ["max_mass", "fail", []],
+      ["allowed_trailer_types", "fail", [ids.TRAILER_DISALLOWED]],
+      ["allowed_adr_categories", "fail", [ids.ADR_DISALLOWED_RADIOACTIVE]],
+    ]);
+  });
+  test("a telemetry source, an event review or a non-limit violation makes acceptance unavailable", () => {
+    const e = overMass();
+    expect(acceptance(e, limits, null, { ...manualOnly, hasTelemetrySource: true })).toEqual({
+      mode: "unavailable",
+      exceeded: ["rule_mass_exceeded"],
+      blockedReasonCodes: ["telemetry_source_present"],
+    });
+    expect(
+      acceptance(e, limits, null, { ...manualOnly, eventReviewRequired: true }).blockedReasonCodes,
+    ).toEqual(["event_requires_review"]);
+    expect(
+      acceptance(createSyntheticManualEvidence(), limits, null, {
+        ...manualOnly,
+        eventInvalid: true,
+      }),
+    ).toMatchObject({ mode: "unavailable", blockedReasonCodes: ["event_requires_review"] });
+    expect(acceptance({ ...e, outcome: "cancelled" }, limits, null, manualOnly)).toMatchObject({
+      mode: "unavailable",
+      blockedReasonCodes: ["terminal_outcome_not_delivered"],
+    });
+    expect(acceptance({ ...e, outcome: "open" }, limits, null, manualOnly)).toMatchObject({
+      mode: "unavailable",
+      blockedReasonCodes: ["trip_open"],
+    });
+    // Ordinary telemetry acceptance is unchanged by the source rule.
+    expect(
+      acceptance(createSyntheticTripEvidence(), limits, null, {
+        ...manualOnly,
+        hasTelemetrySource: true,
+      }).mode,
+    ).toBe("ordinary");
+  });
+  test("unknown limits, missing facts and unresolved history block acceptance even beside a proven breach", () => {
+    const e = createSyntheticManualEvidence({
+      cargoMassKg: mass("21000"),
+      adrCategory: unknownFact<PinnedEntity>("data_unknown"),
+    });
+    expect(classify(e, limits, null, [], true).reasons).toEqual(["rule_mass_exceeded"]);
+    expect(acceptance(e, limits, null, manualOnly)).toEqual({
+      mode: "unavailable",
+      exceeded: ["rule_mass_exceeded"],
+      blockedReasonCodes: ["rule_adr_category_unknown"],
+    });
+    expect(
+      acceptance({ ...overMass(), origin: unknownFact() }, limits, null, manualOnly)
+        .blockedReasonCodes,
+    ).toEqual(["origin_unknown"]);
+    const unresolved: Historical = {
+      status: "unresolved",
+      reasonCode: "qualification_history_unknown",
+      attributionBasis: "manual_confirmation",
+      attributionAt: null,
+    };
+    expect(acceptance(overMass(), unresolved, null, manualOnly)).toEqual({
+      mode: "unavailable",
+      exceeded: [],
+      blockedReasonCodes: ["qualification_history_unknown"],
+    });
+    expect(qualificationCheck(overMass(), unresolved, null)).toEqual({
+      status: "unresolved",
+      reasonCode: "qualification_history_unknown",
+      rules: [],
+    });
+    const unknownMass = qualificationCheck(
+      createSyntheticManualEvidence({ cargoMassKg: unknownFact("data_unknown") }),
+      limits,
+      null,
+    ).rules[0];
+    expect(unknownMass).toMatchObject({
+      outcome: "unknown",
+      observedMassKg: null,
+      limitMassKg: "20000",
+    });
+  });
+  test("a full event exception accepts ordinarily while a partial exception blocks the override", () => {
+    const full = overMass();
+    expect(acceptance(full, limits, event, manualOnly).mode).toBe("ordinary");
+    expect(qualificationCheck(full, limits, event).rules[0]).toEqual({
+      ruleType: "max_mass",
+      outcome: "pass",
+      reasonCode: "event_prescribed_load_bypass",
+      bypassedByEvent: true,
+      observedMassKg: "21000",
+      limitMassKg: "20000",
+      entityIds: [],
+    });
+    const partial = createSyntheticManualEvidence({
+      cargoMassKg: mass("21000"),
+      trailers: {
+        complete: true,
+        items: [pinnedEntityFact(ids.TRAILER_DISALLOWED, "trailer_type")],
+      },
+    });
+    expect(acceptance(partial, limits, event, manualOnly)).toEqual({
+      mode: "unavailable",
+      exceeded: ["rule_trailer_type_disallowed"],
+      blockedReasonCodes: ["event_exception_applied"],
+    });
+    // Without any bypass the same associated event does not prevent an override.
+    expect(acceptance(partial, limits, { ...event, prescribedMassKg: "1" }, manualOnly).mode).toBe(
+      "over_limits",
     );
   });
 });

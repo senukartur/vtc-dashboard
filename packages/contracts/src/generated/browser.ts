@@ -2820,6 +2820,8 @@ export interface components {
         };
         Decimal: string;
         Decision: {
+            /** @description True only for a staff acceptance that waived qualification limits with explicit confirmation; reasonCodes then list the exceeded limits plus accepted_over_limits. */
+            acceptedOverLimits: boolean;
             basis: components["schemas"]["EvaluationSnapshot"];
             /** Format: date-time */
             decidedAt: string;
@@ -2830,9 +2832,13 @@ export interface components {
             reason: string | null;
             reasonCodes: string[];
             reviewedRevisionId: string | null;
+            /** @description Reviewer summary for a staff decision (also shown for former members); null for system decisions. */
+            reviewer: components["schemas"]["MemberSummary"] | null;
             reviewerId: string | null;
         };
         DecisionInput: {
+            /** @description Optional, false when omitted. Explicit reviewer confirmation to accept a manual report over qualification limits. Only valid with decision accept and a null proposalId (422 otherwise). Required when the review acceptance mode is over_limits and rejected with 409 when it is ordinary or unavailable. */
+            confirmOverLimits?: boolean;
             /** @enum {string} */
             decision: "accept" | "reject";
             /** Format: uuid */
@@ -3984,6 +3990,13 @@ export interface components {
             /** @enum {string} */
             purpose: "initial" | "reinstatement" | "historical_resolution" | "administrative_correction" | "promotion";
         };
+        /** @description Historical qualification rules evaluated for the reviewed fact. Unresolved history has a reason code and no rules. */
+        QualificationCheck: {
+            reasonCode: string | null;
+            rules: components["schemas"]["QualificationRuleCheck"][];
+            /** @enum {string} */
+            status: "resolved" | "unresolved";
+        };
         QualificationLevel: {
             /** @enum {string} */
             code: "trainee" | "driver_iii" | "driver_ii" | "driver_i";
@@ -4024,6 +4037,17 @@ export interface components {
                 trailersComplete: boolean;
                 trailerTypeIds: (string | null)[];
             };
+        };
+        /** @description One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 catalog entities that broke a trailer or ADR rule. Unknown values are null, never zero. */
+        QualificationRuleCheck: {
+            bypassedByEvent: boolean;
+            entityIds: string[];
+            limitMassKg: components["schemas"]["Decimal"] | null;
+            observedMassKg: components["schemas"]["Decimal"] | null;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            reasonCode: string;
+            ruleType: string;
         };
         QualificationRuleHistory: {
             /** Format: date-time */
@@ -4144,13 +4168,21 @@ export interface components {
             trailerTypeId?: string;
         };
         Review: {
+            acceptance: components["schemas"]["ReviewAcceptance"];
             blockedReasonCodes: string[];
             canDecide: boolean;
             evaluation: components["schemas"]["EvaluationSnapshot"];
             /** Format: uuid */
             factRevisionId: string;
             facts: components["schemas"]["SafeSourceFact"][];
+            qualificationCheck: components["schemas"]["QualificationCheck"];
             trip: components["schemas"]["TripPrivate"];
+        };
+        /** @description ordinary: accept without confirmOverLimits. over_limits: only qualification limits failed, the group has no telemetry source and no event exception; accept requires confirmOverLimits true. unavailable: accept returns 409; blockedReasonCodes explain why. Rejection is not limited by this mode, and self-review is reported separately by canDecide. */
+        ReviewAcceptance: {
+            blockedReasonCodes: string[];
+            /** @enum {string} */
+            mode: "ordinary" | "over_limits" | "unavailable";
         };
         RolesInput: {
             reason: string;
@@ -4348,6 +4380,19 @@ export interface components {
             /** Format: uuid */
             tripId: string;
         } & unknown;
+        /** @description Present only in listTrips responses for scope=review. Review-queue state of the canonical trip: hold flag, stored review reasons, queue time and the current manual revision number (null without a manual report). */
+        TripReviewQueueEntry: {
+            /** Format: date-time */
+            createdAt: string;
+            hold: boolean;
+            manualRevision: components["schemas"]["TripReviewRevision"] | null;
+            reasonCodes: string[];
+        };
+        TripReviewRevision: {
+            number: number;
+            /** Format: date-time */
+            submittedAt: string;
+        };
         TripSummary: {
             actualDistanceM: string | null;
             cargo: components["schemas"]["CatalogLabel"] | null;
@@ -4370,6 +4415,7 @@ export interface components {
              * @enum {string}
              */
             reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
+            review?: components["schemas"]["TripReviewQueueEntry"];
             sourceKinds: ("ets2telemetry" | "manual")[];
             version: number;
             /** @constant */
@@ -8098,7 +8144,11 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 decision?: "unassessed" | "pending_review" | "accepted" | "rejected";
                 game?: "ets2" | "ats";
+                /** @description Review queue only (scope=review): filter by the trip review hold. 422 otherwise. */
+                hold?: boolean;
                 limit?: components["parameters"]["Limit"];
+                /** @description Review queue only (scope=review): createdAt then id order; default desc. 422 otherwise. Cursors are bound to hold and order. */
+                order?: "asc" | "desc";
                 scope?: "company" | "mine" | "review";
             };
             header?: never;

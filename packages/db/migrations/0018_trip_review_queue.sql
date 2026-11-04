@@ -1,0 +1,1 @@
+CREATE INDEX `trip_review_queue` ON `trips` (`review_hold`,`alias_of`,`created_at`,`id`);

@@ -10,8 +10,10 @@ import {
 } from "@vtc/db";
 import {
   and,
+  asc,
   desc,
   eq,
+  gt,
   inArray,
   isNull,
   lt,
@@ -86,6 +88,11 @@ export interface TripsPorts {
   ) => Promise<
     Map<string, { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }>
   >;
+  // Review queue only: current manual revision number/time per trip, without evidence reads.
+  manualRevisions?: (
+    tx: TxContext,
+    tripIds: string[],
+  ) => Promise<Map<string, { number: number; submittedAt: string }>>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export interface SourceContext {
@@ -98,6 +105,9 @@ export interface ListOptions {
   scope?: "company" | "mine" | "review";
   game?: "ets2" | "ats";
   decision?: Trip["decision"];
+  // Review queue only (scope=review).
+  hold?: boolean;
+  order?: "asc" | "desc";
   cursor?: string;
   limit?: number;
 }
@@ -670,7 +680,9 @@ export function createTrips(
       options.scope ?? "company",
       options.game ?? null,
       options.decision ?? null,
-      "createdAt/id:desc",
+      options.order === "asc" ? "createdAt/id:asc" : "createdAt/id:desc",
+      // Appended only when set, so cursors issued before the review filters stay valid.
+      ...(options.hold === undefined ? [] : [`hold:${options.hold}`]),
     ];
   }
   function readCursor(
@@ -922,9 +934,13 @@ export function createTrips(
         !Number.isInteger(limit) ||
         limit < 1 ||
         limit > 100 ||
-        !["company", "mine", "review"].includes(scope)
+        !["company", "mine", "review"].includes(scope) ||
+        (options.hold !== undefined && typeof options.hold !== "boolean") ||
+        (options.order !== undefined && !["asc", "desc"].includes(options.order)) ||
+        (scope !== "review" && (options.hold !== undefined || options.order !== undefined))
       )
         throw identityError(422);
+      const ascending = options.order === "asc";
       return run(async (tx) => {
         const current = await authority(tx, actor, scope === "review");
         const after = readCursor(actor, options);
@@ -941,15 +957,25 @@ export function createTrips(
                   : undefined,
               options.game ? eq(trips.game, options.game) : undefined,
               options.decision ? eq(trips.decision, options.decision) : undefined,
+              options.hold === undefined ? undefined : eq(trips.reviewHold, options.hold),
               after
-                ? or(
-                    lt(trips.createdAt, after.createdAt),
-                    and(eq(trips.createdAt, after.createdAt), lt(trips.id, after.id)),
-                  )
+                ? ascending
+                  ? or(
+                      gt(trips.createdAt, after.createdAt),
+                      and(eq(trips.createdAt, after.createdAt), gt(trips.id, after.id)),
+                    )
+                  : or(
+                      lt(trips.createdAt, after.createdAt),
+                      and(eq(trips.createdAt, after.createdAt), lt(trips.id, after.id)),
+                    )
                 : undefined,
             ),
           )
-          .orderBy(desc(trips.createdAt), desc(trips.id))
+          .orderBy(
+            ...(ascending
+              ? [asc(trips.createdAt), asc(trips.id)]
+              : [desc(trips.createdAt), desc(trips.id)]),
+          )
           .limit(limit + 1);
         const page = rows.slice(0, limit),
           last = page.at(-1);
@@ -964,7 +990,33 @@ export function createTrips(
           ).toString("base64url");
           nextCursor = `${body}.${signature(body).toString("base64url")}`;
         }
-        return { items: await summaries(tx, page, current.locale), nextCursor };
+        const items = await summaries(tx, page, current.locale);
+        if (scope !== "review") return { items, nextCursor };
+        // One batched revision read per page (at most 100 trips), never one read per row.
+        const manual = page.length
+          ? await ports.manualRevisions?.(
+              tx,
+              page.map((row) => row.id),
+            )
+          : undefined;
+        return {
+          items: items.map((item, index) => {
+            const row = page[index] as Trip,
+              revision = manual?.get(row.id) ?? null;
+            return {
+              ...item,
+              review: {
+                hold: row.reviewHold,
+                reasonCodes: row.reviewReasons,
+                createdAt: row.createdAt,
+                manualRevision: revision
+                  ? { number: revision.number, submittedAt: revision.submittedAt }
+                  : null,
+              },
+            };
+          }),
+          nextCursor,
+        };
       });
     },
     async detail(actor: Actor, tripId: string): Promise<S["TripView"]> {

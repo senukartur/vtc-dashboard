@@ -19,7 +19,7 @@ import { catalogFacts, catalogRevisions } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
 
-export { and, asc, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+export { and, asc, desc, eq, gt, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const provider = (name: string) => mysqlEnum(name, ["ets2telemetry", "manual"]);
@@ -68,6 +68,7 @@ export const trips = mysqlTable(
     index("trip_owner_page").on(t.ownerId, t.createdAt, t.id),
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),
     index("trip_analytics_reporting").on(t.decision, t.reportingAt, t.game, t.ownerId),
+    index("trip_review_queue").on(t.reviewHold, t.aliasOf, t.createdAt, t.id),
     check("trip_version_positive", sql`${t.version} > 0`),
   ],
 );

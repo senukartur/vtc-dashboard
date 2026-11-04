@@ -11,3 +11,6 @@ VTC-025 adds `0012_manual_reports.sql`: twelve manual/evidence/generation tables
 
 
 VTC-036 appends `0017_event_notification_material.sql` without rewriting `0016` or earlier assets. It adds Events-owned nullable material-prefix JSON, virtual pending discovery and its index. No history-copy seed runs in DDL; bounded owning repair fills prefixes after upgrade. Index construction still evaluates retained Events and must satisfy unchanged native DDL/recovery budgets. Preserve additive columns during a producer rollback, pause incompatible notification readers, and catch up before enabling current delivery; see [material identity upgrade](../../../docs/development/notifications.md#material-identity-upgrade-and-repair).
+
+
+VTC-059A appends `0018_trip_review_queue.sql` without rewriting `0017` or earlier assets: one additive `CREATE INDEX trip_review_queue ON trips (review_hold, alias_of, created_at, id)` for the staff review queue. It adds no column, data change or grant; old readers ignore it. Rollback leaves the index in place or drops it with reviewed DDL; a failed build follows the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).

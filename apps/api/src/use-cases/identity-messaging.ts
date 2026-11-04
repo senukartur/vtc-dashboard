@@ -192,6 +192,10 @@ export function composeIdentity(
                 if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
                 return manualReports.projectionInTransaction(tx, ids);
               },
+              manualRevisions: (tx, ids) => {
+                if (!manualReports) throw new Error("MANUAL_COMPOSITION_INCOMPLETE");
+                return manualReports.revisionSummariesInTransaction(tx, ids);
+              },
             }
           : {}),
       })

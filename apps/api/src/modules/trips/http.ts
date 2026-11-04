@@ -29,6 +29,8 @@ export async function registerTripRoutes(app: FastifyInstance, identity: Identit
             type: "string",
             enum: ["unassessed", "pending_review", "accepted", "rejected"],
           },
+          hold: { type: "boolean" },
+          order: { type: "string", enum: ["asc", "desc"] },
         }),
         response: { 200: ref("EnvelopeListTripSummary") },
       },
