@@ -29,11 +29,16 @@ jobs:
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # No commit-status permission here: the Claude step reads untrusted PR content, so the
+    # merge-gate status is published by the separate status job below (VTC-075).
     permissions:
       contents: read
       pull-requests: write
-      # Publishes the required "Advisory review" commit status (VTC-075).
-      statuses: write
+    outputs:
+      eligible: ${{ steps.target.outputs.eligible }}
+      exempt: ${{ steps.target.outputs.exempt }}
+      head_sha: ${{ steps.target.outputs.head_sha }}
+      published: ${{ steps.publish.outcome == 'success' }}
     steps:
       - name: Check review target
         id: target
@@ -240,15 +245,33 @@ jobs:
               event: 'COMMENT',
               comments,
             });
-      # Required by the main ruleset (VTC-075), so auto-merge waits for this review and its
-      # inline threads. A failed, cancelled or missing review blocks merge until the run is re-run.
+
+  # Required by the main ruleset (VTC-075), so auto-merge waits for this review and its inline
+  # threads. Only this job may write commit statuses, and it runs no PR-controlled input: it reads the
+  # review job's validated target and step outcome. It also runs after a cancelled or timed-out
+  # review, so that head shows a visible failure instead of a missing status.
+  review-status:
+    name: Required review status
+    needs: [review]
+    if: >-
+      always() &&
+      (needs.review.outputs.eligible == 'true' || needs.review.outputs.exempt == 'true')
+    # The latest run for a head publishes last: a newer status job waits for an older one.
+    concurrency:
+      group: claude-review-status-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
       - name: Publish required review status
-        if: ${{ !cancelled() && (steps.target.outputs.eligible == 'true' || steps.target.outputs.exempt == 'true') }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          REVIEW_HEAD_SHA: ${{ steps.target.outputs.head_sha }}
-          EXEMPT: ${{ steps.target.outputs.exempt }}
-          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          REVIEW_HEAD_SHA: ${{ needs.review.outputs.head_sha }}
+          EXEMPT: ${{ needs.review.outputs.exempt }}
+          PUBLISHED: ${{ needs.review.outputs.published }}
+          REVIEW_RESULT: ${{ needs.review.result }}
         with:
           script: |
             const sha = process.env.REVIEW_HEAD_SHA || '';
@@ -257,7 +280,8 @@ jobs:
               return;
             }
             const exempt = process.env.EXEMPT === 'true';
-            const published = process.env.PUBLISH_OUTCOME === 'success';
+            const published = process.env.PUBLISHED === 'true' && process.env.REVIEW_RESULT === 'success';
+            const cancelled = process.env.REVIEW_RESULT === 'cancelled';
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -268,7 +292,9 @@ jobs:
                 ? 'Dependabot PR: advisory review not run'
                 : published
                   ? 'Advisory review published for this head'
-                  : 'Advisory review failed; re-run the workflow',
+                  : cancelled
+                    ? 'Advisory review cancelled or timed out; re-run the workflow'
+                    : 'Advisory review failed; re-run the workflow',
               target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
 

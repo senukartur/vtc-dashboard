@@ -63,7 +63,7 @@ test.each(jobs)("%s CLI schema rejects malformed, missing and unexpected review 
     expect(validate({ summary: "Invalid finding.", findings: [invalid] })).toBe(false);
 });
 
-test("the review job publishes the status the main ruleset requires", () => {
+test("a separate status job publishes the status the main ruleset requires", () => {
   const ruleset = JSON.parse(
     readFileSync(new URL("../../.github/rulesets/main.json", import.meta.url), "utf8"),
   );
@@ -71,11 +71,20 @@ test("the review job publishes the status the main ruleset requires", () => {
     (rule: { type: string }) => rule.type === "required_status_checks",
   ).parameters.required_status_checks;
   expect(checks).toContainEqual({ context: "Advisory review", integration_id: 15368 });
-  const review = workflow.split(/\r?\n {2}mention:/)[0] ?? "";
-  expect(review).toContain("statuses: write");
-  expect(review).toContain("context: 'Advisory review'");
-  // A cancelled review publishes nothing, so a newer run decides the status.
-  expect(review).toContain("!cancelled() && (steps.target.outputs.eligible == 'true'");
+  const [review = "", status = ""] = (workflow.split(/\r?\n {2}mention:/)[0] ?? "").split(
+    /\r?\n {2}review-status:/,
+  );
+  // The Claude step reads untrusted PR content, so its job cannot publish the merge gate.
+  expect(review).not.toContain("statuses: write");
+  expect(review).not.toContain("createCommitStatus");
+  expect(review).toMatch(/published: \$\{\{ steps\.publish\.outcome == 'success' \}\}/);
+  expect(status).toMatch(/permissions:\r?\n {6}statuses: write\r?\n {4}steps:/);
+  expect(status).toContain("needs: [review]");
+  expect(status).toContain("context: 'Advisory review'");
+  // A cancelled or timed-out review still gets a visible failure for its head.
+  expect(status).toContain("always() &&");
+  expect(status).toMatch(/REVIEW_RESULT: \$\{\{ needs\.review\.result \}\}/);
+  expect(status).toMatch(/group: claude-review-status-.*\r?\n {6}cancel-in-progress: false/);
   // Reviews of different heads never cancel each other (VTC-075).
   expect(review).toMatch(
     /group: claude-review-\$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \}\}-\$\{\{ github\.event\.workflow_run\.head_sha \}\}/,
