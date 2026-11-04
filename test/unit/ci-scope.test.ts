@@ -1,9 +1,13 @@
 import { expect, test } from "vitest";
 import { rehearsalPath, rehearsalScope } from "../../scripts/ci-scope.mjs";
 
-test("pushes always require the deployment rehearsal", () => {
-  for (const event of ["push", "workflow_dispatch", undefined])
+test("main pushes skip the rehearsal while the schedule and manual dispatch always run it", () => {
+  expect(rehearsalScope("push", [])).toBe("false");
+  expect(rehearsalScope("push", ["deploy/development/rehearsal.py"])).toBe("false");
+  for (const event of ["schedule", "workflow_dispatch"])
     expect(rehearsalScope(event, [])).toBe("true");
+  for (const event of ["workflow_run", "pull_request_target", "", undefined])
+    expect(() => rehearsalScope(event, [])).toThrow("CI_SCOPE_EVENT_INVALID");
 });
 
 test("pull requests require it only for paths the rehearsal exercises", () => {
