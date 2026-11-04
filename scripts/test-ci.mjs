@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { collectEvents, qualityReport } from "./ci-result.mjs";
-import { ciGroups, validShard } from "./test-selection.mjs";
+import { ciGroups, shardableLanes, validShard } from "./test-selection.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const args = process.argv.slice(2);
@@ -13,7 +13,10 @@ const probe =
 // node scripts/test-ci.mjs --group <core|integration|persistence-recovery|e2e> [--shard <i/n>]
 const group = args[0] === "--group" && Object.hasOwn(ciGroups, args[1]) ? args[1] : undefined;
 const shard =
-  group === "e2e" && args.length === 4 && args[2] === "--shard" && validShard(args[3])
+  shardableLanes.includes(group) &&
+  args.length === 4 &&
+  args[2] === "--shard" &&
+  validShard(args[3])
     ? args[3]
     : undefined;
 if (args.length && !probe && !(group && args.length === (shard ? 4 : 2)))

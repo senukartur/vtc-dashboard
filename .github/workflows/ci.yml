@@ -30,12 +30,15 @@ jobs:
       matrix:
         include:
           - { name: core, group: core, shard: "" }
-          - { name: integration, group: integration, shard: "" }
+          - { name: integration 1-2, group: integration, shard: 1/2 }
+          - { name: integration 2-2, group: integration, shard: 2/2 }
           - { name: persistence-recovery, group: persistence-recovery, shard: "" }
-          - { name: e2e 1-4, group: e2e, shard: 1/4 }
-          - { name: e2e 2-4, group: e2e, shard: 2/4 }
-          - { name: e2e 3-4, group: e2e, shard: 3/4 }
-          - { name: e2e 4-4, group: e2e, shard: 4/4 }
+          - { name: e2e 1-6, group: e2e, shard: 1/6 }
+          - { name: e2e 2-6, group: e2e, shard: 2/6 }
+          - { name: e2e 3-6, group: e2e, shard: 3/6 }
+          - { name: e2e 4-6, group: e2e, shard: 4/6 }
+          - { name: e2e 5-6, group: e2e, shard: 5/6 }
+          - { name: e2e 6-6, group: e2e, shard: 6/6 }
     steps:
       - name: Checkout candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

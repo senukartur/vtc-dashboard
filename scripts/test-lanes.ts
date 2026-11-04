@@ -25,6 +25,7 @@ import {
   ciGroups,
   groupSelection,
   parseSelection,
+  shardableLanes,
   validProject,
   validShard,
 } from "./test-selection.mjs";
@@ -41,9 +42,11 @@ const browserProject =
   !["all", "failure-reporting"].includes(lane) && validProject(process.env.VTC_TEST_PROJECT)
     ? process.env.VTC_TEST_PROJECT
     : undefined;
-// CI splits the browser lane into parallel jobs; only the e2e focus accepts a shard.
-const browserShard =
-  lane === "e2e" && validShard(process.env.VTC_TEST_SHARD) ? process.env.VTC_TEST_SHARD : undefined;
+// CI splits the integration and browser lanes into parallel jobs; only those foci accept a shard.
+const laneShard =
+  shardableLanes.includes(lane) && validShard(process.env.VTC_TEST_SHARD)
+    ? process.env.VTC_TEST_SHARD
+    : undefined;
 const cli = (name: string) => resolve(`node_modules/${name}`);
 let active: ReturnType<typeof spawn> | undefined;
 let interrupted = false;
@@ -95,7 +98,14 @@ async function execute(
       await writeFile(path, JSON.stringify(allocation));
     }
     const args = ["unit", "contracts", "integration"].includes(name)
-      ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts", ...files]
+      ? [
+          cli("vitest/vitest.mjs"),
+          "run",
+          "--config",
+          "vitest.config.ts",
+          ...(name === "integration" && laneShard && !probe ? [`--shard=${laneShard}`] : []),
+          ...files,
+        ]
       : name === "e2e"
         ? [
             cli("@playwright/test/cli.js"),
@@ -103,7 +113,7 @@ async function execute(
             "--config",
             "playwright.config.ts",
             ...(browserProject && !probe ? [`--project=${browserProject}`] : []),
-            ...(browserShard && !probe ? [`--shard=${browserShard}`] : []),
+            ...(laneShard && !probe ? [`--shard=${laneShard}`] : []),
             ...files,
           ]
         : [
