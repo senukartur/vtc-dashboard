@@ -111,9 +111,9 @@ jobs:
         run: node deploy/development/test.mjs $REHEARSAL_ARGS
   artifact:
     # A main push has no rehearsal leg (VTC-072); the merge candidate was rehearsed on its PR
-    # when the path rule required it.
+    # when the path rule required it. The artifact builds alongside Quality (VTC-074): Required
+    # CI still needs both, and deploy accepts only an artifact of a successful run.
     name: Production release artifact
-    needs: [quality]
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
