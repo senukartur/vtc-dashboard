@@ -4,6 +4,7 @@ import { useSession } from "../../app/Session.js";
 import type { Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import { RecentTripsWidget, UpcomingEventWidget } from "./blocks.js";
 import {
   ActualDistanceChart,
   KpiStrip,
@@ -11,13 +12,13 @@ import {
   MetricDefinitionsCard,
   MyQualificationWidget,
   ReviewerQueueWidget,
-  UpcomingEventWidget,
 } from "./components.js";
 import { computePeriodDates, type GameFilter, type PeriodFilter, periods } from "./model.js";
 import {
   useCompanyAnalytics,
   useDriverLeaderboard,
   useMyQualificationProgress,
+  useRecentCompanyTrips,
   useReviewQueueTrips,
   useUpcomingEvent,
 } from "./queries.js";
@@ -79,6 +80,8 @@ function DashboardContent() {
   const atsProgressQuery = useMyQualificationProgress("ats");
   const upcomingEventQuery = useUpcomingEvent();
   const reviewTripsQuery = useReviewQueueTrips();
+  // Follows the game filter only: the trips list has no date filter for the period.
+  const recentTripsQuery = useRecentCompanyTrips(effectiveGame);
 
   const canReview = capabilities.includes("trips.review");
   const analytics = analyticsQuery.data;
@@ -198,8 +201,15 @@ function DashboardContent() {
                 query={upcomingEventQuery}
                 locale={locale}
                 displayTimezone={displayTimezone}
+                canRespond={capabilities.includes("events.respond")}
               />
             </div>
+            {/* Full-width third row, below the first desktop screen. */}
+            <RecentTripsWidget
+              query={recentTripsQuery}
+              locale={locale}
+              displayTimezone={displayTimezone}
+            />
           </div>
 
           <MetricDefinitionsCard />

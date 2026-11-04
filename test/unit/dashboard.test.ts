@@ -103,6 +103,15 @@ describe("Dashboard & Driver Profiles Unit Tests", () => {
         "leaderboard.retry",
         "reviewQueue.error",
         "upcomingEvent.error",
+        "upcomingEvent.going",
+        "upcomingEvent.goingButton",
+        "upcomingEvent.cantGoButton",
+        "upcomingEvent.countdownDays",
+        "upcomingEvent.reasonRequired",
+        "recentTrips.title",
+        "recentTrips.allTrips",
+        "recentTrips.empty",
+        "recentTrips.forbidden",
         "states.forbidden",
       ])
         expect(present).toContain(key);

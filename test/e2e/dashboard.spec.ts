@@ -23,6 +23,10 @@ const eventCard = (page: Page) =>
   page.getByRole("region", { name: /^(Upcoming Event|Ближайшее мероприятие)$/ });
 const reviewCard = (page: Page) =>
   page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
+const recentTripsCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Recent company trips|Последние рейсы компании)$/ });
+const responseGroup = (page: Page) =>
+  eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const gameGroup = (page: Page) => page.getByRole("group", { name: /^(Game|Игра)$/ });
 const periodSelect = (page: Page) => page.getByRole("combobox", { name: /^(Period|Период)$/ });
 const loadingStatus = (page: Page) =>
@@ -38,6 +42,8 @@ const dashboardOnlyPaths = [
   "/api/v1/me/qualification-progress",
   "/api/v1/me/upcoming-event",
   "/api/v1/qualification-levels",
+  "/api/v1/trips",
+  "/api/v1/events/",
 ];
 function requestsTo(state: DashboardMockState, prefix: string) {
   return state.requests.filter((url) => url.pathname.startsWith(prefix)).map(String);
@@ -103,11 +109,13 @@ test.describe("Company Dashboard E2E", () => {
     ).toBeVisible();
     await expect(eventCard(page)).toContainText("(UTC)");
 
-    // Blocks without an existing data source stay omitted instead of faked.
+    // The convoy quick response and recent company trips come from existing reads (VTC-055).
+    await expect(responseGroup(page).getByRole("button")).toHaveText(["Going", "Can't go"]);
+    await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
+    await expect(recentTripsCard(page).getByRole("listitem")).toHaveCount(5);
     await expect(
-      page.getByRole("button", { name: /^(Going|Can't go|Поеду|Не смогу)$/ }),
-    ).toHaveCount(0);
-    await expect(page.getByText(/Recent company trips|Последние рейсы компании/)).toHaveCount(0);
+      recentTripsCard(page).getByRole("link", { name: "All company trips", exact: true }),
+    ).toHaveAttribute("href", "/account/trips?scope=company");
     await expect(page.getByText(/Достаточно суров|Yukon\?/)).toHaveCount(0);
 
     await loaded(page);
@@ -572,6 +580,12 @@ test.describe("Company Dashboard E2E", () => {
     await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
     await expect(reviewCard(page)).toHaveCount(0);
     expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+    // Without events.respond the convoy shows no response controls and reads no own response.
+    await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
+    await expect(responseGroup(page)).toHaveCount(0);
+    expect(
+      state.requests.filter((url) => url.pathname.endsWith("/my-response")).map(String),
+    ).toEqual([]);
   });
 
   test("keeps review queue and event failures inside their cards", async ({ page }) => {
