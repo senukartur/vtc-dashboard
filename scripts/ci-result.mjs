@@ -16,11 +16,17 @@ export const stages = [
   "failure-reporting",
   "cleanup",
 ];
+// The rehearsal may be skipped only on a pull request whose successful scope job reported
+// "false" under the path rule in ci-scope.mjs; main always requires it.
 export function requiredCi(results) {
-  if (results?.quality !== "success" || results?.deployment !== "success") return 1;
+  if (results?.quality !== "success" || results?.scope !== "success") return 1;
+  if (!["true", "false"].includes(results.rehearsal)) return 1;
+  const rehearsal = results.rehearsal === "true" ? "success" : "skipped";
+  if (results.deployment !== rehearsal) return 1;
   if (results.event === "pull_request") return results.artifact === "skipped" ? 0 : 1;
   return results.event === "push" &&
     results.ref === "refs/heads/main" &&
+    results.rehearsal === "true" &&
     results.artifact === "success"
     ? 0
     : 1;

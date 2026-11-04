@@ -21,17 +21,29 @@ import { isDeliberateFailure, probeIdentity } from "../test/support/failure-proo
 import { browserFailureLine, browserPreparationLine } from "./browser-diagnostics.mjs";
 import { eventLine } from "./ci-result.mjs";
 import { runTestProcess } from "./test-process.mjs";
-import { groupSelection, parseSelection, validProject } from "./test-selection.mjs";
+import {
+  ciGroups,
+  groupSelection,
+  parseSelection,
+  validProject,
+  validShard,
+} from "./test-selection.mjs";
 
 const lanes = ["unit", "contracts", "integration", "persistence", "recovery", "e2e"];
 const lane = process.argv[2];
-if (!lane || ![...lanes, "all", "failure-reporting", "selected"].includes(lane))
+if (
+  !lane ||
+  ![...lanes, "all", "failure-reporting", "selected", "core", "persistence-recovery"].includes(lane)
+)
   throw new Error("INVALID_TEST_LANE");
 // Focused local runs only: the aggregate and probes never receive a browser project filter.
 const browserProject =
   !["all", "failure-reporting"].includes(lane) && validProject(process.env.VTC_TEST_PROJECT)
     ? process.env.VTC_TEST_PROJECT
     : undefined;
+// CI splits the browser lane into parallel jobs; only the e2e focus accepts a shard.
+const browserShard =
+  lane === "e2e" && validShard(process.env.VTC_TEST_SHARD) ? process.env.VTC_TEST_SHARD : undefined;
 const cli = (name: string) => resolve(`node_modules/${name}`);
 let active: ReturnType<typeof spawn> | undefined;
 let interrupted = false;
@@ -91,6 +103,7 @@ async function execute(
             "--config",
             "playwright.config.ts",
             ...(browserProject && !probe ? [`--project=${browserProject}`] : []),
+            ...(browserShard && !probe ? [`--shard=${browserShard}`] : []),
             ...files,
           ]
         : [
@@ -456,6 +469,27 @@ async function proveIsolation() {
   }
 }
 
+// Runs stages in order and stops at the first failure, as the aggregate always has.
+async function runStages(stages: string[], assertionProbe = false) {
+  for (const name of stages) {
+    const started = Date.now();
+    if (name === "isolation") {
+      await proveIsolation();
+      console.log(eventLine("isolation", 0, Date.now() - started));
+    } else if (name === "failure-reporting") {
+      await proveFailures();
+      console.log(eventLine("failure-reporting", 0, Date.now() - started));
+    } else {
+      const result = await execute(name, assertionProbe && name === "unit");
+      if (result.code !== 0 || interrupted) {
+        console.log(`AGGREGATE child ${name} failed`);
+        process.exitCode = result.code || 1;
+        return;
+      }
+    }
+  }
+}
+
 async function disposeAllocations(disposers: (() => Promise<void>)[]) {
   const cleanup = await Promise.allSettled(disposers.map((dispose) => dispose()));
   const failure = cleanup.find((result) => result.status === "rejected");
@@ -475,28 +509,13 @@ try {
     process.exitCode = 1;
   } else if (lane === "failure-reporting") await proveFailures();
   else if (lane === "all") {
-    if (!process.argv.includes("--assertion-probe")) {
-      const started = Date.now();
-      await proveIsolation();
-      console.log(eventLine("isolation", 0, Date.now() - started));
-    }
-    for (const name of lanes) {
-      const result = await execute(
-        name,
-        process.argv.includes("--assertion-probe") && name === "unit",
-      );
-      if (result.code !== 0 || interrupted) {
-        console.log(`AGGREGATE child ${name} failed`);
-        process.exitCode = result.code || 1;
-        break;
-      }
-    }
-    if (!process.exitCode) {
-      const started = Date.now();
-      await proveFailures();
-      console.log(eventLine("failure-reporting", 0, Date.now() - started));
-    }
-  } else if (lane === "selected") {
+    const assertionProbe = process.argv.includes("--assertion-probe");
+    await runStages(
+      [...(assertionProbe ? [] : ["isolation"]), ...lanes, "failure-reporting"],
+      assertionProbe,
+    );
+  } else if (lane === "core" || lane === "persistence-recovery") await runStages(ciGroups[lane]);
+  else if (lane === "selected") {
     // Every selected lane runs, so one failure does not hide results from the others.
     for (const { lane: name, files } of groupSelection(
       parseSelection(process.env.VTC_TEST_SELECTION),

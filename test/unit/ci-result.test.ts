@@ -10,6 +10,8 @@ import {
 test("required aggregate accepts only explicit success and rejects every other result", () => {
   const valid = {
     quality: "success",
+    scope: "success",
+    rehearsal: "true",
     deployment: "success",
     artifact: "success",
     event: "push",
@@ -17,10 +19,35 @@ test("required aggregate accepts only explicit success and rejects every other r
   };
   expect(requiredCi(valid)).toBe(0);
   expect(requiredCi({ ...valid, event: "pull_request", artifact: "skipped" })).toBe(0);
-  for (const field of ["quality", "deployment", "artifact", "event", "ref"])
+  for (const field of ["quality", "scope", "rehearsal", "deployment", "artifact", "event", "ref"])
     for (const value of ["failure", "cancelled", "skipped", "unknown", undefined])
       expect(requiredCi({ ...valid, [field]: value })).toBe(1);
   expect(requiredCi({ ...valid, event: "pull_request", artifact: "success" })).toBe(1);
+});
+
+test("the rehearsal may be skipped only by the path rule on a pull request", () => {
+  const pull = {
+    quality: "success",
+    scope: "success",
+    rehearsal: "false",
+    deployment: "skipped",
+    artifact: "skipped",
+    event: "pull_request",
+  };
+  expect(requiredCi(pull)).toBe(0);
+  // A rehearsal that ran anyway, or one that the rule required, must succeed explicitly.
+  for (const deployment of ["success", "failure", "cancelled", undefined])
+    expect(requiredCi({ ...pull, deployment })).toBe(1);
+  for (const deployment of ["skipped", "failure", "cancelled", undefined])
+    expect(requiredCi({ ...pull, rehearsal: "true", deployment })).toBe(1);
+  // A failed scope job never authorizes a skip, and main never skips.
+  for (const scope of ["failure", "cancelled", "skipped", undefined])
+    expect(requiredCi({ ...pull, scope })).toBe(1);
+  for (const rehearsal of ["", "TRUE", "0", true, false, undefined])
+    expect(requiredCi({ ...pull, rehearsal })).toBe(1);
+  expect(requiredCi({ ...pull, event: "push", ref: "refs/heads/main", artifact: "success" })).toBe(
+    1,
+  );
   for (const quality of ["failure", "cancelled", "skipped", "", "unknown", undefined, null, true])
     expect(requiredCi({ quality })).toBe(1);
   for (const missing of [undefined, null, {}, []]) expect(requiredCi(missing)).toBe(1);
