@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // Focused local runs. CI never passes a selection and always runs every lane.
@@ -59,13 +59,58 @@ export function validProject(value) {
   return browserProjects.includes(value);
 }
 
-// CI splits these lanes into parallel jobs (Playwright and Vitest --shard).
+// CI splits these lanes into parallel jobs, each running an explicit list of files.
 export const shardableLanes = ["integration", "e2e"];
 
 // A shard is "<index>/<total>" with 1 <= index <= total <= 8.
 export function validShard(value) {
   const match = /^([1-8])\/([1-8])$/.exec(value ?? "");
   return !!match && Number(match[1]) <= Number(match[2]);
+}
+
+// CI shards are packed by measured duration, not by file count. Greedy longest-first:
+// each file, heaviest first (ties by name), joins the lightest shard (ties by lowest index).
+// A file without a valid weight counts as the mean of the known ones, so new files still run.
+// Every file lands in exactly one shard, and the plan is the same on every runner.
+export function planShards(files, total, weights = {}) {
+  if (!Number.isSafeInteger(total) || total < 1 || total > 8) throw new Error("TEST_SHARD_INVALID");
+  const weightOf = (file) =>
+    Object.hasOwn(weights, file) && Number.isSafeInteger(weights[file]) && weights[file] > 0
+      ? weights[file]
+      : undefined;
+  const unique = [...new Set(files)].sort();
+  const known = unique.map(weightOf).filter((weight) => weight !== undefined);
+  const fallback = known.length ? known.reduce((sum, weight) => sum + weight, 0) / known.length : 1;
+  const shards = Array.from({ length: total }, () => ({ files: [], weight: 0 }));
+  for (const { file, weight } of unique
+    .map((file) => ({ file, weight: weightOf(file) ?? fallback }))
+    .sort((a, b) => b.weight - a.weight || (a.file < b.file ? -1 : 1))) {
+    const lightest = shards.reduce((best, shard) => (shard.weight < best.weight ? shard : best));
+    lightest.files.push(file);
+    lightest.weight += weight;
+  }
+  return shards.map((shard) => shard.files.sort());
+}
+
+export function shardFiles(files, shard, weights) {
+  if (!validShard(shard)) throw new Error("TEST_SHARD_INVALID");
+  const [index, total] = shard.split("/").map(Number);
+  const selected = planShards(files, total, weights)[index - 1];
+  if (!selected.length) throw new Error("TEST_SHARD_EMPTY");
+  return selected;
+}
+
+// Measured per-file milliseconds from hosted runs; see docs/development/ci.md to refresh them.
+export function shardWeights(root) {
+  const value = JSON.parse(readFileSync(join(root, "scripts/test-shard-weights.json"), "utf8"));
+  return Object.fromEntries(shardableLanes.map((lane) => [lane, value?.[lane] ?? {}]));
+}
+
+// The files of one shardable lane that this CI shard runs.
+export function laneShardFiles(root, lane, shard) {
+  if (!shardableLanes.includes(lane)) throw new Error("TEST_SHARD_INVALID");
+  const files = listTestFiles(root).filter((file) => laneOf(file) === lane);
+  return shardFiles(files, shard, shardWeights(root)[lane]);
 }
 
 // CI groups split the aggregate into parallel jobs; together they run every stage of "all".

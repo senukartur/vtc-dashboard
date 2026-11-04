@@ -5,12 +5,16 @@ import {
   ciGroups,
   groupSelection,
   laneOf,
+  laneShardFiles,
   listTestFiles,
   parseLocalArguments,
   parseSelection,
+  planShards,
   selectableLanes,
   serializeSelection,
   shardableLanes,
+  shardFiles,
+  shardWeights,
   validShard,
 } from "../../scripts/test-selection.mjs";
 
@@ -154,6 +158,69 @@ describe("CI groups", () => {
     for (const value of ["1/1", "4/4", "8/8"]) expect(validShard(value)).toBe(true);
     for (const value of ["", "4", "2/1", "1/4/4", " 1/4", undefined])
       expect(validShard(value)).toBe(false);
+  });
+});
+
+describe("duration-weighted shards", () => {
+  const file = (name: string) => `test/integration/${name}.test.ts`;
+  const [a, b, c, d, e] = [file("a"), file("b"), file("c"), file("d"), file("e")];
+  const files = [a, b, c, d, e];
+
+  test("pack heaviest first into the lightest shard", () => {
+    const weights = { [a]: 100, [b]: 60, [c]: 50, [d]: 30, [e]: 20 };
+    // a → 1 (100), b → 2 (60), c → 2 (110), d → 1 (130), e → 2 (130).
+    expect(planShards(files, 2, weights)).toEqual([
+      [a, d],
+      [b, c, e],
+    ]);
+    expect(planShards(files.toReversed(), 2, weights)).toEqual(planShards(files, 2, weights));
+    expect(planShards(files, 1, weights)).toEqual([files]);
+  });
+
+  test("give unknown or invalid weights the mean of the known ones", () => {
+    // Zero, fractional and inherited weights are ignored; c gets the mean of a and b (40).
+    const weights: Record<string, number> = Object.assign(Object.create({ [c]: 999 }), {
+      [a]: 60,
+      [b]: 20,
+      [d]: 0,
+      [e]: 1.5,
+    });
+    expect(planShards([a, b, c], 2, weights)).toEqual([[a], [b, c]]);
+    // Without any weight every file counts the same and the shards differ by at most one.
+    const even = planShards(files, 3);
+    expect(even.map((shard) => shard.length).toSorted()).toEqual([1, 2, 2]);
+  });
+
+  test("run every file exactly once for every shard count", () => {
+    const weights = shardWeights(root);
+    for (const lane of shardableLanes) {
+      const laneFiles = inventory.filter((file) => laneOf(file) === lane);
+      for (let total = 1; total <= 8; total += 1) {
+        const shards = Array.from({ length: total }, (_, index) =>
+          laneShardFiles(root, lane, `${index + 1}/${total}`),
+        );
+        expect(shards.flat().toSorted()).toEqual(laneFiles);
+        expect(shards.every((shard) => shard.length > 0)).toBe(true);
+        expect(shards).toEqual(planShards(laneFiles, total, weights[lane] ?? {}));
+      }
+    }
+  });
+
+  test("refuse invalid or empty shards", () => {
+    expect(() => shardFiles(files, "3/2")).toThrow("TEST_SHARD_INVALID");
+    expect(() => shardFiles([a], "2/2")).toThrow("TEST_SHARD_EMPTY");
+    expect(() => planShards(files, 9)).toThrow("TEST_SHARD_INVALID");
+    expect(() => laneShardFiles(root, "unit", "1/2")).toThrow("TEST_SHARD_INVALID");
+  });
+
+  test("keep only positive integer weights for shardable lanes", () => {
+    const weights = shardWeights(root);
+    expect(Object.keys(weights)).toEqual(shardableLanes);
+    for (const lane of shardableLanes)
+      for (const [path, weight] of Object.entries(weights[lane] ?? {})) {
+        expect(laneOf(path)).toBe(lane);
+        expect(Number.isSafeInteger(weight) && weight > 0).toBe(true);
+      }
   });
 });
 
