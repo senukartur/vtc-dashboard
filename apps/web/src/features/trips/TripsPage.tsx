@@ -10,9 +10,21 @@ import { useWideLayout } from "./layout.js";
 import { useTripQuery } from "./queries.js";
 import { TripPanel } from "./TripPanel.js";
 import { TripTable } from "./TripTable.js";
-import { queryString, selectedTrip, selectionSearch, tripFilters } from "./transport.js";
+import {
+  filterSearch,
+  queryString,
+  selectedTrip,
+  selectionSearch,
+  type TripSource,
+  tripFilters,
+  tripSources,
+} from "./transport.js";
 import "./trips.css";
 import "./trips-list.css";
+const sourceLabels: Record<TripSource, "sourceTelemetry" | "sourceManual"> = {
+  ets2telemetry: "sourceTelemetry",
+  manual: "sourceManual",
+};
 export function TripsPage() {
   const { t } = useTranslation("trips"),
     session = useSession(),
@@ -50,15 +62,10 @@ export function TripsPage() {
     focusPanel.current = false;
     heading.current?.focus({ preventScroll: true });
   }, [selected]);
+  // URL updates start from window.location.search: the router's functional `previous` can be
+  // stale when two changes land before a re-render, which would drop the earlier filter.
   function change(key: string, value: string) {
-    setParams((previous) => {
-      const next = new URLSearchParams(previous);
-      if (value) next.set(key, value);
-      else next.delete(key);
-      next.delete("cursor");
-      next.delete("trip");
-      return next;
-    });
+    setParams(filterSearch(window.location.search, key, value));
   }
   function select(event: MouseEvent<HTMLAnchorElement>, id: string) {
     if (!wide || !isPlainSelfClick(event)) return;
@@ -74,11 +81,9 @@ export function TripsPage() {
     (
       document.getElementById(`trip-link-${id}`) ?? document.getElementById("main-content")
     )?.focus();
-    setParams((previous) => {
-      const next = new URLSearchParams(previous);
-      next.delete("trip");
-      return next;
-    });
+    const next = new URLSearchParams(window.location.search);
+    next.delete("trip");
+    setParams(next);
   }
   const items = query.data?.data.data.items;
   const toolbar = (
@@ -116,6 +121,23 @@ export function TripsPage() {
           </Select>
         </span>
       )}
+      <span className="trips-filter">
+        <Label htmlFor="trip-source" className="visually-hidden">
+          {t("sourceFilter")}
+        </Label>
+        <Select
+          id="trip-source"
+          value={filters.source ?? ""}
+          onChange={(e) => change("source", e.target.value)}
+        >
+          <option value="">{t("anySource")}</option>
+          {tripSources.map((source) => (
+            <option value={source} key={source}>
+              {t(sourceLabels[source])}
+            </option>
+          ))}
+        </Select>
+      </span>
       <small className="trips-timezone">{t("timesIn", { timezone })}</small>
     </fieldset>
   );
