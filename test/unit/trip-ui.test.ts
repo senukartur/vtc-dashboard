@@ -4,12 +4,15 @@ import { tripTranslations } from "../../apps/web/src/features/trips/translations
 import {
   attemptFor,
   canonicalDecimal,
+  filterSearch,
   proposalResult,
+  queryString,
   revisionFields,
   schema,
   selectedTrip,
   selectionSearch,
   tripFilters,
+  tripSources,
 } from "../../apps/web/src/features/trips/transport.ts";
 
 const cases = JSON.parse(
@@ -41,13 +44,56 @@ test("generated trip runtime envelopes accept reviewed fixtures and reject priva
 test("URL scope validation cannot grant review or invent unsupported filters", () => {
   expect(
     tripFilters(new URLSearchParams("scope=review&game=ets2&decision=accepted&search=secret")),
-  ).toEqual({ scope: "mine", game: "ets2", decision: "accepted" });
+  ).toEqual({ scope: "mine", game: "ets2", decision: "accepted", source: undefined });
   // The review queue has its own page and query; the member list never selects the review scope.
-  expect(tripFilters(new URLSearchParams("scope=review&game=wrong&decision=wrong"))).toEqual({
+  expect(
+    tripFilters(new URLSearchParams("scope=review&game=wrong&decision=wrong&source=wrong")),
+  ).toEqual({
     scope: "mine",
     game: undefined,
     decision: undefined,
+    source: undefined,
   });
+});
+test("source filter accepts only the contract source kinds and resets paging state", () => {
+  const spec = JSON.parse(
+    readFileSync(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
+  );
+  expect([...tripSources]).toEqual(
+    spec.components.schemas.TripSummary.properties.sourceKinds.items.enum,
+  );
+  for (const source of tripSources)
+    expect(tripFilters(new URLSearchParams({ source })).source).toBe(source);
+  for (const query of ["source=", "source=telemetry", "source=Manual", "source=MANUAL", ""])
+    expect(tripFilters(new URLSearchParams(query)).source, query).toBeUndefined();
+  // The first repeated value wins, as for the other filters; the request sends exactly one.
+  expect(tripFilters(new URLSearchParams("source=manual&source=ets2telemetry")).source).toBe(
+    "manual",
+  );
+  // Company scope keeps the source filter (unlike decision, which the page drops there).
+  expect(tripFilters(new URLSearchParams("scope=company&source=ets2telemetry"))).toEqual({
+    scope: "company",
+    game: undefined,
+    decision: undefined,
+    source: "ets2telemetry",
+  });
+  const manual = { scope: "mine", source: "manual" },
+    telemetry = { scope: "mine", source: "ets2telemetry" };
+  expect(queryString({ ...manual, limit: 25, cursor: null })).toBe(
+    "scope=mine&source=manual&limit=25",
+  );
+  expect(queryString(manual)).not.toBe(queryString(telemetry));
+  expect(queryString({ scope: "mine", source: undefined })).toBe("scope=mine");
+  const id = "49000000-0000-4000-8000-000000000002";
+  expect(
+    filterSearch(`?scope=company&game=ats&cursor=c&trip=${id}`, "source", "manual").toString(),
+  ).toBe("scope=company&game=ats&source=manual");
+  expect(filterSearch("?scope=mine&source=manual&cursor=c", "source", "").toString()).toBe(
+    "scope=mine",
+  );
+  expect(filterSearch("game=ats", "source", "ets2telemetry").toString()).toBe(
+    "game=ats&source=ets2telemetry",
+  );
 });
 test("side-panel selection accepts only canonical UUIDv4 values and never reaches list filters", () => {
   const id = "49000000-0000-4000-8000-000000000002";
@@ -74,6 +120,10 @@ test("dense list strings exist in both locales and never include mockup-only cop
     "filters",
     "allGames",
     "anyDecision",
+    "sourceFilter",
+    "anySource",
+    "sourceTelemetry",
+    "sourceManual",
     "listLabel",
     "timesIn",
     "distance",

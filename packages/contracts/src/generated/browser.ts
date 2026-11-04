@@ -8150,6 +8150,8 @@ export interface operations {
                 /** @description Review queue only (scope=review): createdAt then id order; default desc. 422 otherwise. Cursors are bound to hold and order. */
                 order?: "asc" | "desc";
                 scope?: "company" | "mine" | "review";
+                /** @description Optional source-kind filter for every scope, using the TripSummary.sourceKinds vocabulary: a trip matches when its canonical group has a source of that kind (a trip with telemetry and a manual report matches both; a trip without sources matches neither). Applied server-side with the scope's visibility rules before keyset paging and bound into the signed cursor. Omitted: no source filter. */
+                source?: "ets2telemetry" | "manual";
             };
             header?: never;
             path?: never;

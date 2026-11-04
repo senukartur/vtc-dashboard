@@ -3616,6 +3616,19 @@
             }
           },
           {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2telemetry",
+                "manual"
+              ]
+            },
+            "description": "Optional source-kind filter for every scope, using the TripSummary.sourceKinds vocabulary: a trip matches when its canonical group has a source of that kind (a trip with telemetry and a manual report matches both; a trip without sources matches neither). Applied server-side with the scope's visibility rules before keyset paging and bound into the signed cursor. Omitted: no source filter."
+          },
+          {
             "name": "hold",
             "in": "query",
             "required": false,

@@ -22,9 +22,20 @@ export function requireRelease({ revision, run, workflow, artifacts, ancestor, c
     (mode === "auto" && current !== revision)
   )
     throw new Error("RELEASE_INELIGIBLE");
-  const expected = `development-${run.id}-${run.run_attempt}-${revision}`;
-  if (!Array.isArray(artifacts) || artifacts.length !== 1) throw new Error("ARTIFACT_AMBIGUOUS");
-  const artifact = artifacts[0];
+  // The artifact job does not wait for Quality (VTC-074), so "re-run failed jobs" can leave the
+  // successful attempt-1 artifact in a later successful attempt. Take this run's newest attempt
+  // that is not later than the run's own attempt; its manifest records the same attempt.
+  if (!Array.isArray(artifacts)) throw new Error("ARTIFACT_AMBIGUOUS");
+  const pattern = new RegExp(`^development-${run.id}-([1-9][0-9]{0,3})-${revision}$`);
+  const attempts = artifacts
+    .map((value) => Number(pattern.exec(value?.name ?? "")?.[1]))
+    .filter((value) => Number.isSafeInteger(value) && value <= run.run_attempt);
+  if (!attempts.length) throw new Error("ARTIFACT_AMBIGUOUS");
+  const attempt = Math.max(...attempts);
+  const expected = `development-${run.id}-${attempt}-${revision}`;
+  const matching = artifacts.filter((value) => value?.name === expected);
+  if (matching.length !== 1) throw new Error("ARTIFACT_AMBIGUOUS");
+  const artifact = matching[0];
   if (
     artifact.name !== expected ||
     artifact.expired !== false ||
@@ -37,7 +48,7 @@ export function requireRelease({ revision, run, workflow, artifacts, ancestor, c
     artifact.workflow_run?.head_sha !== revision
   )
     throw new Error("ARTIFACT_INELIGIBLE");
-  return { revision, runId: run.id, attempt: run.run_attempt, artifactId: artifact.id, mode };
+  return { revision, runId: run.id, attempt, artifactId: artifact.id, mode };
 }
 export function validateManifest(value, selected) {
   if (

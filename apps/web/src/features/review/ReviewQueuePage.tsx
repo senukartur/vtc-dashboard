@@ -8,7 +8,13 @@ import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { PageNav, State } from "../trips/components.js";
 import { useWideLayout } from "../trips/layout.js";
 import { useTripQuery } from "../trips/queries.js";
-import { queryString, selectionSearch, TripFailure } from "../trips/transport.js";
+import {
+  queryString,
+  selectionSearch,
+  TripFailure,
+  tripSourceLabels,
+  tripSources,
+} from "../trips/transport.js";
 import { DecisionPanel } from "./DecisionPanel.js";
 import { ReviewQueueTable } from "./ReviewQueueTable.js";
 import { decisions, listQuery, type QueueTab, queueParams, queueSearch } from "./review-model.js";
@@ -17,9 +23,10 @@ import "../trips/trips-list.css";
 import "./review.css";
 
 /**
- * Dispatch review queue (VTC-059): Awaiting (held, oldest first) and Decided tabs, game, decision
- * and order filters, cursor pages and, from 1200px, a decision panel beside the queue selected by
- * `?trip=`. Narrower screens open the full review page instead.
+ * Dispatch review queue (VTC-059): Awaiting (held, oldest first) and Decided tabs, game, source
+ * (VTC-077), decision and order filters, cursor pages and, from 1200px, a decision panel beside the
+ * queue selected by `?trip=`. Narrower screens open the full review page instead. A filter change
+ * restarts paging and closes the panel; switching tabs keeps the game and source.
  */
 export function ReviewQueuePage() {
   const { t } = useTranslation("trips"),
@@ -84,7 +91,7 @@ export function ReviewQueuePage() {
   }
   function reset() {
     change((next) => {
-      for (const key of ["game", "decision", "order"]) next.delete(key);
+      for (const key of ["game", "source", "decision", "order"]) next.delete(key);
     });
   }
   function select(event: MouseEvent<HTMLAnchorElement>, id: string) {
@@ -119,7 +126,7 @@ export function ReviewQueuePage() {
     );
   const items = query.data?.data.data.items,
     back = queueSearch(search),
-    filtered = !!params.game || !!params.decision || search.has("order");
+    filtered = !!params.game || !!params.source || !!params.decision || search.has("order");
   return (
     <div className="stack trip-page review-queue">
       <header className="review-queue-header">
@@ -151,6 +158,23 @@ export function ReviewQueuePage() {
               <option value="">{t("allGames")}</option>
               <option value="ets2">ETS2</option>
               <option value="ats">ATS</option>
+            </Select>
+          </span>
+          <span className="review-filter">
+            <Label htmlFor="review-source" className="visually-hidden">
+              {t("sourceFilter")}
+            </Label>
+            <Select
+              id="review-source"
+              value={params.source ?? ""}
+              onChange={(e) => filter("source", e.target.value)}
+            >
+              <option value="">{t("anySource")}</option>
+              {tripSources.map((source) => (
+                <option value={source} key={source}>
+                  {t(tripSourceLabels[source])}
+                </option>
+              ))}
             </Select>
           </span>
           {params.tab === "decided" && (

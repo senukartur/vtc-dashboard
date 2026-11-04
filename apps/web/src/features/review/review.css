@@ -36,7 +36,10 @@
 .review-queue .review-queue-header p {
   margin: 0;
 }
+/* One row of tabs and filters from 1000px of toolbar width (the toolbar sits above the decision
+   panel, which does not narrow it); a container query arranges narrower toolbars below. */
 .review-queue .review-toolbar {
+  container: review-toolbar / inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -71,6 +74,14 @@
   margin-left: auto;
   color: var(--muted);
   font-size: var(--font-small);
+}
+/* Narrower toolbars, on both tabs alike: the tabs and the timezone note share the first row and
+   the filters take a full row below, so switching tabs or wider fonts never reflow the bar. */
+@container review-toolbar (max-width: 999.98px) {
+  .review-queue .review-filters {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 
 /* Queue beside the decision panel from 1200px (WIDE_QUERY in trips/layout.ts). */
@@ -327,7 +338,9 @@
   .review-queue .review-filed time {
     display: inline-flex;
   }
+  /* Phones keep the note last, under the filters. */
   .review-queue .review-timezone {
+    order: 1;
     margin-left: 0;
     flex-basis: 100%;
   }
