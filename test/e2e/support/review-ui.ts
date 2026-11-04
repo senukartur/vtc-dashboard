@@ -438,6 +438,11 @@ export type ReviewMockOptions = {
   firstDecision?: number;
   /** Session without trips.review. */
   forbidden?: boolean;
+  /**
+   * Two-item pages: the first page ends with a cursor bound to its source filter
+   * (`page-2.<source|any>`), and a cursor replayed under another source answers 409.
+   */
+  paged?: boolean;
 };
 export type ReviewMock = {
   lists: URLSearchParams[];
@@ -479,16 +484,28 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     if (path === "/api/v1/trips") {
       mock.lists.push(url.searchParams);
       const hold = url.searchParams.get("hold") === "true",
-        game = url.searchParams.get("game");
+        game = url.searchParams.get("game"),
+        source = url.searchParams.get("source"),
+        cursor = url.searchParams.get("cursor"),
+        bound = `page-2.${source ?? "any"}`;
       if (hold && typeof awaiting === "number")
         return route.fulfill({ status: awaiting, json: { error: { code: "PRIVATE_SENTINEL" } } });
       let items = order
         .map((key) => states[key])
         .filter((state) => (state.summary.review?.hold ?? false) === hold)
         .map((state) => state.summary)
-        .filter((summary) => !game || summary.game === game);
+        .filter((summary) => !game || summary.game === game)
+        .filter((summary) => !source || summary.sourceKinds.some((kind) => kind === source));
       if (hold && awaiting === "empty") items = [];
       if (url.searchParams.get("order") === "desc") items = items.reverse();
+      if (cursor !== null && cursor !== bound)
+        return route.fulfill({ status: 409, json: { error: { code: "PRIVATE_SENTINEL" } } });
+      if (options.paged)
+        return route.fulfill({
+          json: cursor
+            ? list(items.slice(2))
+            : list(items.slice(0, 2), items.length > 2 ? bound : null),
+        });
       return route.fulfill({ json: list(items) });
     }
     const match = /^\/api\/v1\/trips\/([0-9a-f-]{36})(\/.*)?$/.exec(path);
