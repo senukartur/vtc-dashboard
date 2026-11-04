@@ -1023,6 +1023,7 @@ function toolbarBudget(page: Page) {
       rowSpreadControls: round(spread([tabs, ...filters])),
       rowSpreadSelects: round(spread(filters)),
       filtersBelowTabs: filters.every((filter) => box(filter).top >= box(tabs).bottom - 0.5),
+      timezoneBelowFilters: box(timezone).top >= box(group).bottom - 0.5,
       tabsSpare: round(width - box(tabs).width),
       widestSelectSpare: round(width - Math.max(...filters.map((f) => box(f).width))),
       selectHeights: selects.map((select) => round(box(select).height)),
@@ -1096,6 +1097,10 @@ test("R18 toolbar budget with wide-font spare in RU and EN on both tabs and besi
             expect(budget.filtersBelowTabs, label).toBe(true);
             expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
             expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
+          } else {
+            // Phones stack the tabs, then the filters, then the timezone note.
+            expect(budget.filtersBelowTabs, label).toBe(true);
+            expect(budget.timezoneBelowFilters, label).toBe(true);
           }
           await noOverflow(page);
           expect(await brokenWords(page.locator(".review-toolbar")), label).toEqual([]);
