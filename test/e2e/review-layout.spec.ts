@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { expect, test } from "./support/fixtures.ts";
@@ -838,4 +839,265 @@ test("R15c a tab click and an order change dispatched in one task keep both", as
   });
   await expect(page).toHaveURL(/\/account\/review\?order=desc$/);
   await expect(page.locator("#review-order")).toHaveValue("desc");
+});
+
+// Source filter (VTC-077): the shared listTrips `source` parameter on both queue tabs.
+const lastList = (mock: { lists: URLSearchParams[] }) => () => mock.lists.at(-1)?.toString();
+/** Every cursor the queue sent belongs to the source filter of its own request. */
+function cursorsMatchSource(lists: URLSearchParams[]) {
+  for (const request of lists)
+    if (request.has("cursor"))
+      expect(request.get("cursor"), request.toString()).toBe(
+        `page-2.${request.get("source") ?? "any"}`,
+      );
+}
+test("R17a source filter sends the parameter, restarts paging, closes the panel and keeps focus", async ({
+  page,
+}, info) => {
+  const mock = await open(
+    page,
+    wide(info) ? `/account/review?trip=${reviewIds.over}` : "/account/review",
+    { paged: true },
+  );
+  if (wide(info)) await expect(panel(page)).toBeVisible();
+  const source = page.locator("#review-source");
+  await expect(page.getByRole("combobox", { name: "Source", exact: true })).toBeVisible();
+  await expect(source.locator("option")).toHaveText(["Any source", "Telemetry", "Manual report"]);
+  await expect(source).toHaveValue("");
+  await page.locator("#review-game").focus();
+  await page.keyboard.press("Tab");
+  await expect(source).toBeFocused();
+  await source.selectOption("manual");
+  await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
+  await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
+  await expect.poll(lastList(mock)).toBe("scope=review&hold=true&source=manual&order=asc&limit=25");
+  await expect(source).toBeFocused();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(table(page).locator("tbody tr")).toHaveCount(2);
+  await page.getByRole("button", { name: "Next page", exact: true }).click();
+  await expect
+    .poll(lastList(mock))
+    .toBe("scope=review&hold=true&source=manual&order=asc&limit=25&cursor=page-2.manual");
+  await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeEnabled();
+  if (wide(info)) {
+    await page.locator(`#trip-link-${reviewIds.resubmission}`).click();
+    await expect(page).toHaveURL(new RegExp(`trip=${reviewIds.resubmission}`));
+    await expect(panel(page)).toBeVisible();
+  }
+  // Focus left the select for paging (and the row on desktop); the reviewer returns to it.
+  await source.focus();
+  await source.selectOption("ets2telemetry");
+  await expect
+    .poll(lastList(mock))
+    .toBe("scope=review&hold=true&source=ets2telemetry&order=asc&limit=25");
+  await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
+  await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
+  await expect(panel(page)).toHaveCount(0);
+  await expect(source).toBeFocused();
+  await expect(queue(page).getByRole("alert")).toHaveCount(0);
+  cursorsMatchSource(mock.lists);
+});
+
+test("R17b tabs keep the source, Reset clears it and Back restores it", async ({ page }) => {
+  const mock = await open(page, "/account/review?source=ets2telemetry");
+  const source = page.locator("#review-source");
+  await expect(source).toHaveValue("ets2telemetry");
+  await page.getByRole("button", { name: text.en.decided, exact: true }).click();
+  await expect
+    .poll(lastList(mock))
+    .toBe("scope=review&hold=false&source=ets2telemetry&order=desc&limit=25");
+  await expect(source).toHaveValue("ets2telemetry");
+  await expect(queue(page).getByText("No trips match these filters.")).toBeVisible();
+  await page.getByRole("button", { name: "Reset filters", exact: true }).click();
+  await expect(page).toHaveURL(/\/account\/review\?tab=decided$/);
+  await expect(source).toHaveValue("");
+  await expect(page.locator("#review-game")).toBeFocused();
+  await expect.poll(lastList(mock)).toBe("scope=review&hold=false&order=desc&limit=25");
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
+  await expect(source).toHaveValue("ets2telemetry");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  // An empty Awaiting tab is "filtered" only by a valid source.
+  await open(page, "/account/review?source=manual", { awaiting: "empty" });
+  await expect(queue(page).getByText("No trips match these filters.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reset filters", exact: true })).toBeVisible();
+  await page.goto("/account/review?source=bogus");
+  await expect(queue(page).getByText("No reports are waiting for a decision.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show decided trips", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reset filters", exact: true })).toHaveCount(0);
+});
+
+test("R17c unknown sources are never sent, rapid changes keep both and back links carry it", async ({
+  page,
+}, info) => {
+  const mock = await open(page, "/account/review?source=bogus");
+  const source = page.locator("#review-source");
+  await expect(source).toHaveValue("");
+  await expect.poll(lastList(mock)).toBe("scope=review&hold=true&order=asc&limit=25");
+  // Two filter changes dispatched in one task: each starts from the committed URL.
+  await page.evaluate(() => {
+    for (const [id, value] of [
+      ["review-game", "ats"],
+      ["review-source", "manual"],
+    ] as const) {
+      const select = document.getElementById(id);
+      if (!(select instanceof HTMLSelectElement)) throw new Error("FILTER_NOT_RENDERED");
+      select.value = value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  });
+  await expect(page).toHaveURL(/[?&]game=ats(&|$)/);
+  await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
+  await expect
+    .poll(lastList(mock))
+    .toBe("scope=review&hold=true&game=ats&source=manual&order=asc&limit=25");
+  expect(mock.lists.some((request) => request.get("source") === "bogus")).toBe(false);
+  await page.goto("/account/review");
+  await page.getByRole("button", { name: text.en.decided, exact: true }).click();
+  await source.selectOption("manual");
+  await expect(page).toHaveURL(/\/account\/review\?tab=decided&source=manual$/);
+  await expect(source).toHaveValue("manual");
+  await page.goto("/account/review?source=manual");
+  const link = page.locator(`#trip-link-${reviewIds.over}`);
+  if (wide(info)) {
+    await expect(link).toHaveAttribute("href", /[?&]source=manual(&|$)/);
+    await expect(link).toHaveAttribute("href", new RegExp(`[?&]trip=${reviewIds.over}(&|$)`));
+  } else
+    await expect(link).toHaveAttribute("href", `/account/review/${reviewIds.over}?source=manual`);
+  await page.goto(`/account/review/${reviewIds.over}?source=manual`);
+  await expect(page.getByRole("link", { name: "Back to queue", exact: true })).toHaveAttribute(
+    "href",
+    "/account/review?source=manual",
+  );
+});
+
+const wideFont = ".review-toolbar, .review-toolbar * { letter-spacing: 0.06em !important; }";
+/**
+ * Queue toolbar geometry: spare width once the tabs, the bar gap and the filters with their own
+ * gaps share one row (spareControls) or the filters alone (spareSelects); the room left beside
+ * the tabs and the widest single filter when items wrap; row alignment; and the timezone note.
+ */
+function toolbarBudget(page: Page) {
+  return page.evaluate(async () => {
+    await document.fonts.ready;
+    const bar = document.querySelector(".review-queue .review-toolbar"),
+      tabs = bar?.querySelector(".review-tabs"),
+      group = bar?.querySelector(".review-filters"),
+      timezone = bar?.querySelector(".review-timezone");
+    if (!bar || !tabs || !group || !timezone) throw new Error("TOOLBAR_NOT_RENDERED");
+    const box = (element: Element) => element.getBoundingClientRect(),
+      gapOf = (element: Element) => Number.parseFloat(getComputedStyle(element).columnGap) || 0,
+      filters = Array.from(group.querySelectorAll(".review-filter")),
+      selects = Array.from(bar.querySelectorAll("select")),
+      width = box(bar).width,
+      used =
+        filters.reduce((total, element) => total + box(element).width, 0) +
+        gapOf(group) * Math.max(0, filters.length - 1);
+    const spread = (list: Element[]) => {
+      const centres = list.map((element) => box(element).top + box(element).height / 2);
+      return Math.max(...centres) - Math.min(...centres);
+    };
+    const inside = (element: Element) =>
+      box(element).left >= box(bar).left - 0.5 &&
+      box(element).right <= box(bar).right + 0.5 &&
+      box(element).right <= window.innerWidth &&
+      box(element).top >= box(bar).top - 0.5 &&
+      box(element).bottom <= box(bar).bottom + 0.5;
+    const overlaps = (a: DOMRect, b: DOMRect) =>
+      a.left < b.right - 0.5 &&
+      b.left < a.right - 0.5 &&
+      a.top < b.bottom - 0.5 &&
+      b.top < a.bottom - 0.5;
+    const round = (value: number) => Math.round(value * 10) / 10;
+    return {
+      width: round(width),
+      filters: filters.length,
+      filterWidths: [tabs, ...filters].map((element) => round(box(element).width)),
+      spareControls: round(width - box(tabs).width - gapOf(bar) - used),
+      spareSelects: round(width - used),
+      rowSpreadControls: round(spread([tabs, ...filters])),
+      rowSpreadSelects: round(spread(filters)),
+      tabsSpare: round(width - box(tabs).width),
+      widestSelectSpare: round(width - Math.max(...filters.map((f) => box(f).width))),
+      selectHeights: selects.map((select) => round(box(select).height)),
+      selectsInside: selects.every(inside),
+      timezoneInside: inside(timezone),
+      timezoneOverlaps: [tabs, ...filters].some((element) => overlaps(box(timezone), box(element))),
+    };
+  });
+}
+test("R18 toolbar budget with wide-font spare in RU and EN on both tabs and beside the panel", async ({
+  page,
+}, info) => {
+  test.setTimeout(60_000);
+  const project = info.project.name,
+    touch = project === "mobile-chromium",
+    desktop = project === "desktop-chromium";
+  await open(page);
+  const layouts = desktop
+    ? [
+        { width: 1280, trip: null },
+        { width: 1200, trip: reviewIds.over },
+      ]
+    : [{ width: page.viewportSize()?.width ?? 0, trip: null }];
+  const results: Record<string, unknown>[] = [];
+  for (const layout of layouts) {
+    if (desktop) await page.setViewportSize({ width: layout.width, height: 800 });
+    for (const tab of ["awaiting", "decided"] as const) {
+      const search = new URLSearchParams();
+      if (tab === "decided") search.set("tab", "decided");
+      if (layout.trip) search.set("trip", layout.trip);
+      await page.goto(`/account/review${search.size ? `?${search}` : ""}`);
+      for (const locale of ["en", "ru"] as const) {
+        await catalogLanguage(page, locale);
+        await expect(page.getByRole("heading", { level: 1 })).toHaveText(text[locale].title);
+        await expect(queue(page).locator(".review-list-footer")).toBeVisible();
+        if (layout.trip) {
+          await expect(page.locator('.review-layout[data-panel="open"]')).toBeVisible();
+          await expect(panel(page)).toBeVisible();
+          await settled(page);
+        }
+        for (const wideText of [false, true]) {
+          const style = wideText ? await page.addStyleTag({ content: wideFont }) : null,
+            budget = await toolbarBudget(page),
+            context = {
+              project,
+              viewport: layout.width,
+              panel: !!layout.trip,
+              tab,
+              locale,
+              wideText,
+            },
+            label = JSON.stringify({ ...context, ...budget });
+          results.push({ ...context, ...budget });
+          expect(budget.filters, label).toBe(tab === "decided" ? 4 : 3);
+          for (const height of budget.selectHeights)
+            if (touch) expect(height, label).toBeGreaterThanOrEqual(40);
+            else expect(Math.abs(height - 32), label).toBeLessThanOrEqual(0.5);
+          expect(budget.selectsInside, label).toBe(true);
+          expect(budget.tabsSpare, label).toBeGreaterThanOrEqual(4);
+          expect(budget.widestSelectSpare, label).toBeGreaterThanOrEqual(4);
+          expect(budget.timezoneInside, label).toBe(true);
+          expect(budget.timezoneOverlaps, label).toBe(false);
+          if (!touch) {
+            // Tablet and desktop keep every filter on one row with room to spare.
+            expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
+            expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
+          }
+          if (desktop) {
+            // Desktop, also beside the decision panel, keeps the tabs on that row too.
+            expect(budget.rowSpreadControls, label).toBeLessThanOrEqual(4);
+            expect(budget.spareControls, label).toBeGreaterThanOrEqual(4);
+          }
+          await noOverflow(page);
+          expect(await brokenWords(page.locator(".review-toolbar")), label).toEqual([]);
+          if (touch)
+            await capture(page, info, `review-toolbar-${tab}-${locale}${wideText ? "-wide" : ""}`);
+          await style?.evaluate((node) => node.parentNode?.removeChild(node));
+        }
+      }
+    }
+  }
+  await expect(page.locator("body")).not.toContainText(/Достаточно суров|Yukon\?|Юкон\?/);
+  await writeFile(info.outputPath("review-toolbar-budget.json"), JSON.stringify(results, null, 2));
 });
