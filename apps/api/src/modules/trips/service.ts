@@ -104,7 +104,8 @@ export interface SourceContext {
   canonical?: { tripId: string; expectedVersion: number };
 }
 export type TripSource = S["TripSummary"]["sourceKinds"][number];
-const tripSources: readonly TripSource[] = ["ets2telemetry", "manual"];
+// The route schema uses this list too, so the contract parity test catches a missing value.
+export const tripSources = ["ets2telemetry", "manual"] as const satisfies readonly TripSource[];
 export interface ListOptions {
   scope?: "company" | "mine" | "review";
   game?: "ets2" | "ats";

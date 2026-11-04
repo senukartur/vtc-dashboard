@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Identity } from "../identity/service.js";
-import type { ListOptions, Trips } from "./service.js";
+import { type ListOptions, type Trips, tripSources } from "./service.js";
 
 const object = (properties: Record<string, unknown>) => ({
   type: "object",
@@ -20,7 +20,7 @@ export const listTripsQuerystring = object({
     enum: ["unassessed", "pending_review", "accepted", "rejected"],
   },
   // TripSummary.sourceKinds vocabulary; applies to every scope.
-  source: { type: "string", enum: ["ets2telemetry", "manual"] },
+  source: { type: "string", enum: [...tripSources] },
   hold: { type: "boolean" },
   order: { type: "string", enum: ["asc", "desc"] },
 });
