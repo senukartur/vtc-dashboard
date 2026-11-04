@@ -103,6 +103,8 @@ test("controlled 409 closes obsolete confirmation, retains reason and requires f
   });
   await page.goto(`/account/review/${id}`);
   await catalogLanguage(page);
+  await page.locator("#review-choice-reject").click();
+  await expect(page.locator("#review-choice-reject")).toHaveAttribute("aria-pressed", "true");
   await page.locator("#review-reason").fill("Retained explanation");
   await page.getByRole("button", { name: "Reject trip", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();

@@ -4,115 +4,43 @@ import { CatalogSelector, type Selection } from "../../shared/catalog-selectors/
 import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { EvidenceItem } from "../manual-reports/fields.js";
-import { Codes, Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
-import { HistoricalRules } from "../trips/HistoricalRules.js";
+import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { canonicalDecimal, type DTO, proposalResult, schema } from "../trips/transport.js";
-export function ReviewPanel({ tripId }: { tripId: string }) {
+/**
+ * Proposals and supported resolution of a reviewed trip, behind one disclosure below the
+ * decision workspace. It opens by default while a proposal is pending.
+ */
+export function ReviewCorrections({
+  tripId,
+  trip,
+  etag,
+  self,
+}: {
+  tripId: string;
+  trip: DTO["TripPrivate"];
+  etag: string | null;
+  self: boolean;
+}) {
   const { t } = useTranslation("trips"),
-    query = useTripQuery(`/trips/${tripId}/review`, "EnvelopeReview"),
-    command = useTripCommand(),
-    [reason, setReason] = useState(""),
-    [success, setSuccess] = useState(false);
-  const review = query.data?.data.data,
-    trip = review?.trip,
-    self = review?.blockedReasonCodes.includes("self_review_forbidden"),
-    reviewed = trip?.manualRevision?.id ?? review?.factRevisionId;
+    [open, setOpen] = useState(!!trip.pendingProposalId);
   return (
-    <div className="stack">
-      <Card className="stack">
-        <h2>{t("review")}</h2>
-        <State query={query} />
-        {review && (
-          <>
-            <Fields
-              values={{
-                version: trip?.summary.version,
-                reviewedRevisionId: reviewed,
-                ...review.evaluation,
-              }}
-            />
-            <Codes values={review.blockedReasonCodes} />
-            <HistoricalRules basis={review.evaluation} />
-            {self && <p>{t("selfReview")}</p>}
-            <h3>{t("facts")}</h3>
-            {review.facts.map((f) => (
-              <Fields
-                key={`${f.field}-${f.evidenceRecordId}`}
-                values={{
-                  [f.field]: f.sourceValue,
-                  source: f.evidenceRecordId,
-                  reasonCodes: f.reasonCode,
-                }}
-              />
-            ))}
-            <Label htmlFor="review-reason">{t("reason")}</Label>
-            <textarea
-              id="review-reason"
-              className="input"
-              maxLength={2048}
-              value={reason}
-              onChange={(e) => {
-                setReason(e.target.value);
-                setSuccess(false);
-              }}
-            />
-            <Failure error={command.failure} seconds={command.seconds} />
-            {success && <p role="status">{t("success")}</p>}
-            <div className="trip-actions">
-              {(["accept", "reject"] as const).map((decision) => (
-                <Confirm
-                  key={decision}
-                  label={t(decision)}
-                  guard={JSON.stringify([
-                    query.data?.etag,
-                    reviewed,
-                    review.factRevisionId,
-                    reason,
-                    decision,
-                  ])}
-                  disabled={!review.canDecide || !reason.trim() || command.seconds > 0}
-                  pending={command.pending}
-                  failure={command.failure}
-                  onConfirm={async () => {
-                    const r = await command.run(
-                      `/trips/${tripId}/decisions`,
-                      {
-                        decision,
-                        reviewedRevisionId: reviewed,
-                        factRevisionId: review.factRevisionId,
-                        proposalId: null,
-                        reason: reason.trim(),
-                      },
-                      "EnvelopeDecision",
-                      query.data?.etag,
-                    );
-                    if (r) setSuccess(true);
-                    return r;
-                  }}
-                >
-                  <p>{reason}</p>
-                  <Fields
-                    values={{
-                      decision: t(decision),
-                      version: trip?.summary.version,
-                      reviewedRevisionId: reviewed,
-                      factRevisionId: review.factRevisionId,
-                    }}
-                  />
-                </Confirm>
-              ))}
-            </div>
-          </>
-        )}
-      </Card>
-      {review && trip && (
-        <>
-          <ProposalList tripId={tripId} etag={query.data?.etag ?? null} self={!!self} />
-          {!self && <ResolutionForm tripId={tripId} trip={trip} etag={query.data?.etag ?? null} />}
-        </>
+    <details
+      className="review-corrections"
+      open={open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary>
+        {t("correctionsResolution")}
+        {trip.pendingProposalId && <> · {t("pendingProposal")}</>}
+      </summary>
+      {open && (
+        <div className="stack">
+          <ProposalList tripId={tripId} etag={etag} self={self} />
+          {!self && <ResolutionForm tripId={tripId} trip={trip} etag={etag} />}
+        </div>
       )}
-    </div>
+    </details>
   );
 }
 function ResolutionForm({

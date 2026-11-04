@@ -31,6 +31,11 @@ const NotificationsPage = lazy(() =>
   })),
 );
 
+const ReviewQueuePage = lazy(() =>
+  import("../features/review/ReviewQueuePage.js").then((module) => ({
+    default: module.ReviewQueuePage,
+  })),
+);
 const TripsPage = lazy(() =>
   import("../features/trips/TripsPage.js").then((module) => ({ default: module.TripsPage })),
 );
@@ -118,7 +123,7 @@ const accountRoutes: Record<RouteId, ReactElement> = {
   drivers: <DriversPage />,
   driver: <DriverProfilePage />,
   qualifications: <QualificationsPage />,
-  review: <TripsPage review />,
+  review: <ReviewQueuePage />,
   reconciliation: <ReconciliationPage />,
   reviewTrip: <TripDetailPage review />,
   applications: <ApplicationsPage />,

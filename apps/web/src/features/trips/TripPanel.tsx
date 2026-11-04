@@ -32,13 +32,11 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  */
 export function TripPanel({
   tripId,
-  review,
   fallback,
   headingRef,
   onClose,
 }: {
   tripId: string;
-  review: boolean;
   fallback: DTO["TripSummary"] | undefined;
   headingRef: RefObject<HTMLHeadingElement | null>;
   onClose: () => void;
@@ -47,13 +45,8 @@ export function TripPanel({
     session = useSession(),
     headingId = useId(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    timezone = session.self?.preferences.displayTimezone ?? "UTC",
-    staff = !!session.self?.capabilities.includes("trips.review");
-  const query = useTripQuery(
-    `/trips/${tripId}`,
-    "EnvelopeTripView",
-    validId(tripId) && (!review || staff),
-  );
+    timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  const query = useTripQuery(`/trips/${tripId}`, "EnvelopeTripView", validId(tripId));
   const view = query.data?.data.data,
     summary = view?.view === "private" ? view.summary : view,
     current = summary ?? fallback,

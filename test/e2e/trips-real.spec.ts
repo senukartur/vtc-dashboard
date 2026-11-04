@@ -110,6 +110,9 @@ async function confirm(page: Page, label: string, commandPath?: string) {
   page.on("response", settled);
   page.on("requestfailed", failed);
   try {
+    // The decision panel names the submit button after the chosen outcome; choosing is idempotent.
+    const choice = label === "Reject trip" ? "reject" : label === "Accept trip" ? "accept" : null;
+    if (choice) await page.locator(`#review-choice-${choice}`).click();
     await page.getByRole("button", { name: label, exact: true }).click();
     const response = commandPath
       ? page.waitForResponse(
@@ -336,6 +339,14 @@ async function proposal(staff: Awaited<ReturnType<typeof staffContext>>, tripId:
     (p: { state: string; kind: string }) => p.state === "pending" && p.kind === "resolution",
   );
 }
+/** Opens the review page's "Corrections and resolution" disclosure (open while a proposal is pending). */
+async function corrections(page: Page) {
+  const disclosure = page.locator("details.review-corrections");
+  await expect(disclosure).toBeVisible();
+  if (!(await disclosure.evaluate((node) => (node as HTMLDetailsElement).open)))
+    await disclosure.locator(":scope > summary").click();
+  await expect(disclosure).toHaveAttribute("open", "");
+}
 async function approve(
   page: Page,
   staff: Awaited<ReturnType<typeof staffContext>>,
@@ -343,6 +354,7 @@ async function approve(
 ) {
   const p = await proposal(staff, tripId);
   if (!p) throw Error("SYNTHETIC_PROPOSAL_MISSING");
+  await corrections(page);
   await page.locator("summary").filter({ hasText: p.id }).click();
   await page.locator(`#proposal-${p.id}`).fill("Fictional verified proposal");
   await confirm(page, "Approve proposal");
@@ -430,6 +442,7 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await catalogLanguage(staffPage);
     await resetAccountLimits();
     phase = "STALE_DECISION";
+    await staffPage.locator("#review-choice-reject").click();
     await staffPage.locator("#review-reason").fill("Fictional rejection after current review");
     await staffPage.getByRole("button", { name: "Reject trip", exact: true }).click();
     await page.goto(`/account/reports/${reportId}/edit`);
@@ -494,6 +507,7 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     await catalogLanguage(staffPage);
     await resetAccountLimits();
     phase = "STAFF_RESOLUTION";
+    await corrections(staffPage);
     await staffPage.getByText("Propose supported resolution", { exact: true }).click();
     await staffPage
       .getByRole("combobox", { name: "Cargo", exact: true })
@@ -550,6 +564,7 @@ test("real report draft upload unresolved cargo stale review rejection revision 
     const requestId = requests.find((r: { status: string }) => r.status === "pending").id;
     await staffPage.reload();
     await catalogLanguage(staffPage);
+    await corrections(staffPage);
     await staffPage.getByText("Propose supported resolution", { exact: true }).click();
     await staffPage.locator("#resolution-request").selectOption(requestId);
     await staffPage.locator("#resolution-actualDistanceM").fill("123000");
@@ -857,6 +872,95 @@ test("real owner event association requires confirmed attendance and late teleme
   }
 });
 
+test("real dispatcher accepts an over-limit manual report and late telemetry returns it for review", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(90000);
+  await resetAccountLimits();
+  const fixture = await tripBrowserFixture(),
+    staff = await staffContext(),
+    staffBrowser = await browser.newContext({
+      baseURL: "http://127.0.0.1:4173",
+      viewport: { width: 1280, height: 900 },
+      serviceWorkers: "block",
+    });
+  let phase = "OVER_LIMIT_REPORT";
+  try {
+    const manual = fixture.composed.manualReports,
+      trips = fixture.composed.trips;
+    if (!manual || !trips) throw Error("TRIP_BROWSER_COMPOSITION_MISSING");
+    const bytes = pngBytes(),
+      image = await manual.upload(
+        fixture.author,
+        randomUUID(),
+        "synthetic-over-limit.png",
+        (async function* () {
+          yield bytes;
+        })(),
+        "image/png",
+      );
+    // The fixture level allows 20 t; the report declares 21 t.
+    const report = await manual.submitReport(fixture.author, randomUUID(), {
+      fields: { ...fixture.fields, cargoMassKg: "21000", evidenceIds: [image.id] },
+    });
+    const nickname = (await (await staff.get("/api/v1/me")).json()).data.member.nickname as string;
+    await staffBrowser.addCookies((await staff.storageState()).cookies);
+    const reviewer = await staffBrowser.newPage();
+    await reviewer.goto(`/account/review/${report.tripId}`);
+    await catalogLanguage(reviewer);
+    phase = "ACCEPT_OVER_LIMITS";
+    await reviewer.locator("#review-choice-accept").click();
+    await expect(reviewer.locator(".review-over-limits .review-limits li")).toHaveCount(1);
+    await reviewer.locator("#review-reason").fill("Fictional waiver for a documented convoy");
+    await expect(reviewer.getByRole("button", { name: "Accept trip", exact: true })).toBeDisabled();
+    await reviewer.locator("#review-confirm-limits").check();
+    await confirm(reviewer, "Accept trip");
+    const latest = reviewer.locator(".review-history li").first();
+    await expect(latest).toContainText("Accepted over limits");
+    await expect(latest).toContainText(nickname);
+    await write(page.request, "/auth/login", { email: fixture.email, password: fixture.password });
+    let current = (await (await page.request.get(`/api/v1/trips/${report.tripId}`)).json()).data;
+    expect(current.summary.decision).toBe("accepted");
+    expect(current.decisions[0].acceptedOverLimits).toBe(true);
+    expect((await trips.status(fixture.author)).counts.accepted).toBe(1);
+    await resetAccountLimits();
+    phase = "LATE_TELEMETRY";
+    // Matching telemetry confirms the breach and returns the trip to the queue.
+    await fixture.telemetry(
+      { tripId: report.tripId, expectedVersion: current.summary.version },
+      "completed",
+      21000,
+    );
+    await reviewer.goto("/account/review?order=desc");
+    await catalogLanguage(reviewer);
+    const link = reviewer.locator(`#trip-link-${report.tripId}`),
+      row = reviewer.locator("#review-queue-table tbody tr").filter({ has: link });
+    await expect(row).toContainText("Late telemetry");
+    await link.click();
+    await expect(reviewer.locator("#review-choice-accept")).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await expect(reviewer.locator("#review-choice-accept")).toHaveAccessibleDescription(
+      /^Acceptance is unavailable/,
+    );
+    phase = "REJECT";
+    await reviewer.locator("#review-choice-reject").click();
+    await reviewer.locator("#review-reason").fill("Fictional telemetry confirms the breach");
+    await confirm(reviewer, "Reject trip");
+    current = (await (await page.request.get(`/api/v1/trips/${report.tripId}`)).json()).data;
+    expect(current.summary.decision).toBe("rejected");
+    expect((await trips.status(fixture.author)).counts.accepted).toBe(0);
+  } catch (error) {
+    throw new Error(`SYNTHETIC_TRIP_OVER_LIMIT_BROWSER_${phase}`, { cause: error });
+  } finally {
+    await staffBrowser.close();
+    await staff.dispose();
+    await fixture.close();
+  }
+});
+
 test("real director cannot review an own manual report and ordinary driver cannot enter staff review", async ({
   page,
   context,
@@ -889,8 +993,11 @@ test("real director cannot review an own manual report and ordinary driver canno
         exact: true,
       }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Accept trip", exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Reject trip", exact: true })).toBeDisabled();
+    // An own report shows only the note: no choice, reason or submit control is rendered.
+    for (const id of ["#review-choice-accept", "#review-choice-reject", "#review-reason"])
+      await expect(page.locator(id)).toHaveCount(0);
+    for (const name of ["Accept trip", "Reject trip", "Record decision"])
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
     const review = await staff.get(`/api/v1/trips/${own.tripId}/review`),
       body = (await review.json()).data;
     const denied = await write(
