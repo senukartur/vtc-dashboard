@@ -1,7 +1,16 @@
-import { inertNotifications } from "./notifications.ts";
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
+import {
+  makeOptionalEventFixture,
+  makeRecentTripsFixture,
+  makeResponseCountsFixture,
+  makeRsvpFixture,
+  upcomingEvent,
+} from "./dashboard-fixtures.ts";
+import { inertNotifications } from "./notifications.ts";
+
+type S = components["schemas"];
 
 export const member1Id = "41000000-0000-4000-8000-000000000001";
 export const member2Id = "41000000-0000-4000-8000-000000000002";
@@ -324,30 +333,31 @@ export function makeTripSummaryListFixture(ownerId: string = member1Id) {
   };
 }
 
+/** The nearest convoy; it starts in 2099 so the fixture never passes the real clock. */
 export function makeUpcomingEventFixture() {
-  return {
-    data: {
-      id: "70000000-0000-4000-8000-000000000001",
-      version: 1,
-      title: "Autumn Yukon Convoy 2026",
-      description: "Annual Autumn European Convoy for Yukon Union drivers",
-      game: "ets2" as const,
-      startsAt: "2026-11-05T18:00:00.000Z",
-      endsAt: "2026-11-05T21:00:00.000Z",
-      status: "scheduled" as const,
-      origin: null,
-      destination: null,
-      server: "Simulation 1",
-      organizer: "Yukon Staff",
-      meetingLocation: "Berlin Quarry",
-      route: "Berlin -> Hamburg -> Amsterdam",
-      meetingAt: "2026-11-05T17:30:00.000Z",
-    },
-    meta,
-  };
+  return makeOptionalEventFixture(upcomingEvent);
 }
 
-export type DashboardEndpoint = "analytics" | "leaderboard" | "progress" | "review" | "event";
+export type DashboardEndpoint =
+  | "analytics"
+  | "leaderboard"
+  | "progress"
+  | "review"
+  | "companyTrips"
+  | "event"
+  | "myResponse"
+  | "counts"
+  | "rsvp";
+
+/** Planned outcome of the next RSVP PUT: a failure status (with Retry-After) or a network abort. */
+export type RsvpOutcome = { status: number; retryAfter?: number } | "abort";
+
+/** One intercepted RSVP command with its lower-cased request headers and JSON body. */
+export interface RsvpCommand {
+  url: URL;
+  headers: Record<string, string>;
+  body: unknown;
+}
 
 /** Mutable mock state returned to the test; changes apply to the next matching request. */
 export interface DashboardMockState {
@@ -360,15 +370,41 @@ export interface DashboardMockState {
   /** Holds company analytics responses until `releaseAnalytics` is called. */
   holdAnalytics(): void;
   releaseAnalytics(): void;
+  /** Holds every response of an endpoint until `release` is called for it. */
+  hold(endpoint: DashboardEndpoint): void;
+  release(endpoint: DashboardEndpoint): void;
+  /** `scope=company` trips; undefined keeps the five-trip fixture. */
+  companyTrips: S["EnvelopeListTripSummary"] | undefined;
+  /** What `/me/upcoming-event` returns (null: no scheduled event). */
+  upcoming: S["EventPublic"] | null;
+  /** The member's own response; a successful PUT replaces it with the next version. */
+  response: S["Rsvp"];
+  /** Response counts; a successful PUT moves the member between them. */
+  counts: S["EventResponseCounts"];
+  /** Every RSVP PUT, including failed and aborted ones. */
+  commands: RsvpCommand[];
+  /** Outcomes consumed by the next RSVP PUTs before they succeed again. */
+  rsvpOutcomes: RsvpOutcome[];
 }
 
-const endpointPaths: Record<DashboardEndpoint, string> = {
-  analytics: "/api/v1/analytics/company",
-  leaderboard: "/api/v1/analytics/leaderboard",
-  progress: "/api/v1/me/qualification-progress",
-  review: "/api/v1/trips",
-  event: "/api/v1/me/upcoming-event",
-};
+/** The mocked endpoint of a request; trips are split by scope, my-response by method. */
+function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
+  const path = url.pathname;
+  if (path === "/api/v1/analytics/company") return "analytics";
+  if (path === "/api/v1/analytics/leaderboard") return "leaderboard";
+  if (path === "/api/v1/me/qualification-progress") return "progress";
+  if (path === "/api/v1/me/upcoming-event") return "event";
+  if (path === "/api/v1/trips") {
+    const scope = url.searchParams.get("scope");
+    return scope === "review" ? "review" : scope === "company" ? "companyTrips" : undefined;
+  }
+  if (/^\/api\/v1\/events\/[^/]+\/my-response$/.test(path))
+    return method === "PUT" ? "rsvp" : "myResponse";
+  if (/^\/api\/v1\/events\/[^/]+\/response-counts$/.test(path)) return "counts";
+  return undefined;
+}
+
+const etagOf = (response: S["Rsvp"]) => `"v${response.version}"`;
 
 export async function mockDashboardRoutes(
   page: Page,
@@ -385,36 +421,58 @@ export async function mockDashboardRoutes(
     reviewNextCursor?: boolean;
   } = {},
 ): Promise<DashboardMockState> {
-  let gate: { promise: Promise<void>; release: () => void } | undefined;
+  const gates = new Map<DashboardEndpoint, { promise: Promise<void>; release: () => void }>();
+  // Replayed idempotency keys return the stored result without another change.
+  const replays = new Map<string, { body: S["EnvelopeRsvp"]; etag: string }>();
   const state: DashboardMockState = {
     requests: [],
     failures: { ...options.failures },
     capabilities: options.capabilities ? [...options.capabilities] : undefined,
-    holdAnalytics() {
-      if (gate) return;
+    hold(endpoint) {
+      if (gates.has(endpoint)) return;
       let release = () => {};
       const promise = new Promise<void>((resolve) => {
         release = resolve;
       });
-      gate = { promise, release };
+      gates.set(endpoint, { promise, release });
+    },
+    release(endpoint) {
+      gates.get(endpoint)?.release();
+      gates.delete(endpoint);
+    },
+    holdAnalytics() {
+      state.hold("analytics");
     },
     releaseAnalytics() {
-      gate?.release();
-      gate = undefined;
+      state.release("analytics");
     },
+    companyTrips: undefined,
+    upcoming: upcomingEvent,
+    response: makeRsvpFixture().data,
+    counts: makeResponseCountsFixture().data,
+    commands: [],
+    rsvpOutcomes: [],
   };
   if (options.holdAnalytics) state.holdAnalytics();
   await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const url = new URL(request.url());
     const path = url.pathname;
     state.requests.push(url);
-    if (path === endpointPaths.analytics && gate) await gate.promise;
-    for (const [endpoint, status] of Object.entries(state.failures)) {
-      if (status && path === endpointPaths[endpoint as DashboardEndpoint])
-        return route.fulfill({ status, json: { error: { code: "SYNTHETIC_FAILURE" } } });
-    }
+    const endpoint = endpointOf(request.method(), url);
+    if (endpoint === "rsvp")
+      state.commands.push({
+        url,
+        headers: await request.allHeaders(),
+        body: request.postDataJSON(),
+      });
+    const gate = endpoint && gates.get(endpoint);
+    if (gate) await gate.promise;
+    const failure = endpoint && state.failures[endpoint];
+    if (failure)
+      return route.fulfill({ status: failure, json: { error: { code: "SYNTHETIC_FAILURE" } } });
 
     if (path === "/api/v1/auth/csrf") {
       return route.fulfill({ json: { data: { token: "NONFUNCTIONAL_FIXTURE" }, meta } });
@@ -454,8 +512,49 @@ export async function mockDashboardRoutes(
         },
       });
     }
-    if (path === "/api/v1/me/upcoming-event") {
-      return route.fulfill({ json: makeUpcomingEventFixture() });
+    if (endpoint === "event") {
+      return route.fulfill({ json: makeOptionalEventFixture(state.upcoming) });
+    }
+    if (endpoint === "myResponse") {
+      return route.fulfill({
+        json: { data: state.response, meta },
+        headers: { ETag: etagOf(state.response) },
+      });
+    }
+    if (endpoint === "counts") {
+      return route.fulfill({ json: { data: { ...state.counts }, meta } });
+    }
+    if (endpoint === "rsvp") {
+      const outcome = state.rsvpOutcomes.shift();
+      if (outcome === "abort") return route.abort("failed");
+      if (outcome)
+        return route.fulfill({
+          status: outcome.status,
+          headers: outcome.retryAfter ? { "Retry-After": String(outcome.retryAfter) } : {},
+          json: { error: { code: "SYNTHETIC_FAILURE" } },
+        });
+      const headers = await request.allHeaders();
+      const key = headers["idempotency-key"] ?? "";
+      const replay = replays.get(key);
+      if (replay) return route.fulfill({ json: replay.body, headers: { ETag: replay.etag } });
+      if (headers["if-match"] !== etagOf(state.response))
+        return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+      const input = request.postDataJSON() as S["RsvpInput"];
+      const before = state.response.response;
+      const counts = { ...state.counts };
+      if (before === "participating") counts.participating -= 1;
+      if (before === "declined") counts.declined -= 1;
+      if (input.response === "participating") counts.participating += 1;
+      if (input.response === "declined") counts.declined += 1;
+      state.counts = counts;
+      state.response = {
+        response: input.response,
+        version: state.response.version + 1,
+        declineReason: input.response === "declined" ? input.reason : null,
+      };
+      const body = { data: state.response, meta };
+      replays.set(key, { body, etag: etagOf(state.response) });
+      return route.fulfill({ json: body, headers: { ETag: etagOf(state.response) } });
     }
     if (path === "/api/v1/me/qualification-progress") {
       const game = (url.searchParams.get("game") ?? "ets2") as "ets2" | "ats";
@@ -483,10 +582,13 @@ export async function mockDashboardRoutes(
       const memberId = path.split("/").pop() ?? member1Id;
       return route.fulfill({ json: makeMemberProfileFixture(memberId) });
     }
+    if (endpoint === "companyTrips") {
+      return route.fulfill({ json: state.companyTrips ?? makeRecentTripsFixture() });
+    }
     if (path === "/api/v1/trips") {
       const fixture = makeTripSummaryListFixture();
       // A full first page of the five-item review queue with more pending behind the cursor.
-      if (options.reviewNextCursor) {
+      if (options.reviewNextCursor && endpoint === "review") {
         const [item] = fixture.data.items;
         const items = [0, 1, 2, 3, 4].map((index) => ({
           ...item,

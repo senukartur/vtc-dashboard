@@ -164,6 +164,17 @@ describe("affected tests", () => {
     expect(tokens.some((token) => token.includes("trips"))).toBe(false);
   });
 
+  test("selects the overview convoy blocks for an events change", () => {
+    const { tokens } = affectedTests(["apps/web/src/features/events/x.ts"], inventory);
+    expect(tokens).toEqual(
+      expect.arrayContaining([
+        "test/e2e/dashboard-blocks.spec.ts",
+        "test/unit/dashboard-blocks.test.ts",
+        "test/e2e/events-layout.spec.ts",
+      ]),
+    );
+  });
+
   test("selects changed tests themselves and skips removed ones", () => {
     const { tokens } = affectedTests(
       ["test/unit/events.test.ts", "test/unit/removed.test.ts"],

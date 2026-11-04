@@ -162,7 +162,7 @@ const areas = [
   },
   {
     paths: ["apps/api/src/modules/events/", "apps/web/src/features/events/"],
-    tests: ["events", "event-workspace"],
+    tests: ["events", "event-workspace", "dashboard"],
   },
   { paths: ["apps/api/src/modules/messaging/"], tests: ["messaging", "identity-email"] },
   {
