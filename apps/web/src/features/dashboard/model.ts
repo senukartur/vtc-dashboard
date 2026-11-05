@@ -19,7 +19,10 @@ const calendarLocale = "en-US-u-ca-gregory-nu-latn";
 const dateFields = { year: "numeric", month: "numeric", day: "numeric" } as const;
 
 /** Today's calendar date in `timeZone`. A zone unknown to the browser falls back to UTC. */
-function calendarToday(now: Date, timeZone: string): { year: number; month: number; day: number } {
+export function calendarToday(
+  now: Date,
+  timeZone: string,
+): { year: number; month: number; day: number } {
   let format: Intl.DateTimeFormat;
   try {
     format = new Intl.DateTimeFormat(calendarLocale, { ...dateFields, timeZone });
@@ -36,7 +39,7 @@ function calendarToday(now: Date, timeZone: string): { year: number; month: numb
 }
 
 /** Calendar arithmetic only: `Date.UTC` normalises overflowing months and days. */
-function isoDate(year: number, month: number, day: number): string {
+export function isoDate(year: number, month: number, day: number): string {
   const date = new Date(Date.UTC(year, month - 1, day));
   const pad = (n: number, width = 2) => String(n).padStart(width, "0");
   return `${pad(date.getUTCFullYear(), 4)}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;

@@ -12,6 +12,7 @@ import {
   responsePressed,
   retainsError,
   rsvpView,
+  untilAnchored,
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
@@ -155,6 +156,45 @@ describe("retry of a block without data", () => {
         (data: { items: unknown[] }) => data.items.length === 0,
       ),
     ).toBe("forbidden");
+  });
+});
+
+describe("view until the reporting timezone is known", () => {
+  type Query = Parameters<typeof untilAnchored<{ items: unknown[] }>>[0];
+
+  it("returns the query once anchored and shows loading before", () => {
+    const settled = {
+      data: { items: [] },
+      error: null,
+      isError: false,
+      isLoadingError: false,
+      isRefetchError: false,
+      isSuccess: true,
+      isPending: false,
+      status: "success",
+      fetchStatus: "idle",
+    } as unknown as Query;
+    expect(untilAnchored(settled, true)).toBe(settled);
+    const waiting = untilAnchored(settled, false);
+    expect(waiting.data).toBeUndefined();
+    expect(waiting.isPending).toBe(true);
+    expect(waiting.status).toBe("pending");
+    expect(waiting.isError).toBe(false);
+    expect(waiting.isSuccess).toBe(false);
+    // Cached errors of a key the page may not use are hidden too.
+    const failed = {
+      ...settled,
+      data: undefined,
+      error: new AccountFailure("forbidden"),
+      isError: true,
+      isSuccess: false,
+      status: "error",
+    } as unknown as Query;
+    expect(untilAnchored(failed, false)).toMatchObject({
+      error: null,
+      isError: false,
+      isPending: true,
+    });
   });
 });
 
