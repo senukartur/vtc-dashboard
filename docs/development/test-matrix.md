@@ -16,30 +16,34 @@ Each file is allocated to one row below for additive counting. A zero means no d
 
 ## Feature × layer
 
-U = unit cases; C = contract cases; I = integration cases / baseline seconds; B = unique browser cases / selected project executions / baseline seconds. U and C durations are not measured.
+The seven coverage layers are unit (U), contracts (C), integration (I), controlled functional E2E, layout E2E, real E2E, and deployment rehearsal. U/C cells count cases; their per-feature durations are **NM (not measured)**. I cells contain cases / baseline seconds. Each E2E category cell contains unique cases / selected project executions / category-specific baseline seconds. **NM** means timing evidence is unavailable; **N/A** means no dedicated case in that layer, so no duration applies.
 
-| Feature | U | C | I / seconds | B / executions / seconds |
-| --- | ---: | ---: | ---: | ---: |
-| Public pages | 23 | 0 | 0 / 0.000 | 17 / 30 / 53.315 |
-| Account and identity | 32 | 0 | 64 / 54.442 | 38 / 55 / 187.579 |
-| Admissions | 15 | 0 | 40 / 21.995 | 26 / 44 / 59.749 |
-| Members and administration | 23 | 4 | 20 / 19.759 | 48 / 64 / 151.024 |
-| Catalogs | 42 | 2 | 21 / 10.358 | 30 / 45 / 97.579 |
-| Dashboard and analytics | 83 | 4 | 13 / 12.678 | 48 / 71 / 200.871 |
-| Drivers | 25 | 0 | 0 / 0.000 | 22 / 26 / 71.846 |
-| Events | 18 | 3 | 22 / 24.762 | 44 / 67 / 188.087 |
-| Notifications and messaging | 56 | 2 | 63 / 29.982 | 42 / 55 / 120.036 |
-| Qualifications | 75 | 2 | 33 / 32.222 | 40 / 69 / 156.080 |
-| Trip list | 29 | 2 | 33 / 9.537 | 8 / 16 / 30.493 |
-| Manual reports | 25 | 7 | 30 / 31.128 | 23 / 36 / 71.668 |
-| Review and canonical decisions | 31 | 6 | 51 / 20.208 | 40 / 73 / 263.578 |
-| Telemetry and reconciliation | 9 | 4 | 49 / 36.477 | 0 / 0 / 0.000 |
-| UI foundation | 15 | 0 | 0 / 0.000 | 20 / 53 / 77.004 |
-| Navigation | 11 | 0 | 0 / 0.000 | 19 / 40 / 38.618 |
-| Settings | 13 | 0 | 0 / 0.000 | 25 / 38 / 62.430 |
-| Readiness and built smoke | 0 | 0 | 0 / 0.000 | 7 / 8 / 9.175 |
-| Harness, jobs and platform | 155 | 0 | 24 / 93.344 | 0 / 0 / 0.000 |
-| **Total** | **680** | **36** | **463 / 396.892** | **497 / 790 / 1839.132** |
+Old E2E artifacts aggregate timings by file, and files mix categories. Category-specific baseline durations are therefore **NM**, even when a file name contains `layout` or `real`; no file or lane time is divided between categories. The final column preserves the measured aggregate E2E seconds for the row's allocated files. It is a separate measurement, not an eighth coverage layer.
+
+Deployment-rehearsal cells attribute shared checkpoints/scenarios using the [rehearsal source key](#deployment-rehearsal-source-key). They do not assign additive per-feature case counts. A shared fixture attribution covers only its stated setup/operation; it does not establish full feature acceptance. Attributed rehearsal per-feature durations are **NM**; no lane duration is allocated to features. Repeated references identify shared evidence and must not be summed.
+
+| Feature | U | C | I / seconds | Controlled E2E cases / executions / seconds | Layout E2E cases / executions / seconds | Real E2E cases / executions / seconds | Deployment rehearsal | Aggregate baseline E2E seconds |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
+| Public pages | 23 | 0 | 0 / 0.000 | 11 / 12 / NM | 6 / 18 / NM | 0 / 0 / N/A | No dedicated case; N/A | 53.315 |
+| Account and identity | 32 | 0 | 64 / 54.442 | 24 / 25 / NM | 8 / 24 / NM | 6 / 6 / NM | Shared ID, W3; NM | 187.579 |
+| Admissions | 15 | 0 | 40 / 21.995 | 12 / 13 / NM | 12 / 29 / NM | 2 / 2 / NM | Shared CODEC, W3; NM | 59.749 |
+| Members and administration | 23 | 4 | 20 / 19.759 | 19 / 20 / NM | 11 / 26 / NM | 18 / 18 / NM | Shared W3; NM | 151.024 |
+| Catalogs | 42 | 2 | 21 / 10.358 | 22 / 23 / NM | 7 / 21 / NM | 1 / 1 / NM | Shared DOMAIN fixture; NM | 97.579 |
+| Dashboard and analytics | 83 | 4 | 13 / 12.678 | 36 / 37 / NM | 12 / 34 / NM | 0 / 0 / N/A | No dedicated case; N/A | 200.871 |
+| Drivers | 25 | 0 | 0 / 0.000 | 19 / 20 / NM | 3 / 6 / NM | 0 / 0 / N/A | No dedicated case; N/A | 71.846 |
+| Events | 18 | 3 | 22 / 24.762 | 23 / 24 / NM | 13 / 35 / NM | 8 / 8 / NM | Shared ID, W5; NM | 188.087 |
+| Notifications and messaging | 56 | 2 | 63 / 29.982 | 33 / 34 / NM | 6 / 18 / NM | 3 / 3 / NM | Shared DOMAIN, JOBS, W1–9; NM | 120.036 |
+| Qualifications | 75 | 2 | 33 / 32.222 | 22 / 23 / NM | 16 / 44 / NM | 2 / 2 / NM | Shared DOMAIN fixture, W3; NM | 156.080 |
+| Trip list | 29 | 2 | 33 / 9.537 | 3 / 4 / NM | 5 / 12 / NM | 0 / 0 / N/A | No dedicated list case; N/A | 30.493 |
+| Manual reports | 25 | 7 | 30 / 31.128 | 15 / 16 / NM | 8 / 20 / NM | 0 / 0 / N/A | Shared CODEC, DOMAIN; NM | 71.668 |
+| Review and canonical decisions | 31 | 6 | 51 / 20.208 | 19 / 20 / NM | 17 / 49 / NM | 4 / 4 / NM | Shared DOMAIN, W3; NM | 263.578 |
+| Telemetry and reconciliation | 9 | 4 | 49 / 36.477 | 0 / 0 / N/A | 0 / 0 / N/A | 0 / 0 / N/A | Shared W1–2, W7–9 (source pipeline); NM | 0.000 |
+| UI foundation | 15 | 0 | 0 / 0.000 | 4 / 5 / NM | 16 / 48 / NM | 0 / 0 / N/A | No dedicated UI case; N/A | 77.004 |
+| Navigation | 11 | 0 | 0 / 0.000 | 2 / 3 / NM | 17 / 37 / NM | 0 / 0 / N/A | No dedicated UI case; N/A | 38.618 |
+| Settings | 13 | 0 | 0 / 0.000 | 17 / 18 / NM | 8 / 20 / NM | 0 / 0 / N/A | No dedicated company-settings case; N/A | 62.430 |
+| Readiness and built smoke | 0 | 0 | 0 / 0.000 | 6 / 7 / NM | 0 / 0 / N/A | 1 / 1 / NM | Shared ID, OPS; NM | 9.175 |
+| Harness, jobs and platform | 155 | 0 | 24 / 93.344 | 0 / 0 / N/A | 0 / 0 / N/A | 0 / 0 / N/A | Shared OPS, JOBS, W1–9; NM | 0.000 |
+| **Total** | **680** | **36** | **463 / 396.892** | **287 / 304 / NM** | **165 / 441 / NM** | **45 / 45 / NM** | **Shared; non-additive; NM** | **1839.132** |
 
 ## Source map
 
@@ -131,6 +135,21 @@ Only two browser declarations are removed; each previously ran in the three-proj
 | `trips.spec.ts:15`, generic controlled trip-list zero/labels/overflow/keyboard case | `trips-list.spec.ts`, **trip list layout: tabs, compact filters, dense table or phone cards in RU and EN** (base line 170), retains zero km, long EN/RU labels, overflow, screenshots and richer table/card checks. Its fixture carries the representative long Cyrillic origin. **keyboard reaches filters, rows and the panel in order; tabs activate manually** (base line 425) now carries ArrowDown before Tab and verifies Company decision focus, with the remaining row/panel order checks. Both remain layout cases at all three projects. |
 
 Other apparent overlaps are complementary as above. No integration, persistence, recovery or deployment rehearsal case is deleted. Full exact-head Quality execution and independent review remain delivery gates; listing, native unit feedback and a baseline hosted pass do not establish candidate browser/MySQL acceptance.
+
+## Deployment rehearsal source key
+
+These attributions follow the [committed coverage manifest](../../deploy/development/rehearsal-coverage.json) and its [rehearsal driver](../../deploy/development/rehearsal.py). They describe existing executable sources, not evidence that this candidate's rehearsal ran.
+
+| Key | Manifest checkpoints / scenarios and bounded feature attribution |
+| --- | --- |
+| ID | `core-identity-ingress-acceptance`: packaged account entry points, private evidence denial and database/readiness recovery; restricted identity bootstrap, login and email proof. The [identity acceptance entry](../../apps/api/src/identity-acceptance.ts) also exercises event create/respond/update/attendance/cancel with replay/history checks. This is shared account/event deployment evidence, not full membership or admissions coverage. |
+| CODEC | `core-production-codec-grants`: production manual-image write/read/remove and restricted runtime grants; bounded admissions rate-row insert/read/delete proof. See the driver's codec and admissions-limit operations. It does not prove the public admission UI. |
+| DOMAIN | `core-restricted-domain-profiles`: [manual grants smoke](../../deploy/development/manual-grants-smoke.mjs), [trip-decision grants smoke](../../deploy/development/trip-decisions-grants-smoke.mjs), and [notification grants smoke](../../deploy/development/notifications-grants-smoke.mjs) exercise restricted runtime/worker profiles. Catalog import/publish and qualification-rule setup are shared fixtures for trip decisions, not dedicated catalog/qualification acceptance cases. Manual evidence/revision/correction, trip decisions and notification operations retain their specific grants assertions. |
+| JOBS | `core-durable-jobs`: scheduler heartbeat, duplicate seed, consumers, retry/chaining, cleanup and denied writes; `core-worker-cleanup-races` protects owned worker teardown. These are shared platform/messaging boundaries. |
+| W1–9 | The manifest's `window` harness delegates to [notification acceptance](../../deploy/development/notifications_acceptance.py) and the [compiled application entry](../../apps/api/src/notifications-acceptance.ts). W1–2 exercise current/older source ingestion and notification delivery; W3 combines admission notification, trip rejection privacy, role loss, deactivation and reinstatement with qualification assignment; W4 exercises notification preferences; W5 exercises event reminder/reschedule/cancel behavior. W6–9 exercise scheduler pause/backlog/overlap, interruption/recovery and minute-tick delivery. These nine shared scenario ordinals are not separately allocated domain case counts. The telemetry row attributes source-pipeline evidence only; it does not claim a dedicated reconciliation-review rehearsal. |
+| OPS | The remaining core startup/migration/control checks and all fourteen manifest `recovery` checkpoints cover deployment ownership, healthy/unhealthy releases, export/encrypted copy/restore, synthetic evidence/reference consistency, corruption/dirty-migration refusal, locks and archive/receive fences. They are shared operational evidence, not per-feature restore acceptance. |
+
+“No dedicated case” means the manifest/source map supplies no dedicated rehearsal for that feature's workflow. It does not imply that shared deployment infrastructure omits that feature's packaged code. In particular, W4 notification preferences are attributed to notifications, not to the distinct company-settings workflow; layout and navigation acceptance remain browser evidence.
 
 ## Persistence, recovery and deployment rehearsal
 
