@@ -10,8 +10,8 @@ import { useWideLayout } from "../trips/layout.js";
 import { useTripQuery } from "../trips/queries.js";
 import {
   queryString,
+  rejectedCursor,
   selectionSearch,
-  TripFailure,
   tripSourceLabels,
   tripSources,
 } from "../trips/transport.js";
@@ -50,11 +50,9 @@ export function ReviewQueuePage() {
     "EnvelopeListTripSummary",
     staff,
   );
-  // A cursor the server no longer accepts (422) restarts at the first page of the same filters.
-  const stale = !!cursor && query.error instanceof TripFailure && query.error.status === 422;
-  useEffect(() => {
-    if (stale) setPage({ key: filterKey, cursor: null, cursors: [] });
-  }, [stale, filterKey]);
+  // A cursor the server no longer accepts restarts at the first page of the same filters. The
+  // reset happens during render, so the rejected page never shows its error.
+  if (rejectedCursor(cursor, query.error)) setPage({ key: filterKey, cursor: null, cursors: [] });
   const selected = wide ? params.trip : null,
     heading = useRef<HTMLHeadingElement>(null),
     // Focus intent from a plain row click; Back/Forward and deep links leave focus alone.

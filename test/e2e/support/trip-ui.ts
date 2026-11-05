@@ -145,3 +145,25 @@ export async function completeForm(page: Page) {
     }),
   );
 }
+/**
+ * Counts alerts inserted inside `selector` from now on, including ones removed again before an
+ * assertion could see them (for example an error that a list replaces with its first page).
+ */
+export async function countInsertedAlerts(page: Page, selector: string) {
+  await page.evaluate((root) => {
+    const state = window as unknown as { insertedAlerts: number };
+    state.insertedAlerts = 0;
+    new MutationObserver((records) => {
+      for (const record of records)
+        for (const node of Array.from(record.addedNodes))
+          if (
+            node instanceof Element &&
+            node.closest(root) &&
+            (node.matches("[role=alert]") || node.querySelector("[role=alert]"))
+          )
+            state.insertedAlerts++;
+    }).observe(document.body, { subtree: true, childList: true });
+  }, selector);
+  return () =>
+    page.evaluate(() => (window as unknown as { insertedAlerts: number }).insertedAlerts);
+}

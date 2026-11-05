@@ -450,6 +450,8 @@ export type ReviewMock = {
   states: Record<ReviewTrip, ReviewState>;
   /** Makes the awaiting list answer normally again. */
   recover: () => void;
+  /** Makes every later cursor answer 409, like an expired or rotated cursor. */
+  expire: () => void;
 };
 const order: ReviewTrip[] = ["late", "over", "telemetry", "own", "resubmission"];
 
@@ -461,13 +463,17 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
     ReviewTrip,
     ReviewState
   >;
-  let awaiting = options.awaiting;
+  let awaiting = options.awaiting,
+    expired = false;
   const mock: ReviewMock = {
     lists: [],
     posts: [],
     states,
     recover: () => {
       awaiting = undefined;
+    },
+    expire: () => {
+      expired = true;
     },
   };
   const keyOf = (id: string) => order.find((key) => reviewIds[key] === id);
@@ -498,7 +504,7 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         .filter((summary) => !source || summary.sourceKinds.some((kind) => kind === source));
       if (hold && awaiting === "empty") items = [];
       if (url.searchParams.get("order") === "desc") items = items.reverse();
-      if (cursor !== null && cursor !== bound)
+      if (cursor !== null && (expired || cursor !== bound))
         return route.fulfill({ status: 409, json: { error: { code: "PRIVATE_SENTINEL" } } });
       if (options.paged)
         return route.fulfill({

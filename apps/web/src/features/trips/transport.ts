@@ -68,6 +68,14 @@ export class TripFailure extends AccountFailure {
     super(kind, delay);
   }
 }
+/**
+ * listTrips answers 409 `VERSION_CONFLICT` for every cursor it no longer accepts: tampered,
+ * expired, signed with a rotated key, or issued for other filters or another member. Lists
+ * restart at the first page of the same filters instead of showing an error.
+ */
+export function rejectedCursor(cursor: string | null, error: unknown) {
+  return !!cursor && error instanceof TripFailure && error.status === 409;
+}
 export function fail(response: Response): never {
   const kinds: Record<number, AccountFailure["kind"]> = {
     400: "invalid",

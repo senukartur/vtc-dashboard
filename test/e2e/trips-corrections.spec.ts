@@ -55,20 +55,23 @@ async function selectFile(page: Page) {
 }
 
 test(
-  "corrective URL history never crosses filter cursor authority and refresh recovers the first page",
+  "corrective URL history never crosses filter cursor authority and the first page recovers",
   browserCase(["@functional"]),
   async ({ page }) => {
     await mockTrips(page);
     const requests: { key: string; cursor: string | null }[] = [];
-    let failNext = false;
+    let failNext: number | null = null;
     await page.route("**/api/v1/trips?*", (route) => {
       const q = new URL(route.request().url()).searchParams;
       const key = [q.get("scope"), q.get("game"), q.get("decision")].join(":");
       const cursor = q.get("cursor");
       requests.push({ key, cursor });
-      if ((cursor && cursor !== key) || (cursor && failNext)) {
-        failNext = false;
+      if (cursor && cursor !== key)
         return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+      if (cursor && failNext) {
+        const status = failNext;
+        failNext = null;
+        return route.fulfill({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
       }
       return route.fulfill({ json: envelope({ items: [], nextCursor: cursor ? null : key }) });
     });
@@ -97,7 +100,18 @@ test(
     await expect.poll(() => requests.at(-1)?.cursor).toBe("company:ats:");
     await page.goBack();
     await expect.poll(() => requests.at(-1)).toEqual({ key: "mine:ats:accepted", cursor: null });
-    failNext = true;
+    // A cursor the server rejects (409) restarts the same filters at the first page by itself.
+    failNext = 409;
+    await next.click();
+    await expect
+      .poll(() => requests.slice(-2))
+      .toEqual([
+        { key: "mine:ats:accepted", cursor: "mine:ats:accepted" },
+        { key: "mine:ats:accepted", cursor: null },
+      ]);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    // Any other failure shows an alert, and Refresh restarts at the first page.
+    failNext = 503;
     await next.click();
     await expect(page.getByRole("alert")).toBeVisible();
     await page.getByRole("button", { name: "Refresh", exact: true }).click();

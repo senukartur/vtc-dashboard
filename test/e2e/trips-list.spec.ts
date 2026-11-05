@@ -3,7 +3,7 @@ import type { Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage, entityId, envelope, list } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { example, mockTrips } from "./support/trip-ui.ts";
+import { countInsertedAlerts, example, mockTrips } from "./support/trip-ui.ts";
 
 // Fictional trips only; every identity, label and reason below is synthetic.
 const ids = [1, 2, 3, 4].map((n) => `49000000-0000-4000-8000-00000000000${n}`) as [
@@ -94,6 +94,7 @@ const listKeys = new Set(["scope", "game", "decision", "source", "limit", "curso
 
 async function mockList(page: Page, { paged = false } = {}) {
   await mockTrips(page);
+  let expired = false;
   const lists: URLSearchParams[] = [],
     details: string[] = [],
     others: string[] = [];
@@ -112,6 +113,9 @@ async function mockList(page: Page, { paged = false } = {}) {
         tripIds
           .map(summary)
           .filter((trip) => !source || (trip.sourceKinds as string[]).includes(source));
+    // An expired or rotated cursor: the server rejects every cursor with 409 VERSION_CONFLICT.
+    if (expired && q.has("cursor"))
+      return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
     if (q.get("scope") === "company") return route.fulfill({ json: list(only([colleague])) });
     // Page two holds the mixed-source trip when filtered, so every source has a second page.
     if (paged && q.get("cursor") === "page-2")
@@ -130,7 +134,15 @@ async function mockList(page: Page, { paged = false } = {}) {
     if (tripId === first) view.data.decisions = [];
     return route.fulfill({ json: view, headers: { ETag: '"v1"' } });
   });
-  return { lists, details, others };
+  return {
+    lists,
+    details,
+    others,
+    /** Makes every later cursor answer 409. */
+    expire: () => {
+      expired = true;
+    },
+  };
 }
 function expectListParams(lists: URLSearchParams[]) {
   expect(lists.length).toBeGreaterThan(0);
@@ -510,6 +522,36 @@ test(
     await expect
       .poll(() => lists.at(-1)?.toString())
       .toBe(new URLSearchParams({ scope: "mine", game: "ats", limit: "25" }).toString());
+    expectListParams(lists);
+  },
+);
+
+test(
+  "a rejected cursor restarts at the first page of the same filters without an error",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const desktop = info.project.name === "desktop-chromium";
+    const { lists, expire } = await mockList(page, { paged: true });
+    const search = `?game=ets2${desktop ? `&trip=${second}` : ""}`;
+    await page.goto(`/account/trips${search}`);
+    await catalogLanguage(page);
+    await expect(table(page)).toBeVisible();
+    if (desktop) await expect(panel(page, second)).toBeVisible();
+    const alerts = await countInsertedAlerts(page, ".trips-list-area");
+    expire();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    const first = "scope=mine&game=ets2&limit=25";
+    await expect.poll(() => lists.slice(-2).map(String)).toEqual([`${first}&cursor=page-2`, first]);
+    await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+    // The filters and the selection stay; only the page restarts.
+    expect(new URL(page.url()).search).toBe(search);
+    if (desktop) await expect(panel(page, second)).toBeVisible();
+    await page.waitForTimeout(250);
+    expect(await alerts()).toBe(0);
+    // One rejected cursor costs one first-page request, not a loop.
+    expect(lists.filter((q) => q.has("cursor"))).toHaveLength(1);
+    expect(lists.at(-1)?.toString()).toBe(first);
     expectListParams(lists);
   },
 );

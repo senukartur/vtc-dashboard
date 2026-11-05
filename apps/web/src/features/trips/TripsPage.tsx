@@ -13,6 +13,7 @@ import { TripTable } from "./TripTable.js";
 import {
   filterSearch,
   queryString,
+  rejectedCursor,
   selectedTrip,
   selectionSearch,
   tripFilters,
@@ -48,6 +49,9 @@ export function TripsPage() {
     `/trips?${queryString({ ...effective, limit: 25, cursor })}`,
     "EnvelopeListTripSummary",
   );
+  // A cursor the server no longer accepts restarts at the first page of the same filters. The
+  // reset happens during render, so the rejected page never shows its error.
+  if (rejectedCursor(cursor, query.error)) setPage({ key: filterKey, cursor: null, cursors: [] });
   // The side panel exists only on wide layouts; narrow layouts ignore `?trip=` entirely.
   const selected = wide ? selectedTrip(params) : null,
     heading = useRef<HTMLHeadingElement>(null),
