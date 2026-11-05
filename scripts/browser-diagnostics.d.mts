@@ -54,6 +54,15 @@ export type BrowserFailure =
   | { kind: "global"; category: string; status: BrowserFailureStatus };
 export const browserFiles: Record<string, string>;
 export const browserProjects: string[];
+export interface BrowserTiming {
+  spec: string;
+  project: string;
+  durationMs: number;
+}
+export const browserTimingPrefix: string;
+export const browserTimingLimit: number;
+export function safeBrowserTiming(value: unknown): BrowserTiming | undefined;
+export function browserTimingLine(value: unknown): string;
 export const browserFailurePrefix: string;
 export function safeBrowserFailure(value: unknown): BrowserFailure | undefined;
 export function browserFailureLine(value: unknown): string;
