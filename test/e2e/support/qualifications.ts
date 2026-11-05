@@ -91,10 +91,18 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
         atMs: Math.round(performance.now()),
       });
       await gate;
+      const request = route.request();
+      // The page's read fence can abort this read after its response arrives. Playwright then
+      // emits requestfailed but never settles response.finished(), so accept either outcome.
+      const aborted = new Promise<void>((resolve) => {
+        page.on("requestfailed", (failed) => {
+          if (failed === request) resolve();
+        });
+      });
       try {
         await route.fulfill(captured);
-        const response = await route.request().response();
-        await response?.finished();
+        const response = await request.response();
+        await Promise.race([response?.finished(), aborted]);
       } finally {
         state.heldFinished.push(kind);
         state.raceEvents.push({
