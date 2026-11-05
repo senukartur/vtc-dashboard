@@ -22,6 +22,8 @@ const label = (text: string, englishFallback = false) => ({
   retired: false,
 });
 const owner = accountFixture("en").data.member;
+const longCyrillicOrigin =
+  "Вымышленный длинный кириллический город возле северного транспортного узла";
 function summary(tripId: string) {
   const trip = example("getTrip:success").data;
   trip.id = tripId;
@@ -30,7 +32,7 @@ function summary(tripId: string) {
     Object.assign(trip, {
       decision: "accepted",
       outcome: "delivered",
-      origin: label("Fictional Harbor"),
+      origin: label(longCyrillicOrigin),
       destination: label("Fictional Ridge"),
       cargo: label("Fictional machinery"),
       actualDistanceM: "755400",
@@ -54,8 +56,8 @@ function summary(tripId: string) {
     Object.assign(trip, {
       game: "ats",
       decision: "rejected",
-      origin: label("Вымышленный длинный кириллический город возле северного транспортного узла"),
-      destination: label("Fictional Long Valley Junction with an extended catalog label", true),
+      origin: label("Fictional Long Valley Junction with an extended catalog label", true),
+      destination: label("Fictional Desert Crossing", true),
       cargo: label("Fictional lumber", true),
       actualDistanceM: "186000",
       reportingAt: "2026-10-26T18:30:00.000Z",
@@ -78,7 +80,7 @@ function summary(tripId: string) {
   return trip;
 }
 const routeNames: Record<string, string> = {
-  [first]: "Fictional Harbor → Fictional Ridge",
+  [first]: `${longCyrillicOrigin} → Fictional Ridge`,
   [second]: "Fictional Quarry → Fictional Harbor",
   [colleague]: "Fictional Port → Fictional Mill",
 };
@@ -241,6 +243,8 @@ test(
         : ["Route", "Cargo", "Driven distance", "Sources", "Company decision", "Reporting time"];
       const current = table(page, ru ? "Список рейсов" : "Trip list");
       await expect(current).toBeVisible();
+      await expect(rowLink(page, first)).toBeVisible();
+      await expect(rowLink(page, first)).toContainText(longCyrillicOrigin);
       await expect(
         header.getByRole("link").filter({ hasText: /\S/ }),
         "header keeps only drafts and new report",
@@ -372,7 +376,7 @@ test(
     await expect(rowLink(page, second)).toBeFocused();
 
     await rowLink(page, third).click();
-    const missing = page.getByRole("region", { name: /Вымышленный длинный кириллический город/ });
+    const missing = page.getByRole("region", { name: /Fictional Long Valley/ });
     await expect(missing.getByText("This record is unavailable or inaccessible.")).toBeVisible();
     await expect(missing.getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
     await expect(table(page)).toBeVisible();
