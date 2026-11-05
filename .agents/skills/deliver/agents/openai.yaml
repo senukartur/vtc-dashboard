@@ -1,6 +1,6 @@
 interface:
   display_name: "Deliver"
   short_description: "Plan, implement, verify and review one VTC task"
-  default_prompt: "Use $deliver to complete the specified VTC card or task and open a draft PR."
+  default_prompt: "Use $deliver to complete the specified VTC card or task, open a PR and merge it when Required CI and review pass."
 policy:
   allow_implicit_invocation: false
