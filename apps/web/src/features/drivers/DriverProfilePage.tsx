@@ -4,6 +4,9 @@ import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import type { Locale } from "../../shared/formatting.js";
 import { Button, Card } from "../../shared/ui/primitives.js";
+import { PERIOD_FALLBACK_TIMEZONE, periodTimeZone } from "../dashboard/model.js";
+import { useReportingTimezoneSource } from "../dashboard/queries.js";
+import { untilAnchored } from "../dashboard/view-model.js";
 import { useQualificationQuery } from "../qualifications/queries.js";
 import {
   DistanceByMonth,
@@ -56,16 +59,37 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [game, setGame] = useState<GameFilter>("all");
   // Fixed for the page lifetime so a midnight rollover never silently changes the window.
-  const [period] = useState(() => twelveMonthWindow());
+  const [now] = useState(() => new Date());
   const effectiveGame = game === "all" ? undefined : game;
 
+  // The 12-month window starts from today's month in the reporting timezone (shared overview
+  // read), so analytics waits for it and its first request already has the right dates. A failed
+  // read that is being retried still waits. Called first so, on a cold load, the stats read
+  // enters the read queue alongside the profile read.
+  const timezoneQuery = useReportingTimezoneSource();
+  const reportingTimezone = periodTimeZone(
+    timezoneQuery.data,
+    timezoneQuery.isError && !timezoneQuery.isFetching,
+  );
+  const anchored = reportingTimezone !== undefined;
+  const period = twelveMonthWindow(now, reportingTimezone ?? PERIOD_FALLBACK_TIMEZONE);
+
+  // The other reads have no date window, so they do not wait: the profile read renders the
+  // header, layout and not-found/forbidden/error states as soon as possible.
   const profileQuery = useMemberProfile(memberId);
   const profile = profileQuery.data;
   const assignments = {
     ets2: profile ? assignmentFor(profile, "ets2") : null,
     ats: profile ? assignmentFor(profile, "ats") : null,
   };
-  const analyticsQuery = useMemberAnalytics(memberId, { ...period, game: effectiveGame });
+  const analyticsQuery = useMemberAnalytics(memberId, {
+    ...period,
+    game: effectiveGame,
+    enabled: anchored,
+  });
+  // Until the zone is known the KPIs and chart show loading, never cached data or errors of a
+  // fallback-dates key from an earlier visit.
+  const analyticsView = untilAnchored(analyticsQuery, anchored);
   const tripsQuery = useMemberAcceptedTrips(memberId, { isSelf, game: effectiveGame });
   const progress = {
     ets2: useMemberProgress(memberId, "ets2", !!assignments.ets2),
@@ -87,9 +111,28 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
     ats: { levels: atsLevels.data?.data.data.items, pending: atsLevels.isPending },
   };
 
+  /**
+   * Retry rereads a pending, failed or zone-less stats read first (reusing a read in flight). A new
+   * zone changes the analytics key and that query fetches on its own; refetching the current one
+   * would repeat the old dates. Refetch ignores `enabled`, so it never runs on a pending zone.
+   */
+  const retryAnalytics = async () => {
+    if (
+      !anchored ||
+      timezoneQuery.isError ||
+      timezoneQuery.data?.currentMonth.status === "unavailable"
+    ) {
+      const result = await timezoneQuery.refetch({ cancelRefetch: false });
+      // The page may have gone (navigation, revoked access): no private reads for it.
+      if (!titleRef.current) return;
+      if (periodTimeZone(result.data, result.isError) !== reportingTimezone) return;
+    }
+    void analyticsQuery.refetch({ cancelRefetch: false });
+  };
+
   const failure = !profile && profileQuery.isError ? failureView(profileQuery.error) : null;
   const pending =
-    !failure && (profileQuery.isPending || analyticsQuery.isPending || tripsQuery.isPending);
+    !failure && (profileQuery.isPending || analyticsView.isPending || tripsQuery.isPending);
 
   let content: ReactNode;
   if (failure === "notFound") {
@@ -139,7 +182,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
     const visibleGames = GAMES.filter((g) => game === "all" || g === game);
     content = (
       <>
-        <DriverKpis query={analyticsQuery} locale={locale} />
+        <DriverKpis query={analyticsView} locale={locale} onRetry={() => void retryAnalytics()} />
         <div className="driver-layout">
           <div className="driver-main">
             <DriverTrips
@@ -164,7 +207,7 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
               />
             ))}
             <p className="driver-note">{t("qualification.note")}</p>
-            <DistanceByMonth query={analyticsQuery} locale={locale} />
+            <DistanceByMonth query={analyticsView} locale={locale} />
           </div>
         </div>
       </>

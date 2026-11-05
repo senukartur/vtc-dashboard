@@ -1,4 +1,3 @@
-import type { UseQueryResult } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
@@ -31,26 +30,8 @@ import {
   useReviewQueueTrips,
   useUpcomingEvent,
 } from "./queries.js";
+import { untilAnchored } from "./view-model.js";
 import "./dashboard.css";
-
-/**
- * A block's view while the overview waits for the reporting timezone: loading, never the cached
- * data or error of keys the page may not use.
- */
-function untilAnchored<T>(query: UseQueryResult<T>, anchored: boolean): UseQueryResult<T> {
-  if (anchored) return query;
-  return {
-    ...query,
-    data: undefined,
-    error: null,
-    isError: false,
-    isLoadingError: false,
-    isRefetchError: false,
-    isSuccess: false,
-    isPending: true,
-    status: "pending",
-  } as UseQueryResult<T>;
-}
 
 /** Gate: without company.read no dashboard query hook mounts, so nothing is requested. */
 export function DashboardPage() {
