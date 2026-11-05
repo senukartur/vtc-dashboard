@@ -2,13 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { membership, roles } from "@vtc/db/identity-schema";
 import {
-  and,
-  asc,
-  desc,
   eq,
-  isNull,
-  lt,
-  or,
   sourceMessages,
   sourcePayloads,
   sourceTrips,
@@ -39,7 +33,7 @@ import {
   createTrips,
   type SourceContext,
   type Trips,
-  tripSourceCondition,
+  tripListQuery,
 } from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
@@ -1714,7 +1708,7 @@ test("source filter keeps each scope's page index with ref probes and no outer f
   });
   await control.query("ANALYZE TABLE trips, source_trips");
   const last = rows[300] as (typeof rows)[number];
-  // The service's list predicate, built from the same drizzle helpers and source condition.
+  // The service's own list predicate and keyset order, so the guard checks the real query.
   const plan = async (
     scope: "company" | "mine" | "review",
     source: SourceKind,
@@ -1722,33 +1716,20 @@ test("source filter keeps each scope's page index with ref probes and no outer f
   ) => {
     const query = await unit.run(async (tx) => {
       const db = unit.client(tx);
+      const q = tripListQuery(db, {
+        scope,
+        viewerId: owner.userId,
+        game: extra.game,
+        hold: extra.hold,
+        source,
+        order: extra.order,
+        after: extra.after ? { createdAt: last.createdAt, id: last.id } : null,
+      });
       return db
         .select()
         .from(trips)
-        .where(
-          and(
-            isNull(trips.aliasOf),
-            scope === "company"
-              ? eq(trips.decision, "accepted")
-              : scope === "mine"
-                ? eq(trips.ownerId, owner.userId)
-                : undefined,
-            extra.game ? eq(trips.game, extra.game) : undefined,
-            extra.hold === undefined ? undefined : eq(trips.reviewHold, extra.hold),
-            tripSourceCondition(db, source),
-            extra.after
-              ? or(
-                  lt(trips.createdAt, last.createdAt),
-                  and(eq(trips.createdAt, last.createdAt), lt(trips.id, last.id)),
-                )
-              : undefined,
-          ),
-        )
-        .orderBy(
-          ...(extra.order === "asc"
-            ? [asc(trips.createdAt), asc(trips.id)]
-            : [desc(trips.createdAt), desc(trips.id)]),
-        )
+        .where(q.where)
+        .orderBy(...q.orderBy)
         .limit(26)
         .toSQL();
     });

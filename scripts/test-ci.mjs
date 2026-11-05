@@ -59,11 +59,14 @@ const report = qualityReport(
   collector.browserFailures,
   collector.fixtureDiagnostics,
   collector.fileTimings,
+  collector.browserTimings,
 );
 await writeFile(path, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
 console.log(`Quality suite: ${report.status}; ${report.category}`);
 for (const event of report.stages)
   console.log(`${event.stage}: ${event.status} (${event.durationMs}ms)`);
 for (const timing of report.fileTimings) console.log(`${timing.file}: ${timing.durationMs}ms`);
+for (const timing of report.browserTimings)
+  console.log(`Browser ${timing.spec} [${timing.project}]: ${timing.durationMs}ms`);
 if (report.probeIdentity) console.log(`Probe: ${report.probeIdentity}; exit ${report.exitCode}`);
 process.exitCode = report.exitCode;

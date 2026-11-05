@@ -6,12 +6,14 @@ import {
   blockView,
   type Countdown,
   countdown,
+  type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
   recentTripsPath,
   responsePressed,
   retainsError,
   rsvpView,
+  untilAnchored,
 } from "../../apps/web/src/features/dashboard/view-model.ts";
 import { formatQuantity } from "../../apps/web/src/shared/formatting.ts";
 import {
@@ -155,6 +157,46 @@ describe("retry of a block without data", () => {
         (data: { items: unknown[] }) => data.items.length === 0,
       ),
     ).toBe("forbidden");
+  });
+});
+
+describe("view until the reporting timezone is known", () => {
+  const refetch = async () => undefined;
+
+  it("returns the query once anchored and shows loading before", () => {
+    const settled: QueryView<{ items: unknown[] }> = {
+      data: { items: [] },
+      error: null,
+      isError: false,
+      isPending: false,
+      errorUpdateCount: 2,
+      refetch,
+    };
+    expect(untilAnchored(settled, true)).toBe(settled);
+    const waiting = untilAnchored(settled, false);
+    expect(waiting).toEqual({
+      data: undefined,
+      error: null,
+      isError: false,
+      isPending: true,
+      errorUpdateCount: 2,
+      refetch,
+    });
+    expect(waiting.refetch).toBe(refetch);
+    expect(blockView(waiting, (data) => data.items.length === 0)).toBe("loading");
+    // Cached errors of a key the page may not use are hidden too.
+    const failed: QueryView<{ items: unknown[] }> = {
+      ...settled,
+      data: undefined,
+      error: new AccountFailure("forbidden"),
+      isError: true,
+    };
+    expect(untilAnchored(failed, false)).toMatchObject({
+      data: undefined,
+      error: null,
+      isError: false,
+      isPending: true,
+    });
   });
 });
 

@@ -105,10 +105,18 @@ export function useMemberProfile(memberId: string) {
   });
 }
 
-/** Monthly accepted-trip analytics for the given window; the game filter is optional. */
+/**
+ * Monthly accepted-trip analytics for the given window; the game filter is optional. The profile
+ * passes `enabled: false` until the reporting timezone that anchors the window is known.
+ */
 export function useMemberAnalytics(
   memberId: string,
-  params: { fromDate: string; toDateExclusive: string; game?: Game | undefined },
+  params: {
+    fromDate: string;
+    toDateExclusive: string;
+    game?: Game | undefined;
+    enabled?: boolean | undefined;
+  },
 ) {
   const { allowed, key, read } = useProfileRead();
   const search = new URLSearchParams({
@@ -121,7 +129,7 @@ export function useMemberAnalytics(
   return useQuery({
     ...common,
     queryKey: key("driver-analytics", memberId, path),
-    enabled: !!memberId && allowed,
+    enabled: !!memberId && allowed && params.enabled !== false,
     queryFn: async ({ signal }) => (await read(path, "EnvelopeAnalytics", signal)).data,
   });
 }

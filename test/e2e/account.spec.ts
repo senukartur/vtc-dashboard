@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Locator, Page, Request, Route, TestInfo } from "@playwright/test";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
-import { expect, test } from "./support/fixtures.ts";
+import { browserCase, expect, test } from "./support/fixtures.ts";
 import { openMoreSheet, phone, signOutFromMenu, switchLanguage } from "./support/locale.ts";
 
 const meta = { requestId: "synthetic-request" };
@@ -32,171 +32,178 @@ async function capture(page: Page, info: TestInfo, name: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
 }
-test("early link ingress is StrictMode-safe, removes history/query/hash, never redeems on GET and hides malformed links", async ({
-  page,
-}) => {
-  await mocks(page);
-  let writes = 0;
-  let secretReferrer = false;
-  const token = `${fixtureId}.${"x".repeat(43)}`;
-  page.on("request", (request) => {
-    if (request.method() === "POST") writes++;
-    if ((request.headers().referer ?? "").includes(token)) secretReferrer = true;
-  });
-  await page.goto(`/INVITATION/?token=${token}#discard`);
-  await language(page, "en");
-  expect(page.url().endsWith("/invitation")).toBe(true);
-  expect(await page.evaluate(() => JSON.stringify(history.state).includes("x".repeat(43)))).toBe(
-    false,
-  );
-  await expect(page.getByLabel("New password", { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => "__vtcLink" in window)).toBe(false);
-  expect(
-    await page.evaluate(() =>
-      JSON.stringify([localStorage, sessionStorage, document.body.innerHTML]).includes(
-        "x".repeat(43),
+test(
+  "early link ingress is StrictMode-safe, removes history/query/hash, never redeems on GET and hides malformed links",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
+    let writes = 0;
+    let secretReferrer = false;
+    const token = `${fixtureId}.${"x".repeat(43)}`;
+    page.on("request", (request) => {
+      if (request.method() === "POST") writes++;
+      if ((request.headers().referer ?? "").includes(token)) secretReferrer = true;
+    });
+    await page.goto(`/INVITATION/?token=${token}#discard`);
+    await language(page, "en");
+    expect(page.url().endsWith("/invitation")).toBe(true);
+    expect(await page.evaluate(() => JSON.stringify(history.state).includes("x".repeat(43)))).toBe(
+      false,
+    );
+    await expect(page.getByLabel("New password", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => "__vtcLink" in window)).toBe(false);
+    expect(
+      await page.evaluate(() =>
+        JSON.stringify([localStorage, sessionStorage, document.body.innerHTML]).includes(
+          "x".repeat(43),
+        ),
       ),
-    ),
-  ).toBe(false);
-  expect(writes).toBe(0);
-  expect(secretReferrer).toBe(false);
-  await page.reload();
-  await language(page, "en");
-  await expect(page.getByRole("heading", { name: "This link is unavailable" })).toBeVisible();
-  for (const suffix of ["", "?token=bad", `?token=${token}&token=${token}`]) {
-    await page.goto(`/password-reset${suffix}`);
+    ).toBe(false);
+    expect(writes).toBe(0);
+    expect(secretReferrer).toBe(false);
+    await page.reload();
     await language(page, "en");
     await expect(page.getByRole("heading", { name: "This link is unavailable" })).toBeVisible();
-  }
-});
+    for (const suffix of ["", "?token=bad", `?token=${token}&token=${token}`]) {
+      await page.goto(`/password-reset${suffix}`);
+      await language(page, "en");
+      await expect(page.getByRole("heading", { name: "This link is unavailable" })).toBeVisible();
+    }
+  },
+);
 for (const locale of ["en", "ru"] as const) {
-  test(`controlled ${locale} login failures retain input, bound rate retry and hide server details`, async ({
-    page,
-  }, info) => {
-    await mocks(page);
-    let status = 401;
-    await page.route("**/api/v1/auth/login", (route) =>
-      route.fulfill({ ...error(status), headers: { "Retry-After": "1" } }),
-    );
-    await page.goto("/login");
-    await language(page, locale);
-    const form = page.getByRole("form", {
-      name: locale === "en" ? "Sign in" : "Войти",
-      exact: true,
-    });
-    await form
-      .getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true })
-      .fill("member@example.invalid");
-    const password = form.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
-    await password.fill("NONFUNCTIONAL_FIXTURE");
-    for (const value of [401, 403, 429, 503]) {
-      status = value;
+  test(
+    `controlled ${locale} login failures retain input, bound rate retry and hide server details`,
+    browserCase(["@functional"]),
+    async ({ page }, info) => {
+      await mocks(page);
+      let status = 401;
+      await page.route("**/api/v1/auth/login", (route) =>
+        route.fulfill({ ...error(status), headers: { "Retry-After": "1" } }),
+      );
+      await page.goto("/login");
+      await language(page, locale);
+      const form = page.getByRole("form", {
+        name: locale === "en" ? "Sign in" : "Войти",
+        exact: true,
+      });
       await form
+        .getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true })
+        .fill("member@example.invalid");
+      const password = form.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
+      await password.fill("NONFUNCTIONAL_FIXTURE");
+      for (const value of [401, 403, 429, 503]) {
+        status = value;
+        await form
+          .getByRole("button", {
+            name:
+              locale === "en" ? /^(Sign in|Retry this action)$/ : /^(Войти|Повторить действие)$/,
+          })
+          .click();
+        await expect(form.getByRole("alert")).toBeVisible();
+        await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+        await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+        if (value === 429) {
+          await expect(
+            form.getByRole("button", {
+              name: locale === "en" ? "Retry this action" : "Повторить действие",
+              exact: true,
+            }),
+          ).toBeDisabled();
+          await expect(
+            form.getByRole("button", {
+              name: locale === "en" ? "Retry this action" : "Повторить действие",
+              exact: true,
+            }),
+          ).toBeEnabled();
+        }
+      }
+      await capture(page, info, `${locale}-login-unavailable`);
+    },
+  );
+  test(
+    `controlled ${locale} accessible sign-in validation, recovery, visibility, mobile focus and synthetic render`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mocks(page);
+      await page.goto("/login");
+      await language(page, locale);
+      const form = page.getByRole("form", {
+        name: locale === "en" ? "Sign in" : "Войти",
+        exact: true,
+      });
+      await form
+        .getByRole("button", { name: locale === "en" ? "Sign in" : "Войти", exact: true })
+        .click();
+      await expect(page.locator(".error-summary")).toBeFocused();
+      await expect(page.locator(".error-summary a")).toHaveCount(2);
+      await page.locator(".error-summary a").first().click();
+      await expect(
+        page.getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true }),
+      ).toBeFocused();
+      const password = page.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
+      await password.fill("NONFUNCTIONAL_FIXTURE");
+      const toggle = form.getByRole("button", {
+        name: locale === "en" ? "Show password" : "Показать пароль",
+        exact: true,
+      });
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expect(password).toHaveAttribute("type", "text");
+      await page
+        .getByRole("banner")
+        .getByRole("combobox")
+        .selectOption(locale === "en" ? "ru" : "en");
+      await expect(
+        page.getByLabel(locale === "en" ? "Пароль" : "Password", { exact: true }),
+      ).toHaveValue("NONFUNCTIONAL_FIXTURE");
+      await expect(
+        page.getByRole("button", {
+          name: locale === "en" ? "Показать пароль" : "Show password",
+          exact: true,
+        }),
+      ).toHaveAttribute("aria-pressed", "true");
+      await language(page, locale);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await capture(page, info, `${locale}-login-validation`);
+      if (info.project.name === "desktop-chromium") {
+        const viewport = page.viewportSize();
+        await page.setViewportSize({ width: 375, height: 812 });
+        await capture(page, info, `${locale}-login-small`);
+        await page.setViewportSize({ width: 844, height: 390 });
+        await capture(page, info, `${locale}-login-landscape`);
+        if (viewport) await page.setViewportSize(viewport);
+      }
+      const menu = page.getByRole("button", { name: /^(Open navigation|Открыть навигацию)$/ });
+      if (await menu.isVisible()) {
+        await menu.click();
+        await page.keyboard.press("Escape");
+        await expect(menu).toBeFocused();
+      }
+      await page.goto("/password-recovery");
+      await language(page, locale);
+      await page.route("**/api/v1/auth/password-reset-requests", (route) =>
+        route.fulfill({ status: 202, json: { data: { status: "received" }, meta } }),
+      );
+      await page
+        .getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true })
+        .fill("unknown@example.invalid");
+      await page
         .getByRole("button", {
-          name: locale === "en" ? /^(Sign in|Retry this action)$/ : /^(Войти|Повторить действие)$/,
+          name: locale === "en" ? "Request password recovery" : "Запросить восстановление пароля",
+          exact: true,
         })
         .click();
-      await expect(form.getByRole("alert")).toBeVisible();
-      await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
-      await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
-      if (value === 429) {
-        await expect(
-          form.getByRole("button", {
-            name: locale === "en" ? "Retry this action" : "Повторить действие",
-            exact: true,
-          }),
-        ).toBeDisabled();
-        await expect(
-          form.getByRole("button", {
-            name: locale === "en" ? "Retry this action" : "Повторить действие",
-            exact: true,
-          }),
-        ).toBeEnabled();
-      }
-    }
-    await capture(page, info, `${locale}-login-unavailable`);
-  });
-  test(`controlled ${locale} accessible sign-in validation, recovery, visibility, mobile focus and synthetic render`, async ({
-    page,
-  }, info) => {
-    await mocks(page);
-    await page.goto("/login");
-    await language(page, locale);
-    const form = page.getByRole("form", {
-      name: locale === "en" ? "Sign in" : "Войти",
-      exact: true,
-    });
-    await form
-      .getByRole("button", { name: locale === "en" ? "Sign in" : "Войти", exact: true })
-      .click();
-    await expect(page.locator(".error-summary")).toBeFocused();
-    await expect(page.locator(".error-summary a")).toHaveCount(2);
-    await page.locator(".error-summary a").first().click();
-    await expect(
-      page.getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true }),
-    ).toBeFocused();
-    const password = page.getByLabel(locale === "en" ? "Password" : "Пароль", { exact: true });
-    await password.fill("NONFUNCTIONAL_FIXTURE");
-    const toggle = form.getByRole("button", {
-      name: locale === "en" ? "Show password" : "Показать пароль",
-      exact: true,
-    });
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await expect(password).toHaveAttribute("type", "text");
-    await page
-      .getByRole("banner")
-      .getByRole("combobox")
-      .selectOption(locale === "en" ? "ru" : "en");
-    await expect(
-      page.getByLabel(locale === "en" ? "Пароль" : "Password", { exact: true }),
-    ).toHaveValue("NONFUNCTIONAL_FIXTURE");
-    await expect(
-      page.getByRole("button", {
-        name: locale === "en" ? "Показать пароль" : "Show password",
-        exact: true,
-      }),
-    ).toHaveAttribute("aria-pressed", "true");
-    await language(page, locale);
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await capture(page, info, `${locale}-login-validation`);
-    if (info.project.name === "desktop-chromium") {
-      const viewport = page.viewportSize();
-      await page.setViewportSize({ width: 375, height: 812 });
-      await capture(page, info, `${locale}-login-small`);
-      await page.setViewportSize({ width: 844, height: 390 });
-      await capture(page, info, `${locale}-login-landscape`);
-      if (viewport) await page.setViewportSize(viewport);
-    }
-    const menu = page.getByRole("button", { name: /^(Open navigation|Открыть навигацию)$/ });
-    if (await menu.isVisible()) {
-      await menu.click();
-      await page.keyboard.press("Escape");
-      await expect(menu).toBeFocused();
-    }
-    await page.goto("/password-recovery");
-    await language(page, locale);
-    await page.route("**/api/v1/auth/password-reset-requests", (route) =>
-      route.fulfill({ status: 202, json: { data: { status: "received" }, meta } }),
-    );
-    await page
-      .getByLabel(locale === "en" ? "Email" : "Электронная почта", { exact: true })
-      .fill("unknown@example.invalid");
-    await page
-      .getByRole("button", {
-        name: locale === "en" ? "Request password recovery" : "Запросить восстановление пароля",
-        exact: true,
-      })
-      .click();
-    await expect(
-      page.getByRole("heading", {
-        name: locale === "en" ? "Request received" : "Запрос принят",
-        exact: true,
-      }),
-    ).toBeVisible();
-    await capture(page, info, `${locale}-recovery`);
-  });
+      await expect(
+        page.getByRole("heading", {
+          name: locale === "en" ? "Request received" : "Запрос принят",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await capture(page, info, `${locale}-recovery`);
+    },
+  );
 }
 async function box(locator: Locator) {
   const value = await locator.boundingBox();
@@ -229,891 +236,918 @@ for (const locale of ["en", "ru"] as const) {
     notMember: en ? "Not in the company yet?" : "Ещё не в компании?",
     steps: en ? "Next steps" : "Следующие шаги",
   };
-  test(`controlled ${locale} sign-in layout keeps the recovery link on the password label row, submit last and the application link below`, async ({
-    page,
-  }, info) => {
-    await mocks(page);
-    await page.goto("/login");
-    await language(page, locale);
-    const main = page.getByRole("main");
-    const form = page.getByRole("form", { name: copy.form, exact: true });
-    const email = form.getByLabel(copy.email, { exact: true });
-    const password = form.getByLabel(copy.password, { exact: true });
-    const forgot = form.getByRole("link", { name: copy.forgot, exact: true });
-    const toggle = form.getByRole("button", { name: copy.show, exact: true });
-    const submit = form.getByRole("button", { name: copy.form, exact: true });
-    await expect(forgot).toHaveAttribute("href", "/password-recovery");
-    const [forgotBox, passwordBox, labelBox, toggleBox] = await Promise.all([
-      box(forgot),
-      box(password),
-      box(form.locator('label[for="login-password"]')),
-      box(toggle),
-    ]);
-    expect(forgotBox.y + forgotBox.height).toBeLessThanOrEqual(passwordBox.y + 0.5);
-    expect(
-      Math.abs(forgotBox.x + forgotBox.width - (passwordBox.x + passwordBox.width)),
-    ).toBeLessThanOrEqual(1);
-    expect(
-      Math.abs(forgotBox.y + forgotBox.height / 2 - (labelBox.y + labelBox.height / 2)),
-    ).toBeLessThanOrEqual(4);
-    expect(toggleBox.x).toBeGreaterThanOrEqual(passwordBox.x - 0.5);
-    expect(toggleBox.y).toBeGreaterThanOrEqual(passwordBox.y - 0.5);
-    expect(toggleBox.x + toggleBox.width).toBeLessThanOrEqual(
-      passwordBox.x + passwordBox.width + 0.5,
-    );
-    expect(toggleBox.y + toggleBox.height).toBeLessThanOrEqual(
-      passwordBox.y + passwordBox.height + 0.5,
-    );
-    const coarse = await coarsePointer(page);
-    for (const control of [email, password, submit]) {
-      const { height } = await box(control);
-      if (coarse) expect(height).toBeGreaterThanOrEqual(40);
-      else near(height, 32);
-    }
-    near(toggleBox.width, coarse ? 40 : 32);
-    near(toggleBox.height, coarse ? 40 : 32);
-    expect(forgotBox.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
-    await email.focus();
-    for (const next of [forgot, password, toggle, submit]) {
-      await page.keyboard.press("Tab");
-      await expect(next).toBeFocused();
-    }
-    expect(await lastControlType(form)).toBe("submit");
-    const apply = main.getByRole("link", { name: publicContent[locale].apply, exact: true });
-    await expect(apply).toHaveAttribute("href", en ? "/en#apply" : "/#apply");
-    const formBox = await box(form);
-    expect((await box(apply)).y).toBeGreaterThanOrEqual(formBox.y + formBox.height);
-    await expect(main.getByText(copy.notMember, { exact: true })).toBeVisible();
-    await expect(main.getByRole("link", { name: copy.home, exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-    const brand = page.locator(".auth-brand");
-    await expect(brand).toHaveAttribute("aria-hidden", "true");
-    await expect(brand).toContainText(publicContent[locale].heading);
-    if (info.project.name === "desktop-chromium") {
-      await expect(brand).toBeVisible();
-      expect((await box(brand)).x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
-    } else await expect(brand).toBeHidden();
-    expect(await page.evaluate(() => document.body.textContent?.includes("Достаточно суров"))).toBe(
-      false,
-    );
-    for (const reducedMotion of ["no-preference", "reduce"] as const) {
-      await page.emulateMedia({ reducedMotion });
+  test(
+    `controlled ${locale} sign-in layout keeps the recovery link on the password label row, submit last and the application link below`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mocks(page);
+      await page.goto("/login");
+      await language(page, locale);
+      const main = page.getByRole("main");
+      const form = page.getByRole("form", { name: copy.form, exact: true });
+      const email = form.getByLabel(copy.email, { exact: true });
+      const password = form.getByLabel(copy.password, { exact: true });
+      const forgot = form.getByRole("link", { name: copy.forgot, exact: true });
+      const toggle = form.getByRole("button", { name: copy.show, exact: true });
+      const submit = form.getByRole("button", { name: copy.form, exact: true });
+      await expect(forgot).toHaveAttribute("href", "/password-recovery");
+      const [forgotBox, passwordBox, labelBox, toggleBox] = await Promise.all([
+        box(forgot),
+        box(password),
+        box(form.locator('label[for="login-password"]')),
+        box(toggle),
+      ]);
+      expect(forgotBox.y + forgotBox.height).toBeLessThanOrEqual(passwordBox.y + 0.5);
       expect(
-        await brand.evaluate((element) =>
-          [element, ...Array.from(element.querySelectorAll("*"))].every(
-            (node) => getComputedStyle(node).animationName === "none",
+        Math.abs(forgotBox.x + forgotBox.width - (passwordBox.x + passwordBox.width)),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(forgotBox.y + forgotBox.height / 2 - (labelBox.y + labelBox.height / 2)),
+      ).toBeLessThanOrEqual(4);
+      expect(toggleBox.x).toBeGreaterThanOrEqual(passwordBox.x - 0.5);
+      expect(toggleBox.y).toBeGreaterThanOrEqual(passwordBox.y - 0.5);
+      expect(toggleBox.x + toggleBox.width).toBeLessThanOrEqual(
+        passwordBox.x + passwordBox.width + 0.5,
+      );
+      expect(toggleBox.y + toggleBox.height).toBeLessThanOrEqual(
+        passwordBox.y + passwordBox.height + 0.5,
+      );
+      const coarse = await coarsePointer(page);
+      for (const control of [email, password, submit]) {
+        const { height } = await box(control);
+        if (coarse) expect(height).toBeGreaterThanOrEqual(40);
+        else near(height, 32);
+      }
+      near(toggleBox.width, coarse ? 40 : 32);
+      near(toggleBox.height, coarse ? 40 : 32);
+      expect(forgotBox.height).toBeGreaterThanOrEqual(coarse ? 40 : 24);
+      await email.focus();
+      for (const next of [forgot, password, toggle, submit]) {
+        await page.keyboard.press("Tab");
+        await expect(next).toBeFocused();
+      }
+      expect(await lastControlType(form)).toBe("submit");
+      const apply = main.getByRole("link", { name: publicContent[locale].apply, exact: true });
+      await expect(apply).toHaveAttribute("href", en ? "/en#apply" : "/#apply");
+      const formBox = await box(form);
+      expect((await box(apply)).y).toBeGreaterThanOrEqual(formBox.y + formBox.height);
+      await expect(main.getByText(copy.notMember, { exact: true })).toBeVisible();
+      await expect(main.getByRole("link", { name: copy.home, exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+      const brand = page.locator(".auth-brand");
+      await expect(brand).toHaveAttribute("aria-hidden", "true");
+      await expect(brand).toContainText(publicContent[locale].heading);
+      if (info.project.name === "desktop-chromium") {
+        await expect(brand).toBeVisible();
+        expect((await box(brand)).x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
+      } else await expect(brand).toBeHidden();
+      expect(
+        await page.evaluate(() => document.body.textContent?.includes("Достаточно суров")),
+      ).toBe(false);
+      for (const reducedMotion of ["no-preference", "reduce"] as const) {
+        await page.emulateMedia({ reducedMotion });
+        expect(
+          await brand.evaluate((element) =>
+            [element, ...Array.from(element.querySelectorAll("*"))].every(
+              (node) => getComputedStyle(node).animationName === "none",
+            ),
           ),
-        ),
-      ).toBe(true);
-    }
-    await capture(page, info, `${locale}-login-layout`);
-  });
-  test(`controlled ${locale} in-field password toggles keep value, focus and autocomplete, mask on submit and follow the entry-screen pattern`, async ({
-    page,
-  }, info) => {
-    await mocks(page);
-    await page.route("**/api/v1/auth/login", (route) => route.fulfill(error(401)));
-    await page.goto("/login");
-    await language(page, locale);
-    const main = page.getByRole("main");
-    const form = page.getByRole("form", { name: copy.form, exact: true });
-    const password = form.getByLabel(copy.password, { exact: true });
-    const toggle = form.getByRole("button", { name: copy.show, exact: true });
-    await expect(toggle).toHaveAttribute("aria-controls", "login-password");
-    await expect(password).toHaveAttribute("id", "login-password");
-    await password.fill("NONFUNCTIONAL_FIXTURE");
-    const before = await box(password);
-    await toggle.click();
-    await expect(toggle).toBeFocused();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await expect(password).toHaveAttribute("type", "text");
-    await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
-    await expect(password).toHaveAttribute("autocomplete", "current-password");
-    await expect(password).toHaveAttribute("name", "password");
-    await expect(password).toHaveAttribute("spellcheck", "false");
-    const after = await box(password);
-    for (const key of ["x", "y", "width", "height"] as const) near(after[key], before[key]);
-    await page.keyboard.press("Space");
-    await expect(toggle).toBeFocused();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await expect(password).toHaveAttribute("type", "password");
-    await toggle.click();
-    await expect(password).toHaveAttribute("type", "text");
-    await form.getByLabel(copy.email, { exact: true }).fill("member@example.invalid");
-    await form.getByRole("button", { name: copy.form, exact: true }).click();
-    await expect(form.getByRole("alert")).toBeVisible();
-    await expect(password).toHaveAttribute("type", "password");
-    await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+        ).toBe(true);
+      }
+      await capture(page, info, `${locale}-login-layout`);
+    },
+  );
+  test(
+    `controlled ${locale} in-field password toggles keep value, focus and autocomplete, mask on submit and follow the entry-screen pattern`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mocks(page);
+      await page.route("**/api/v1/auth/login", (route) => route.fulfill(error(401)));
+      await page.goto("/login");
+      await language(page, locale);
+      const main = page.getByRole("main");
+      const form = page.getByRole("form", { name: copy.form, exact: true });
+      const password = form.getByLabel(copy.password, { exact: true });
+      const toggle = form.getByRole("button", { name: copy.show, exact: true });
+      await expect(toggle).toHaveAttribute("aria-controls", "login-password");
+      await expect(password).toHaveAttribute("id", "login-password");
+      await password.fill("NONFUNCTIONAL_FIXTURE");
+      const before = await box(password);
+      await toggle.click();
+      await expect(toggle).toBeFocused();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await expect(password).toHaveAttribute("type", "text");
+      await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+      await expect(password).toHaveAttribute("autocomplete", "current-password");
+      await expect(password).toHaveAttribute("name", "password");
+      await expect(password).toHaveAttribute("spellcheck", "false");
+      const after = await box(password);
+      for (const key of ["x", "y", "width", "height"] as const) near(after[key], before[key]);
+      await page.keyboard.press("Space");
+      await expect(toggle).toBeFocused();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(password).toHaveAttribute("type", "password");
+      await toggle.click();
+      await expect(password).toHaveAttribute("type", "text");
+      await form.getByLabel(copy.email, { exact: true }).fill("member@example.invalid");
+      await form.getByRole("button", { name: copy.form, exact: true }).click();
+      await expect(form.getByRole("alert")).toBeVisible();
+      await expect(password).toHaveAttribute("type", "password");
+      await expect(password).toHaveValue("NONFUNCTIONAL_FIXTURE");
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
-    await page.goto(`/password-reset?token=${linkToken}`);
-    await language(page, locale);
-    const back = main.getByRole("link", { name: copy.back, exact: true });
-    await expect(back).toHaveAttribute("href", "/login");
-    expect(await main.evaluate((element) => element.querySelector("a")?.textContent)).toBe(
-      copy.back,
-    );
-    expect((await box(back)).y + (await box(back)).height).toBeLessThanOrEqual(
-      (await box(page.getByRole("heading", { level: 1 }))).y,
-    );
-    const newPassword = main.getByLabel(copy.newPassword, { exact: true });
-    const confirmation = main.getByLabel(copy.confirmation, { exact: true });
-    const show = main.getByRole("button", { name: copy.show, exact: true });
-    const showRepeat = main.getByRole("button", { name: copy.showRepeat, exact: true });
-    for (const input of [newPassword, confirmation])
-      await expect(input).toHaveAttribute("autocomplete", "new-password");
-    await show.click();
-    await expect(newPassword).toHaveAttribute("type", "text");
-    await expect(confirmation).toHaveAttribute("type", "password");
-    await expect(showRepeat).toHaveAttribute("aria-pressed", "false");
-    await showRepeat.click();
-    await expect(confirmation).toHaveAttribute("type", "text");
-    await expect(show).toHaveAttribute("aria-pressed", "true");
-    const hint = main.locator("#reset-password-hint");
-    await expect(newPassword).toHaveAttribute("aria-describedby", /(^| )reset-password-hint( |$)/);
-    const passwordBox = await box(newPassword);
-    expect((await box(hint)).y).toBeGreaterThanOrEqual(passwordBox.y + passwordBox.height);
-    await expect(main.getByRole("link", { name: copy.forgot, exact: true })).toHaveCount(0);
-    await expect(
-      main.getByRole("link", { name: publicContent[locale].apply, exact: true }),
-    ).toHaveCount(0);
-    await capture(page, info, `${locale}-reset`);
+      await page.goto(`/password-reset?token=${linkToken}`);
+      await language(page, locale);
+      const back = main.getByRole("link", { name: copy.back, exact: true });
+      await expect(back).toHaveAttribute("href", "/login");
+      expect(await main.evaluate((element) => element.querySelector("a")?.textContent)).toBe(
+        copy.back,
+      );
+      expect((await box(back)).y + (await box(back)).height).toBeLessThanOrEqual(
+        (await box(page.getByRole("heading", { level: 1 }))).y,
+      );
+      const newPassword = main.getByLabel(copy.newPassword, { exact: true });
+      const confirmation = main.getByLabel(copy.confirmation, { exact: true });
+      const show = main.getByRole("button", { name: copy.show, exact: true });
+      const showRepeat = main.getByRole("button", { name: copy.showRepeat, exact: true });
+      for (const input of [newPassword, confirmation])
+        await expect(input).toHaveAttribute("autocomplete", "new-password");
+      await show.click();
+      await expect(newPassword).toHaveAttribute("type", "text");
+      await expect(confirmation).toHaveAttribute("type", "password");
+      await expect(showRepeat).toHaveAttribute("aria-pressed", "false");
+      await showRepeat.click();
+      await expect(confirmation).toHaveAttribute("type", "text");
+      await expect(show).toHaveAttribute("aria-pressed", "true");
+      const hint = main.locator("#reset-password-hint");
+      await expect(newPassword).toHaveAttribute(
+        "aria-describedby",
+        /(^| )reset-password-hint( |$)/,
+      );
+      const passwordBox = await box(newPassword);
+      expect((await box(hint)).y).toBeGreaterThanOrEqual(passwordBox.y + passwordBox.height);
+      await expect(main.getByRole("link", { name: copy.forgot, exact: true })).toHaveCount(0);
+      await expect(
+        main.getByRole("link", { name: publicContent[locale].apply, exact: true }),
+      ).toHaveCount(0);
+      await capture(page, info, `${locale}-reset`);
 
-    await page.goto(`/invitation?token=${linkToken}`);
-    await language(page, locale);
-    await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
-      "href",
-      "/login",
-    );
-    await main.getByRole("button", { name: copy.showRepeat, exact: true }).click();
-    await expect(main.getByLabel(copy.confirmation, { exact: true })).toHaveAttribute(
-      "type",
-      "text",
-    );
-    await expect(main.getByLabel(copy.newPassword, { exact: true })).toHaveAttribute(
-      "type",
-      "password",
-    );
-    const steps = main.getByRole("list", { name: copy.steps, exact: true });
-    await expect(steps.getByRole("listitem")).toHaveText(
-      en
-        ? [
-            "Set your account password",
-            "Sign in with your invitation email",
-            "Verify Steam ownership in Connections",
-          ]
-        : [
-            "Задайте пароль аккаунта",
-            "Войдите с почтой из приглашения",
-            "Подтвердите Steam в разделе «Подключения»",
-          ],
-    );
-    await expect(steps.getByRole("listitem").first()).toHaveAttribute("aria-current", "step");
-    const accept = await box(
-      main.getByRole("button", {
-        name: en ? "Accept invitation" : "Принять приглашение",
-        exact: true,
-      }),
-    );
-    expect((await box(steps)).y).toBeGreaterThanOrEqual(accept.y + accept.height);
-    await capture(page, info, `${locale}-invitation`);
+      await page.goto(`/invitation?token=${linkToken}`);
+      await language(page, locale);
+      await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
+        "href",
+        "/login",
+      );
+      await main.getByRole("button", { name: copy.showRepeat, exact: true }).click();
+      await expect(main.getByLabel(copy.confirmation, { exact: true })).toHaveAttribute(
+        "type",
+        "text",
+      );
+      await expect(main.getByLabel(copy.newPassword, { exact: true })).toHaveAttribute(
+        "type",
+        "password",
+      );
+      const steps = main.getByRole("list", { name: copy.steps, exact: true });
+      await expect(steps.getByRole("listitem")).toHaveText(
+        en
+          ? [
+              "Set your account password",
+              "Sign in with your invitation email",
+              "Verify Steam ownership in Connections",
+            ]
+          : [
+              "Задайте пароль аккаунта",
+              "Войдите с почтой из приглашения",
+              "Подтвердите Steam в разделе «Подключения»",
+            ],
+      );
+      await expect(steps.getByRole("listitem").first()).toHaveAttribute("aria-current", "step");
+      const accept = await box(
+        main.getByRole("button", {
+          name: en ? "Accept invitation" : "Принять приглашение",
+          exact: true,
+        }),
+      );
+      expect((await box(steps)).y).toBeGreaterThanOrEqual(accept.y + accept.height);
+      await capture(page, info, `${locale}-invitation`);
 
-    await page.goto("/password-reset");
-    await language(page, locale);
-    await expect(
-      page.getByRole("heading", {
-        name: en ? "This link is unavailable" : "Ссылка недоступна",
-        exact: true,
-      }),
-    ).toBeVisible();
-    await expect(main.getByRole("link", { name: copy.back, exact: true })).toBeVisible();
-    await expect(
-      main.getByRole("link", {
+      await page.goto("/password-reset");
+      await language(page, locale);
+      await expect(
+        page.getByRole("heading", {
+          name: en ? "This link is unavailable" : "Ссылка недоступна",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(main.getByRole("link", { name: copy.back, exact: true })).toBeVisible();
+      await expect(
+        main.getByRole("link", {
+          name: en ? "Request password recovery" : "Запросить восстановление пароля",
+          exact: true,
+        }),
+      ).toHaveAttribute("href", "/password-recovery");
+
+      await page.goto("/password-recovery");
+      await language(page, locale);
+      await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
+        "href",
+        "/login",
+      );
+      const recovery = page.getByRole("form", {
         name: en ? "Request password recovery" : "Запросить восстановление пароля",
         exact: true,
-      }),
-    ).toHaveAttribute("href", "/password-recovery");
-
-    await page.goto("/password-recovery");
-    await language(page, locale);
-    await expect(main.getByRole("link", { name: copy.back, exact: true })).toHaveAttribute(
-      "href",
-      "/login",
-    );
-    const recovery = page.getByRole("form", {
-      name: en ? "Request password recovery" : "Запросить восстановление пароля",
-      exact: true,
-    });
-    expect(await lastControlType(recovery)).toBe("submit");
-    await capture(page, info, `${locale}-recovery-form`);
-  });
-}
-test("controlled uncertain invitation retry retains payload/key, pending prevents duplicates, expired result is safe", async ({
-  page,
-}) => {
-  await mocks(page);
-  const attempts: { key: string | undefined; body: string | null }[] = [];
-  let count = 0;
-  let release = () => {};
-  const delayed = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route("**/api/v1/public/invitation-redemptions", async (route) => {
-    attempts.push({
-      key: route.request().headers()["idempotency-key"],
-      body: route.request().postData(),
-    });
-    count++;
-    if (count === 1) {
-      await delayed;
-      await route.abort("failed");
-    } else await route.fulfill({ status: 201, json: receipt });
-  });
-  await page.goto(`/invitation?token=${fixtureId}.${"x".repeat(43)}`);
-  await language(page, "en");
-  await page.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-  await page.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-  await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
-  try {
-    await expect(page.getByRole("button", { name: "Please wait…", exact: true })).toBeDisabled();
-    await expect(page.getByLabel("New password", { exact: true })).toBeDisabled();
-    await page
-      .getByRole("form", { name: "Accept invitation", exact: true })
-      .evaluate(async (element) => {
-        if (!(element instanceof HTMLFormElement)) throw new Error("SYNTHETIC_FORM_MISSING");
-        element.requestSubmit();
-        element.requestSubmit();
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       });
-    expect(attempts).toHaveLength(1);
-  } finally {
-    release();
-  }
-  await expect(page.getByRole("alert")).toContainText("result could not be confirmed");
-  await page.getByRole("button", { name: "Retry this action", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Account created", exact: true })).toBeVisible();
-  expect(attempts).toHaveLength(2);
-  expect(attempts[1]).toEqual(attempts[0]);
-  await page.route("**/api/v1/public/invitation-redemptions", (route) => route.fulfill(error(409)));
-  await page.goto(`/invitation?token=${fixtureId}.${"x".repeat(43)}`);
-  await language(page, "en");
-  await page.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-  await page.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-  await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "This link is unavailable", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
-});
-test("authenticated pending-email read401 evicts the account instead of retaining cached self", async ({
-  page,
-}) => {
-  await mocks(page);
-  const self = accountFixture();
-  self.data.emailVerified = true;
-  await page.route("**/api/v1/me", (route) =>
-    route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
-  );
-  await page.route("**/api/v1/me/email-change", (route) => route.fulfill(error(401)));
-  await page.goto("/account");
-  // Reach the terminal state first: the brief authenticated shell's user menu is about to unmount.
-  await expect(
-    page.getByRole("heading", {
-      name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
-    }),
-  ).toBeVisible();
-  await language(page, "en");
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
-  await expect(page.locator(".account-address")).toHaveCount(0);
-  await expect(page.getByRole("form", { name: "Request email change", exact: true })).toHaveCount(
-    0,
-  );
-});
-test("challenge replacement clears old confirmation fields while wrong-code retries preserve recoverable input", async ({
-  page,
-}) => {
-  await mocks(page);
-  const self = accountFixture();
-  let generation = 16;
-  const next = () => ({
-    data: {
-      ...challenge.data,
-      id: `41000000-0000-4000-8000-${String(++generation).padStart(12, "0")}`,
+      expect(await lastControlType(recovery)).toBe("submit");
+      await capture(page, info, `${locale}-recovery-form`);
     },
-    meta,
-  });
-  await page.route("**/api/v1/me", (route) =>
-    route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
   );
-  await page.route("**/api/v1/me/email-verification-requests", (route) =>
-    route.fulfill({ status: 202, json: next() }),
-  );
-  await page.route("**/api/v1/me/email-verifications", (route) => route.fulfill(error(401)));
-  await page.route("**/api/v1/me/credential-challenges", (route) =>
-    route.fulfill({ status: 202, json: next() }),
-  );
-  await page.route("**/api/v1/me/credential-changes", (route) => route.fulfill(error(401)));
-  await page.goto("/account");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Request verification code", exact: true }).click();
-  let form = page.getByRole("form", { name: "Confirm email verification", exact: true });
-  await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_OLD_CODE");
-  await form.getByRole("button", { name: "Confirm code", exact: true }).click();
-  await expect(form.getByRole("alert")).toBeVisible();
-  await expect(form.getByLabel("Email code", { exact: true })).toHaveValue(
-    "NONFUNCTIONAL_OLD_CODE",
-  );
-  await page.getByRole("button", { name: "Request a new code", exact: true }).click();
-  await expect(form.getByLabel("Email code", { exact: true })).toHaveValue("");
-  self.data.emailVerified = true;
-  await page.reload();
-  await language(page, "en");
-  await page.getByRole("button", { name: "Change password", exact: true }).click();
-  await page.getByRole("button", { name: "Send code to current email", exact: true }).click();
-  form = page.getByRole("form", { name: "Change password", exact: true });
-  await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_OLD_CODE");
-  await form.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_PASSWORD");
-  await form.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_PASSWORD");
-  await form.getByRole("button", { name: "Confirm password change", exact: true }).click();
-  await expect(form.getByRole("alert")).toBeVisible();
-  await expect(form.getByLabel("New password", { exact: true })).toHaveValue(
-    "NONFUNCTIONAL_PASSWORD",
-  );
-  await page.getByRole("button", { name: "Request a new code", exact: true }).click();
-  for (const label of ["Email code", "New password", "Repeat new password"])
-    await expect(form.getByLabel(label, { exact: true })).toHaveValue("");
-});
-
-for (const readFailure of [false, true]) {
-  test(`VTC019 ordering regression: email replacement fences command and pending read${readFailure ? " with recovery" : ""}`, async ({
-    page,
-  }) => {
+}
+test(
+  "controlled uncertain invitation retry retains payload/key, pending prevents duplicates, expired result is safe",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
+    const attempts: { key: string | undefined; body: string | null }[] = [];
+    let count = 0;
+    let release = () => {};
+    const delayed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/public/invitation-redemptions", async (route) => {
+      attempts.push({
+        key: route.request().headers()["idempotency-key"],
+        body: route.request().postData(),
+      });
+      count++;
+      if (count === 1) {
+        await delayed;
+        await route.abort("failed");
+      } else await route.fulfill({ status: 201, json: receipt });
+    });
+    await page.goto(`/invitation?token=${fixtureId}.${"x".repeat(43)}`);
+    await language(page, "en");
+    await page.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
+    try {
+      await expect(page.getByRole("button", { name: "Please wait…", exact: true })).toBeDisabled();
+      await expect(page.getByLabel("New password", { exact: true })).toBeDisabled();
+      await page
+        .getByRole("form", { name: "Accept invitation", exact: true })
+        .evaluate(async (element) => {
+          if (!(element instanceof HTMLFormElement)) throw new Error("SYNTHETIC_FORM_MISSING");
+          element.requestSubmit();
+          element.requestSubmit();
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        });
+      expect(attempts).toHaveLength(1);
+    } finally {
+      release();
+    }
+    await expect(page.getByRole("alert")).toContainText("result could not be confirmed");
+    await page.getByRole("button", { name: "Retry this action", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Account created", exact: true })).toBeVisible();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+    await page.route("**/api/v1/public/invitation-redemptions", (route) =>
+      route.fulfill(error(409)),
+    );
+    await page.goto(`/invitation?token=${fixtureId}.${"x".repeat(43)}`);
+    await language(page, "en");
+    await page.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Accept invitation", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "This link is unavailable", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("PRIVATE_SENTINEL")).toHaveCount(0);
+  },
+);
+test(
+  "authenticated pending-email read401 evicts the account instead of retaining cached self",
+  browserCase(["@functional"]),
+  async ({ page }) => {
     await mocks(page);
     const self = accountFixture();
     self.data.emailVerified = true;
-    const replacementId = "41000000-0000-4000-8000-000000000071";
-    const proposedId = "41000000-0000-4000-8000-000000000072";
-    let pending = {
-      id: fixtureId,
-      stage: "current_email",
-      proposedEmail: "replacement@example.invalid",
-      expiresAt: challenge.data.expiresAt,
-    };
-    let releaseCommand = () => {},
-      releaseRead = () => {},
-      releaseStage = () => {},
-      commandEntered = () => {},
-      readEntered = () => {},
-      stageEntered = () => {};
-    const commandGate = new Promise<void>((resolve) => {
-      releaseCommand = resolve;
-    });
-    const readGate = new Promise<void>((resolve) => {
-      releaseRead = resolve;
-    });
-    const commandStarted = new Promise<void>((resolve) => {
-      commandEntered = resolve;
-    });
-    const readStarted = new Promise<void>((resolve) => {
-      readEntered = resolve;
-    });
-    const stageGate = new Promise<void>((resolve) => {
-      releaseStage = resolve;
-    });
-    const stageStarted = new Promise<void>((resolve) => {
-      stageEntered = resolve;
-    });
-    let replacementIssued = false,
-      readHeld = false,
-      stageHeld = false,
-      failCommand = readFailure,
-      confirmations = 0,
-      matchingGeneration = false;
-    let phase = "DISCOVERY";
     await page.route("**/api/v1/me", (route) =>
       route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
     );
-    await page.route("**/api/v1/me/email-change", async (route) => {
-      if (replacementIssued && !readHeld) {
-        readHeld = true;
-        readEntered();
-        await readGate;
-        if (readFailure) return route.fulfill(error(503));
-      }
-      if (pending.stage === "proposed_email" && !stageHeld) {
-        stageHeld = true;
-        stageEntered();
-        await stageGate;
-      }
-      return route.fulfill({ json: { data: { pending }, meta } });
-    });
-    await page.route("**/api/v1/me/credential-challenges", async (route) => {
-      if (failCommand) {
-        failCommand = false;
-        return route.fulfill(error(503));
-      }
-      commandEntered();
-      await commandGate;
-      replacementIssued = true;
-      pending = { ...pending, id: replacementId };
-      return route.fulfill({
-        status: 202,
-        json: { ...challenge, data: { ...challenge.data, id: replacementId } },
-      });
-    });
-    await page.route("**/api/v1/me/credential-changes", (route) => {
-      confirmations++;
-      const body = route.request().postDataJSON();
-      matchingGeneration = body.challengeId === replacementId;
-      if (body.code !== "NONFUNCTIONAL_NEW_CODE") return route.fulfill(error(401));
-      pending = { ...pending, id: proposedId, stage: "proposed_email" };
-      return route.fulfill({
-        status: 202,
-        json: { ...challenge, data: { ...challenge.data, id: proposedId } },
-      });
-    });
-    try {
-      await page.goto("/account");
-      await expect(
-        page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-      ).toBeVisible();
-      const request = page.getByRole("form", { name: "Request email change", exact: true });
-      const confirm = page.getByRole("form", {
-        name: "Confirm email replacement stage",
-        exact: true,
-      });
-      const code = confirm.getByLabel("Email code", { exact: true });
-      await code.fill("NONFUNCTIONAL_OLD_CODE");
-      await request.getByLabel("Proposed email", { exact: true }).fill(pending.proposedEmail);
-      phase = "COMMAND_PENDING";
-      if (readFailure) {
-        await request
-          .getByRole("button", { name: "Replace pending email request", exact: true })
-          .click();
-        await expect(request.getByRole("alert")).toBeVisible();
-        await expect(code).toBeEnabled();
-        await expect(code).toHaveValue("NONFUNCTIONAL_OLD_CODE");
-      }
-      await request
-        .getByRole("button", {
-          name: readFailure ? "Retry this action" : "Replace pending email request",
-          exact: true,
-        })
-        .click();
-      await commandStarted;
-      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
-      const commandBlockedConfirmation = await code.isDisabled();
-      releaseCommand();
-      await readStarted;
-      phase = "PENDING_FENCE";
-      await expect(code).toBeDisabled();
-      await expect(
-        confirm.getByRole("button", { name: /^(Please wait…|Confirm this email code)$/ }),
-      ).toBeDisabled();
-      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
-      await expect(
-        page.getByRole("button", { name: "Refresh pending request", exact: true }),
-      ).toBeDisabled();
-      expect(confirmations).toBe(0);
-      releaseRead();
-      if (readFailure) {
-        phase = "READ_RECOVERY";
-        await expect(
-          page.getByText("Pending email replacement could not be checked.", { exact: true }),
-        ).toBeVisible();
-        await expect(confirm).toHaveCount(0);
-        await expect(request.getByLabel("Proposed email", { exact: true })).toHaveValue(
-          pending.proposedEmail,
-        );
-        await page.getByRole("button", { name: "Check again", exact: true }).click();
-      }
-      phase = "GENERATION_READY";
-      await expect(code).toBeEnabled();
-      await expect(code).toHaveValue("");
-      expect(commandBlockedConfirmation).toBe(true);
-      phase = "WRONG_CODE";
-      await code.fill("NONFUNCTIONAL_WRONG_CODE");
-      await confirm.getByRole("button", { name: "Confirm this email code", exact: true }).click();
-      await expect(confirm.getByRole("alert")).toBeVisible();
-      await expect(code).toHaveValue("NONFUNCTIONAL_WRONG_CODE");
-      await expect(
-        page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-      ).toBeVisible();
-      phase = "NEW_STAGE";
-      await code.fill("NONFUNCTIONAL_NEW_CODE");
-      await confirm.getByRole("button", { name: "Retry this action", exact: true }).click();
-      await stageStarted;
-      await expect(code).toBeDisabled();
-      await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
-      releaseStage();
-      await expect(page.getByText(/Current email confirmed/)).toBeVisible();
-      await expect(code).toHaveValue("");
-      expect(matchingGeneration).toBe(true);
-      expect(confirmations).toBe(2);
-      await expect(page.locator(".account-address")).toHaveText(self.data.email);
-    } catch {
-      throw new Error(`VTC019_EMAIL_${readFailure ? "RECOVERY" : "SUCCESS"}_${phase}_FAILED`);
-    } finally {
-      releaseCommand();
-      releaseRead();
-      releaseStage();
-    }
-  });
-}
-test("controlled account preferences conflict requires refresh/review, wrong codes preserve session, outage and revoked access hide private content", async ({
-  page,
-}, info) => {
-  await mocks(page);
-  let self = accountFixture();
-  let status = 200;
-  let version = 1;
-  await page.route("**/api/v1/me", (route) =>
-    route.fulfill(
-      status === 200 ? { json: self, headers: { ETag: `"v${version}"` } } : error(status),
-    ),
-  );
-  await page.route("**/api/v1/me/email-verification-requests", (route) =>
-    route.fulfill({ status: 202, json: challenge }),
-  );
-  await page.route("**/api/v1/me/email-verifications", (route) => route.fulfill(error(401)));
-  let conflicts = true;
-  await page.route("**/api/v1/me/preferences", (route) => {
-    if (conflicts) {
-      version++;
-      self = {
-        ...self,
-        data: { ...self.data, preferences: { locale: "en", displayTimezone: "Europe/Warsaw" } },
-      };
-      return route.fulfill(error(409));
-    }
-    expect(route.request().headers()["if-match"]).toBe(`"v${version}"`);
-    self.data.preferences = route.request().postDataJSON();
-    version++;
-    return route.fulfill({ json: { data: self.data.preferences, meta } });
-  });
-  await page.goto("/account/preferences");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
-  ).toBeVisible();
-  await capture(page, info, "en-preferences");
-  await language(page, "ru");
-  await capture(page, info, "ru-preferences");
-  await language(page, "en");
-  const timezone = page.getByLabel("Display timezone", { exact: true });
-  await timezone.fill("Asia/Tokyo");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.getByRole("button", { name: "Refresh preferences for review" }).click();
-  await expect(page.getByText(/Preferences changed elsewhere/)).toBeVisible();
-  await expect(timezone).toHaveValue("Europe/Warsaw");
-  conflicts = false;
-  await timezone.fill("UTC");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
-  await page
-    .getByRole("navigation", { name: "Account sections", exact: true })
-    .getByRole("link", { name: /^Security/ })
-    .click();
-  await page.getByRole("button", { name: "Request verification code", exact: true }).click();
-  const form = page.getByRole("form", { name: "Confirm email verification", exact: true });
-  await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_WRONG_CODE");
-  await form.getByRole("button", { name: "Confirm code", exact: true }).click();
-  await expect(form.getByRole("alert")).toBeVisible();
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-  ).toBeVisible();
-  status = 503;
-  await page.goto("/account");
-  await language(page, "en");
-  await expect(
-    page.getByRole("heading", { name: "Session check unavailable", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
-  status = 401;
-  await page.getByRole("button", { name: "Check again", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("member@example.invalid", { exact: true })).toHaveCount(0);
-});
-test("controlled current capabilities expose role-grouped workspace navigation equally for trainee/driver and staff destinations without deputy succession", async ({
-  page,
-}) => {
-  await mocks(page);
-  const destinations: Record<string, (string | null)[]> = {};
-  for (const roles of [
-    ["trainee"],
-    ["driver"],
-    ["driver", "dispatcher"],
-    ["driver", "deputy_director"],
-  ] as const) {
+    await page.route("**/api/v1/me/email-change", (route) => route.fulfill(error(401)));
+    await page.goto("/account");
+    // Reach the terminal state first: the brief authenticated shell's user menu is about to unmount.
+    await expect(
+      page.getByRole("heading", {
+        name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+      }),
+    ).toBeVisible();
+    await language(page, "en");
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
+    await expect(page.locator(".account-address")).toHaveCount(0);
+    await expect(page.getByRole("form", { name: "Request email change", exact: true })).toHaveCount(
+      0,
+    );
+  },
+);
+test(
+  "challenge replacement clears old confirmation fields while wrong-code retries preserve recoverable input",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
     const self = accountFixture();
-    self.data.member.roles = [...roles];
-    self.data.capabilities = [
-      "company.read",
-      "trips.submit_own",
-      ...(roles.includes("dispatcher" as never) || roles.includes("deputy_director" as never)
-        ? ["trips.review"]
-        : []),
-      ...(roles.includes("deputy_director" as never) ? ["applications.manage"] : []),
-    ];
+    let generation = 16;
+    const next = () => ({
+      data: {
+        ...challenge.data,
+        id: `41000000-0000-4000-8000-${String(++generation).padStart(12, "0")}`,
+      },
+      meta,
+    });
     await page.route("**/api/v1/me", (route) =>
       route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
     );
+    await page.route("**/api/v1/me/email-verification-requests", (route) =>
+      route.fulfill({ status: 202, json: next() }),
+    );
+    await page.route("**/api/v1/me/email-verifications", (route) => route.fulfill(error(401)));
+    await page.route("**/api/v1/me/credential-challenges", (route) =>
+      route.fulfill({ status: 202, json: next() }),
+    );
+    await page.route("**/api/v1/me/credential-changes", (route) => route.fulfill(error(401)));
     await page.goto("/account");
     await expect(
       page.getByRole("heading", { level: 1, name: "Security", exact: true }),
     ).toBeVisible();
-    const report = page
-      .getByRole("link", { name: "New report", exact: true })
-      .filter({ visible: true });
-    // Phones show New report in the bottom bar and the other sections in the More sheet.
-    if (phone(page)) {
-      await expect(report).toBeVisible();
-      await openMoreSheet(page);
-    } else {
-      const menu = page.getByRole("button", { name: "Open navigation" });
-      if (await menu.isVisible()) await menu.click();
+    await page.getByRole("button", { name: "Request verification code", exact: true }).click();
+    let form = page.getByRole("form", { name: "Confirm email verification", exact: true });
+    await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_OLD_CODE");
+    await form.getByRole("button", { name: "Confirm code", exact: true }).click();
+    await expect(form.getByRole("alert")).toBeVisible();
+    await expect(form.getByLabel("Email code", { exact: true })).toHaveValue(
+      "NONFUNCTIONAL_OLD_CODE",
+    );
+    await page.getByRole("button", { name: "Request a new code", exact: true }).click();
+    await expect(form.getByLabel("Email code", { exact: true })).toHaveValue("");
+    self.data.emailVerified = true;
+    await page.reload();
+    await language(page, "en");
+    await page.getByRole("button", { name: "Change password", exact: true }).click();
+    await page.getByRole("button", { name: "Send code to current email", exact: true }).click();
+    form = page.getByRole("form", { name: "Change password", exact: true });
+    await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_OLD_CODE");
+    await form.getByLabel("New password", { exact: true }).fill("NONFUNCTIONAL_PASSWORD");
+    await form.getByLabel("Repeat new password", { exact: true }).fill("NONFUNCTIONAL_PASSWORD");
+    await form.getByRole("button", { name: "Confirm password change", exact: true }).click();
+    await expect(form.getByRole("alert")).toBeVisible();
+    await expect(form.getByLabel("New password", { exact: true })).toHaveValue(
+      "NONFUNCTIONAL_PASSWORD",
+    );
+    await page.getByRole("button", { name: "Request a new code", exact: true }).click();
+    for (const label of ["Email code", "New password", "Repeat new password"])
+      await expect(form.getByLabel(label, { exact: true })).toHaveValue("");
+  },
+);
+
+for (const readFailure of [false, true]) {
+  test(
+    `VTC019 ordering regression: email replacement fences command and pending read${readFailure ? " with recovery" : ""}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mocks(page);
+      const self = accountFixture();
+      self.data.emailVerified = true;
+      const replacementId = "41000000-0000-4000-8000-000000000071";
+      const proposedId = "41000000-0000-4000-8000-000000000072";
+      let pending = {
+        id: fixtureId,
+        stage: "current_email",
+        proposedEmail: "replacement@example.invalid",
+        expiresAt: challenge.data.expiresAt,
+      };
+      let releaseCommand = () => {},
+        releaseRead = () => {},
+        releaseStage = () => {},
+        commandEntered = () => {},
+        readEntered = () => {},
+        stageEntered = () => {};
+      const commandGate = new Promise<void>((resolve) => {
+        releaseCommand = resolve;
+      });
+      const readGate = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      const commandStarted = new Promise<void>((resolve) => {
+        commandEntered = resolve;
+      });
+      const readStarted = new Promise<void>((resolve) => {
+        readEntered = resolve;
+      });
+      const stageGate = new Promise<void>((resolve) => {
+        releaseStage = resolve;
+      });
+      const stageStarted = new Promise<void>((resolve) => {
+        stageEntered = resolve;
+      });
+      let replacementIssued = false,
+        readHeld = false,
+        stageHeld = false,
+        failCommand = readFailure,
+        confirmations = 0,
+        matchingGeneration = false;
+      let phase = "DISCOVERY";
+      await page.route("**/api/v1/me", (route) =>
+        route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
+      );
+      await page.route("**/api/v1/me/email-change", async (route) => {
+        if (replacementIssued && !readHeld) {
+          readHeld = true;
+          readEntered();
+          await readGate;
+          if (readFailure) return route.fulfill(error(503));
+        }
+        if (pending.stage === "proposed_email" && !stageHeld) {
+          stageHeld = true;
+          stageEntered();
+          await stageGate;
+        }
+        return route.fulfill({ json: { data: { pending }, meta } });
+      });
+      await page.route("**/api/v1/me/credential-challenges", async (route) => {
+        if (failCommand) {
+          failCommand = false;
+          return route.fulfill(error(503));
+        }
+        commandEntered();
+        await commandGate;
+        replacementIssued = true;
+        pending = { ...pending, id: replacementId };
+        return route.fulfill({
+          status: 202,
+          json: { ...challenge, data: { ...challenge.data, id: replacementId } },
+        });
+      });
+      await page.route("**/api/v1/me/credential-changes", (route) => {
+        confirmations++;
+        const body = route.request().postDataJSON();
+        matchingGeneration = body.challengeId === replacementId;
+        if (body.code !== "NONFUNCTIONAL_NEW_CODE") return route.fulfill(error(401));
+        pending = { ...pending, id: proposedId, stage: "proposed_email" };
+        return route.fulfill({
+          status: 202,
+          json: { ...challenge, data: { ...challenge.data, id: proposedId } },
+        });
+      });
+      try {
+        await page.goto("/account");
+        await expect(
+          page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+        ).toBeVisible();
+        const request = page.getByRole("form", { name: "Request email change", exact: true });
+        const confirm = page.getByRole("form", {
+          name: "Confirm email replacement stage",
+          exact: true,
+        });
+        const code = confirm.getByLabel("Email code", { exact: true });
+        await code.fill("NONFUNCTIONAL_OLD_CODE");
+        await request.getByLabel("Proposed email", { exact: true }).fill(pending.proposedEmail);
+        phase = "COMMAND_PENDING";
+        if (readFailure) {
+          await request
+            .getByRole("button", { name: "Replace pending email request", exact: true })
+            .click();
+          await expect(request.getByRole("alert")).toBeVisible();
+          await expect(code).toBeEnabled();
+          await expect(code).toHaveValue("NONFUNCTIONAL_OLD_CODE");
+        }
+        await request
+          .getByRole("button", {
+            name: readFailure ? "Retry this action" : "Replace pending email request",
+            exact: true,
+          })
+          .click();
+        await commandStarted;
+        await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+        const commandBlockedConfirmation = await code.isDisabled();
+        releaseCommand();
+        await readStarted;
+        phase = "PENDING_FENCE";
+        await expect(code).toBeDisabled();
+        await expect(
+          confirm.getByRole("button", { name: /^(Please wait…|Confirm this email code)$/ }),
+        ).toBeDisabled();
+        await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "Refresh pending request", exact: true }),
+        ).toBeDisabled();
+        expect(confirmations).toBe(0);
+        releaseRead();
+        if (readFailure) {
+          phase = "READ_RECOVERY";
+          await expect(
+            page.getByText("Pending email replacement could not be checked.", { exact: true }),
+          ).toBeVisible();
+          await expect(confirm).toHaveCount(0);
+          await expect(request.getByLabel("Proposed email", { exact: true })).toHaveValue(
+            pending.proposedEmail,
+          );
+          await page.getByRole("button", { name: "Check again", exact: true }).click();
+        }
+        phase = "GENERATION_READY";
+        await expect(code).toBeEnabled();
+        await expect(code).toHaveValue("");
+        expect(commandBlockedConfirmation).toBe(true);
+        phase = "WRONG_CODE";
+        await code.fill("NONFUNCTIONAL_WRONG_CODE");
+        await confirm.getByRole("button", { name: "Confirm this email code", exact: true }).click();
+        await expect(confirm.getByRole("alert")).toBeVisible();
+        await expect(code).toHaveValue("NONFUNCTIONAL_WRONG_CODE");
+        await expect(
+          page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+        ).toBeVisible();
+        phase = "NEW_STAGE";
+        await code.fill("NONFUNCTIONAL_NEW_CODE");
+        await confirm.getByRole("button", { name: "Retry this action", exact: true }).click();
+        await stageStarted;
+        await expect(code).toBeDisabled();
+        await expect(request.getByLabel("Proposed email", { exact: true })).toBeDisabled();
+        releaseStage();
+        await expect(page.getByText(/Current email confirmed/)).toBeVisible();
+        await expect(code).toHaveValue("");
+        expect(matchingGeneration).toBe(true);
+        expect(confirmations).toBe(2);
+        await expect(page.locator(".account-address")).toHaveText(self.data.email);
+      } catch {
+        throw new Error(`VTC019_EMAIL_${readFailure ? "RECOVERY" : "SUCCESS"}_${phase}_FAILED`);
+      } finally {
+        releaseCommand();
+        releaseRead();
+        releaseStage();
+      }
+    },
+  );
+}
+test(
+  "controlled account preferences conflict requires refresh/review, wrong codes preserve session, outage and revoked access hide private content",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    await mocks(page);
+    let self = accountFixture();
+    let status = 200;
+    let version = 1;
+    await page.route("**/api/v1/me", (route) =>
+      route.fulfill(
+        status === 200 ? { json: self, headers: { ETag: `"v${version}"` } } : error(status),
+      ),
+    );
+    await page.route("**/api/v1/me/email-verification-requests", (route) =>
+      route.fulfill({ status: 202, json: challenge }),
+    );
+    await page.route("**/api/v1/me/email-verifications", (route) => route.fulfill(error(401)));
+    let conflicts = true;
+    await page.route("**/api/v1/me/preferences", (route) => {
+      if (conflicts) {
+        version++;
+        self = {
+          ...self,
+          data: { ...self.data, preferences: { locale: "en", displayTimezone: "Europe/Warsaw" } },
+        };
+        return route.fulfill(error(409));
+      }
+      expect(route.request().headers()["if-match"]).toBe(`"v${version}"`);
+      self.data.preferences = route.request().postDataJSON();
+      version++;
+      return route.fulfill({ json: { data: self.data.preferences, meta } });
+    });
+    await page.goto("/account/preferences");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
+    ).toBeVisible();
+    await capture(page, info, "en-preferences");
+    await language(page, "ru");
+    await capture(page, info, "ru-preferences");
+    await language(page, "en");
+    const timezone = page.getByLabel("Display timezone", { exact: true });
+    await timezone.fill("Asia/Tokyo");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("button", { name: "Refresh preferences for review" }).click();
+    await expect(page.getByText(/Preferences changed elsewhere/)).toBeVisible();
+    await expect(timezone).toHaveValue("Europe/Warsaw");
+    conflicts = false;
+    await timezone.fill("UTC");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Timezone saved", { exact: true })).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "Account sections", exact: true })
+      .getByRole("link", { name: /^Security/ })
+      .click();
+    await page.getByRole("button", { name: "Request verification code", exact: true }).click();
+    const form = page.getByRole("form", { name: "Confirm email verification", exact: true });
+    await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_WRONG_CODE");
+    await form.getByRole("button", { name: "Confirm code", exact: true }).click();
+    await expect(form.getByRole("alert")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+    ).toBeVisible();
+    status = 503;
+    await page.goto("/account");
+    await language(page, "en");
+    await expect(
+      page.getByRole("heading", { name: "Session check unavailable", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
+    status = 401;
+    await page.getByRole("button", { name: "Check again", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("member@example.invalid", { exact: true })).toHaveCount(0);
+  },
+);
+test(
+  "controlled current capabilities expose role-grouped workspace navigation equally for trainee/driver and staff destinations without deputy succession",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
+    const destinations: Record<string, (string | null)[]> = {};
+    for (const roles of [
+      ["trainee"],
+      ["driver"],
+      ["driver", "dispatcher"],
+      ["driver", "deputy_director"],
+    ] as const) {
+      const self = accountFixture();
+      self.data.member.roles = [...roles];
+      self.data.capabilities = [
+        "company.read",
+        "trips.submit_own",
+        ...(roles.includes("dispatcher" as never) || roles.includes("deputy_director" as never)
+          ? ["trips.review"]
+          : []),
+        ...(roles.includes("deputy_director" as never) ? ["applications.manage"] : []),
+      ];
+      await page.route("**/api/v1/me", (route) =>
+        route.fulfill({ json: self, headers: { ETag: '"v1"' } }),
+      );
+      await page.goto("/account");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+      ).toBeVisible();
+      const report = page
+        .getByRole("link", { name: "New report", exact: true })
+        .filter({ visible: true });
+      // Phones show New report in the bottom bar and the other sections in the More sheet.
+      if (phone(page)) {
+        await expect(report).toBeVisible();
+        await openMoreSheet(page);
+      } else {
+        const menu = page.getByRole("button", { name: "Open navigation" });
+        if (await menu.isVisible()) await menu.click();
+      }
+      const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
+      await expect(navigation.getByRole("link", { name: "Drafts", exact: true })).toBeVisible();
+      if (!phone(page)) await expect(report).toBeVisible();
+      await expect(page.getByText(/Leadership transfer/)).toHaveCount(0);
+      await expect(navigation.getByRole("link", { name: "Dispatch", exact: true })).toHaveCount(
+        self.data.capabilities.includes("trips.review") ? 1 : 0,
+      );
+      await expect(navigation.getByRole("link", { name: "Applications", exact: true })).toHaveCount(
+        self.data.capabilities.includes("applications.manage") ? 1 : 0,
+      );
+      destinations[roles.join("+")] = await navigation
+        .getByRole("link")
+        .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+      if (await page.getByRole("dialog").isVisible()) await page.keyboard.press("Escape");
     }
-    const navigation = page.getByRole("navigation", { name: "Main navigation", exact: true });
-    await expect(navigation.getByRole("link", { name: "Drafts", exact: true })).toBeVisible();
-    if (!phone(page)) await expect(report).toBeVisible();
-    await expect(page.getByText(/Leadership transfer/)).toHaveCount(0);
-    await expect(navigation.getByRole("link", { name: "Dispatch", exact: true })).toHaveCount(
-      self.data.capabilities.includes("trips.review") ? 1 : 0,
-    );
-    await expect(navigation.getByRole("link", { name: "Applications", exact: true })).toHaveCount(
-      self.data.capabilities.includes("applications.manage") ? 1 : 0,
-    );
-    destinations[roles.join("+")] = await navigation
-      .getByRole("link")
-      .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
-    if (await page.getByRole("dialog").isVisible()) await page.keyboard.press("Escape");
-  }
-  expect(destinations.trainee).toEqual(destinations.driver);
-});
-test("confirmed anonymous sessions can recover a new shared-cookie session on focus without restoring old identity data or looping", async ({
-  page,
-}) => {
-  await mocks(page);
-  let status = 401;
-  let reads = 0;
-  const self = accountFixture();
-  self.data.member.nickname = "Fictional Recovered Member";
-  await page.route("**/api/v1/me", (route) => {
-    reads++;
-    return route.fulfill(
-      status === 200 ? { json: self, headers: { ETag: '"v1"' } } : error(status),
-    );
-  });
-  await page.goto("/account");
-  await language(page, "en");
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  expect(reads).toBe(1);
-  status = 200;
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("main").getByText("Fictional Recovered Member", { exact: true }),
-  ).toBeVisible();
-  status = 401;
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("Fictional Recovered Member", { exact: true })).toHaveCount(0);
-  const before = reads;
-  status = 200;
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-  ).toBeVisible();
-  expect(reads).toBe(before + 1);
-});
+    expect(destinations.trainee).toEqual(destinations.driver);
+  },
+);
+test(
+  "confirmed anonymous sessions can recover a new shared-cookie session on focus without restoring old identity data or looping",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
+    let status = 401;
+    let reads = 0;
+    const self = accountFixture();
+    self.data.member.nickname = "Fictional Recovered Member";
+    await page.route("**/api/v1/me", (route) => {
+      reads++;
+      return route.fulfill(
+        status === 200 ? { json: self, headers: { ETag: '"v1"' } } : error(status),
+      );
+    });
+    await page.goto("/account");
+    await language(page, "en");
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    expect(reads).toBe(1);
+    status = 200;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText("Fictional Recovered Member", { exact: true }),
+    ).toBeVisible();
+    status = 401;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Fictional Recovered Member", { exact: true })).toHaveCount(0);
+    const before = reads;
+    status = 200;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+    ).toBeVisible();
+    expect(reads).toBe(before + 1);
+  },
+);
 for (const held of ["probe", "command"] as const) {
-  test(`old logout ${held} cannot end B or start an unowned probe after shared-cookie identity switching`, async ({
-    page,
-  }) => {
+  test(
+    `old logout ${held} cannot end B or start an unowned probe after shared-cookie identity switching`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mocks(page);
+      const first = accountFixture();
+      first.data.member.nickname = "Fictional Member A";
+      const second = accountFixture();
+      second.data.member.id = "41000000-0000-4000-8000-000000000018";
+      second.data.member.nickname = "Fictional Member B";
+      let current = first;
+      let logoutStarted = false;
+      let reads = 0;
+      let probes = 0;
+      let heldRequest: Request | undefined;
+      let release = () => {};
+      let started = () => {};
+      let handled = () => {};
+      let settled = () => {};
+      const began = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const delayed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const handlerFinished = new Promise<void>((resolve) => {
+        handled = resolve;
+      });
+      const requestSettled = new Promise<void>((resolve) => {
+        settled = resolve;
+      });
+      const onSettled = (request: Request) => {
+        if (request === heldRequest) settled();
+      };
+      page.on("requestfinished", onSettled);
+      page.on("requestfailed", onSettled);
+      await page.route("**/api/v1/me", async (route) => {
+        reads++;
+        if (current === first && logoutStarted) {
+          probes++;
+          heldRequest = route.request();
+          started();
+          await delayed;
+          await route.fulfill(error(401)).catch(() => {});
+          handled();
+        } else await route.fulfill({ json: current, headers: { ETag: '"v1"' } });
+      });
+      await page.route("**/api/v1/auth/logout", async (route) => {
+        logoutStarted = true;
+        if (held === "command") {
+          heldRequest = route.request();
+          started();
+          await delayed;
+        }
+        await route.fulfill(error(503)).catch(() => {});
+        if (held === "command") handled();
+      });
+      try {
+        await page.goto("/account/preferences");
+        await expect(
+          page.getByRole("main").getByText("Fictional Member A", { exact: true }),
+        ).toBeVisible();
+        await signOutFromMenu(page);
+        await began;
+        expect(probes).toBe(held === "probe" ? 1 : 0);
+        const beforeSwitch = reads;
+        current = second;
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect(
+          page.getByRole("main").getByText("Fictional Member B", { exact: true }),
+        ).toBeVisible();
+        const timezone = page.getByLabel("Display timezone", { exact: true });
+        await timezone.fill("Europe/Warsaw");
+        release();
+        await Promise.all([handlerFinished, requestSettled]);
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+        await expect(
+          page.getByRole("main").getByText("Fictional Member B", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
+        ).toBeVisible();
+        await expect(timezone).toHaveValue("Europe/Warsaw");
+        await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
+        // Focus discovers B, then the new access generation confirms B. Disposed A owns no read.
+        expect(reads).toBe(beforeSwitch + 2);
+        expect(probes).toBe(held === "probe" ? 1 : 0);
+      } finally {
+        release();
+        page.off("requestfinished", onSettled);
+        page.off("requestfailed", onSettled);
+      }
+    },
+  );
+}
+test(
+  "late private reads from A cannot appear after rendered logout and B login in the same app cache",
+  browserCase(["@functional"]),
+  async ({ page }) => {
     await mocks(page);
     const first = accountFixture();
+    first.data.emailVerified = true;
     first.data.member.nickname = "Fictional Member A";
     const second = accountFixture();
     second.data.member.id = "41000000-0000-4000-8000-000000000018";
     second.data.member.nickname = "Fictional Member B";
     let current = first;
-    let logoutStarted = false;
-    let reads = 0;
-    let probes = 0;
-    let heldRequest: Request | undefined;
     let release = () => {};
     let started = () => {};
-    let handled = () => {};
-    let settled = () => {};
     const began = new Promise<void>((resolve) => {
       started = resolve;
     });
     const delayed = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const handlerFinished = new Promise<void>((resolve) => {
-      handled = resolve;
-    });
-    const requestSettled = new Promise<void>((resolve) => {
-      settled = resolve;
-    });
-    const onSettled = (request: Request) => {
-      if (request === heldRequest) settled();
-    };
-    page.on("requestfinished", onSettled);
-    page.on("requestfailed", onSettled);
-    await page.route("**/api/v1/me", async (route) => {
-      reads++;
-      if (current === first && logoutStarted) {
-        probes++;
-        heldRequest = route.request();
+    await page.route("**/api/v1/me", (route) =>
+      route.fulfill({ json: current, headers: { ETag: '"v1"' } }),
+    );
+    await page.route("**/api/v1/me/email-change", async (route) => {
+      if (current === first) {
         started();
         await delayed;
-        await route.fulfill(error(401)).catch(() => {});
-        handled();
-      } else await route.fulfill({ json: current, headers: { ETag: '"v1"' } });
+        await route
+          .fulfill({
+            json: {
+              data: {
+                pending: {
+                  id: fixtureId,
+                  proposedEmail: "private-a@example.invalid",
+                  expiresAt: "2099-10-19T12:00:00.000Z",
+                  stage: "proposed_email",
+                },
+              },
+              meta,
+            },
+          })
+          .catch(() => {});
+      } else await route.fulfill({ json: { data: { pending: null }, meta } });
     });
-    await page.route("**/api/v1/auth/logout", async (route) => {
-      logoutStarted = true;
-      if (held === "command") {
-        heldRequest = route.request();
-        started();
-        await delayed;
-      }
-      await route.fulfill(error(503)).catch(() => {});
-      if (held === "command") handled();
+    await page.route("**/api/v1/auth/logout", (route) => route.fulfill({ json: receipt }));
+    await page.route("**/api/v1/auth/login", (route) => {
+      current = second;
+      return route.fulfill({ json: second, headers: { ETag: '"v1"' } });
     });
     try {
-      await page.goto("/account/preferences");
+      await page.goto("/account");
+      await began;
       await expect(
         page.getByRole("main").getByText("Fictional Member A", { exact: true }),
       ).toBeVisible();
       await signOutFromMenu(page);
-      await began;
-      expect(probes).toBe(held === "probe" ? 1 : 0);
-      const beforeSwitch = reads;
-      current = second;
-      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(
+        page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+      ).toBeVisible();
+      await page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
+      await page.getByLabel("Email", { exact: true }).fill("member-b@example.invalid");
+      await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      // The main sign-in link records the protected page it came from, so B returns to Account.
+      await expect(page).toHaveURL(/\/account\/security$/);
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Security", exact: true }),
+      ).toBeVisible();
       await expect(
         page.getByRole("main").getByText("Fictional Member B", { exact: true }),
       ).toBeVisible();
-      const timezone = page.getByLabel("Display timezone", { exact: true });
-      await timezone.fill("Europe/Warsaw");
       release();
-      await Promise.all([handlerFinished, requestSettled]);
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) =>
-            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-          ),
-      );
-      await expect(
-        page.getByRole("main").getByText("Fictional Member B", { exact: true }),
-      ).toBeVisible();
-      await expect(
-        page.getByRole("heading", { level: 1, name: "Preferences", exact: true }),
-      ).toBeVisible();
-      await expect(timezone).toHaveValue("Europe/Warsaw");
       await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
-      // Focus discovers B, then the new access generation confirms B. Disposed A owns no read.
-      expect(reads).toBe(beforeSwitch + 2);
-      expect(probes).toBe(held === "probe" ? 1 : 0);
+      await expect(page.getByText(/private-a@example.invalid/)).toHaveCount(0);
     } finally {
       release();
-      page.off("requestfinished", onSettled);
-      page.off("requestfailed", onSettled);
     }
-  });
-}
-test("late private reads from A cannot appear after rendered logout and B login in the same app cache", async ({
-  page,
-}) => {
-  await mocks(page);
-  const first = accountFixture();
-  first.data.emailVerified = true;
-  first.data.member.nickname = "Fictional Member A";
-  const second = accountFixture();
-  second.data.member.id = "41000000-0000-4000-8000-000000000018";
-  second.data.member.nickname = "Fictional Member B";
-  let current = first;
-  let release = () => {};
-  let started = () => {};
-  const began = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const delayed = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route("**/api/v1/me", (route) =>
-    route.fulfill({ json: current, headers: { ETag: '"v1"' } }),
-  );
-  await page.route("**/api/v1/me/email-change", async (route) => {
-    if (current === first) {
-      started();
-      await delayed;
-      await route
-        .fulfill({
-          json: {
-            data: {
-              pending: {
-                id: fixtureId,
-                proposedEmail: "private-a@example.invalid",
-                expiresAt: "2099-10-19T12:00:00.000Z",
-                stage: "proposed_email",
-              },
-            },
-            meta,
-          },
-        })
-        .catch(() => {});
-    } else await route.fulfill({ json: { data: { pending: null }, meta } });
-  });
-  await page.route("**/api/v1/auth/logout", (route) => route.fulfill({ json: receipt }));
-  await page.route("**/api/v1/auth/login", (route) => {
-    current = second;
-    return route.fulfill({ json: second, headers: { ETag: '"v1"' } });
-  });
-  try {
-    await page.goto("/account");
-    await began;
-    await expect(
-      page.getByRole("main").getByText("Fictional Member A", { exact: true }),
-    ).toBeVisible();
-    await signOutFromMenu(page);
-    await expect(
-      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-    ).toBeVisible();
-    await page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
-    await page.getByLabel("Email", { exact: true }).fill("member-b@example.invalid");
-    await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    // The main sign-in link records the protected page it came from, so B returns to Account.
-    await expect(page).toHaveURL(/\/account\/security$/);
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Security", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("main").getByText("Fictional Member B", { exact: true }),
-    ).toBeVisible();
-    release();
-    await expect(page.getByText("Fictional Member A", { exact: true })).toHaveCount(0);
-    await expect(page.getByText(/private-a@example.invalid/)).toHaveCount(0);
-  } finally {
-    release();
-  }
-});
+  },
+);
 
 // VTC-047 account settings sections. Connection responses reuse the reviewed contract examples.
 const contractCases: { id: string; response: unknown }[] = JSON.parse(
@@ -1210,94 +1244,98 @@ const sectionNav = (page: Page, locale: "en" | "ru" = "en") =>
     .getByRole("navigation", { name: locale === "en" ? "Account sections" : "Разделы аккаунта" });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 
-test("account sections have deep links, one history entry each, main focus, titles, breadcrumbs and responsive navigation in EN and RU", async ({
-  page,
-}, info) => {
-  await settingsWorkspace(page);
-  const main = page.getByRole("main");
-  const crumb = page.getByRole("navigation", { name: /^(Breadcrumb|Навигационная цепочка)$/ });
-  await page.goto("/account");
-  await expect(page).toHaveURL(/\/account\/security$/);
-  await language(page, "en");
-  await expect(heading(page)).toHaveText("Security");
-  await expect(crumb.getByRole("listitem")).toHaveText(["Account", "Security"]);
-  await expect(page).toHaveTitle("Security · Yukon Union");
-  const links = sectionNav(page).getByRole("link");
-  await expect(links).toHaveText([
-    "Profile",
-    "Security needs attention",
-    "Connections",
-    "Preferences",
-  ]);
-  await expect(
-    sectionNav(page).getByRole("link", { name: "Security needs attention", exact: true }),
-  ).toHaveAttribute("aria-current", "page");
-  for (const [index, path] of sectionPaths.entries()) {
-    const name = sectionNames.en[index] ?? "";
-    await page.goto(`/account/${path}`);
-    await expect(heading(page)).toHaveText(name);
-    await expect(heading(page)).toHaveCount(1);
-    await expect(page).toHaveTitle(`${name} · Yukon Union`);
-    await expect(links.nth(index)).toHaveAttribute("aria-current", "page");
-    await expect(sectionNav(page).locator('[aria-current="page"]')).toHaveCount(1);
-  }
-  // Fragments of the former single page land in their section without an extra history entry.
-  await page.goto("/account#preferences");
-  await expect(page).toHaveURL(/\/account\/preferences$/);
-  await page.goto("/account?view=1#password");
-  await expect(page).toHaveURL(/\/account\/security\?view=1$/);
-  await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).click();
-  await expect(page).toHaveURL(/\/account\/profile$/);
-  await expect(main).toBeFocused();
-  await page.goBack();
-  await expect(page).toHaveURL(/\/account\/security\?view=1$/);
-  await expect(heading(page)).toHaveText("Security");
-  await page.goForward();
-  await expect(page).toHaveURL(/\/account\/profile$/);
-  await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).focus();
-  await page.keyboard.press("Tab");
-  await expect(
-    sectionNav(page).getByRole("link", { name: "Security needs attention", exact: true }),
-  ).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/account\/security$/);
-  await expect(main).toBeFocused();
-
-  const coarse = await coarsePointer(page);
-  for (const locale of ["en", "ru"] as const) {
-    await language(page, locale);
-    const localized = sectionNav(page, locale).getByRole("link");
-    await expect(localized.locator(".account-section-label")).toHaveText(sectionNames[locale]);
-    for (const link of await localized.all()) {
-      expect((await box(link)).height).toBeGreaterThanOrEqual(coarse ? 40 : 29.5);
-      // Long Russian labels stay whole inside their link.
-      expect(
-        await link.evaluate((element) => {
-          const label = element.querySelector(".account-section-label");
-          return label !== null && label.scrollWidth <= label.clientWidth + 0.5;
-        }),
-      ).toBe(true);
-    }
-    const navBox = await box(sectionNav(page, locale));
-    const content = await box(main.locator(".account-settings-content"));
-    if (phone(page)) {
-      // Phones stack the section links above the content in a two-column grid.
-      expect(navBox.y + navBox.height).toBeLessThanOrEqual(content.y + 0.5);
-      const [first, second, third] = await Promise.all([0, 1, 2].map((n) => box(localized.nth(n))));
-      if (!first || !second || !third) throw new Error("SYNTHETIC_LAYOUT_MISSING");
-      near(first.y, second.y);
-      expect(second.x).toBeGreaterThan(first.x + first.width - 0.5);
-      expect(third.y).toBeGreaterThanOrEqual(first.y + first.height);
-    } else expect(navBox.x + navBox.width).toBeLessThanOrEqual(content.x + 0.5);
+test(
+  "account sections have deep links, one history entry each, main focus, titles, breadcrumbs and responsive navigation in EN and RU",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    await settingsWorkspace(page);
+    const main = page.getByRole("main");
+    const crumb = page.getByRole("navigation", { name: /^(Breadcrumb|Навигационная цепочка)$/ });
+    await page.goto("/account");
+    await expect(page).toHaveURL(/\/account\/security$/);
+    await language(page, "en");
+    await expect(heading(page)).toHaveText("Security");
+    await expect(crumb.getByRole("listitem")).toHaveText(["Account", "Security"]);
+    await expect(page).toHaveTitle("Security · Yukon Union");
+    const links = sectionNav(page).getByRole("link");
+    await expect(links).toHaveText([
+      "Profile",
+      "Security needs attention",
+      "Connections",
+      "Preferences",
+    ]);
+    await expect(
+      sectionNav(page).getByRole("link", { name: "Security needs attention", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
     for (const [index, path] of sectionPaths.entries()) {
-      await localized.nth(index).click();
-      await expect(page).toHaveURL(new RegExp(`/account/${path}$`));
-      await expect(heading(page)).toHaveText(sectionNames[locale][index] ?? "");
-      await capture(page, info, `${locale}-account-${path}`);
+      const name = sectionNames.en[index] ?? "";
+      await page.goto(`/account/${path}`);
+      await expect(heading(page)).toHaveText(name);
+      await expect(heading(page)).toHaveCount(1);
+      await expect(page).toHaveTitle(`${name} · Yukon Union`);
+      await expect(links.nth(index)).toHaveAttribute("aria-current", "page");
+      await expect(sectionNav(page).locator('[aria-current="page"]')).toHaveCount(1);
     }
-  }
-  await localizedSecurity(page);
-});
+    // Fragments of the former single page land in their section without an extra history entry.
+    await page.goto("/account#preferences");
+    await expect(page).toHaveURL(/\/account\/preferences$/);
+    await page.goto("/account?view=1#password");
+    await expect(page).toHaveURL(/\/account\/security\?view=1$/);
+    await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/profile$/);
+    await expect(main).toBeFocused();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/account\/security\?view=1$/);
+    await expect(heading(page)).toHaveText("Security");
+    await page.goForward();
+    await expect(page).toHaveURL(/\/account\/profile$/);
+    await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await expect(
+      sectionNav(page).getByRole("link", { name: "Security needs attention", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/account\/security$/);
+    await expect(main).toBeFocused();
+
+    const coarse = await coarsePointer(page);
+    for (const locale of ["en", "ru"] as const) {
+      await language(page, locale);
+      const localized = sectionNav(page, locale).getByRole("link");
+      await expect(localized.locator(".account-section-label")).toHaveText(sectionNames[locale]);
+      for (const link of await localized.all()) {
+        expect((await box(link)).height).toBeGreaterThanOrEqual(coarse ? 40 : 29.5);
+        // Long Russian labels stay whole inside their link.
+        expect(
+          await link.evaluate((element) => {
+            const label = element.querySelector(".account-section-label");
+            return label !== null && label.scrollWidth <= label.clientWidth + 0.5;
+          }),
+        ).toBe(true);
+      }
+      const navBox = await box(sectionNav(page, locale));
+      const content = await box(main.locator(".account-settings-content"));
+      if (phone(page)) {
+        // Phones stack the section links above the content in a two-column grid.
+        expect(navBox.y + navBox.height).toBeLessThanOrEqual(content.y + 0.5);
+        const [first, second, third] = await Promise.all(
+          [0, 1, 2].map((n) => box(localized.nth(n))),
+        );
+        if (!first || !second || !third) throw new Error("SYNTHETIC_LAYOUT_MISSING");
+        near(first.y, second.y);
+        expect(second.x).toBeGreaterThan(first.x + first.width - 0.5);
+        expect(third.y).toBeGreaterThanOrEqual(first.y + first.height);
+      } else expect(navBox.x + navBox.width).toBeLessThanOrEqual(content.x + 0.5);
+      for (const [index, path] of sectionPaths.entries()) {
+        await localized.nth(index).click();
+        await expect(page).toHaveURL(new RegExp(`/account/${path}$`));
+        await expect(heading(page)).toHaveText(sectionNames[locale][index] ?? "");
+        await capture(page, info, `${locale}-account-${path}`);
+      }
+    }
+    await localizedSecurity(page);
+  },
+);
 async function localizedSecurity(page: Page) {
   await sectionNav(page, "ru")
     .getByRole("link", { name: /^Безопасность/ })
@@ -1315,438 +1353,459 @@ async function localizedSecurity(page: Page) {
   ).toHaveAttribute("aria-current", "page");
 }
 
-test("an anonymous section deep link returns to that section after sign-in; without company.read Connections and the driver profile stay out", async ({
-  page,
-}) => {
-  await mocks(page);
-  let signedIn = false;
-  let capabilityReads = 0;
-  const self = accountFixture();
-  self.data.capabilities = [];
-  await page.route("**/api/v1/me", (route) =>
-    route.fulfill(signedIn ? { json: self, headers: { ETag: '"v1"' } } : error(401)),
-  );
-  await page.route("**/api/v1/me/connection-capabilities", (route) => {
-    capabilityReads++;
-    return route.fulfill(error(403));
-  });
-  await page.route("**/api/v1/auth/login", (route) => {
-    signedIn = true;
-    return route.fulfill({ json: self, headers: { ETag: '"v1"' } });
-  });
-  await page.goto("/account/preferences");
-  await language(page, "en");
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Email", { exact: true }).fill("member@example.invalid");
-  await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/account\/preferences$/);
-  await expect(heading(page)).toHaveText("Preferences");
-  await expect(sectionNav(page).getByRole("link")).toHaveText([
-    "Profile",
-    /^Security/,
-    "Preferences",
-  ]);
-  await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Nickname", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open profile", exact: true })).toHaveCount(0);
-  await page.goto("/account/connections");
-  await expect(heading(page)).toHaveText("Connections");
-  await expect(page.getByText("Connection controls unavailable", { exact: true })).toBeVisible();
-  expect(capabilityReads).toBe(0);
-});
-
-test("until the email is verified, change actions stay focusable but inert with the explanation; verification unlocks them", async ({
-  page,
-}, info) => {
-  const state = await settingsWorkspace(page);
-  await page.goto("/account/security");
-  await language(page, "en");
-  await expect(page.getByText(verifyFirst, { exact: true })).toBeVisible();
-  await expect(page.getByText("Not verified", { exact: true })).toBeVisible();
-  const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
-  const changePassword = page.getByRole("button", { name: "Change password", exact: true });
-  for (const button of [changeEmail, changePassword]) {
-    await expect(button).toHaveAttribute("aria-disabled", "true");
-    await expect(button).toHaveAccessibleDescription(verifyFirst);
-    await expect(button).not.toHaveAttribute("aria-expanded", /.*/);
-    // Playwright treats aria-disabled as not actionable; activate it the way keyboard users do.
-    await button.focus();
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Space");
-  }
-  await changeEmail.focus();
-  await page.keyboard.press("Tab");
-  await expect(changePassword).toBeFocused();
-  expect(state.challenges).toBe(0);
-  await expect(
-    page.getByRole("button", { name: "Send code to current email", exact: true }),
-  ).toHaveCount(0);
-  await expect(page.getByRole("form", { name: "Request email change", exact: true })).toHaveCount(
-    0,
-  );
-  await capture(page, info, "en-security-unverified");
-  await language(page, "ru");
-  for (const name of ["Изменить почту", "Изменить пароль"])
-    await expect(page.getByRole("button", { name, exact: true })).toHaveAttribute(
-      "aria-disabled",
-      "true",
+test(
+  "an anonymous section deep link returns to that section after sign-in; without company.read Connections and the driver profile stay out",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mocks(page);
+    let signedIn = false;
+    let capabilityReads = 0;
+    const self = accountFixture();
+    self.data.capabilities = [];
+    await page.route("**/api/v1/me", (route) =>
+      route.fulfill(signedIn ? { json: self, headers: { ETag: '"v1"' } } : error(401)),
     );
-  await capture(page, info, "ru-security-unverified");
-  await language(page, "en");
-  await page.getByRole("button", { name: "Request verification code", exact: true }).click();
-  const form = page.getByRole("form", { name: "Confirm email verification", exact: true });
-  await expect(form).toBeVisible();
-  expect(state.verificationRequests).toBe(1);
-  await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_CODE");
-  await form.getByRole("button", { name: "Confirm code", exact: true }).click();
-  await expect(
-    page.getByRole("status").filter({ hasText: "Your current email is verified." }),
-  ).toBeVisible();
-  await expect(page.getByText(verifyFirst, { exact: true })).toHaveCount(0);
-  await expect(changeEmail).toBeFocused();
-  for (const button of [changeEmail, changePassword]) {
-    await expect(button).not.toHaveAttribute("aria-disabled", /.*/);
-    await expect(button).toHaveAttribute("aria-expanded", "false");
-  }
-  await expect(page.getByText("Verified", { exact: true })).toBeVisible();
-  await expect(
-    sectionNav(page).getByRole("link", { name: "Security", exact: true }),
-  ).toHaveAttribute("aria-current", "page");
-});
+    await page.route("**/api/v1/me/connection-capabilities", (route) => {
+      capabilityReads++;
+      return route.fulfill(error(403));
+    });
+    await page.route("**/api/v1/auth/login", (route) => {
+      signedIn = true;
+      return route.fulfill({ json: self, headers: { ETag: '"v1"' } });
+    });
+    await page.goto("/account/preferences");
+    await language(page, "en");
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
+    await page.getByLabel("Email", { exact: true }).fill("member@example.invalid");
+    await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/preferences$/);
+    await expect(heading(page)).toHaveText("Preferences");
+    await expect(sectionNav(page).getByRole("link")).toHaveText([
+      "Profile",
+      /^Security/,
+      "Preferences",
+    ]);
+    await sectionNav(page).getByRole("link", { name: "Profile", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Nickname", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open profile", exact: true })).toHaveCount(0);
+    await page.goto("/account/connections");
+    await expect(heading(page)).toHaveText("Connections");
+    await expect(page.getByText("Connection controls unavailable", { exact: true })).toBeVisible();
+    expect(capabilityReads).toBe(0);
+  },
+);
 
-test("verified change disclosures expose their state and keep a requested code across collapse", async ({
-  page,
-}, info) => {
-  const state = await settingsWorkspace(page, { verified: true });
-  await page.goto("/account/security");
-  await language(page, "en");
-  const changePassword = page.getByRole("button", { name: "Change password", exact: true });
-  await expect(changePassword).toHaveAttribute("aria-expanded", "false");
-  await expect(
-    page.getByRole("button", { name: "Send code to current email", exact: true }),
-  ).toHaveCount(0);
-  await changePassword.click();
-  await expect(changePassword).toHaveAttribute("aria-expanded", "true");
-  const panel = page.locator(`#${await changePassword.getAttribute("aria-controls")}`);
-  await panel.getByRole("button", { name: "Send code to current email", exact: true }).click();
-  const form = page.getByRole("form", { name: "Change password", exact: true });
-  await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_CODE");
-  expect(state.challenges).toBe(1);
-  await changePassword.click();
-  await expect(changePassword).toHaveAttribute("aria-expanded", "false");
-  await expect(form).toBeHidden();
-  await changePassword.click();
-  await expect(form.getByLabel("Email code", { exact: true })).toHaveValue("NONFUNCTIONAL_CODE");
-  await page.getByRole("button", { name: "Change email", exact: true }).click();
-  await expect(page.getByRole("form", { name: "Request email change", exact: true })).toBeVisible();
-  await capture(page, info, "en-security-expanded");
-  await language(page, "ru");
-  await expect(page.getByRole("button", { name: "Изменить пароль", exact: true })).toHaveAttribute(
-    "aria-expanded",
-    "true",
-  );
-  await expect(page.getByRole("button", { name: "Изменить почту", exact: true })).toBeVisible();
-});
+test(
+  "until the email is verified, change actions stay focusable but inert with the explanation; verification unlocks them",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page);
+    await page.goto("/account/security");
+    await language(page, "en");
+    await expect(page.getByText(verifyFirst, { exact: true })).toBeVisible();
+    await expect(page.getByText("Not verified", { exact: true })).toBeVisible();
+    const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
+    const changePassword = page.getByRole("button", { name: "Change password", exact: true });
+    for (const button of [changeEmail, changePassword]) {
+      await expect(button).toHaveAttribute("aria-disabled", "true");
+      await expect(button).toHaveAccessibleDescription(verifyFirst);
+      await expect(button).not.toHaveAttribute("aria-expanded", /.*/);
+      // Playwright treats aria-disabled as not actionable; activate it the way keyboard users do.
+      await button.focus();
+      await page.keyboard.press("Enter");
+      await page.keyboard.press("Space");
+    }
+    await changeEmail.focus();
+    await page.keyboard.press("Tab");
+    await expect(changePassword).toBeFocused();
+    expect(state.challenges).toBe(0);
+    await expect(
+      page.getByRole("button", { name: "Send code to current email", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("form", { name: "Request email change", exact: true })).toHaveCount(
+      0,
+    );
+    await capture(page, info, "en-security-unverified");
+    await language(page, "ru");
+    for (const name of ["Изменить почту", "Изменить пароль"])
+      await expect(page.getByRole("button", { name, exact: true })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    await capture(page, info, "ru-security-unverified");
+    await language(page, "en");
+    await page.getByRole("button", { name: "Request verification code", exact: true }).click();
+    const form = page.getByRole("form", { name: "Confirm email verification", exact: true });
+    await expect(form).toBeVisible();
+    expect(state.verificationRequests).toBe(1);
+    await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_CODE");
+    await form.getByRole("button", { name: "Confirm code", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Your current email is verified." }),
+    ).toBeVisible();
+    await expect(page.getByText(verifyFirst, { exact: true })).toHaveCount(0);
+    await expect(changeEmail).toBeFocused();
+    for (const button of [changeEmail, changePassword]) {
+      await expect(button).not.toHaveAttribute("aria-disabled", /.*/);
+      await expect(button).toHaveAttribute("aria-expanded", "false");
+    }
+    await expect(page.getByText("Verified", { exact: true })).toBeVisible();
+    await expect(
+      sectionNav(page).getByRole("link", { name: "Security", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
+  },
+);
 
-test("sign out lives in Security and keeps main focused through uncertain and confirmed results", async ({
-  page,
-}) => {
-  const state = await settingsWorkspace(page, { verified: true });
-  state.logout = 503;
-  await page.goto("/account/security");
-  await language(page, "en");
-  const main = page.getByRole("main");
-  await main.getByRole("button", { name: "Sign out", exact: true }).click();
-  await expect(main.getByRole("status")).toContainText("Sign-out could not be confirmed");
-  await expect(main).toBeFocused();
-  state.logout = 200;
-  await page.getByRole("button", { name: "Check session before returning", exact: true }).click();
-  await expect(heading(page)).toHaveText("Security");
-  await main.getByRole("button", { name: "Sign out", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
-  ).toBeVisible();
-  await expect(main).toBeFocused();
-});
+test(
+  "verified change disclosures expose their state and keep a requested code across collapse",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page, { verified: true });
+    await page.goto("/account/security");
+    await language(page, "en");
+    const changePassword = page.getByRole("button", { name: "Change password", exact: true });
+    await expect(changePassword).toHaveAttribute("aria-expanded", "false");
+    await expect(
+      page.getByRole("button", { name: "Send code to current email", exact: true }),
+    ).toHaveCount(0);
+    await changePassword.click();
+    await expect(changePassword).toHaveAttribute("aria-expanded", "true");
+    const panel = page.locator(`#${await changePassword.getAttribute("aria-controls")}`);
+    await panel.getByRole("button", { name: "Send code to current email", exact: true }).click();
+    const form = page.getByRole("form", { name: "Change password", exact: true });
+    await form.getByLabel("Email code", { exact: true }).fill("NONFUNCTIONAL_CODE");
+    expect(state.challenges).toBe(1);
+    await changePassword.click();
+    await expect(changePassword).toHaveAttribute("aria-expanded", "false");
+    await expect(form).toBeHidden();
+    await changePassword.click();
+    await expect(form.getByLabel("Email code", { exact: true })).toHaveValue("NONFUNCTIONAL_CODE");
+    await page.getByRole("button", { name: "Change email", exact: true }).click();
+    await expect(
+      page.getByRole("form", { name: "Request email change", exact: true }),
+    ).toBeVisible();
+    await capture(page, info, "en-security-expanded");
+    await language(page, "ru");
+    await expect(
+      page.getByRole("button", { name: "Изменить пароль", exact: true }),
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("button", { name: "Изменить почту", exact: true })).toBeVisible();
+  },
+);
 
-test("preferences save language at once and timezone explicitly, with row status, guarded duplicates and conflict review", async ({
-  page,
-}, info) => {
-  const state = await settingsWorkspace(page);
-  await page.goto("/account/preferences");
-  await language(page, "en");
-  const languageGroup = page.getByRole("group", {
-    name: /^(Interface language|Язык интерфейса)$/,
-  });
-  const english = languageGroup.getByRole("button", { name: "English", exact: true });
-  const russian = languageGroup.getByRole("button", { name: "Русский", exact: true });
-  const timezone = page.getByLabel("Display timezone", { exact: true });
-  const save = page.getByRole("button", { name: "Save", exact: true });
-  const statuses = page.locator(".settings-row").getByRole("status");
-  await expect(statuses).toHaveCount(2);
-  await expect(statuses.nth(0)).toHaveText("");
-  await expect(statuses.nth(1)).toHaveText("");
-  await expect(english).toHaveAttribute("aria-pressed", "true");
-  await expect(timezone).toHaveAccessibleDescription(/IANA timezone/);
-  await russian.click();
-  await expect(page.locator("html")).toHaveAttribute("lang", "ru");
-  await expect(statuses.nth(0)).toHaveText("Язык сохранён");
-  await expect(statuses.nth(1)).toHaveText("");
-  await expect(russian).toBeFocused();
-  await expect(russian).toHaveAttribute("aria-pressed", "true");
-  expect(state.preferences).toEqual([
-    { body: { locale: "ru", displayTimezone: "UTC" }, ifMatch: '"v1"' },
-  ]);
-  await language(page, "en");
-  // The session-only menu switch changes the interface, not the saved choice.
-  await expect(russian).toHaveAttribute("aria-pressed", "true");
-  await timezone.fill("Mars/Base");
-  await save.click();
-  await expect(timezone).toHaveAttribute("aria-invalid", "true");
-  await expect(page.getByText("Check Display timezone.", { exact: true })).toBeVisible();
-  await expect(timezone).toBeFocused();
-  expect(state.preferences).toHaveLength(1);
-  await timezone.fill("Europe/Warsaw");
-  await expect(timezone).toHaveAttribute("aria-invalid", "false");
-  await save.click();
-  await expect(statuses.nth(1)).toHaveText("Timezone saved");
-  await expect(statuses.nth(0)).toHaveText("");
-  expect(state.preferences[1]).toEqual({
-    body: { locale: "ru", displayTimezone: "Europe/Warsaw" },
-    ifMatch: '"v2"',
-  });
-  await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  await capture(page, info, "en-preferences-saved");
-  await timezone.fill("Europe/Warsa");
-  await expect(statuses.nth(1)).toHaveText("");
-  // A held save ignores another press; buttons stay focusable rather than disabled.
-  let release = () => {};
-  state.hold = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  try {
-    await timezone.fill("Asia/Tokyo");
-    await save.click();
-    await expect(statuses.nth(1)).toHaveText("Please wait…");
-    await expect(save).toHaveAttribute("aria-disabled", "true");
-    // Playwright will not click an aria-disabled control; keyboard activation still reaches it.
-    await save.press("Enter");
-    await english.click();
-    // An unguarded press would replace or clear this row's pending status.
-    await expect(statuses.nth(1)).toHaveText("Please wait…");
+test(
+  "sign out lives in Security and keeps main focused through uncertain and confirmed results",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await settingsWorkspace(page, { verified: true });
+    state.logout = 503;
+    await page.goto("/account/security");
+    await language(page, "en");
+    const main = page.getByRole("main");
+    await main.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(main.getByRole("status")).toContainText("Sign-out could not be confirmed");
+    await expect(main).toBeFocused();
+    state.logout = 200;
+    await page.getByRole("button", { name: "Check session before returning", exact: true }).click();
+    await expect(heading(page)).toHaveText("Security");
+    await main.getByRole("button", { name: "Sign out", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Sign in to open your account", exact: true }),
+    ).toBeVisible();
+    await expect(main).toBeFocused();
+  },
+);
+
+test(
+  "preferences save language at once and timezone explicitly, with row status, guarded duplicates and conflict review",
+  browserCase(["@functional", "@smoke-account"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page);
+    await page.goto("/account/preferences");
+    await language(page, "en");
+    const languageGroup = page.getByRole("group", {
+      name: /^(Interface language|Язык интерфейса)$/,
+    });
+    const english = languageGroup.getByRole("button", { name: "English", exact: true });
+    const russian = languageGroup.getByRole("button", { name: "Русский", exact: true });
+    const timezone = page.getByLabel("Display timezone", { exact: true });
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    const statuses = page.locator(".settings-row").getByRole("status");
+    await expect(statuses).toHaveCount(2);
     await expect(statuses.nth(0)).toHaveText("");
-    await expect(english).toHaveAttribute("aria-pressed", "false");
-  } finally {
-    release();
-    state.hold = null;
-  }
-  await expect(statuses.nth(1)).toHaveText("Timezone saved");
-  expect(state.preferences).toHaveLength(3);
-  // A rate-limit wait keeps Save focusable but aria-disabled until the wait ends.
-  state.preferenceStatus = 429;
-  await timezone.fill("Asia/Seoul");
-  await save.click();
-  await expect(page.getByText(/^Wait \d+ s before retrying\.$/)).toBeVisible();
-  await expect(save).toHaveAttribute("aria-disabled", "true");
-  await save.press("Enter");
-  await expect(save).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
-  expect(state.preferences).toHaveLength(4);
-  state.preferenceStatus = 409;
-  await timezone.fill("America/Denver");
-  await save.click();
-  await expect(page.getByRole("alert")).toContainText("The current state changed");
-  await page.getByRole("button", { name: "Refresh preferences for review", exact: true }).click();
-  await expect(page.getByText(/Preferences changed elsewhere/)).toBeVisible();
-  await expect(timezone).toHaveValue("Europe/Warsaw");
-  await expect(english).toHaveAttribute("aria-pressed", "true");
-  await capture(page, info, "en-preferences-conflict");
-  await save.click();
-  await expect(statuses.nth(1)).toHaveText("Timezone saved");
-  await expect(page.getByText(/Preferences changed elsewhere/)).toHaveCount(0);
-  expect(state.preferences.at(-1)).toEqual({
-    body: { locale: "en", displayTimezone: "Europe/Warsaw" },
-    ifMatch: `"v${state.version - 1}"`,
-  });
-  await language(page, "ru");
-  await capture(page, info, "ru-preferences-saved");
-});
+    await expect(statuses.nth(1)).toHaveText("");
+    await expect(english).toHaveAttribute("aria-pressed", "true");
+    await expect(timezone).toHaveAccessibleDescription(/IANA timezone/);
+    await russian.click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+    await expect(statuses.nth(0)).toHaveText("Язык сохранён");
+    await expect(statuses.nth(1)).toHaveText("");
+    await expect(russian).toBeFocused();
+    await expect(russian).toHaveAttribute("aria-pressed", "true");
+    expect(state.preferences).toEqual([
+      { body: { locale: "ru", displayTimezone: "UTC" }, ifMatch: '"v1"' },
+    ]);
+    await language(page, "en");
+    // The session-only menu switch changes the interface, not the saved choice.
+    await expect(russian).toHaveAttribute("aria-pressed", "true");
+    await timezone.fill("Mars/Base");
+    await save.click();
+    await expect(timezone).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("Check Display timezone.", { exact: true })).toBeVisible();
+    await expect(timezone).toBeFocused();
+    expect(state.preferences).toHaveLength(1);
+    await timezone.fill("Europe/Warsaw");
+    await expect(timezone).toHaveAttribute("aria-invalid", "false");
+    await save.click();
+    await expect(statuses.nth(1)).toHaveText("Timezone saved");
+    await expect(statuses.nth(0)).toHaveText("");
+    expect(state.preferences[1]).toEqual({
+      body: { locale: "ru", displayTimezone: "Europe/Warsaw" },
+      ifMatch: '"v2"',
+    });
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await capture(page, info, "en-preferences-saved");
+    await timezone.fill("Europe/Warsa");
+    await expect(statuses.nth(1)).toHaveText("");
+    // A held save ignores another press; buttons stay focusable rather than disabled.
+    let release = () => {};
+    state.hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await timezone.fill("Asia/Tokyo");
+      await save.click();
+      await expect(statuses.nth(1)).toHaveText("Please wait…");
+      await expect(save).toHaveAttribute("aria-disabled", "true");
+      // Playwright will not click an aria-disabled control; keyboard activation still reaches it.
+      await save.press("Enter");
+      await english.click();
+      // An unguarded press would replace or clear this row's pending status.
+      await expect(statuses.nth(1)).toHaveText("Please wait…");
+      await expect(statuses.nth(0)).toHaveText("");
+      await expect(english).toHaveAttribute("aria-pressed", "false");
+    } finally {
+      release();
+      state.hold = null;
+    }
+    await expect(statuses.nth(1)).toHaveText("Timezone saved");
+    expect(state.preferences).toHaveLength(3);
+    // A rate-limit wait keeps Save focusable but aria-disabled until the wait ends.
+    state.preferenceStatus = 429;
+    await timezone.fill("Asia/Seoul");
+    await save.click();
+    await expect(page.getByText(/^Wait \d+ s before retrying\.$/)).toBeVisible();
+    await expect(save).toHaveAttribute("aria-disabled", "true");
+    await save.press("Enter");
+    await expect(save).not.toHaveAttribute("aria-disabled", /.*/, { timeout: 4000 });
+    expect(state.preferences).toHaveLength(4);
+    state.preferenceStatus = 409;
+    await timezone.fill("America/Denver");
+    await save.click();
+    await expect(page.getByRole("alert")).toContainText("The current state changed");
+    await page.getByRole("button", { name: "Refresh preferences for review", exact: true }).click();
+    await expect(page.getByText(/Preferences changed elsewhere/)).toBeVisible();
+    await expect(timezone).toHaveValue("Europe/Warsaw");
+    await expect(english).toHaveAttribute("aria-pressed", "true");
+    await capture(page, info, "en-preferences-conflict");
+    await save.click();
+    await expect(statuses.nth(1)).toHaveText("Timezone saved");
+    await expect(page.getByText(/Preferences changed elsewhere/)).toHaveCount(0);
+    expect(state.preferences.at(-1)).toEqual({
+      body: { locale: "en", displayTimezone: "Europe/Warsaw" },
+      ifMatch: `"v${state.version - 1}"`,
+    });
+    await language(page, "ru");
+    await capture(page, info, "ru-preferences-saved");
+  },
+);
 
-test("connections section shows Steam, TruckersMP and telemetry credentials as rows, partial runtimes and formatted dates", async ({
-  page,
-}, info) => {
-  const state = await settingsWorkspace(page);
-  await page.goto("/account/connections");
-  await language(page, "en");
-  await expect(heading(page)).toHaveText("Connections");
-  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-  const identity = page
-    .getByRole("heading", { level: 2, name: "Steam and TruckersMP", exact: true })
-    .locator("..");
-  const tokens = page
-    .getByRole("heading", { level: 2, name: "Personal telemetry credentials", exact: true })
-    .locator("..");
-  await expect(identity.getByRole("heading", { level: 3, name: "Steam" })).toBeVisible();
-  await expect(identity.getByText("Not linked", { exact: true }).first()).toBeVisible();
-  await expect(
-    identity.getByRole("button", { name: "Verify Steam ownership", exact: true }),
-  ).toBeVisible();
-  await expect(identity.getByRole("heading", { level: 3, name: "TruckersMP" })).toBeVisible();
-  await expect(identity.getByText(/Last successful check: Not set/)).toBeVisible();
-  await expect(
-    tokens.getByRole("heading", { level: 3, name: "synthetic-example", exact: true }),
-  ).toBeVisible();
-  await expect(
-    tokens.getByText(/Created: 17 Oct 2026, 12:00 · Last used: Never used/),
-  ).toBeVisible();
-  await expect(tokens.getByText("2026-10-17T12:00:00.000Z")).toHaveCount(0);
-  await expect(
-    tokens.getByRole("button", { name: "Revoke credential · synthetic-example", exact: true }),
-  ).toBeVisible();
-  expect(state.capabilityReads).toBe(1);
-  await capture(page, info, "en-connections");
-  await language(page, "ru");
-  await expect(heading(page)).toHaveText("Подключения");
-  await capture(page, info, "ru-connections");
-  await page.unrouteAll({ behavior: "ignoreErrors" });
-  await settingsWorkspace(page, { telemetry: false });
-  await page.reload();
-  await language(page, "en");
-  await expect(
-    page.getByText("Some connection services are disabled or unavailable.", { exact: false }),
-  ).toBeVisible();
-  await expect(
-    page
+test(
+  "connections section shows Steam, TruckersMP and telemetry credentials as rows, partial runtimes and formatted dates",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    const state = await settingsWorkspace(page);
+    await page.goto("/account/connections");
+    await language(page, "en");
+    await expect(heading(page)).toHaveText("Connections");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+    const identity = page
+      .getByRole("heading", { level: 2, name: "Steam and TruckersMP", exact: true })
+      .locator("..");
+    const tokens = page
       .getByRole("heading", { level: 2, name: "Personal telemetry credentials", exact: true })
-      .locator("..")
-      .getByText("Disabled in this runtime", { exact: true }),
-  ).toBeVisible();
-});
+      .locator("..");
+    await expect(identity.getByRole("heading", { level: 3, name: "Steam" })).toBeVisible();
+    await expect(identity.getByText("Not linked", { exact: true }).first()).toBeVisible();
+    await expect(
+      identity.getByRole("button", { name: "Verify Steam ownership", exact: true }),
+    ).toBeVisible();
+    await expect(identity.getByRole("heading", { level: 3, name: "TruckersMP" })).toBeVisible();
+    await expect(identity.getByText(/Last successful check: Not set/)).toBeVisible();
+    await expect(
+      tokens.getByRole("heading", { level: 3, name: "synthetic-example", exact: true }),
+    ).toBeVisible();
+    await expect(
+      tokens.getByText(/Created: 17 Oct 2026, 12:00 · Last used: Never used/),
+    ).toBeVisible();
+    await expect(tokens.getByText("2026-10-17T12:00:00.000Z")).toHaveCount(0);
+    await expect(
+      tokens.getByRole("button", { name: "Revoke credential · synthetic-example", exact: true }),
+    ).toBeVisible();
+    expect(state.capabilityReads).toBe(1);
+    await capture(page, info, "en-connections");
+    await language(page, "ru");
+    await expect(heading(page)).toHaveText("Подключения");
+    await capture(page, info, "ru-connections");
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await settingsWorkspace(page, { telemetry: false });
+    await page.reload();
+    await language(page, "en");
+    await expect(
+      page.getByText("Some connection services are disabled or unavailable.", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("heading", { level: 2, name: "Personal telemetry credentials", exact: true })
+        .locator("..")
+        .getByText("Disabled in this runtime", { exact: true }),
+    ).toBeVisible();
+  },
+);
 
-test("profile rows show nickname, roles and the driver profile link", async ({ page }, info) => {
-  await settingsWorkspace(page);
-  await page.goto("/account/profile");
-  await language(page, "en");
-  const nickname = page
-    .getByRole("heading", { level: 2, name: "Nickname", exact: true })
-    .locator("../..");
-  await expect(nickname.getByText("Fictional Yukon Member", { exact: true })).toBeVisible();
-  await expect(nickname.getByText("Your name in the company.", { exact: true })).toBeVisible();
-  const roles = page
-    .getByRole("heading", { level: 2, name: "Roles", exact: true })
-    .locator("../..");
-  await expect(roles.getByText("Trainee", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open profile", exact: true })).toHaveAttribute(
-    "href",
-    `/account/drivers/${fixtureId}`,
-  );
-  await capture(page, info, "en-profile");
-});
-
-test("settings row controls follow the compact and coarse-pointer target sizes", async ({
-  page,
-}) => {
-  await settingsWorkspace(page, { verified: true });
-  const coarse = await coarsePointer(page);
-  const check = async (locator: Locator, fine: number) => {
-    const { height } = await box(locator);
-    if (coarse) expect(height).toBeGreaterThanOrEqual(40);
-    else near(height, fine);
-  };
-  await page.goto("/account/security");
-  await language(page, "en");
-  for (const name of ["Change email", "Change password", "Sign out"])
-    await check(page.getByRole("main").getByRole("button", { name, exact: true }), 24);
-  await page.goto("/account/preferences");
-  await language(page, "en");
-  for (const name of ["Русский", "English"])
-    await check(
-      page.getByRole("group", { name: "Interface language" }).getByRole("button", { name }),
-      24,
+test(
+  "profile rows show nickname, roles and the driver profile link",
+  browserCase(["@functional"]),
+  async ({ page }, info) => {
+    await settingsWorkspace(page);
+    await page.goto("/account/profile");
+    await language(page, "en");
+    const nickname = page
+      .getByRole("heading", { level: 2, name: "Nickname", exact: true })
+      .locator("../..");
+    await expect(nickname.getByText("Fictional Yukon Member", { exact: true })).toBeVisible();
+    await expect(nickname.getByText("Your name in the company.", { exact: true })).toBeVisible();
+    const roles = page
+      .getByRole("heading", { level: 2, name: "Roles", exact: true })
+      .locator("../..");
+    await expect(roles.getByText("Trainee", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open profile", exact: true })).toHaveAttribute(
+      "href",
+      `/account/drivers/${fixtureId}`,
     );
-  await check(page.getByLabel("Display timezone", { exact: true }), 32);
-  await check(page.getByRole("button", { name: "Save", exact: true }), 24);
-  await page.goto("/account/profile");
-  await check(page.getByRole("link", { name: "Open profile", exact: true }), 24);
-});
+    await capture(page, info, "en-profile");
+  },
+);
+
+test(
+  "settings row controls follow the compact and coarse-pointer target sizes",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await settingsWorkspace(page, { verified: true });
+    const coarse = await coarsePointer(page);
+    const check = async (locator: Locator, fine: number) => {
+      const { height } = await box(locator);
+      if (coarse) expect(height).toBeGreaterThanOrEqual(40);
+      else near(height, fine);
+    };
+    await page.goto("/account/security");
+    await language(page, "en");
+    for (const name of ["Change email", "Change password", "Sign out"])
+      await check(page.getByRole("main").getByRole("button", { name, exact: true }), 24);
+    await page.goto("/account/preferences");
+    await language(page, "en");
+    for (const name of ["Русский", "English"])
+      await check(
+        page.getByRole("group", { name: "Interface language" }).getByRole("button", { name }),
+        24,
+      );
+    await check(page.getByLabel("Display timezone", { exact: true }), 32);
+    await check(page.getByRole("button", { name: "Save", exact: true }), 24);
+    await page.goto("/account/profile");
+    await check(page.getByRole("link", { name: "Open profile", exact: true }), 24);
+  },
+);
 
 for (const start of [
   "a read failure",
   "an expiry found on refresh",
   "a held read after focus moved",
 ] as const)
-  test(`a forced-open email panel stays open and keeps focus sensible after ${start} resolves to no pending request`, async ({
-    page,
-  }) => {
-    await settingsWorkspace(page, { verified: true });
-    const failed = start !== "an expiry found on refresh";
-    let read = 0;
-    let release = () => {};
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await page.route("**/api/v1/me/email-change", async (route) => {
-      read++;
-      if (read > 1) {
-        if (start === "a held read after focus moved") await held;
-        return route.fulfill({ json: { data: { pending: null }, meta } });
-      }
-      if (failed) return route.fulfill(error(503));
-      return route.fulfill({
-        json: {
-          data: {
-            pending: {
-              id: fixtureId,
-              stage: "current_email",
-              proposedEmail: "replacement@example.invalid",
-              expiresAt: challenge.data.expiresAt,
-            },
-          },
-          meta,
-        },
+  test(
+    `a forced-open email panel stays open and keeps focus sensible after ${start} resolves to no pending request`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await settingsWorkspace(page, { verified: true });
+      const failed = start !== "an expiry found on refresh";
+      let read = 0;
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
       });
-    });
-    await page.goto("/account/security");
-    await language(page, "en");
-    const panel = page.locator("#security-email-panel");
-    const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
-    const badge = page.getByText("Replacement pending", { exact: true });
-    const refresh = failed
-      ? page.getByRole("button", { name: "Check again", exact: true })
-      : page.getByRole("button", { name: "Refresh pending request", exact: true });
-    await expect(refresh).toBeVisible();
-    await expect(
-      page.getByRole("form", { name: "Request email change", exact: true }),
-    ).toBeVisible();
-    // An unknown pending state claims no replacement; a known one replaces the toggle.
-    await expect(changeEmail).toHaveCount(0);
-    await expect(badge).toHaveCount(failed ? 0 : 1);
-    const changePassword = page.getByRole("button", { name: "Change password", exact: true });
-    try {
-      await refresh.click();
-      if (start === "a held read after focus moved") {
-        // The user moves on while the read is in flight; the vanished button must not pull focus back.
-        await expect.poll(() => read).toBe(2);
-        await changePassword.focus();
+      await page.route("**/api/v1/me/email-change", async (route) => {
+        read++;
+        if (read > 1) {
+          if (start === "a held read after focus moved") await held;
+          return route.fulfill({ json: { data: { pending: null }, meta } });
+        }
+        if (failed) return route.fulfill(error(503));
+        return route.fulfill({
+          json: {
+            data: {
+              pending: {
+                id: fixtureId,
+                stage: "current_email",
+                proposedEmail: "replacement@example.invalid",
+                expiresAt: challenge.data.expiresAt,
+              },
+            },
+            meta,
+          },
+        });
+      });
+      await page.goto("/account/security");
+      await language(page, "en");
+      const panel = page.locator("#security-email-panel");
+      const changeEmail = page.getByRole("button", { name: "Change email", exact: true });
+      const badge = page.getByText("Replacement pending", { exact: true });
+      const refresh = failed
+        ? page.getByRole("button", { name: "Check again", exact: true })
+        : page.getByRole("button", { name: "Refresh pending request", exact: true });
+      await expect(refresh).toBeVisible();
+      await expect(
+        page.getByRole("form", { name: "Request email change", exact: true }),
+      ).toBeVisible();
+      // An unknown pending state claims no replacement; a known one replaces the toggle.
+      await expect(changeEmail).toHaveCount(0);
+      await expect(badge).toHaveCount(failed ? 0 : 1);
+      const changePassword = page.getByRole("button", { name: "Change password", exact: true });
+      try {
+        await refresh.click();
+        if (start === "a held read after focus moved") {
+          // The user moves on while the read is in flight; the vanished button must not pull focus back.
+          await expect.poll(() => read).toBe(2);
+          await changePassword.focus();
+        }
+      } finally {
+        release();
       }
-    } finally {
-      release();
-    }
-    await expect(
-      panel.getByText("No usable email replacement is pending.", { exact: true }),
-    ).toBeVisible();
-    await expect(panel).toBeVisible();
-    await expect(badge).toHaveCount(0);
-    await expect(changeEmail).toHaveAttribute("aria-expanded", "true");
-    if (start === "a held read after focus moved") {
-      await expect(changePassword).toBeFocused();
-      await expect(panel.locator(":focus")).toHaveCount(0);
-    } else await expect(panel.locator(":focus")).toHaveCount(1);
-    await changeEmail.click();
-    await expect(changeEmail).toHaveAttribute("aria-expanded", "false");
-    await expect(panel).toBeHidden();
-    expect(read).toBe(2);
-  });
+      await expect(
+        panel.getByText("No usable email replacement is pending.", { exact: true }),
+      ).toBeVisible();
+      await expect(panel).toBeVisible();
+      await expect(badge).toHaveCount(0);
+      await expect(changeEmail).toHaveAttribute("aria-expanded", "true");
+      if (start === "a held read after focus moved") {
+        await expect(changePassword).toBeFocused();
+        await expect(panel.locator(":focus")).toHaveCount(0);
+      } else await expect(panel.locator(":focus")).toHaveCount(1);
+      await changeEmail.click();
+      await expect(changeEmail).toHaveAttribute("aria-expanded", "false");
+      await expect(panel).toBeHidden();
+      expect(read).toBe(2);
+    },
+  );

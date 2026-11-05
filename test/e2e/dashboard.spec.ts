@@ -8,7 +8,7 @@ import {
   makeFilteredAnalyticsFixture,
   mockDashboardRoutes,
 } from "./support/dashboard-ui.ts";
-import { expect, test } from "./support/fixtures.ts";
+import { browserCase, expect, test } from "./support/fixtures.ts";
 import { switchLanguage } from "./support/locale.ts";
 
 const kpis = (page: Page) =>
@@ -97,907 +97,1019 @@ async function activate(page: Page, target: Locator, touch: boolean) {
 }
 
 test.describe("Company Dashboard E2E", () => {
-  test("loads the compact overview with KPIs, distance chart and existing-data widgets", async ({
-    page,
-  }, info) => {
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
+  test(
+    "loads the compact overview with KPIs, distance chart and existing-data widgets",
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
 
-    await expect(
-      page.getByRole("heading", { name: "Company Overview", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
-    await expect(
-      page.getByText("Accepted trips only; periods use the company reporting timezone", {
-        exact: true,
-      }),
-    ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+      await expect(
+        page.getByText("Accepted trips only; periods use the company reporting timezone", {
+          exact: true,
+        }),
+      ).toBeVisible();
 
-    const metrics = kpis(page);
-    await expect(metrics.getByRole("term")).toHaveText([
-      "Actual distance",
-      "Accepted trips",
-      "Active drivers",
-    ]);
-    await expect(metrics.getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      const metrics = kpis(page);
+      await expect(metrics.getByRole("term")).toHaveText([
+        "Actual distance",
+        "Accepted trips",
+        "Active drivers",
+      ]);
+      await expect(metrics.getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
 
-    await expect(
-      chartCard(page).getByRole("heading", { name: "Distance Dynamics", exact: true }),
-    ).toBeVisible();
-    await expect(chartCard(page).getByText("Reporting timezone: Europe/Moscow")).toBeVisible();
+      await expect(
+        chartCard(page).getByRole("heading", { name: "Distance Dynamics", exact: true }),
+      ).toBeVisible();
+      await expect(chartCard(page).getByText("Reporting timezone: Europe/Moscow")).toBeVisible();
 
-    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
-    await expect(leaderboardCard(page).getByRole("link", { name: "BetaHauler" })).toBeVisible();
-    await expect(qualificationCard(page).getByRole("link", { name: "All my trips" })).toBeVisible();
-    await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
-    await expect(
-      eventCard(page).getByRole("heading", { name: "Autumn Yukon Convoy 2026", exact: true }),
-    ).toBeVisible();
-    await expect(eventCard(page)).toContainText("(UTC)");
+      await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+      await expect(leaderboardCard(page).getByRole("link", { name: "BetaHauler" })).toBeVisible();
+      await expect(
+        qualificationCard(page).getByRole("link", { name: "All my trips" }),
+      ).toBeVisible();
+      await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
+      await expect(
+        eventCard(page).getByRole("heading", { name: "Autumn Yukon Convoy 2026", exact: true }),
+      ).toBeVisible();
+      await expect(eventCard(page)).toContainText("(UTC)");
 
-    // The convoy quick response and recent company trips come from existing reads (VTC-055).
-    await expect(responseGroup(page).getByRole("button")).toHaveText(["Going", "Can't go"]);
-    await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
-    await expect(recentTripsCard(page).getByRole("listitem")).toHaveCount(5);
-    await expect(
-      recentTripsCard(page).getByRole("link", { name: "All company trips", exact: true }),
-    ).toHaveAttribute("href", "/account/trips?scope=company");
-    await expect(page.getByText(/Достаточно суров|Yukon\?/)).toHaveCount(0);
+      // The convoy quick response and recent company trips come from existing reads (VTC-055).
+      await expect(responseGroup(page).getByRole("button")).toHaveText(["Going", "Can't go"]);
+      await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
+      await expect(recentTripsCard(page).getByRole("listitem")).toHaveCount(5);
+      await expect(
+        recentTripsCard(page).getByRole("link", { name: "All company trips", exact: true }),
+      ).toHaveAttribute("href", "/account/trips?scope=company");
+      await expect(page.getByText(/Достаточно суров|Yukon\?/)).toHaveCount(0);
 
-    await loaded(page);
-    await capture(page, info, "dashboard-overview-en", true);
-    await switchLanguage(page, "ru");
-    await expect(page.getByRole("heading", { name: "Обзор компании", exact: true })).toBeVisible();
-    await expect(
-      page.getByText("Только принятые рейсы; периоды — в отчётном часовом поясе компании", {
-        exact: true,
-      }),
-    ).toBeVisible();
-    await loaded(page);
-    await capture(page, info, "dashboard-overview-ru", true);
-  });
-
-  test("filters by game and period with matching totals and requests", async ({ page }) => {
-    const now = new Date("2026-10-15T12:00:00.000Z");
-    await page.clock.setFixedTime(now);
-    const state = await mockDashboardRoutes(page, { filterAware: true });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-
-    const group = gameGroup(page);
-    const ets2 = group.getByRole("button", { name: "ETS2", exact: true });
-    await ets2.click();
-    await expect(ets2).toHaveAttribute("aria-pressed", "true");
-    await expect(group.getByRole("button", { name: "All games", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-    await expect(group.getByRole("button", { name: "ATS", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-    await periodSelect(page).selectOption("lastMonth");
-    await expect(periodSelect(page)).toHaveValue("lastMonth");
-
-    const expected = computePeriodDates("lastMonth", now, "Europe/Moscow");
-    expect(expected).toEqual({ fromDate: "2026-09-01", toDateExclusive: "2026-10-01" });
-    for (const path of ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"]) {
-      await expect
-        .poll(() => lastRequest(state, path)?.searchParams.get("fromDate"))
-        .toBe(expected.fromDate);
-      const url = lastRequest(state, path);
-      expect(url?.searchParams.get("game")).toBe("ets2");
-      expect(url?.searchParams.get("toDateExclusive")).toBe(expected.toDateExclusive);
-    }
-
-    // The fixture total is the exact sum of its buckets, and the page shows exactly that total.
-    const fixture = makeFilteredAnalyticsFixture(
-      new URLSearchParams({ game: "ets2", granularity: "day" }),
-    ).data;
-    const bucketSum = fixture.buckets.reduce(
-      (sum, bucket) => sum + BigInt(bucket.actualDistanceM),
-      0n,
-    );
-    expect(bucketSum).toBe(BigInt(fixture.actualDistanceM));
-    await expect(kpis(page).getByRole("definition")).toHaveText([
-      formatQuantity(fixture.actualDistanceM, "km", "en"),
-      String(fixture.acceptedTrips),
-      "2",
-    ]);
-
-    const chart = chartCard(page);
-    await chart.getByRole("button", { name: "Table", exact: true }).click();
-    const rows = chart.locator("tbody tr");
-    await expect(rows).toHaveCount(fixture.buckets.length);
-    for (const [index, bucket] of fixture.buckets.entries()) {
-      await expect(rows.nth(index).getByRole("rowheader")).toContainText(bucket.date);
-      await expect(rows.nth(index)).toContainText(
-        formatQuantity(bucket.actualDistanceM, "km", "en"),
-      );
-    }
-  });
-
-  test("anchors periods to the reporting timezone across a month boundary", async ({ page }) => {
-    // 01:30 on 1 November in Moscow while the UTC clock still shows 31 October.
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, { filterAware: true });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-
-    const statsIndex = state.requests.findIndex((url) => url.pathname === statsPath);
-    const firstPeriodIndex = state.requests.findIndex((url) =>
-      url.pathname.startsWith("/api/v1/analytics/"),
-    );
-    expect(statsIndex).toBeGreaterThanOrEqual(0);
-    expect(firstPeriodIndex).toBeGreaterThan(statsIndex);
-    const initial = periodRequests(state);
-    expect(initial).toHaveLength(2);
-    for (const url of initial) {
-      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-    }
-
-    for (const [period, fromDate, toDateExclusive] of [
-      ["lastMonth", "2026-10-01", "2026-11-01"],
-      ["last7Days", "2026-10-26", "2026-11-02"],
-      ["last30Days", "2026-10-03", "2026-11-02"],
-    ] as const) {
-      await periodSelect(page).selectOption(period);
-      for (const path of periodPaths)
-        await expect
-          .poll(() => periodRequests(state, path, fromDate, toDateExclusive).length)
-          .toBe(1);
       await loaded(page);
-    }
-    expect(requestsTo(state, statsPath)).toHaveLength(1);
-    // One request per endpoint for the initial period and for each change.
-    for (const path of periodPaths) expect(periodRequests(state, path)).toHaveLength(4);
-  });
+      await capture(page, info, "dashboard-overview-en", true);
+      await switchLanguage(page, "ru");
+      await expect(
+        page.getByRole("heading", { name: "Обзор компании", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByText("Только принятые рейсы; периоды — в отчётном часовом поясе компании", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await loaded(page);
+      await capture(page, info, "dashboard-overview-ru", true);
+    },
+  );
 
-  test("waits for the reporting timezone before requesting overview data", async ({ page }) => {
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, { filterAware: true });
-    state.hold("stats");
-    await page.goto("/account/dashboard");
-    await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
-    // Reads outside the gate still run: the shell chip's nearest event and the level names.
-    await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
-    await expect.poll(() => requestsTo(state, "/api/v1/qualification-levels").length).toBe(2);
-    for (const path of [...periodPaths, ...secondaryPaths])
-      expect(requestsTo(state, path)).toEqual([]);
-    await expect(loadingStatus(page)).toHaveCount(1);
-    for (const button of await gameGroup(page).getByRole("button").all())
-      await expect(button).toBeEnabled();
-    await expect(periodSelect(page)).toBeEnabled();
-
-    state.release("stats");
-    await loaded(page);
-    for (const path of periodPaths) {
-      const requests = periodRequests(state, path);
-      expect(requests).toHaveLength(1);
-      expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
-      expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-    }
-    // Progress for both games, the review queue and the recent trips follow the period reads.
-    await expect.poll(() => requestsTo(state, "/api/v1/me/qualification-progress").length).toBe(2);
-    await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(2);
-    const firstIndex = (path: string) =>
-      state.requests.findIndex((url) => url.pathname.startsWith(path));
-    const lastPeriod = Math.max(...periodPaths.map(firstIndex));
-    const firstSecondary = Math.min(...secondaryPaths.map(firstIndex));
-    expect(lastPeriod).toBeGreaterThanOrEqual(0);
-    expect(firstSecondary).toBeGreaterThan(lastPeriod);
-  });
-
-  for (const variant of ["failed", "unavailable"] as const) {
-    test(`falls back to UTC anchors when the timezone is ${variant}`, async ({ page }) => {
-      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-      const state = await mockDashboardRoutes(page, {
-        filterAware: true,
-        ...(variant === "failed" ? { failures: { stats: 503 } } : { reportingTimezone: null }),
-      });
+  test(
+    "filters by game and period with matching totals and requests",
+    browserCase(["@functional", "@smoke-dashboard"]),
+    async ({ page }) => {
+      const now = new Date("2026-10-15T12:00:00.000Z");
+      await page.clock.setFixedTime(now);
+      const state = await mockDashboardRoutes(page, { filterAware: true });
       await page.goto("/account/dashboard");
       await loaded(page);
-      await expect(page.getByRole("alert")).toHaveCount(0);
+
+      const group = gameGroup(page);
+      const ets2 = group.getByRole("button", { name: "ETS2", exact: true });
+      await ets2.click();
+      await expect(ets2).toHaveAttribute("aria-pressed", "true");
+      await expect(group.getByRole("button", { name: "All games", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      await expect(group.getByRole("button", { name: "ATS", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      await periodSelect(page).selectOption("lastMonth");
+      await expect(periodSelect(page)).toHaveValue("lastMonth");
+
+      const expected = computePeriodDates("lastMonth", now, "Europe/Moscow");
+      expect(expected).toEqual({ fromDate: "2026-09-01", toDateExclusive: "2026-10-01" });
+      for (const path of ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"]) {
+        await expect
+          .poll(() => lastRequest(state, path)?.searchParams.get("fromDate"))
+          .toBe(expected.fromDate);
+        const url = lastRequest(state, path);
+        expect(url?.searchParams.get("game")).toBe("ets2");
+        expect(url?.searchParams.get("toDateExclusive")).toBe(expected.toDateExclusive);
+      }
+
+      // The fixture total is the exact sum of its buckets, and the page shows exactly that total.
+      const fixture = makeFilteredAnalyticsFixture(
+        new URLSearchParams({ game: "ets2", granularity: "day" }),
+      ).data;
+      const bucketSum = fixture.buckets.reduce(
+        (sum, bucket) => sum + BigInt(bucket.actualDistanceM),
+        0n,
+      );
+      expect(bucketSum).toBe(BigInt(fixture.actualDistanceM));
+      await expect(kpis(page).getByRole("definition")).toHaveText([
+        formatQuantity(fixture.actualDistanceM, "km", "en"),
+        String(fixture.acceptedTrips),
+        "2",
+      ]);
+
+      const chart = chartCard(page);
+      await chart.getByRole("button", { name: "Table", exact: true }).click();
+      const rows = chart.locator("tbody tr");
+      await expect(rows).toHaveCount(fixture.buckets.length);
+      for (const [index, bucket] of fixture.buckets.entries()) {
+        await expect(rows.nth(index).getByRole("rowheader")).toContainText(bucket.date);
+        await expect(rows.nth(index)).toContainText(
+          formatQuantity(bucket.actualDistanceM, "km", "en"),
+        );
+      }
+    },
+  );
+
+  test(
+    "anchors periods to the reporting timezone across a month boundary",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      // 01:30 on 1 November in Moscow while the UTC clock still shows 31 October.
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, { filterAware: true });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+
+      const statsIndex = state.requests.findIndex((url) => url.pathname === statsPath);
+      const firstPeriodIndex = state.requests.findIndex((url) =>
+        url.pathname.startsWith("/api/v1/analytics/"),
+      );
+      expect(statsIndex).toBeGreaterThanOrEqual(0);
+      expect(firstPeriodIndex).toBeGreaterThan(statsIndex);
+      const initial = periodRequests(state);
+      expect(initial).toHaveLength(2);
+      for (const url of initial) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
+
+      for (const [period, fromDate, toDateExclusive] of [
+        ["lastMonth", "2026-10-01", "2026-11-01"],
+        ["last7Days", "2026-10-26", "2026-11-02"],
+        ["last30Days", "2026-10-03", "2026-11-02"],
+      ] as const) {
+        await periodSelect(page).selectOption(period);
+        for (const path of periodPaths)
+          await expect
+            .poll(() => periodRequests(state, path, fromDate, toDateExclusive).length)
+            .toBe(1);
+        await loaded(page);
+      }
       expect(requestsTo(state, statsPath)).toHaveLength(1);
+      // One request per endpoint for the initial period and for each change.
+      for (const path of periodPaths) expect(periodRequests(state, path)).toHaveLength(4);
+    },
+  );
+
+  test(
+    "waits for the reporting timezone before requesting overview data",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, { filterAware: true });
+      state.hold("stats");
+      await page.goto("/account/dashboard");
+      await expect.poll(() => requestsTo(state, statsPath).length).toBe(1);
+      // Reads outside the gate still run: the shell chip's nearest event and the level names.
+      await expect.poll(() => requestsTo(state, "/api/v1/me/upcoming-event").length).toBe(1);
+      await expect.poll(() => requestsTo(state, "/api/v1/qualification-levels").length).toBe(2);
+      for (const path of [...periodPaths, ...secondaryPaths])
+        expect(requestsTo(state, path)).toEqual([]);
+      await expect(loadingStatus(page)).toHaveCount(1);
+      for (const button of await gameGroup(page).getByRole("button").all())
+        await expect(button).toBeEnabled();
+      await expect(periodSelect(page)).toBeEnabled();
+
+      state.release("stats");
+      await loaded(page);
       for (const path of periodPaths) {
         const requests = periodRequests(state, path);
         expect(requests).toHaveLength(1);
-        expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-10-01");
-        expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-11-01");
+        expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-12-01");
       }
-    });
+      // Progress for both games, the review queue and the recent trips follow the period reads.
+      await expect
+        .poll(() => requestsTo(state, "/api/v1/me/qualification-progress").length)
+        .toBe(2);
+      await expect.poll(() => requestsTo(state, "/api/v1/trips").length).toBe(2);
+      const firstIndex = (path: string) =>
+        state.requests.findIndex((url) => url.pathname.startsWith(path));
+      const lastPeriod = Math.max(...periodPaths.map(firstIndex));
+      const firstSecondary = Math.min(...secondaryPaths.map(firstIndex));
+      expect(lastPeriod).toBeGreaterThanOrEqual(0);
+      expect(firstSecondary).toBeGreaterThan(lastPeriod);
+    },
+  );
+
+  for (const variant of ["failed", "unavailable"] as const) {
+    test(
+      `falls back to UTC anchors when the timezone is ${variant}`,
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+        const state = await mockDashboardRoutes(page, {
+          filterAware: true,
+          ...(variant === "failed" ? { failures: { stats: 503 } } : { reportingTimezone: null }),
+        });
+        await page.goto("/account/dashboard");
+        await loaded(page);
+        await expect(page.getByRole("alert")).toHaveCount(0);
+        expect(requestsTo(state, statsPath)).toHaveLength(1);
+        for (const path of periodPaths) {
+          const requests = periodRequests(state, path);
+          expect(requests).toHaveLength(1);
+          expect(requests[0]?.searchParams.get("fromDate")).toBe("2026-10-01");
+          expect(requests[0]?.searchParams.get("toDateExclusive")).toBe("2026-11-01");
+        }
+      },
+    );
   }
 
-  test("keeps the UTC fallback view through a reconnect", async ({ page, context }) => {
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, {
-      filterAware: true,
-      failures: { stats: 503 },
-    });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    expect(requestsTo(state, statsPath)).toHaveLength(1);
-
-    // A reconnect must not reread the failed zone and send the page back to loading.
-    delete state.failures.stats;
-    await context.setOffline(true);
-    await context.setOffline(false);
-    // Nothing visible changes to wait for; give a reread time to start.
-    await page.waitForTimeout(500);
-    expect(requestsTo(state, statsPath)).toHaveLength(1);
-    await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
-    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
-    await expect(loadingStatus(page)).toHaveCount(0);
-  });
-
-  test("rereads a failed timezone on Retry and requests only the new dates", async ({ page }) => {
-    // Moscow is already in November; the UTC fallback is still in October.
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, {
-      filterAware: true,
-      failures: { stats: 503, analytics: 503 },
-    });
-    await page.goto("/account/dashboard");
-    const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
-    await expect(alert).toBeVisible();
-    expect(requestsTo(state, statsPath)).toHaveLength(1);
-    expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("fromDate")).toBe(
-      "2026-10-01",
-    );
-
-    delete state.failures.stats;
-    delete state.failures.analytics;
-    state.hold("stats");
-    const before = state.requests.length;
-    // Two presses in one task: both reach the handler before the page rerenders, and the second
-    // reuses the stats read in flight.
-    await alert
-      .getByRole("button", { name: "Retry", exact: true })
-      .evaluate((button: HTMLElement) => {
-        button.click();
-        button.click();
+  test(
+    "keeps the UTC fallback view through a reconnect",
+    browserCase(["@functional"]),
+    async ({ page, context }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        failures: { stats: 503 },
       });
-    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
-    await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
-    // While the zone is reread the page waits: no alert, no Retry to press again, no period read.
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(loadingStatus(page)).toHaveCount(1);
-    expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      expect(requestsTo(state, statsPath)).toHaveLength(1);
 
-    state.release("stats");
-    await loaded(page);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    expect(requestsTo(state, statsPath)).toHaveLength(2);
-    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-    for (const path of periodPaths)
-      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-    for (const url of after) {
-      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-    }
-  });
+      // A reconnect must not reread the failed zone and send the page back to loading.
+      delete state.failures.stats;
+      const selfReads = () => state.requests.filter((url) => url.pathname === "/api/v1/me").length;
+      const levelReads = () => requestsTo(state, "/api/v1/qualification-levels").length;
+      const [selfBefore, levelsBefore] = [selfReads(), levelReads()];
+      await context.setOffline(true);
+      await page.waitForFunction(() => !navigator.onLine);
+      await context.setOffline(false);
+      await page.waitForFunction(() => navigator.onLine);
+      // Positive control: queries that opt into reconnect refetches reread, so the reconnect
+      // was handled.
+      await expect.poll(selfReads).toBeGreaterThan(selfBefore);
+      // The level reads are queued after the stats read (FIFO read slots), so a stats reread
+      // would already be recorded.
+      await expect.poll(levelReads).toBe(levelsBefore + 2);
+      expect(requestsTo(state, statsPath)).toHaveLength(1);
+      await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
+      await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+      await expect(loadingStatus(page)).toHaveCount(0);
+    },
+  );
 
-  test("waits for a failed timezone that is reread when the overview remounts", async ({
-    page,
-  }) => {
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, {
-      filterAware: true,
-      failures: { stats: 503, analytics: 503 },
-    });
-    await page.goto("/account/dashboard");
-    await expect(
-      page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" }),
-    ).toBeVisible();
+  test(
+    "rereads a failed timezone on Retry and requests only the new dates",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      // Moscow is already in November; the UTC fallback is still in October.
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        failures: { stats: 503, analytics: 503 },
+      });
+      await page.goto("/account/dashboard");
+      const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+      await expect(alert).toBeVisible();
+      expect(requestsTo(state, statsPath)).toHaveLength(1);
+      expect(lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("fromDate")).toBe(
+        "2026-10-01",
+      );
 
-    // Leave and return in the same document, so the failed queries stay cached.
-    delete state.failures.stats;
-    delete state.failures.analytics;
-    await page.evaluate(() => {
-      history.pushState(null, "", "/account/drivers");
-      dispatchEvent(new PopStateEvent("popstate"));
-    });
-    await expect(page.getByRole("heading", { name: "Company Overview", exact: true })).toHaveCount(
-      0,
-    );
-    state.hold("stats");
-    const before = state.requests.length;
-    await page.goBack();
-    await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
-    // The cached failure and the October leaderboard of the fallback keys stay hidden.
-    await expect(
-      page.getByRole("heading", { name: "Company Overview", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(loadingStatus(page)).toHaveCount(1);
-    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toHaveCount(0);
-    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
-    expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
+      delete state.failures.stats;
+      delete state.failures.analytics;
+      state.hold("stats");
+      const before = state.requests.length;
+      // Two presses in one task: both reach the handler before the page rerenders, and the second
+      // reuses the stats read in flight.
+      await alert
+        .getByRole("button", { name: "Retry", exact: true })
+        .evaluate((button: HTMLElement) => {
+          button.click();
+          button.click();
+        });
+      await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+      await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
+      // While the zone is reread the page waits: no alert, no Retry to press again, no period read.
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(loadingStatus(page)).toHaveCount(1);
+      expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
 
-    state.release("stats");
-    await loaded(page);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    expect(requestsTo(state, statsPath)).toHaveLength(2);
-    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-    for (const path of periodPaths)
-      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-    for (const url of after) {
-      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-    }
-  });
+      state.release("stats");
+      await loaded(page);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      expect(requestsTo(state, statsPath)).toHaveLength(2);
+      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+      for (const path of periodPaths)
+        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+      for (const url of after) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
+    },
+  );
 
-  test("rereads an unavailable timezone on Retry after the zone is set", async ({ page }) => {
-    await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
-    const state = await mockDashboardRoutes(page, {
-      filterAware: true,
-      reportingTimezone: null,
-      failures: { analytics: 409 },
-    });
-    await page.goto("/account/dashboard");
-    const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
-    await expect(alert).toBeVisible();
-    expect(requestsTo(state, statsPath)).toHaveLength(1);
+  test(
+    "waits for a failed timezone that is reread when the overview remounts",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        failures: { stats: 503, analytics: 503 },
+      });
+      await page.goto("/account/dashboard");
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" }),
+      ).toBeVisible();
 
-    // A director sets the zone; the next stats read carries it.
-    state.reportingTimezone = "Europe/Moscow";
-    delete state.failures.analytics;
-    const before = state.requests.length;
-    await alert.getByRole("button", { name: "Retry", exact: true }).click();
-    await loaded(page);
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    expect(requestsTo(state, statsPath)).toHaveLength(2);
-    const after = periodRequests({ ...state, requests: state.requests.slice(before) });
-    for (const path of periodPaths)
-      expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
-    for (const url of after) {
-      expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
-      expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
-    }
-  });
+      // Leave and return in the same document, so the failed queries stay cached.
+      delete state.failures.stats;
+      delete state.failures.analytics;
+      await page.evaluate(() => {
+        history.pushState(null, "", "/account/drivers");
+        dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toHaveCount(0);
+      state.hold("stats");
+      const before = state.requests.length;
+      await page.goBack();
+      await expect.poll(() => requestsTo(state, statsPath).length).toBe(2);
+      // The cached failure and the October leaderboard of the fallback keys stay hidden.
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(loadingStatus(page)).toHaveCount(1);
+      await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toHaveCount(0);
+      await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+      expect(periodRequests({ ...state, requests: state.requests.slice(before) })).toEqual([]);
 
-  test("shows the assigned qualification names for each game instead of UUIDs", async ({
-    page,
-  }) => {
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-    await expect(widget.getByText("European Driver II", { exact: true })).toBeVisible();
-    await expect(widget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
-    await expect(widget).not.toContainText(levelIdEts2);
-    await expect(widget).not.toContainText(levelIdAts);
-    await switchLanguage(page, "ru");
-    const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
-    await expect(russianWidget.getByText("European Driver II", { exact: true })).toBeVisible();
-    await expect(russianWidget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
-  });
+      state.release("stats");
+      await loaded(page);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      expect(requestsTo(state, statsPath)).toHaveLength(2);
+      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+      for (const path of periodPaths)
+        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+      for (const url of after) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
+    },
+  );
 
-  for (const qualificationLevels of ["unavailable", "missing"] as const) {
-    test(`keeps qualification progress when level names are ${qualificationLevels}`, async ({
-      page,
-    }) => {
-      await mockDashboardRoutes(page, { qualificationLevels });
+  test(
+    "rereads an unavailable timezone on Retry after the zone is set",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.setFixedTime(new Date("2026-10-31T22:30:00.000Z"));
+      const state = await mockDashboardRoutes(page, {
+        filterAware: true,
+        reportingTimezone: null,
+        failures: { analytics: 409 },
+      });
+      await page.goto("/account/dashboard");
+      const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+      await expect(alert).toBeVisible();
+      expect(requestsTo(state, statsPath)).toHaveLength(1);
+
+      // A director sets the zone; the next stats read carries it.
+      state.reportingTimezone = "Europe/Moscow";
+      delete state.failures.analytics;
+      const before = state.requests.length;
+      await alert.getByRole("button", { name: "Retry", exact: true }).click();
+      await loaded(page);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      expect(requestsTo(state, statsPath)).toHaveLength(2);
+      const after = periodRequests({ ...state, requests: state.requests.slice(before) });
+      for (const path of periodPaths)
+        expect(after.filter((url) => url.pathname === path)).toHaveLength(1);
+      for (const url of after) {
+        expect(url.searchParams.get("fromDate")).toBe("2026-11-01");
+        expect(url.searchParams.get("toDateExclusive")).toBe("2026-12-01");
+      }
+    },
+  );
+
+  test(
+    "shows the assigned qualification names for each game instead of UUIDs",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page);
       await page.goto("/account/dashboard");
       const widget = page.getByRole("region", { name: "My Qualification", exact: true });
-      await expect(widget.getByText("Level name unavailable", { exact: true })).toHaveCount(2);
+      await expect(widget.getByText("European Driver II", { exact: true })).toBeVisible();
+      await expect(widget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
       await expect(widget).not.toContainText(levelIdEts2);
       await expect(widget).not.toContainText(levelIdAts);
-      await expect(widget).toContainText("15 / 20");
       await switchLanguage(page, "ru");
       const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
-      await expect(
-        russianWidget.getByText("Название уровня недоступно", { exact: true }),
-      ).toHaveCount(2);
-    });
+      await expect(russianWidget.getByText("European Driver II", { exact: true })).toBeVisible();
+      await expect(russianWidget.getByText("Pacific Driver III", { exact: true })).toBeVisible();
+    },
+  );
+
+  for (const qualificationLevels of ["unavailable", "missing"] as const) {
+    test(
+      `keeps qualification progress when level names are ${qualificationLevels}`,
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        await mockDashboardRoutes(page, { qualificationLevels });
+        await page.goto("/account/dashboard");
+        const widget = page.getByRole("region", { name: "My Qualification", exact: true });
+        await expect(widget.getByText("Level name unavailable", { exact: true })).toHaveCount(2);
+        await expect(widget).not.toContainText(levelIdEts2);
+        await expect(widget).not.toContainText(levelIdAts);
+        await expect(widget).toContainText("15 / 20");
+        await switchLanguage(page, "ru");
+        const russianWidget = page.getByRole("region", { name: "Моя квалификация", exact: true });
+        await expect(
+          russianWidget.getByText("Название уровня недоступно", { exact: true }),
+        ).toHaveCount(2);
+      },
+    );
   }
 
-  test("expands and collapses metric calculation definitions", async ({ page }) => {
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
+  test(
+    "expands and collapses metric calculation definitions",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
 
-    const toggleButton = page.getByRole("button", { name: /Show explanations/i });
-    await expect(toggleButton).toBeVisible();
-    await expect(toggleButton).toHaveAttribute("aria-expanded", "false");
-    const controlled = await toggleButton.getAttribute("aria-controls");
-    expect(controlled).toBeTruthy();
-    await toggleButton.click();
+      const toggleButton = page.getByRole("button", { name: /Show explanations/i });
+      await expect(toggleButton).toBeVisible();
+      await expect(toggleButton).toHaveAttribute("aria-expanded", "false");
+      const controlled = await toggleButton.getAttribute("aria-controls");
+      expect(controlled).toBeTruthy();
+      await toggleButton.click();
 
-    await expect(page.getByText("Company Timezone Attribution")).toBeVisible();
-    await expect(page.getByText("Actual Trip Start Time")).toBeVisible();
-    await expect(page.getByText("Trip Confirmation")).toBeVisible();
-    await expect(page.locator(`[id="${controlled}"]`)).toBeVisible();
+      await expect(page.getByText("Company Timezone Attribution")).toBeVisible();
+      await expect(page.getByText("Actual Trip Start Time")).toBeVisible();
+      await expect(page.getByText("Trip Confirmation")).toBeVisible();
+      await expect(page.locator(`[id="${controlled}"]`)).toBeVisible();
 
-    // Collapse
-    const hideButton = page.getByRole("button", { name: /Hide explanations/i });
-    await expect(hideButton).toHaveAttribute("aria-expanded", "true");
-    await hideButton.click();
-    await expect(page.getByText("Company Timezone Attribution")).not.toBeVisible();
-  });
+      // Collapse
+      const hideButton = page.getByRole("button", { name: /Hide explanations/i });
+      await expect(hideButton).toHaveAttribute("aria-expanded", "true");
+      await hideButton.click();
+      await expect(page.getByText("Company Timezone Attribution")).not.toBeVisible();
+    },
+  );
 
-  test("displays empty company state when company has zero metrics", async ({ page }, info) => {
-    await mockDashboardRoutes(page, { emptyCompany: true });
-    await page.goto("/account/dashboard");
+  test(
+    "displays empty company state when company has zero metrics",
+    browserCase(["@functional"]),
+    async ({ page }, info) => {
+      await mockDashboardRoutes(page, { emptyCompany: true });
+      await page.goto("/account/dashboard");
 
-    await expect(
-      page.getByRole("heading", { name: "Company Overview", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByText("Company starting from zero")).toBeVisible();
-    await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
-    const chart = chartCard(page);
-    const empty = chart.getByText("No data to display in chart for the selected period");
-    await expect(empty).toBeVisible();
-    await chart.getByRole("button", { name: "Table", exact: true }).click();
-    await expect(chart.getByRole("button", { name: "Table", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await expect(empty).toBeVisible();
-    await expect(chart.getByRole("table")).toHaveCount(0);
-    await expect(
-      leaderboardCard(page).getByText("No confirmed trips in this period yet"),
-    ).toBeVisible();
-    await capture(page, info, "dashboard-empty-en");
-    await switchLanguage(page, "ru");
-    await expect(page.getByText("Компания начинает путь с нуля")).toBeVisible();
-    await capture(page, info, "dashboard-empty-ru");
-  });
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Company starting from zero")).toBeVisible();
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
+      const chart = chartCard(page);
+      const empty = chart.getByText("No data to display in chart for the selected period");
+      await expect(empty).toBeVisible();
+      await chart.getByRole("button", { name: "Table", exact: true }).click();
+      await expect(chart.getByRole("button", { name: "Table", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(empty).toBeVisible();
+      await expect(chart.getByRole("table")).toHaveCount(0);
+      await expect(
+        leaderboardCard(page).getByText("No confirmed trips in this period yet"),
+      ).toBeVisible();
+      await capture(page, info, "dashboard-empty-en");
+      await switchLanguage(page, "ru");
+      await expect(page.getByText("Компания начинает путь с нуля")).toBeVisible();
+      await capture(page, info, "dashboard-empty-ru");
+    },
+  );
 
-  test("responsive viewport check without horizontal scrollbar on mobile, tablet, desktop", async ({
-    page,
-  }) => {
-    await mockDashboardRoutes(page);
+  test(
+    "responsive viewport check without horizontal scrollbar on mobile, tablet, desktop",
+    browserCase(["@layout"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page);
 
-    const viewports = [
-      { width: 1280, height: 800 },
-      { width: 768, height: 1024 },
-      { width: 390, height: 844 },
-    ];
-
-    for (const vp of viewports) {
-      await page.setViewportSize(vp);
       await page.goto("/account/dashboard");
       await page.evaluate(() => document.fonts.ready);
-
       const hasHorizontalScroll = await page.evaluate(
         () => document.documentElement.scrollWidth > window.innerWidth,
       );
       expect(hasHorizontalScroll).toBe(false);
-    }
-  });
+    },
+  );
 
-  test("bilingual RU and EN rendering without empty or untranslated keys", async ({ page }) => {
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
+  test(
+    "bilingual RU and EN rendering without empty or untranslated keys",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
 
-    // Switch to Russian
-    await switchLanguage(page, "ru");
-    await expect(page.getByRole("heading", { name: "Обзор компании", exact: true })).toBeVisible();
-    await expect(kpis(page).getByRole("term")).toHaveText([
-      "Пройденное расстояние",
-      "Подтвержденные рейсы",
-      "Активные водители",
-    ]);
-    await expect(kpis(page).getByRole("definition").first()).toHaveText(
-      formatQuantity("125430000", "km", "ru"),
-    );
-    await expect(page.getByRole("heading", { name: "Таблица лидеров", exact: true })).toBeVisible();
-    const view = chartCard(page).getByRole("group", { name: "Вид", exact: true });
-    await expect(view.getByRole("button")).toHaveText(["График", "Таблица"]);
+      // Switch to Russian
+      await switchLanguage(page, "ru");
+      await expect(
+        page.getByRole("heading", { name: "Обзор компании", exact: true }),
+      ).toBeVisible();
+      await expect(kpis(page).getByRole("term")).toHaveText([
+        "Пройденное расстояние",
+        "Подтвержденные рейсы",
+        "Активные водители",
+      ]);
+      await expect(kpis(page).getByRole("definition").first()).toHaveText(
+        formatQuantity("125430000", "km", "ru"),
+      );
+      await expect(
+        page.getByRole("heading", { name: "Таблица лидеров", exact: true }),
+      ).toBeVisible();
+      const view = chartCard(page).getByRole("group", { name: "Вид", exact: true });
+      await expect(view.getByRole("button")).toHaveText(["График", "Таблица"]);
 
-    // Switch back to English
-    await switchLanguage(page, "en");
-    await expect(
-      page.getByRole("heading", { name: "Company Overview", exact: true }),
-    ).toBeVisible();
-    await expect(kpis(page).getByRole("term").first()).toHaveText("Actual distance");
-    await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
-  });
+      // Switch back to English
+      await switchLanguage(page, "en");
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toBeVisible();
+      await expect(kpis(page).getByRole("term").first()).toHaveText("Actual distance");
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
+    },
+  );
 
-  test("keeps qualification and the leaderboard on the first desktop screen", async ({
-    page,
-  }, info) => {
-    test.skip(info.project.name !== "desktop-chromium", "The first-screen budget is 1280×800.");
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    for (const locale of ["en", "ru"] as const) {
-      if (locale === "ru") await switchLanguage(page, "ru");
+  test(
+    "keeps qualification and the leaderboard on the first desktop screen",
+    browserCase(["@layout", "@viewport-desktop"]),
+    async ({ page }, info) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      for (const locale of ["en", "ru"] as const) {
+        if (locale === "ru") await switchLanguage(page, "ru");
+        await loaded(page);
+        await expect(qualificationCard(page).getByRole("heading", { level: 3 })).toHaveCount(2);
+        await page.evaluate(() => document.fonts.ready);
+        expect(await page.evaluate(() => scrollY)).toBe(0);
+
+        const qualification = await box(qualificationCard(page));
+        expect(qualification.y).toBeGreaterThanOrEqual(0);
+        expect(qualification.y + qualification.height).toBeLessThanOrEqual(800);
+        for (const heading of await qualificationCard(page)
+          .getByRole("heading", { level: 3 })
+          .all())
+          expect((await box(heading)).y + (await box(heading)).height).toBeLessThanOrEqual(800);
+
+        const leaderboard = leaderboardCard(page);
+        const firstRow = leaderboard.locator("tbody tr").first();
+        for (const target of [
+          leaderboard.getByRole("heading", { level: 2 }),
+          firstRow,
+          page.getByRole("heading", { level: 1 }),
+          gameGroup(page),
+          periodSelect(page),
+          kpis(page),
+        ]) {
+          const rect = await box(target);
+          expect(rect.y + rect.height).toBeLessThanOrEqual(800);
+        }
+
+        const tops = await Promise.all(
+          (await kpis(page).getByRole("definition").all()).map(async (dd) => (await box(dd)).y),
+        );
+        expect(tops).toHaveLength(3);
+        for (const top of tops) expect(Math.abs(top - (tops[0] ?? 0))).toBeLessThanOrEqual(1);
+
+        const title = await box(page.getByRole("heading", { level: 1 }));
+        expect((await box(gameGroup(page))).y).toBeLessThan(title.y + title.height);
+      }
+    },
+  );
+
+  test(
+    "switches the distance card between chart and exact table without losing focus",
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const touch = info.project.name === "mobile-chromium";
+      const state = await mockDashboardRoutes(page, { filterAware: true });
+      await page.goto("/account/dashboard");
       await loaded(page);
-      await expect(qualificationCard(page).getByRole("heading", { level: 3 })).toHaveCount(2);
-      await page.evaluate(() => document.fonts.ready);
-      expect(await page.evaluate(() => scrollY)).toBe(0);
 
-      const qualification = await box(qualificationCard(page));
-      expect(qualification.y).toBeGreaterThanOrEqual(0);
-      expect(qualification.y + qualification.height).toBeLessThanOrEqual(800);
-      for (const heading of await qualificationCard(page).getByRole("heading", { level: 3 }).all())
-        expect((await box(heading)).y + (await box(heading)).height).toBeLessThanOrEqual(800);
+      const chart = chartCard(page);
+      const view = chart.getByRole("group", { name: "View", exact: true });
+      const chartButton = view.getByRole("button", { name: "Chart", exact: true });
+      const tableButton = view.getByRole("button", { name: "Table", exact: true });
+      await expect(chartButton).toHaveAttribute("aria-pressed", "true");
+      await expect(tableButton).toHaveAttribute("aria-pressed", "false");
+      await expect(chart.getByRole("table")).toHaveCount(0);
+      await expect(chart.locator("figcaption")).toHaveText(
+        "Peak: 2026-10-04 — 48,430 km. Exact values are in the Table view.",
+      );
+      const before = (await box(chart)).height;
 
-      const leaderboard = leaderboardCard(page);
-      const firstRow = leaderboard.locator("tbody tr").first();
-      for (const target of [
-        leaderboard.getByRole("heading", { level: 2 }),
-        firstRow,
-        page.getByRole("heading", { level: 1 }),
-        gameGroup(page),
-        periodSelect(page),
-        kpis(page),
-      ]) {
-        const rect = await box(target);
-        expect(rect.y + rect.height).toBeLessThanOrEqual(800);
+      await activate(page, tableButton, touch);
+      await expect(tableButton).toHaveAttribute("aria-pressed", "true");
+      await expect(chartButton).toHaveAttribute("aria-pressed", "false");
+      if (!touch) await expect(tableButton).toBeFocused();
+      const table = chart.getByRole("table");
+      await expect(table.locator("caption")).toContainText("Europe/Moscow");
+      await expect(table.getByRole("columnheader")).toHaveText(["Date", "Distance", "Trips"]);
+      await expect(table.locator("tbody tr")).toHaveCount(4);
+      const peakRow = table.locator("tbody tr").filter({ hasText: "2026-10-04" });
+      await expect(peakRow).toContainText("48,430 km");
+      await expect(peakRow).toContainText("17");
+      await expect(peakRow).toContainText("Peak");
+      await expect(chart.locator("svg")).toHaveCount(0);
+      expect(Math.abs((await box(chart)).height - before)).toBeLessThanOrEqual(2);
+
+      if (!touch) {
+        await page.keyboard.press("Tab");
+        await expect(
+          chart.getByRole("region", { name: /^Distance data table for the period/ }),
+        ).toBeFocused();
       }
 
-      const tops = await Promise.all(
-        (await kpis(page).getByRole("definition").all()).map(async (dd) => (await box(dd)).y),
-      );
-      expect(tops).toHaveLength(3);
-      for (const top of tops) expect(Math.abs(top - (tops[0] ?? 0))).toBeLessThanOrEqual(1);
-
-      const title = await box(page.getByRole("heading", { level: 1 }));
-      expect((await box(gameGroup(page))).y).toBeLessThan(title.y + title.height);
-    }
-  });
-
-  test("switches the distance card between chart and exact table without losing focus", async ({
-    page,
-  }, info) => {
-    const touch = info.project.name === "mobile-chromium";
-    const state = await mockDashboardRoutes(page, { filterAware: true });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-
-    const chart = chartCard(page);
-    const view = chart.getByRole("group", { name: "View", exact: true });
-    const chartButton = view.getByRole("button", { name: "Chart", exact: true });
-    const tableButton = view.getByRole("button", { name: "Table", exact: true });
-    await expect(chartButton).toHaveAttribute("aria-pressed", "true");
-    await expect(tableButton).toHaveAttribute("aria-pressed", "false");
-    await expect(chart.getByRole("table")).toHaveCount(0);
-    await expect(chart.locator("figcaption")).toHaveText(
-      "Peak: 2026-10-04 — 48,430 km. Exact values are in the Table view.",
-    );
-    const before = (await box(chart)).height;
-
-    await activate(page, tableButton, touch);
-    await expect(tableButton).toHaveAttribute("aria-pressed", "true");
-    await expect(chartButton).toHaveAttribute("aria-pressed", "false");
-    if (!touch) await expect(tableButton).toBeFocused();
-    const table = chart.getByRole("table");
-    await expect(table.locator("caption")).toContainText("Europe/Moscow");
-    await expect(table.getByRole("columnheader")).toHaveText(["Date", "Distance", "Trips"]);
-    await expect(table.locator("tbody tr")).toHaveCount(4);
-    const peakRow = table.locator("tbody tr").filter({ hasText: "2026-10-04" });
-    await expect(peakRow).toContainText("48,430 km");
-    await expect(peakRow).toContainText("17");
-    await expect(peakRow).toContainText("Peak");
-    await expect(chart.locator("svg")).toHaveCount(0);
-    expect(Math.abs((await box(chart)).height - before)).toBeLessThanOrEqual(2);
-
-    if (!touch) {
-      await page.keyboard.press("Tab");
-      await expect(
-        chart.getByRole("region", { name: /^Distance data table for the period/ }),
-      ).toBeFocused();
-    }
-
-    // Interval change in Table view: the header stays mounted and keeps focus and view.
-    state.holdAnalytics();
-    const monthly = chart
-      .getByRole("group", { name: "Interval", exact: true })
-      .getByRole("button", { name: "Monthly", exact: true });
-    await activate(page, monthly, touch);
-    await expect(monthly).toHaveAttribute("aria-pressed", "true");
-    await expect(tableButton).toHaveAttribute("aria-pressed", "true");
-    // The status is announced, not shown, so nothing below the header shifts.
-    await expect(loadingStatus(page)).toHaveCount(1);
-    if (!touch) await expect(monthly).toBeFocused();
-    await expect
-      .poll(() => lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("granularity"))
-      .toBe("month");
-    const loadingTop = (await box(chart)).y;
-    state.releaseAnalytics();
-    await expect(loadingStatus(page)).toHaveCount(0);
-    if (!touch) await expect(monthly).toBeFocused();
-    expect(Math.abs((await box(chart)).y - loadingTop)).toBeLessThanOrEqual(1);
-    const monthRow = chart.locator("tbody tr").filter({ hasText: "2026-10-01" });
-    await expect(chart.locator("tbody tr")).toHaveCount(1);
-    await expect(monthRow).toContainText("125,430 km");
-    await expect(monthRow).toContainText("42");
-    await capture(page, info, "dashboard-table-en");
-
-    await chartButton.click();
-    await expect(chart.getByRole("table")).toHaveCount(0);
-
-    await switchLanguage(page, "ru");
-    const russianView = chartCard(page).getByRole("group", { name: "Вид", exact: true });
-    await russianView.getByRole("button", { name: "Таблица", exact: true }).click();
-    const russianTable = chartCard(page).getByRole("table");
-    await expect(russianTable.locator("caption")).toHaveText(
-      "Таблица пройденного расстояния за период (Europe/Moscow)",
-    );
-    await expect(russianTable.getByRole("columnheader")).toHaveText([
-      "Дата",
-      "Расстояние",
-      "Рейсы",
-    ]);
-    await capture(page, info, "dashboard-table-ru");
-  });
-
-  test("keeps the header usable while loading and recovers from an analytics failure", async ({
-    page,
-  }, info) => {
-    const state = await mockDashboardRoutes(page, { holdAnalytics: true });
-    await page.goto("/account/dashboard");
-    await expect(loadingStatus(page)).toHaveCount(1);
-    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
-    for (const button of await gameGroup(page).getByRole("button").all())
-      await expect(button).toBeEnabled();
-    await expect(periodSelect(page)).toBeEnabled();
-    await capture(page, info, "dashboard-loading-en");
-    await switchLanguage(page, "ru");
-    await expect(loadingStatus(page)).toHaveCount(1);
-    await capture(page, info, "dashboard-loading-ru");
-    await switchLanguage(page, "en");
-    state.releaseAnalytics();
-    await loaded(page);
-    await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
-
-    state.failures.analytics = 503;
-    await page.reload();
-    const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
-    await expect(alert).toBeVisible();
-    await expect(kpis(page)).toHaveCount(0);
-    await capture(page, info, "dashboard-error-en");
-    await switchLanguage(page, "ru");
-    await expect(
-      page.getByRole("alert").filter({ hasText: "Не удалось загрузить данные дашборда" }),
-    ).toBeVisible();
-    await capture(page, info, "dashboard-error-ru");
-    await switchLanguage(page, "en");
-    delete state.failures.analytics;
-    await alert.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    // The alert and its button are gone; focus lands on the page title, not the body.
-    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
-  });
-
-  test("keeps partial failures distinct from empty data", async ({ page }) => {
-    const state = await mockDashboardRoutes(page, {
-      emptyCompany: true,
-      failures: { leaderboard: 503 },
-    });
-    await page.goto("/account/dashboard");
-    const leaderboard = leaderboardCard(page);
-    await expect(leaderboard.getByText("Could not load the leaderboard")).toBeVisible();
-    await expect(leaderboard.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
-    await expect(leaderboard.getByText("No confirmed trips in this period yet")).toHaveCount(0);
-    await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("Unavailable");
-    await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
-    await expect(page.getByText("Company starting from zero")).toHaveCount(0);
-
-    delete state.failures.leaderboard;
-    await leaderboard.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(leaderboard.getByText("No confirmed trips in this period yet")).toBeVisible();
-    await expect(leaderboard.getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(page.getByText("Company starting from zero")).toBeVisible();
-
-    state.failures.progress = 503;
-    await page.reload();
-    const qualification = qualificationCard(page);
-    await expect(qualification.getByText("Progress unavailable", { exact: true })).toHaveCount(2);
-    await expect(qualification.getByText("No qualification assigned")).toHaveCount(0);
-  });
-
-  test("keeps current values when a background refresh fails", async ({ page }) => {
-    await page.clock.install();
-    const state = await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
-    const initial = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"].map(
-      (path) => lastRequest(state, path)?.href ?? "",
-    );
-
-    // Let the cached data go stale (TanStack marks it on a timer), break both endpoints, then
-    // leave and return to the same period: the cached query keys refetch and fail.
-    await page.clock.fastForward(60_000);
-    state.failures.analytics = 503;
-    state.failures.leaderboard = 503;
-    await periodSelect(page).selectOption("lastMonth");
-    await expect(page.getByRole("alert")).toBeVisible();
-    const refetched = Promise.all(
-      initial.map((href) =>
-        page.waitForResponse((response) => response.url() === href && response.status() === 503),
-      ),
-    );
-    await periodSelect(page).selectOption("thisMonth");
-    await refetched;
-    for (const href of initial)
-      expect(state.requests.filter((url) => url.href === href).length).toBe(2);
-    // Retained data has no visible change to wait for; give the failed responses time to settle.
-    await page.waitForTimeout(500);
-
-    await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
-    await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
-    await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(page.getByText("Could not load the leaderboard")).toHaveCount(0);
-    await expect(chartCard(page).locator("figcaption")).toContainText("48,430 km");
-  });
-
-  test("explains missing company access without requesting statistics", async ({ page }, info) => {
-    const state = await mockDashboardRoutes(page, { capabilities: withoutCompanyRead });
-    await page.goto("/account/dashboard");
-    await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Company Overview", exact: true }),
-    ).toBeVisible();
-    await expect(gameGroup(page)).toHaveCount(0);
-    await expect(kpis(page)).toHaveCount(0);
-    for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
-    await capture(page, info, "dashboard-forbidden-en");
-    await switchLanguage(page, "ru");
-    await expect(page.getByText("Нет доступа к статистике компании.")).toBeVisible();
-    await capture(page, info, "dashboard-forbidden-ru");
-    for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
-  });
-
-  test("shows no qualification for members who cannot submit own trips", async ({ page }) => {
-    const state = await mockDashboardRoutes(page, { capabilities: ["company.read"] });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    const qualification = qualificationCard(page);
-    await expect(qualification.getByText("No qualification assigned", { exact: true })).toHaveCount(
-      2,
-    );
-    await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
-    await expect(reviewCard(page)).toHaveCount(0);
-    expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
-    // Without events.respond the convoy shows no response controls and reads no own response.
-    await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
-    await expect(responseGroup(page)).toHaveCount(0);
-    expect(
-      state.requests.filter((url) => url.pathname.endsWith("/my-response")).map(String),
-    ).toEqual([]);
-  });
-
-  test("keeps review queue and event failures inside their cards", async ({ page }) => {
-    await mockDashboardRoutes(page, { failures: { review: 503, event: 503 } });
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    await expect(reviewCard(page).getByText("Could not load the review queue")).toBeVisible();
-    await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
-    await expect(eventCard(page).getByText("Could not load the upcoming event")).toBeVisible();
-    await expect(eventCard(page).getByText("No scheduled convoys")).toHaveCount(0);
-    await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
-    await switchLanguage(page, "ru");
-    await expect(reviewCard(page).getByText("Не удалось загрузить очередь проверки")).toBeVisible();
-    await expect(
-      eventCard(page).getByText("Не удалось загрузить ближайшее мероприятие"),
-    ).toBeVisible();
-  });
-
-  test("replaces earlier values when company access is revoked", async ({ page }) => {
-    const state = await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
-
-    state.failures.analytics = 403;
-    state.capabilities = withoutCompanyRead;
-    await periodSelect(page).selectOption("lastMonth");
-    await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
-    await expect(page.getByText("125,430 km")).toHaveCount(0);
-    await expect(kpis(page)).toHaveCount(0);
-  });
-
-  test("keeps compact targets on fine pointers and 40px targets on touch", async ({
-    page,
-  }, info) => {
-    const state = await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
-    if (info.project.name === "mobile-chromium") expect(coarse).toBe(true);
-
-    const height = async (target: Locator) => (await box(target)).height;
-    const expectTarget = async (target: Locator, fine: number, exact: boolean) => {
-      const value = await height(target);
-      if (coarse) expect(value).toBeGreaterThanOrEqual(40);
-      else if (exact) expect(Math.abs(value - fine)).toBeLessThanOrEqual(0.5);
-      else expect(value).toBeGreaterThanOrEqual(fine - 0.5);
-    };
-
-    const chart = chartCard(page);
-    for (const segment of [
-      ...(await gameGroup(page).getByRole("button").all()),
-      ...(await chart
+      // Interval change in Table view: the header stays mounted and keeps focus and view.
+      state.holdAnalytics();
+      const monthly = chart
         .getByRole("group", { name: "Interval", exact: true })
-        .getByRole("button")
-        .all()),
-      ...(await chart.getByRole("group", { name: "View", exact: true }).getByRole("button").all()),
-    ])
-      await expectTarget(segment, 24, true);
-    await expectTarget(periodSelect(page), 32, true);
-    for (const link of [
-      qualificationCard(page).getByRole("link", { name: "All my trips" }),
-      leaderboardCard(page).getByRole("link", { name: "All drivers" }),
-      leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
-      leaderboardCard(page).getByRole("link", { name: "BetaHauler" }),
-    ])
-      await expectTarget(link, 30, false);
-    await expectTarget(page.getByRole("button", { name: "Show explanations" }), 30, false);
+        .getByRole("button", { name: "Monthly", exact: true });
+      await activate(page, monthly, touch);
+      await expect(monthly).toHaveAttribute("aria-pressed", "true");
+      await expect(tableButton).toHaveAttribute("aria-pressed", "true");
+      // The status is announced, not shown, so nothing below the header shifts.
+      await expect(loadingStatus(page)).toHaveCount(1);
+      if (!touch) await expect(monthly).toBeFocused();
+      await expect
+        .poll(() =>
+          lastRequest(state, "/api/v1/analytics/company")?.searchParams.get("granularity"),
+        )
+        .toBe("month");
+      const loadingTop = (await box(chart)).y;
+      state.releaseAnalytics();
+      await expect(loadingStatus(page)).toHaveCount(0);
+      if (!touch) await expect(monthly).toBeFocused();
+      expect(Math.abs((await box(chart)).y - loadingTop)).toBeLessThanOrEqual(1);
+      const monthRow = chart.locator("tbody tr").filter({ hasText: "2026-10-01" });
+      await expect(chart.locator("tbody tr")).toHaveCount(1);
+      await expect(monthRow).toContainText("125,430 km");
+      await expect(monthRow).toContainText("42");
+      await capture(page, info, "dashboard-table-en");
 
-    for (const dd of await kpis(page).getByRole("definition").all())
-      expect(await dd.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await chartButton.click();
+      await expect(chart.getByRole("table")).toHaveCount(0);
 
-    state.failures.leaderboard = 503;
-    await page.reload();
-    await expectTarget(leaderboardCard(page).getByRole("button", { name: "Retry" }), 30, false);
-    state.failures.analytics = 503;
-    await page.reload();
-    await expectTarget(page.getByRole("alert").getByRole("button", { name: "Retry" }), 30, false);
-  });
+      await switchLanguage(page, "ru");
+      const russianView = chartCard(page).getByRole("group", { name: "Вид", exact: true });
+      await russianView.getByRole("button", { name: "Таблица", exact: true }).click();
+      const russianTable = chartCard(page).getByRole("table");
+      await expect(russianTable.locator("caption")).toHaveText(
+        "Таблица пройденного расстояния за период (Europe/Moscow)",
+      );
+      await expect(russianTable.getByRole("columnheader")).toHaveText([
+        "Дата",
+        "Расстояние",
+        "Рейсы",
+      ]);
+      await capture(page, info, "dashboard-table-ru");
+    },
+  );
 
-  test("orders blocks visually and for keyboard users like the DOM", async ({ page }, info) => {
-    await mockDashboardRoutes(page);
-    await page.goto("/account/dashboard");
-    await loaded(page);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  test(
+    "keeps the header usable while loading and recovers from an analytics failure",
+    browserCase(["@functional"]),
+    async ({ page }, info) => {
+      const state = await mockDashboardRoutes(page, { holdAnalytics: true });
+      await page.goto("/account/dashboard");
+      await expect(loadingStatus(page)).toHaveCount(1);
+      await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+      for (const button of await gameGroup(page).getByRole("button").all())
+        await expect(button).toBeEnabled();
+      await expect(periodSelect(page)).toBeEnabled();
+      await capture(page, info, "dashboard-loading-en");
+      await switchLanguage(page, "ru");
+      await expect(loadingStatus(page)).toHaveCount(1);
+      await capture(page, info, "dashboard-loading-ru");
+      await switchLanguage(page, "en");
+      state.releaseAnalytics();
+      await loaded(page);
+      await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
 
-    const chart = await box(chartCard(page));
-    const qualification = await box(qualificationCard(page));
-    const leaderboard = await box(leaderboardCard(page));
-    const event = await box(eventCard(page));
-    if (info.project.name === "desktop-chromium") {
-      expect(Math.abs(chart.y - qualification.y)).toBeLessThanOrEqual(2);
-      expect(chart.x).toBeLessThan(qualification.x);
-      expect(leaderboard.y).toBeGreaterThan(chart.y + chart.height);
-      expect(event.x).toBeGreaterThan(leaderboard.x);
+      state.failures.analytics = 503;
+      await page.reload();
+      const alert = page.getByRole("alert").filter({ hasText: "Failed to load dashboard data" });
+      await expect(alert).toBeVisible();
+      await expect(kpis(page)).toHaveCount(0);
+      await capture(page, info, "dashboard-error-en");
+      await switchLanguage(page, "ru");
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Не удалось загрузить данные дашборда" }),
+      ).toBeVisible();
+      await capture(page, info, "dashboard-error-ru");
+      await switchLanguage(page, "en");
+      delete state.failures.analytics;
+      await alert.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      // The alert and its button are gone; focus lands on the page title, not the body.
+      await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    },
+  );
 
-      const sequence = [
-        gameGroup(page).getByRole("button", { name: "All games", exact: true }),
-        gameGroup(page).getByRole("button", { name: "ETS2", exact: true }),
-        gameGroup(page).getByRole("button", { name: "ATS", exact: true }),
-        periodSelect(page),
-        chartCard(page).getByRole("button", { name: "Daily", exact: true }),
-        chartCard(page).getByRole("button", { name: "Monthly", exact: true }),
-        chartCard(page).getByRole("button", { name: "Chart", exact: true }),
-        chartCard(page).getByRole("button", { name: "Table", exact: true }),
+  test(
+    "keeps partial failures distinct from empty data",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page, {
+        emptyCompany: true,
+        failures: { leaderboard: 503 },
+      });
+      await page.goto("/account/dashboard");
+      const leaderboard = leaderboardCard(page);
+      await expect(leaderboard.getByText("Could not load the leaderboard")).toBeVisible();
+      await expect(leaderboard.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+      await expect(leaderboard.getByText("No confirmed trips in this period yet")).toHaveCount(0);
+      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("Unavailable");
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("0 km");
+      await expect(page.getByText("Company starting from zero")).toHaveCount(0);
+
+      delete state.failures.leaderboard;
+      await leaderboard.getByRole("button", { name: "Retry", exact: true }).click();
+      await expect(leaderboard.getByText("No confirmed trips in this period yet")).toBeVisible();
+      await expect(leaderboard.getByRole("heading", { level: 2 })).toBeFocused();
+      await expect(page.getByText("Company starting from zero")).toBeVisible();
+
+      state.failures.progress = 503;
+      await page.reload();
+      const qualification = qualificationCard(page);
+      await expect(qualification.getByText("Progress unavailable", { exact: true })).toHaveCount(2);
+      await expect(qualification.getByText("No qualification assigned")).toHaveCount(0);
+    },
+  );
+
+  test(
+    "keeps current values when a background refresh fails",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.clock.install();
+      const state = await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      const initial = ["/api/v1/analytics/company", "/api/v1/analytics/leaderboard"].map(
+        (path) => lastRequest(state, path)?.href ?? "",
+      );
+
+      // Let the cached data go stale (TanStack marks it on a timer), break both endpoints, then
+      // leave and return to the same period: the cached query keys refetch and fail.
+      await page.clock.fastForward(60_000);
+      state.failures.analytics = 503;
+      state.failures.leaderboard = 503;
+      await periodSelect(page).selectOption("lastMonth");
+      await expect(page.getByRole("alert")).toBeVisible();
+      const refetched = Promise.all(
+        initial.map((href) =>
+          page.waitForResponse((response) => response.url() === href && response.status() === 503),
+        ),
+      );
+      await periodSelect(page).selectOption("thisMonth");
+      await refetched;
+      for (const href of initial)
+        expect(state.requests.filter((url) => url.href === href).length).toBe(2);
+      // Retained data has no visible change to wait for; give the failed responses time to settle.
+      await page.waitForTimeout(500);
+
+      await expect(kpis(page).getByRole("definition")).toHaveText(["125,430 km", "42", "2"]);
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(2);
+      await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.getByText("Could not load the leaderboard")).toHaveCount(0);
+      await expect(chartCard(page).locator("figcaption")).toContainText("48,430 km");
+    },
+  );
+
+  test(
+    "explains missing company access without requesting statistics",
+    browserCase(["@functional"]),
+    async ({ page }, info) => {
+      const state = await mockDashboardRoutes(page, { capabilities: withoutCompanyRead });
+      await page.goto("/account/dashboard");
+      await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Company Overview", exact: true }),
+      ).toBeVisible();
+      await expect(gameGroup(page)).toHaveCount(0);
+      await expect(kpis(page)).toHaveCount(0);
+      for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
+      await capture(page, info, "dashboard-forbidden-en");
+      await switchLanguage(page, "ru");
+      await expect(page.getByText("Нет доступа к статистике компании.")).toBeVisible();
+      await capture(page, info, "dashboard-forbidden-ru");
+      for (const path of dashboardOnlyPaths) expect(requestsTo(state, path)).toEqual([]);
+    },
+  );
+
+  test(
+    "shows no qualification for members who cannot submit own trips",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page, { capabilities: ["company.read"] });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      const qualification = qualificationCard(page);
+      await expect(
+        qualification.getByText("No qualification assigned", { exact: true }),
+      ).toHaveCount(2);
+      await expect(qualification.getByText("Loading progress…")).toHaveCount(0);
+      await expect(reviewCard(page)).toHaveCount(0);
+      expect(requestsTo(state, "/api/v1/me/qualification-progress")).toEqual([]);
+      // Without events.respond the convoy shows no response controls and reads no own response.
+      await expect(eventCard(page).getByText("Going: 8", { exact: true })).toBeVisible();
+      await expect(responseGroup(page)).toHaveCount(0);
+      expect(
+        state.requests.filter((url) => url.pathname.endsWith("/my-response")).map(String),
+      ).toEqual([]);
+    },
+  );
+
+  test(
+    "keeps review queue and event failures inside their cards",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page, { failures: { review: 503, event: 503 } });
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(reviewCard(page).getByText("Could not load the review queue")).toBeVisible();
+      await expect(reviewCard(page).getByRole("link", { name: "Go to review" })).toBeVisible();
+      await expect(eventCard(page).getByText("Could not load the upcoming event")).toBeVisible();
+      await expect(eventCard(page).getByText("No scheduled convoys")).toHaveCount(0);
+      await expect(page.getByText("Failed to load dashboard data")).toHaveCount(0);
+      await switchLanguage(page, "ru");
+      await expect(
+        reviewCard(page).getByText("Не удалось загрузить очередь проверки"),
+      ).toBeVisible();
+      await expect(
+        eventCard(page).getByText("Не удалось загрузить ближайшее мероприятие"),
+      ).toBeVisible();
+    },
+  );
+
+  test(
+    "replaces earlier values when company access is revoked",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("125,430 km");
+
+      state.failures.analytics = 403;
+      state.capabilities = withoutCompanyRead;
+      await periodSelect(page).selectOption("lastMonth");
+      await expect(page.getByText("You do not have access to company statistics.")).toBeVisible();
+      await expect(page.getByText("125,430 km")).toHaveCount(0);
+      await expect(kpis(page)).toHaveCount(0);
+    },
+  );
+
+  test(
+    "keeps compact targets on fine pointers and 40px targets on touch",
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const state = await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+      if (info.project.name === "mobile-chromium") expect(coarse).toBe(true);
+
+      const height = async (target: Locator) => (await box(target)).height;
+      const expectTarget = async (target: Locator, fine: number, exact: boolean) => {
+        const value = await height(target);
+        if (coarse) expect(value).toBeGreaterThanOrEqual(40);
+        else if (exact) expect(Math.abs(value - fine)).toBeLessThanOrEqual(0.5);
+        else expect(value).toBeGreaterThanOrEqual(fine - 0.5);
+      };
+
+      const chart = chartCard(page);
+      for (const segment of [
+        ...(await gameGroup(page).getByRole("button").all()),
+        ...(await chart
+          .getByRole("group", { name: "Interval", exact: true })
+          .getByRole("button")
+          .all()),
+        ...(await chart
+          .getByRole("group", { name: "View", exact: true })
+          .getByRole("button")
+          .all()),
+      ])
+        await expectTarget(segment, 24, true);
+      await expectTarget(periodSelect(page), 32, true);
+      for (const link of [
         qualificationCard(page).getByRole("link", { name: "All my trips" }),
         leaderboardCard(page).getByRole("link", { name: "All drivers" }),
         leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
-      ];
-      await sequence[0]?.focus();
-      for (const [index, target] of sequence.entries()) {
-        if (index > 0) await page.keyboard.press("Tab");
-        await expect(target).toBeFocused();
+        leaderboardCard(page).getByRole("link", { name: "BetaHauler" }),
+      ])
+        await expectTarget(link, 30, false);
+      await expectTarget(page.getByRole("button", { name: "Show explanations" }), 30, false);
+
+      for (const dd of await kpis(page).getByRole("definition").all())
+        expect(await dd.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+      state.failures.leaderboard = 503;
+      await page.reload();
+      await expectTarget(leaderboardCard(page).getByRole("button", { name: "Retry" }), 30, false);
+      state.failures.analytics = 503;
+      await page.reload();
+      await expectTarget(page.getByRole("alert").getByRole("button", { name: "Retry" }), 30, false);
+    },
+  );
+
+  test(
+    "orders blocks visually and for keyboard users like the DOM",
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockDashboardRoutes(page);
+      await page.goto("/account/dashboard");
+      await loaded(page);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+
+      const chart = await box(chartCard(page));
+      const qualification = await box(qualificationCard(page));
+      const leaderboard = await box(leaderboardCard(page));
+      const event = await box(eventCard(page));
+      if (info.project.name === "desktop-chromium") {
+        expect(Math.abs(chart.y - qualification.y)).toBeLessThanOrEqual(2);
+        expect(chart.x).toBeLessThan(qualification.x);
+        expect(leaderboard.y).toBeGreaterThan(chart.y + chart.height);
+        expect(event.x).toBeGreaterThan(leaderboard.x);
+
+        const sequence = [
+          gameGroup(page).getByRole("button", { name: "All games", exact: true }),
+          gameGroup(page).getByRole("button", { name: "ETS2", exact: true }),
+          gameGroup(page).getByRole("button", { name: "ATS", exact: true }),
+          periodSelect(page),
+          chartCard(page).getByRole("button", { name: "Daily", exact: true }),
+          chartCard(page).getByRole("button", { name: "Monthly", exact: true }),
+          chartCard(page).getByRole("button", { name: "Chart", exact: true }),
+          chartCard(page).getByRole("button", { name: "Table", exact: true }),
+          qualificationCard(page).getByRole("link", { name: "All my trips" }),
+          leaderboardCard(page).getByRole("link", { name: "All drivers" }),
+          leaderboardCard(page).getByRole("link", { name: "AlphaDriver" }),
+        ];
+        await sequence[0]?.focus();
+        for (const [index, target] of sequence.entries()) {
+          if (index > 0) await page.keyboard.press("Tab");
+          await expect(target).toBeFocused();
+        }
+      } else {
+        expect(chart.y).toBeLessThan(qualification.y);
+        expect(qualification.y).toBeLessThan(leaderboard.y);
+        expect(leaderboard.y).toBeLessThan(event.y);
       }
-    } else {
-      expect(chart.y).toBeLessThan(qualification.y);
-      expect(qualification.y).toBeLessThan(leaderboard.y);
-      expect(leaderboard.y).toBeLessThan(event.y);
-    }
-  });
+    },
+  );
 
-  test("counts drivers beyond the widget and marks capped queues", async ({ page }) => {
-    const state = await mockDashboardRoutes(page, { leaderboardSize: 12, reviewNextCursor: true });
-    await page.goto("/account/dashboard");
-    await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
-    await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("12");
-    expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
-      "100",
-    );
-    await expect(reviewCard(page)).toContainText("Trips pending review: 5+");
-  });
+  test(
+    "counts drivers beyond the widget and marks capped queues",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockDashboardRoutes(page, {
+        leaderboardSize: 12,
+        reviewNextCursor: true,
+      });
+      await page.goto("/account/dashboard");
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
+      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("12");
+      expect(lastRequest(state, "/api/v1/analytics/leaderboard")?.searchParams.get("limit")).toBe(
+        "100",
+      );
+      await expect(reviewCard(page)).toContainText("Trips pending review: 5+");
+    },
+  );
 
-  test("shows a lower bound when more drivers exist than one leaderboard page", async ({
-    page,
-  }) => {
-    await mockDashboardRoutes(page, { leaderboardSize: 100, leaderboardNextCursor: true });
-    await page.goto("/account/dashboard");
-    await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("100+");
-    await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
-  });
+  test(
+    "shows a lower bound when more drivers exist than one leaderboard page",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockDashboardRoutes(page, { leaderboardSize: 100, leaderboardNextCursor: true });
+      await page.goto("/account/dashboard");
+      await expect(kpis(page).getByRole("definition").nth(2)).toHaveText("100+");
+      await expect(leaderboardCard(page).locator("tbody tr")).toHaveCount(10);
+    },
+  );
 });

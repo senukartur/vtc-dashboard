@@ -260,6 +260,14 @@ describe("affected tests", () => {
     );
   });
 
+  test("selects the driver profile for a dashboard change", () => {
+    // The profile uses the overview's reporting-timezone source and calendar helpers.
+    const { tokens } = affectedTests(["apps/web/src/features/dashboard/model.ts"], inventory);
+    expect(tokens).toEqual(
+      expect.arrayContaining(["test/unit/drivers.test.ts", "test/e2e/drivers.spec.ts"]),
+    );
+  });
+
   test("selects changed tests themselves and skips removed ones", () => {
     const { tokens } = affectedTests(
       ["test/unit/events.test.ts", "test/unit/removed.test.ts"],

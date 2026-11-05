@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { browserProjectPolicy } from "./test/support/browser-policy.ts";
 
 export default defineConfig({
   testDir: process.env.VTC_FAILURE_PROBE === "assertion" ? "test/probes" : "test/e2e",
@@ -23,10 +24,19 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   projects: [
-    { name: "desktop-chromium", use: { viewport: { width: 1280, height: 800 } } },
-    { name: "tablet-chromium", use: { viewport: { width: 768, height: 1024 } } },
+    {
+      name: "desktop-chromium",
+      ...browserProjectPolicy["desktop-chromium"],
+      use: { viewport: { width: 1280, height: 800 } },
+    },
+    {
+      name: "tablet-chromium",
+      ...browserProjectPolicy["tablet-chromium"],
+      use: { viewport: { width: 768, height: 1024 } },
+    },
     {
       name: "mobile-chromium",
+      ...browserProjectPolicy["mobile-chromium"],
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
   ],

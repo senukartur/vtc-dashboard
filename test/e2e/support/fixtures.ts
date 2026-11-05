@@ -1,5 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { assertLocalOrigin } from "../../support/environment.ts";
+export { browserCase } from "../../support/browser-policy.ts";
 
 export const test = base.extend<{ networkGuard: undefined }>({
   networkGuard: [

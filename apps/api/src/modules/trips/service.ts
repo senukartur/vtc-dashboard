@@ -124,7 +124,7 @@ const sourceMember = alias(trips, "source_member");
  * sourceKinds derivation (root plus alias members). Two correlated EXISTS probes keep the
  * outer page index and probe source_canonical / trip_group_members per candidate row.
  */
-export function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
+function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
   return or(
     exists(
       db
@@ -140,6 +140,54 @@ export function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source
         .where(and(eq(sourceMember.aliasOf, trips.id), eq(sourceTrips.provider, source))),
     ),
   ) as SQL;
+}
+export interface TripListFilter {
+  scope: "company" | "mine" | "review";
+  /** The viewer; scope=mine lists their trips. */
+  viewerId: string;
+  game?: "ets2" | "ats" | undefined;
+  decision?: Trip["decision"] | undefined;
+  hold?: boolean | undefined;
+  source?: TripSource | undefined;
+  order?: "asc" | "desc" | undefined;
+  /** Verified keyset cursor position. */
+  after?: { createdAt: string; id: string } | null | undefined;
+}
+/** The list's outer predicate and keyset order; list() and the EXPLAIN plan guard share it. */
+export function tripListQuery(
+  db: ReturnType<UnitOfWork["client"]>,
+  filter: TripListFilter,
+): { where: SQL | undefined; orderBy: SQL[] } {
+  const ascending = filter.order === "asc",
+    after = filter.after;
+  return {
+    where: and(
+      isNull(trips.aliasOf),
+      filter.scope === "company"
+        ? eq(trips.decision, "accepted")
+        : filter.scope === "mine"
+          ? eq(trips.ownerId, filter.viewerId)
+          : undefined,
+      filter.game ? eq(trips.game, filter.game) : undefined,
+      filter.decision ? eq(trips.decision, filter.decision) : undefined,
+      filter.hold === undefined ? undefined : eq(trips.reviewHold, filter.hold),
+      filter.source ? tripSourceCondition(db, filter.source) : undefined,
+      after
+        ? ascending
+          ? or(
+              gt(trips.createdAt, after.createdAt),
+              and(eq(trips.createdAt, after.createdAt), gt(trips.id, after.id)),
+            )
+          : or(
+              lt(trips.createdAt, after.createdAt),
+              and(eq(trips.createdAt, after.createdAt), lt(trips.id, after.id)),
+            )
+        : undefined,
+    ),
+    orderBy: ascending
+      ? [asc(trips.createdAt), asc(trips.id)]
+      : [desc(trips.createdAt), desc(trips.id)],
+  };
 }
 function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidence): string[] {
   const reasons: string[] = [];
@@ -973,43 +1021,23 @@ export function createTrips(
         (scope !== "review" && (options.hold !== undefined || options.order !== undefined))
       )
         throw identityError(422);
-      const ascending = options.order === "asc";
       return run(async (tx) => {
         const current = await authority(tx, actor, scope === "review");
-        const after = readCursor(actor, options);
+        const query = tripListQuery(c(tx), {
+          scope,
+          viewerId: actor.userId,
+          game: options.game,
+          decision: options.decision,
+          hold: options.hold,
+          source: options.source,
+          order: options.order,
+          after: readCursor(actor, options),
+        });
         const rows = await c(tx)
           .select()
           .from(trips)
-          .where(
-            and(
-              isNull(trips.aliasOf),
-              scope === "company"
-                ? eq(trips.decision, "accepted")
-                : scope === "mine"
-                  ? eq(trips.ownerId, actor.userId)
-                  : undefined,
-              options.game ? eq(trips.game, options.game) : undefined,
-              options.decision ? eq(trips.decision, options.decision) : undefined,
-              options.hold === undefined ? undefined : eq(trips.reviewHold, options.hold),
-              options.source ? tripSourceCondition(c(tx), options.source) : undefined,
-              after
-                ? ascending
-                  ? or(
-                      gt(trips.createdAt, after.createdAt),
-                      and(eq(trips.createdAt, after.createdAt), gt(trips.id, after.id)),
-                    )
-                  : or(
-                      lt(trips.createdAt, after.createdAt),
-                      and(eq(trips.createdAt, after.createdAt), lt(trips.id, after.id)),
-                    )
-                : undefined,
-            ),
-          )
-          .orderBy(
-            ...(ascending
-              ? [asc(trips.createdAt), asc(trips.id)]
-              : [desc(trips.createdAt), desc(trips.id)]),
-          )
+          .where(query.where)
+          .orderBy(...query.orderBy)
           .limit(limit + 1);
         const page = rows.slice(0, limit),
           last = page.at(-1);

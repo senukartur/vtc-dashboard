@@ -1,5 +1,6 @@
 // Pure driver profile helpers: analytics window, level ladder, trip request paths and failures.
 import type { Locale } from "../../shared/formatting.js";
+import { calendarToday, isoDate } from "../dashboard/model.js";
 import { DriversFailure, type DTO } from "./transport.js";
 
 export type Game = "ets2" | "ats";
@@ -21,20 +22,19 @@ export const OWN_TRIPS_LIMIT = 10;
 /** Latest accepted company trips scanned for another member (contract maximum). */
 export const COMPANY_TRIPS_WINDOW = 100;
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const isoDate = (d: Date) =>
-  `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-
 /**
- * Rolling window of twelve calendar months ending with the current one. Like the overview, the
- * anchor month uses the UTC clock; the API interprets both dates in the reporting timezone.
+ * Rolling window of twelve calendar months ending with the current one. Like the overview's
+ * periods (VTC-056), the anchor is today's calendar month in the company reporting timezone, and
+ * the API reads both dates in that timezone. A zone unknown to the browser falls back to UTC.
  */
-export function twelveMonthWindow(now = new Date()): { fromDate: string; toDateExclusive: string } {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
+export function twelveMonthWindow(
+  now: Date,
+  timeZone: string,
+): { fromDate: string; toDateExclusive: string } {
+  const { year, month } = calendarToday(now, timeZone);
   return {
-    fromDate: isoDate(new Date(Date.UTC(year, month - 11, 1))),
-    toDateExclusive: isoDate(new Date(Date.UTC(year, month + 1, 1))),
+    fromDate: isoDate(year, month - 11, 1),
+    toDateExclusive: isoDate(year, month + 1, 1),
   };
 }
 

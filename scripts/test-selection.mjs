@@ -196,7 +196,7 @@ const areas = [
   },
   {
     paths: ["apps/api/src/modules/analytics/", "apps/web/src/features/dashboard/"],
-    tests: ["analytics", "dashboard", "company-stats", "public-company-stats"],
+    tests: ["analytics", "dashboard", "company-stats", "public-company-stats", "drivers"],
   },
   {
     paths: [

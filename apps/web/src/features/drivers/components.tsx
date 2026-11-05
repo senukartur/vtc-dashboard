@@ -15,6 +15,7 @@ import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
+import type { QueryView } from "../dashboard/view-model.js";
 import {
   type Assignment,
   COMPANY_TRIPS_WINDOW,
@@ -168,12 +169,15 @@ export function ProfileHeader({
   );
 }
 
+/** `onRetry` belongs to the page: it may have to reread the reporting timezone first. */
 export function DriverKpis({
   query,
   locale,
+  onRetry,
 }: {
-  query: UseQueryResult<Analytics>;
+  query: QueryView<Analytics>;
   locale: Locale;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation("drivers");
   const sectionRef = useRef<HTMLElement>(null);
@@ -194,7 +198,7 @@ export function DriverKpis({
           onClick={() => {
             // The button unmounts on success; keep focus inside the statistics region.
             sectionRef.current?.focus();
-            void query.refetch();
+            onRetry();
           }}
         >
           {t("kpi.retry")}
@@ -598,7 +602,7 @@ export function DistanceByMonth({
   query,
   locale,
 }: {
-  query: UseQueryResult<Analytics>;
+  query: QueryView<Analytics>;
   locale: Locale;
 }) {
   const { t } = useTranslation("drivers");
