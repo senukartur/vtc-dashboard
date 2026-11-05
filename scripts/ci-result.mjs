@@ -65,16 +65,45 @@ export function eventLine(stage, exitCode, durationMs) {
   if (!event) throw new Error("INVALID_CI_EVENT");
   return `VTC_CI_EVENT ${JSON.stringify(event)}`;
 }
+// Per-file durations for the sharded lanes: only committed test file names and a bounded
+// integer, so the weights in test-shard-weights.json can be refreshed from hosted runs.
+export const fileTimingPrefix = "VTC_FILE_TIMING ";
+const timedFiles = {
+  integration: /^test\/integration\/[a-z0-9][a-z0-9-]*\.test\.ts$/,
+  e2e: /^test\/e2e\/[a-z0-9][a-z0-9-]*\.spec\.ts$/,
+};
+export function safeFileTiming(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Object.keys(value).length !== 3 ||
+    !["integration", "e2e"].includes(value.lane) ||
+    typeof value.file !== "string" ||
+    !timedFiles[value.lane].test(value.file) ||
+    !Number.isSafeInteger(value.durationMs) ||
+    value.durationMs < 0 ||
+    value.durationMs > 86400000
+  )
+    return undefined;
+  return { lane: value.lane, file: value.file, durationMs: value.durationMs };
+}
+export function fileTimingLine(value) {
+  const timing = safeFileTiming(value);
+  if (!timing) throw new Error("INVALID_FILE_TIMING");
+  return `${fileTimingPrefix}${JSON.stringify(timing)}`;
+}
 export function collectEvents() {
   const events = [];
   const browserFailures = [];
   const fixtureDiagnostics = [];
+  const fileTimings = [];
   let pending = "";
   let oversized = false;
   return {
     events,
     browserFailures,
     fixtureDiagnostics,
+    fileTimings,
     push(chunk) {
       for (const part of String(chunk).split(/(\n)/)) {
         if (part === "\n") {
@@ -94,6 +123,14 @@ export function collectEvents() {
               if (failure && browserFailures.length < 32) browserFailures.push(failure);
             } catch {
               /* Unstructured browser diagnostics remain private. */
+            }
+          }
+          if (!oversized && pending.startsWith(fileTimingPrefix)) {
+            try {
+              const timing = safeFileTiming(JSON.parse(pending.slice(fileTimingPrefix.length)));
+              if (timing && fileTimings.length < 128) fileTimings.push(timing);
+            } catch {
+              /* Only the closed timing schema can reach the public report. */
             }
           }
           if (!oversized && pending.startsWith("{")) {
@@ -124,6 +161,7 @@ export function qualityReport(
   probe,
   browserFailures = [],
   fixtureDiagnostics = [],
+  fileTimings = [],
 ) {
   const failures = browserFailures.map(safeBrowserFailure).filter(Boolean).slice(0, 32);
   if (
@@ -149,5 +187,6 @@ export function qualityReport(
     stages: events.map(safeEvent).filter(Boolean).slice(0, 64),
     browserFailures: failures,
     fixtureDiagnostics: fixtureDiagnostics.map(safeTripFixture).filter(Boolean).slice(0, 64),
+    fileTimings: fileTimings.map(safeFileTiming).filter(Boolean).slice(0, 128),
   };
 }

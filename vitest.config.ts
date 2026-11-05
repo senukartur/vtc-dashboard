@@ -9,6 +9,9 @@ export default defineConfig({
       process.env.VTC_FAILURE_PROBE === "assertion"
         ? [`test/probes/${lane}.test.ts`]
         : [`test/${lane}/**/*.test.ts`],
+    // Integration files also report their duration for the CI shard weights.
+    reporters:
+      lane === "integration" ? ["default", "./test/support/file-timing-reporter.ts"] : ["default"],
     environment: "node",
     setupFiles: ["test/support/setup.ts"],
     fileParallelism: false,

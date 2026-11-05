@@ -44,12 +44,12 @@ CI splits the aggregate into parallel groups, each in its own isolated stack (se
 
 ```sh
 pnpm test:local core                                    # check, build, isolation, unit, contracts, failure-reporting
-pnpm test:local integration --skip-check --shard 1/2     # one Vitest shard of the integration files
+pnpm test:local integration --skip-check --shard 1/2     # one duration-packed shard of the integration files
 pnpm test:local persistence-recovery --skip-check
-pnpm test:local e2e --skip-check --shard 2/6            # one Playwright shard of all three projects
+pnpm test:local e2e --skip-check --shard 2/6            # one packed shard of the specs, all three projects
 ```
 
-`ciGroups` in [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) defines the groups; a unit test proves that together they run every stage of `all` exactly once. `core` always runs `pnpm check` and refuses `--skip-check`; the other groups leave check to `core` and still build. `--shard <i/n>` (1 ≤ i ≤ n ≤ 8) is accepted only by `integration` and `e2e` and passes `--shard=i/n` to Vitest or Playwright; probes refuse it. Both split by file count, not by duration. A group stops at its first failed stage, like `all`.
+`ciGroups` in [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) defines the groups; a unit test proves that together they run every stage of `all` exactly once. `core` always runs `pnpm check` and refuses `--skip-check`; the other groups leave check to `core` and still build. `--shard <i/n>` (1 ≤ i ≤ n ≤ 8) is accepted only by `integration` and `e2e`; probes refuse it. Since [VTC-080](https://trello.com/c/E5rjsbVu) the runner does not pass `--shard` to Vitest or Playwright. `planShards` packs the lane's files by the measured weights in [`scripts/test-shard-weights.json`](../../scripts/test-shard-weights.json) (see the [CI guide](ci.md#shard-weights)), and the shard runs its explicit file list. A unit test proves that for every shard count each file runs exactly once. A group stops at its first failed stage, like `all`.
 
 `pnpm test:affected` compares the working tree (committed, staged, unstaged and untracked) with the merge base of `origin/main` (or `--base <ref>`). [`scripts/test-selection.mjs`](../../scripts/test-selection.mjs) maps each changed path: a changed test selects itself; a feature area selects its tests on every layer by name prefix; `test/e2e/support/` selects the e2e lane and `test/persistence/` the persistence and recovery lanes; Markdown, `docs/`, `.github/`, `.claude/` and `.agents/` select nothing. Any other path, including migrations, shared packages, the app shell, `test/support/`, configuration and the harness itself, selects every lane. Add new modules to the area map; a unit test fails when a contract, integration or browser test cannot be reached from any area. Unit and contract files can also run natively with `VTC_TEST_SELECTION="<files>" pnpm test:selected` after `pnpm build:packages`, without Docker's network boundary.
 

@@ -62,3 +62,33 @@ test.each(jobs)("%s CLI schema rejects malformed, missing and unexpected review 
   ])
     expect(validate({ summary: "Invalid finding.", findings: [invalid] })).toBe(false);
 });
+
+test("a separate status job publishes the status the main ruleset requires", () => {
+  const ruleset = JSON.parse(
+    readFileSync(new URL("../../.github/rulesets/main.json", import.meta.url), "utf8"),
+  );
+  const checks = ruleset.rules.find(
+    (rule: { type: string }) => rule.type === "required_status_checks",
+  ).parameters.required_status_checks;
+  expect(checks).toContainEqual({ context: "Advisory review", integration_id: 15368 });
+  const [review = "", status = ""] = (workflow.split(/\r?\n {2}mention:/)[0] ?? "").split(
+    /\r?\n {2}review-status:/,
+  );
+  // The Claude step reads untrusted PR content, so its job cannot publish the merge gate.
+  expect(review).not.toContain("statuses: write");
+  expect(review).not.toContain("createCommitStatus");
+  expect(review).toMatch(/published: \$\{\{ steps\.publish\.outcome == 'success' \}\}/);
+  expect(status).toMatch(/permissions:\r?\n {6}statuses: write\r?\n {4}steps:/);
+  expect(status).toContain("needs: [review]");
+  expect(status).toContain("context: 'Advisory review'");
+  // A cancelled or timed-out review still gets a visible failure for its head.
+  expect(status).toContain("always() &&");
+  expect(status).toMatch(/REVIEW_RESULT: \$\{\{ needs\.review\.result \}\}/);
+  expect(status).toMatch(/group: claude-review-status-.*\r?\n {6}cancel-in-progress: false/);
+  // Reviews of different heads never cancel each other (VTC-075).
+  expect(review).toMatch(
+    /group: claude-review-\$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \}\}-\$\{\{ github\.event\.workflow_run\.head_sha \}\}/,
+  );
+  // The on-demand job must not publish the required status.
+  expect(workflow.split(/\r?\n {2}mention:/)[1]).not.toContain("createCommitStatus");
+});
