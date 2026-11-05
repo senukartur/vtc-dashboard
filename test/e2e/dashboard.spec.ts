@@ -348,10 +348,19 @@ test.describe("Company Dashboard E2E", () => {
 
       // A reconnect must not reread the failed zone and send the page back to loading.
       delete state.failures.stats;
+      const selfReads = () => state.requests.filter((url) => url.pathname === "/api/v1/me").length;
+      const levelReads = () => requestsTo(state, "/api/v1/qualification-levels").length;
+      const [selfBefore, levelsBefore] = [selfReads(), levelReads()];
       await context.setOffline(true);
+      await page.waitForFunction(() => !navigator.onLine);
       await context.setOffline(false);
-      // Nothing visible changes to wait for; give a reread time to start.
-      await page.waitForTimeout(500);
+      await page.waitForFunction(() => navigator.onLine);
+      // Positive control: queries that opt into reconnect refetches reread, so the reconnect
+      // was handled.
+      await expect.poll(selfReads).toBeGreaterThan(selfBefore);
+      // The level reads are queued after the stats read (FIFO read slots), so a stats reread
+      // would already be recorded.
+      await expect.poll(levelReads).toBe(levelsBefore + 2);
       expect(requestsTo(state, statsPath)).toHaveLength(1);
       await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
       await expect(leaderboardCard(page).getByRole("link", { name: "AlphaDriver" })).toBeVisible();
