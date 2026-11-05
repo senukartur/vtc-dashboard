@@ -143,10 +143,23 @@ export function safeQualificationAnnotations(annotations) {
   }
 }
 
+// Where the failure was thrown: a committed test file and line, never free text or another path.
+const failureLocation =
+  /^test\/(?:e2e\/support|e2e|probes|support)\/[a-z0-9-]{1,64}(?:\.spec)?\.ts:[1-9]\d{0,4}$/;
+export function safeFailureLocation(value) {
+  return typeof value === "string" && failureLocation.test(value) ? value : undefined;
+}
+
 // Reject whole records with extra fields; never serialize arbitrary runner objects.
 export function safeBrowserFailure(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const keys = Object.keys(value).sort().join(",");
+  const located = Object.hasOwn(value, "failureAt");
+  const failureAt = located ? safeFailureLocation(value.failureAt) : undefined;
+  if (located && !failureAt) return undefined;
+  const keys = Object.keys(value)
+    .filter((key) => key !== "failureAt")
+    .sort()
+    .join(",");
   if (!statuses.includes(value.status)) return undefined;
   if (
     [
@@ -166,6 +179,7 @@ export function safeBrowserFailure(value) {
       project: value.project,
       line: value.line,
       status: value.status,
+      ...(failureAt ? { failureAt } : {}),
     };
     if (keys === "file,kind,line,project,status") return result;
     const phase =
@@ -180,6 +194,7 @@ export function safeBrowserFailure(value) {
   }
   if (
     keys === "category,kind,status" &&
+    !located &&
     value.kind === "global" &&
     categories.includes(value.category)
   )

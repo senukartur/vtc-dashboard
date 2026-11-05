@@ -47,9 +47,7 @@ test("case timing pipeline includes passed and failed executions, excludes skips
       reporter.onTestEnd(testcase, {
         status,
         duration: status === "skipped" ? 0 : 17,
-        get errors() {
-          return forbidden();
-        },
+        errors: [opaqueError()],
         get attachments() {
           return forbidden();
         },
@@ -173,6 +171,82 @@ const valid = {
   status: "failed",
 };
 const privateText = "SYNTHETIC_PRIVATE_TOKEN=never-publish";
+/** A runner error whose free-text fields must never be read; only `location` is safe. */
+function opaqueError(location?: { file: string; line: number }) {
+  const forbidden = () => {
+    throw new Error("PRIVATE_ERROR_FIELD_READ");
+  };
+  return {
+    location,
+    get message() {
+      return forbidden();
+    },
+    get stack() {
+      return forbidden();
+    },
+    get value() {
+      return forbidden();
+    },
+    get snippet() {
+      return forbidden();
+    },
+  };
+}
+function locatedFailures(errors: unknown) {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    new SafeBrowserReporter().onTestEnd(
+      {
+        location: { file: resolve("test/e2e/landing.spec.ts"), line: 12 },
+        parent: { project: () => ({ name: "desktop-chromium" }) },
+      } as unknown as TestCase,
+      { status: "failed", duration: 1, errors } as unknown as TestResult,
+    );
+    const collector = collectEvents();
+    for (const [line] of output.mock.calls) collector.push(`${line}\n`);
+    return collector.browserFailures;
+  } finally {
+    output.mockRestore();
+  }
+}
+test("failure locations keep the first committed test file and line and read nothing else", () => {
+  const at = (file: string, line: number) => opaqueError({ file: resolve(file), line });
+  expect(locatedFailures([at("test/e2e/landing.spec.ts", 40)])).toEqual([
+    { ...valid, failureAt: "test/e2e/landing.spec.ts:40" },
+  ]);
+  // A timeout can point at a helper, and a dependency or private path is skipped, not published.
+  expect(
+    locatedFailures([
+      at("node_modules/playwright/lib/index.js", 3),
+      opaqueError({ file: privateText, line: 1 }),
+      at("test/e2e/support/locale.ts", 64),
+      at("test/e2e/landing.spec.ts", 40),
+    ]),
+  ).toEqual([{ ...valid, failureAt: "test/e2e/support/locale.ts:64" }]);
+  for (const errors of [
+    [],
+    [opaqueError()],
+    [at("test/e2e/landing.spec.ts", 0)],
+    [at("apps/web/src/main.tsx", 1)],
+    undefined,
+  ])
+    expect(locatedFailures(errors)).toEqual([valid]);
+  for (const failureAt of [
+    "test/e2e/landing.spec.ts:40",
+    "test/e2e/support/locale.ts:64",
+    "test/probes/browser.spec.ts:7",
+    "test/support/failure-proof.ts:9",
+  ])
+    expect(safeBrowserFailure({ ...valid, failureAt })).toEqual({ ...valid, failureAt });
+  expect(
+    safeBrowserFailure({
+      ...valid,
+      file: "qualifications",
+      ...promotionPhase,
+      failureAt: "test/e2e/support/qualifications.ts:97",
+    }),
+  ).toMatchObject({ ...promotionPhase, failureAt: "test/e2e/support/qualifications.ts:97" });
+});
 const promotionPhase = {
   scenario: qualificationPhaseScenario,
   phase: "finally-release-held",
@@ -203,9 +277,7 @@ function phasePipeline(annotations: unknown, file = "qualifications", status = "
       {
         status,
         annotations,
-        get errors() {
-          return forbidden();
-        },
+        errors: [opaqueError()],
         get attachments() {
           return forbidden();
         },
@@ -442,8 +514,27 @@ test("browser diagnostics reject malformed and extra fields at collection and re
       ...valid,
       [field]: privateText,
     })),
+    ...[
+      privateText,
+      12,
+      null,
+      "test/e2e/landing.spec.ts",
+      "test/e2e/landing.spec.ts:0",
+      "test/e2e/landing.spec.ts:100000",
+      "test/e2e/../../secret.ts:1",
+      "test/e2e/a/b.ts:1",
+      "apps/web/src/main.tsx:1",
+      "/home/runner/test/e2e/landing.spec.ts:1",
+      `test/e2e/${"x".repeat(65)}.ts:1`,
+    ].map((failureAt) => ({ ...valid, failureAt })),
     { kind: "global", status: "failed", category: privateText },
     { kind: "global", status: "failed", category: "runner-error", message: privateText },
+    {
+      kind: "global",
+      status: "failed",
+      category: "runner-error",
+      failureAt: "test/e2e/landing.spec.ts:1",
+    },
   ];
   const collector = collectEvents();
   for (const value of invalid) {

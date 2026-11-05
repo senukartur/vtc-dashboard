@@ -42,14 +42,23 @@ export interface QualificationFailurePhase {
 }
 export function safeQualificationPhase(value: unknown): QualificationFailurePhase | undefined;
 export function safeQualificationAnnotations(value: unknown): QualificationFailurePhase | undefined;
+export function safeFailureLocation(value: unknown): string | undefined;
 export type BrowserFailure =
-  | { kind: "test"; file: string; project: string; line: number; status: BrowserFailureStatus }
+  | {
+      kind: "test";
+      file: string;
+      project: string;
+      line: number;
+      status: BrowserFailureStatus;
+      failureAt?: string;
+    }
   | ({
       kind: "test";
       file: "qualifications";
       project: string;
       line: number;
       status: BrowserFailureStatus;
+      failureAt?: string;
     } & QualificationFailurePhase)
   | { kind: "global"; category: string; status: BrowserFailureStatus };
 export const browserFiles: Record<string, string>;
