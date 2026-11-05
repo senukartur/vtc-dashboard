@@ -1,7 +1,7 @@
-// Pure view model for the overview's recent company trips and nearest convoy blocks (VTC-055).
-// It only decides what the blocks show; requests, keys, ETags and command state stay in the
-// hooks and components.
-import type { UseQueryResult } from "@tanstack/react-query";
+// Pure view model for the overview's recent company trips and nearest convoy blocks (VTC-055),
+// plus the pending query view for any page that waits for the reporting timezone (the overview
+// and, since VTC-078, the driver profile). It only decides what the blocks show; requests, keys,
+// ETags and command state stay in the hooks and components.
 import { formatQuantity, formatUtc, type Locale } from "../../shared/formatting.js";
 import { AccountFailure } from "../account/transport.js";
 import type { EventPhase, ResponseValue } from "../events/view-model.js";
@@ -42,23 +42,30 @@ export function retainsError(
   return since !== null && query.data === undefined && query.errorUpdateCount === since;
 }
 
+/** What a block reads from its query; a TanStack result satisfies it unchanged. */
+export type QueryView<T> = {
+  data: T | undefined;
+  error: unknown;
+  isError: boolean;
+  isPending: boolean;
+  errorUpdateCount: number;
+  refetch: (options?: { cancelRefetch?: boolean }) => Promise<unknown>;
+};
+
 /**
- * A block's view while the overview waits for the reporting timezone: loading, never the cached
- * data or error of keys the page may not use.
+ * A query's view while a page waits for the reporting timezone: loading, never the cached data or
+ * error of keys the page may not use.
  */
-export function untilAnchored<T>(query: UseQueryResult<T>, anchored: boolean): UseQueryResult<T> {
+export function untilAnchored<T>(query: QueryView<T>, anchored: boolean): QueryView<T> {
   if (anchored) return query;
   return {
-    ...query,
     data: undefined,
     error: null,
     isError: false,
-    isLoadingError: false,
-    isRefetchError: false,
-    isSuccess: false,
     isPending: true,
-    status: "pending",
-  } as UseQueryResult<T>;
+    errorUpdateCount: query.errorUpdateCount,
+    refetch: query.refetch,
+  };
 }
 
 function isForbidden(error: unknown) {

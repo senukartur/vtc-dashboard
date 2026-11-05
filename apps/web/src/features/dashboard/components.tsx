@@ -1,4 +1,3 @@
-import type { UseQueryResult } from "@tanstack/react-query";
 import { type ReactNode, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -16,6 +15,7 @@ import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useQualificationQuery } from "../qualifications/queries.js";
 import { progressPercent } from "./model.js";
 import type { DTO } from "./transport.js";
+import type { QueryView } from "./view-model.js";
 import "./dashboard.css";
 
 type AnalyticsData = DTO["Analytics"];
@@ -262,7 +262,7 @@ export function LeaderboardWidget({
   query,
   locale,
 }: {
-  query: UseQueryResult<LeaderboardData>;
+  query: QueryView<LeaderboardData>;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");
@@ -377,7 +377,7 @@ function QualificationGame({
   locale,
 }: {
   label: string;
-  query: UseQueryResult<ProgressData>;
+  query: QueryView<ProgressData>;
   available: boolean;
   levels: LevelsQuery;
   locale: Locale;
@@ -475,8 +475,8 @@ export function MyQualificationWidget({
   atsProgress,
   available,
 }: {
-  ets2Progress: UseQueryResult<ProgressData>;
-  atsProgress: UseQueryResult<ProgressData>;
+  ets2Progress: QueryView<ProgressData>;
+  atsProgress: QueryView<ProgressData>;
   available: boolean;
 }) {
   const { t, i18n } = useTranslation("dashboard");
@@ -521,7 +521,7 @@ export function ReviewerQueueWidget({
   query,
   locale,
 }: {
-  query: UseQueryResult<ReviewListData>;
+  query: QueryView<ReviewListData>;
   locale: Locale;
 }) {
   const { t } = useTranslation("dashboard");

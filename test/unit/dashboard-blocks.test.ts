@@ -6,6 +6,7 @@ import {
   blockView,
   type Countdown,
   countdown,
+  type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
   recentTripsPath,
@@ -160,37 +161,38 @@ describe("retry of a block without data", () => {
 });
 
 describe("view until the reporting timezone is known", () => {
-  type Query = Parameters<typeof untilAnchored<{ items: unknown[] }>>[0];
+  const refetch = async () => undefined;
 
   it("returns the query once anchored and shows loading before", () => {
-    const settled = {
+    const settled: QueryView<{ items: unknown[] }> = {
       data: { items: [] },
       error: null,
       isError: false,
-      isLoadingError: false,
-      isRefetchError: false,
-      isSuccess: true,
       isPending: false,
-      status: "success",
-      fetchStatus: "idle",
-    } as unknown as Query;
+      errorUpdateCount: 2,
+      refetch,
+    };
     expect(untilAnchored(settled, true)).toBe(settled);
     const waiting = untilAnchored(settled, false);
-    expect(waiting.data).toBeUndefined();
-    expect(waiting.isPending).toBe(true);
-    expect(waiting.status).toBe("pending");
-    expect(waiting.isError).toBe(false);
-    expect(waiting.isSuccess).toBe(false);
+    expect(waiting).toEqual({
+      data: undefined,
+      error: null,
+      isError: false,
+      isPending: true,
+      errorUpdateCount: 2,
+      refetch,
+    });
+    expect(waiting.refetch).toBe(refetch);
+    expect(blockView(waiting, (data) => data.items.length === 0)).toBe("loading");
     // Cached errors of a key the page may not use are hidden too.
-    const failed = {
+    const failed: QueryView<{ items: unknown[] }> = {
       ...settled,
       data: undefined,
       error: new AccountFailure("forbidden"),
       isError: true,
-      isSuccess: false,
-      status: "error",
-    } as unknown as Query;
+    };
     expect(untilAnchored(failed, false)).toMatchObject({
+      data: undefined,
       error: null,
       isError: false,
       isPending: true,
