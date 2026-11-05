@@ -168,12 +168,15 @@ export function ProfileHeader({
   );
 }
 
+/** `onRetry` belongs to the page: it may have to reread the reporting timezone first. */
 export function DriverKpis({
   query,
   locale,
+  onRetry,
 }: {
   query: UseQueryResult<Analytics>;
   locale: Locale;
+  onRetry: () => void;
 }) {
   const { t } = useTranslation("drivers");
   const sectionRef = useRef<HTMLElement>(null);
@@ -194,7 +197,7 @@ export function DriverKpis({
           onClick={() => {
             // The button unmounts on success; keep focus inside the statistics region.
             sectionRef.current?.focus();
-            void query.refetch();
+            onRetry();
           }}
         >
           {t("kpi.retry")}

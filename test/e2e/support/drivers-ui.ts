@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
+import { makeCompanyStatsFixture } from "./dashboard-fixtures.ts";
 import {
   alphaId,
   analyticsFixture,
@@ -23,7 +24,9 @@ export type DriverEndpoint =
   | "progressEts2"
   | "progressAts"
   | "levels"
-  | "trips";
+  | "trips"
+  /** Public company stats: the reporting timezone that anchors the analytics window. */
+  | "stats";
 
 /** Mutable mock state; changes apply to the next matching request. */
 export interface DriverMockState {
@@ -41,6 +44,11 @@ export interface DriverMockState {
   /** Twelve trips by AlphaHauler in the company window (more than the profile shows). */
   bulkTrips: boolean;
   emptyAnalytics: boolean;
+  /** Zone in the public company stats; null returns the unavailable month. */
+  reportingTimezone: string | null;
+  /** Holds every response of an endpoint until `release` is called for it. */
+  hold(endpoint: DriverEndpoint): void;
+  release(endpoint: DriverEndpoint): void;
   holdProfile(): void;
   releaseProfile(): void;
 }
@@ -53,6 +61,7 @@ function endpointOf(url: URL): DriverEndpoint | null {
     return url.searchParams.get("game") === "ats" ? "progressAts" : "progressEts2";
   if (path === "/api/v1/qualification-levels") return "levels";
   if (path === "/api/v1/trips") return "trips";
+  if (path === "/api/v1/public/company-stats") return "stats";
   return null;
 }
 
@@ -79,9 +88,11 @@ export async function mockDriverRoutes(
     emptyTrips?: boolean;
     bulkTrips?: boolean;
     emptyAnalytics?: boolean;
+    /** Public company stats zone (default Europe/Moscow, as in the analytics fixture). */
+    reportingTimezone?: string | null;
   } = {},
 ): Promise<DriverMockState> {
-  let gate: { promise: Promise<void>; release: () => void } | undefined;
+  const gates = new Map<DriverEndpoint, { promise: Promise<void>; release: () => void }>();
   const state: DriverMockState = {
     requests: [],
     unexpected: [],
@@ -91,17 +102,25 @@ export async function mockDriverRoutes(
     emptyTrips: options.emptyTrips ?? false,
     bulkTrips: options.bulkTrips ?? false,
     emptyAnalytics: options.emptyAnalytics ?? false,
-    holdProfile() {
-      if (gate) return;
+    reportingTimezone:
+      options.reportingTimezone === undefined ? "Europe/Moscow" : options.reportingTimezone,
+    hold(endpoint) {
+      if (gates.has(endpoint)) return;
       let release = () => {};
       const promise = new Promise<void>((resolve) => {
         release = resolve;
       });
-      gate = { promise, release };
+      gates.set(endpoint, { promise, release });
+    },
+    release(endpoint) {
+      gates.get(endpoint)?.release();
+      gates.delete(endpoint);
+    },
+    holdProfile() {
+      state.hold("profile");
     },
     releaseProfile() {
-      gate?.release();
-      gate = undefined;
+      state.release("profile");
     },
   };
   if (options.holdProfile) state.holdProfile();
@@ -122,9 +141,13 @@ export async function mockDriverRoutes(
     if (path === "/api/v1/me/upcoming-event") return route.fulfill({ json: { data: null, meta } });
 
     const endpoint = endpointOf(url);
-    if (endpoint === "profile" && gate) await gate.promise;
+    const gate = endpoint ? gates.get(endpoint) : undefined;
+    if (gate) await gate.promise;
     const status = endpoint ? state.failures[endpoint] : undefined;
     if (status) return route.fulfill({ status, json: { error: { code: "SYNTHETIC_FAILURE" } } });
+
+    if (endpoint === "stats")
+      return route.fulfill({ json: makeCompanyStatsFixture(state.reportingTimezone) });
 
     const memberId = path.split("/")[4] ?? "";
     if (endpoint === "profile") {

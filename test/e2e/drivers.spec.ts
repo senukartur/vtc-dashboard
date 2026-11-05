@@ -20,9 +20,9 @@ const memberCapabilities = [
   "trips.submit_own",
 ];
 
-async function open(page: Page, memberId: string) {
-  // Fixed clock: the rolling window is Dec 2025 – Nov 2026.
-  await page.clock.setFixedTime(new Date("2026-11-15T12:00:00Z"));
+async function open(page: Page, memberId: string, clock = "2026-11-15T12:00:00Z") {
+  // Fixed clock: by default the rolling window is Dec 2025 – Nov 2026.
+  await page.clock.setFixedTime(new Date(clock));
   await page.goto(`/account/drivers/${memberId}`);
 }
 const main = (page: Page) => page.getByRole("main");
@@ -652,5 +652,159 @@ test.describe("Compact driver profile", () => {
       "true",
     );
     await expect(kpis(page)).toHaveAccessibleName("Driver statistics, last 12 months");
+  });
+});
+
+test.describe("Driver profile reporting-timezone window", () => {
+  const statsPath = "/api/v1/public/company-stats";
+  const analyticsPath = `/api/v1/members/${alphaId}/analytics`;
+  const windowOf = (fromDate: string, toDateExclusive: string, game?: "ets2" | "ats") =>
+    `${analyticsPath}?fromDate=${fromDate}&toDateExclusive=${toDateExclusive}&granularity=month${game ? `&game=${game}` : ""}`;
+  // 31 Oct 2026, 22:30 UTC is already 1 Nov 01:30 in Moscow.
+  const monthEnd = "2026-10-31T22:30:00Z";
+  const novemberWindow = windowOf("2025-12-01", "2026-12-01");
+  const utcOctoberWindow = windowOf("2025-11-01", "2026-11-01");
+  type State = Awaited<ReturnType<typeof mockDriverRoutes>>;
+  const statsRequests = (state: State) =>
+    state.requests.filter((url) => url.pathname === statsPath);
+  const analyticsRequests = (state: State) =>
+    state.requests
+      .filter((url) => url.pathname === analyticsPath)
+      .map((url) => `${url.pathname}${url.search}`);
+  const currentMonth = (page: Page) => kpis(page).getByRole("definition").nth(2);
+  const loadingStatus = (page: Page) =>
+    page.getByRole("status").filter({ hasText: "Loading data..." });
+
+  for (const { zone, clock } of [
+    { zone: "Europe/Moscow", clock: monthEnd },
+    // 1 Dec 2026, 07:30 UTC is still 30 Nov 23:30 in Los Angeles.
+    { zone: "America/Los_Angeles", clock: "2026-12-01T07:30:00Z" },
+  ])
+    test(`the first analytics request uses the ${zone} calendar month`, async ({ page }) => {
+      const state = await mockDriverRoutes(page, { reportingTimezone: zone });
+      await open(page, alphaId, clock);
+      await loaded(page);
+      await expect(currentMonth(page)).toContainText("November 2026");
+      expect(statsRequests(state)).toHaveLength(1);
+      const firstStats = state.requests.findIndex((url) => url.pathname === statsPath);
+      const firstAnalytics = state.requests.findIndex((url) => url.pathname === analyticsPath);
+      expect(firstStats).toBeGreaterThanOrEqual(0);
+      expect(firstStats).toBeLessThan(firstAnalytics);
+      expect(analyticsRequests(state)).toEqual([novemberWindow]);
+      expect(state.unexpected).toEqual([]);
+
+      await gameGroup(page).getByRole("button", { name: "ATS", exact: true }).click();
+      await expect(kpis(page).getByRole("definition").first()).toHaveText("31last 12 months");
+      expect(analyticsRequests(state)).toEqual([
+        novemberWindow,
+        windowOf("2025-12-01", "2026-12-01", "ats"),
+      ]);
+      expect(statsRequests(state)).toHaveLength(1);
+    });
+
+  test("only analytics waits for the reporting timezone", async ({ page }) => {
+    const state = await mockDriverRoutes(page);
+    state.hold("stats");
+    await open(page, alphaId, monthEnd);
+    await expect.poll(() => statsRequests(state).length).toBe(1);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("AlphaHauler");
+    await expect(tripsCard(page).getByRole("table")).toBeVisible();
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+    await expect(loadingStatus(page)).toHaveCount(1);
+    expect(analyticsRequests(state)).toEqual([]);
+
+    state.release("stats");
+    await expect(currentMonth(page)).toContainText("November 2026");
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "false");
+    expect(analyticsRequests(state)).toEqual([novemberWindow]);
+    expect(state.unexpected).toEqual([]);
+  });
+
+  for (const variant of ["failed", "unavailable"] as const)
+    test(`falls back to the UTC month when the reporting timezone is ${variant}`, async ({
+      page,
+    }) => {
+      // The real API answers analytics with 409 without a reporting timezone; the mock answers
+      // 200, so this case checks the request dates only.
+      const state = await mockDriverRoutes(
+        page,
+        variant === "failed" ? { failures: { stats: 503 } } : { reportingTimezone: null },
+      );
+      await open(page, alphaId, monthEnd);
+      await loaded(page);
+      await expect(currentMonth(page)).toContainText("October 2026");
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      expect(statsRequests(state)).toHaveLength(1);
+      expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
+      expect(state.unexpected).toEqual([]);
+    });
+
+  test("Retry rereads a failed timezone once and then loads the zone window", async ({ page }) => {
+    const state = await mockDriverRoutes(page, { failures: { stats: 503, analytics: 503 } });
+    await open(page, alphaId, monthEnd);
+    await expect(kpis(page).getByText("Could not load statistics.")).toBeVisible();
+    expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
+
+    delete state.failures.stats;
+    delete state.failures.analytics;
+    state.hold("stats");
+    // Two presses in one task: the second reuses the stats read already in flight.
+    await kpis(page)
+      .getByRole("button", { name: "Retry" })
+      .evaluate((button: HTMLButtonElement) => {
+        button.click();
+        button.click();
+      });
+    await expect(kpis(page)).toBeFocused();
+    await expect.poll(() => statsRequests(state).length).toBe(2);
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+    await expect(kpis(page).getByText("Could not load statistics.")).toHaveCount(0);
+    expect(analyticsRequests(state)).toEqual([utcOctoberWindow]);
+
+    state.release("stats");
+    await expect(currentMonth(page)).toContainText("November 2026");
+    await expect(kpis(page)).toBeFocused();
+    expect(statsRequests(state)).toHaveLength(2);
+    expect(analyticsRequests(state)).toEqual([utcOctoberWindow, novemberWindow]);
+  });
+
+  test("hides cached fallback statistics while a failed timezone is reread on return", async ({
+    page,
+  }) => {
+    const state = await mockDriverRoutes(page, { failures: { stats: 503 } });
+    await open(page, alphaId, monthEnd);
+    await loaded(page);
+    await expect(currentMonth(page)).toContainText("October 2026");
+
+    // Leave and return in the same document, so the failed stats and UTC analytics stay cached.
+    await page.evaluate(() => {
+      history.pushState(null, "", "/account/drivers");
+      dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await expect(kpis(page)).toHaveCount(0);
+    delete state.failures.stats;
+    state.hold("stats");
+    const before = analyticsRequests(state).length;
+    await page.goBack();
+    await expect.poll(() => statsRequests(state).length).toBe(2);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("AlphaHauler");
+    await expect(kpis(page)).toHaveAttribute("aria-busy", "true");
+    await expect(kpis(page).getByText("October 2026")).toHaveCount(0);
+    await expect(chartCard(page).getByText(/October 2026/)).toHaveCount(0);
+    expect(analyticsRequests(state).slice(before)).toEqual([]);
+
+    state.release("stats");
+    await expect(currentMonth(page)).toContainText("November 2026");
+    expect(analyticsRequests(state).slice(before)).toEqual([novemberWindow]);
+  });
+
+  test("requests no timezone without company.read", async ({ page }) => {
+    const state = await mockDriverRoutes(page, {
+      capabilities: memberCapabilities.filter((item) => item !== "company.read"),
+    });
+    await open(page, alphaId, monthEnd);
+    await expect(page.getByText("You do not have access to driver profiles.")).toBeVisible();
+    expect(statsRequests(state)).toEqual([]);
+    expect(state.requests.some((url) => url.pathname.startsWith("/api/v1/members"))).toBe(false);
   });
 });

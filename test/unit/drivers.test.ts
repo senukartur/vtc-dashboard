@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { computePeriodDates } from "../../apps/web/src/features/dashboard/model.ts";
 import {
   assignmentFor,
   failureView,
@@ -48,28 +49,94 @@ const placeholders = (text: string) => (text.match(/\{\{\w+\}\}/g) ?? []).sort()
 const days = (from: string, to: string) => (Date.parse(to) - Date.parse(from)) / 86_400_000;
 
 describe("driver profile model", () => {
-  describe("rolling twelve-month window", () => {
-    it("ends with the current UTC month and starts eleven months earlier", () => {
-      expect(twelveMonthWindow(new Date("2026-11-15T12:00:00Z"))).toEqual({
-        fromDate: "2025-12-01",
-        toDateExclusive: "2026-12-01",
-      });
+  describe("rolling twelve-month window in the reporting timezone", () => {
+    const at = (instant: string, zone: string) => twelveMonthWindow(new Date(instant), zone);
+    const span = (fromDate: string, toDateExclusive: string) => ({ fromDate, toDateExclusive });
+    const october2026 = span("2025-11-01", "2026-11-01");
+    const november2026 = span("2025-12-01", "2026-12-01");
+    const december2026 = span("2026-01-01", "2027-01-01");
+    const january2027 = span("2026-02-01", "2027-02-01");
+
+    it("rolls into the next month at local midnight east of UTC", () => {
+      expect(at("2026-10-31T20:59:00Z", "Europe/Moscow")).toEqual(october2026);
+      expect(at("2026-10-31T21:00:00Z", "Europe/Moscow")).toEqual(november2026);
+      // The UTC clock is still in October at the same instants.
+      expect(at("2026-10-31T20:59:00Z", "UTC")).toEqual(october2026);
+      expect(at("2026-10-31T21:00:00Z", "UTC")).toEqual(october2026);
     });
 
-    it("rolls over January and December", () => {
-      expect(twelveMonthWindow(new Date("2027-01-01T00:00:00Z"))).toEqual({
-        fromDate: "2026-02-01",
-        toDateExclusive: "2027-02-01",
-      });
-      expect(twelveMonthWindow(new Date("2026-12-31T23:59:59Z"))).toEqual({
-        fromDate: "2026-01-01",
-        toDateExclusive: "2027-01-01",
-      });
+    it("keeps the month across a local day boundary inside it", () => {
+      expect(at("2026-11-15T20:59:00Z", "Europe/Moscow")).toEqual(november2026);
+      expect(at("2026-11-15T21:00:00Z", "Europe/Moscow")).toEqual(november2026);
+    });
+
+    it("rolls over the year at local midnight east of UTC", () => {
+      expect(at("2026-12-31T14:59:00Z", "Asia/Tokyo")).toEqual(december2026);
+      expect(at("2026-12-31T15:00:00Z", "Asia/Tokyo")).toEqual(january2027);
+    });
+
+    it("stays in the previous month and year west of UTC", () => {
+      expect(at("2026-12-01T07:59:00Z", "America/Los_Angeles")).toEqual(november2026);
+      expect(at("2026-12-01T07:59:00Z", "UTC")).toEqual(december2026);
+      expect(at("2026-12-01T08:00:00Z", "America/Los_Angeles")).toEqual(december2026);
+      expect(at("2027-01-01T07:59:59.999Z", "America/Los_Angeles")).toEqual(december2026);
+      expect(at("2027-01-01T07:59:59.999Z", "UTC")).toEqual(january2027);
+    });
+
+    it("follows daylight saving changes", () => {
+      // New York leaves daylight saving time on 1 November 2026 (EDT -4 to EST -5).
+      expect(at("2026-11-01T03:59:00Z", "America/New_York")).toEqual(october2026);
+      expect(at("2026-11-01T04:00:00Z", "America/New_York")).toEqual(november2026);
+      expect(at("2026-11-01T06:30:00Z", "America/New_York")).toEqual(november2026);
+      expect(at("2026-12-01T04:30:00Z", "America/New_York")).toEqual(november2026);
+      // Berlin is on CET (+1) on 31 October and on CEST (+2) on 31 March.
+      expect(at("2026-10-31T22:30:00Z", "Europe/Berlin")).toEqual(october2026);
+      expect(at("2026-10-31T23:00:00Z", "Europe/Berlin")).toEqual(november2026);
+      expect(at("2026-03-31T21:59:00Z", "Europe/Berlin")).toEqual(span("2025-04-01", "2026-04-01"));
+      expect(at("2026-03-31T22:00:00Z", "Europe/Berlin")).toEqual(span("2025-05-01", "2026-05-01"));
+    });
+
+    it("handles the extreme offsets", () => {
+      expect(at("2026-10-31T09:59:00Z", "Pacific/Kiritimati")).toEqual(october2026);
+      expect(at("2026-10-31T10:00:00Z", "Pacific/Kiritimati")).toEqual(november2026);
+      expect(at("2026-11-01T10:59:00Z", "Pacific/Pago_Pago")).toEqual(october2026);
+      expect(at("2026-11-01T11:00:00Z", "Pacific/Pago_Pago")).toEqual(november2026);
+    });
+
+    it("falls back to UTC for a zone unknown to the browser", () => {
+      for (const instant of ["2026-10-31T21:00:00Z", "2026-12-31T23:59:59Z"])
+        expect(at(instant, "Not/A_Zone")).toEqual(at(instant, "UTC"));
+    });
+
+    it("ends with the overview's current month and starts eleven months before it", () => {
+      const monthsBefore = (date: string, months: number) => {
+        const [year, month] = date.split("-").map(Number) as [number, number];
+        return new Date(Date.UTC(year, month - 1 - months, 1)).toISOString().slice(0, 10);
+      };
+      const cases: [string, string][] = [
+        ["2026-10-31T20:59:00Z", "Europe/Moscow"],
+        ["2026-10-31T21:00:00Z", "Europe/Moscow"],
+        ["2026-12-31T15:00:00Z", "Asia/Tokyo"],
+        ["2026-12-01T07:59:00Z", "America/Los_Angeles"],
+        ["2027-01-01T07:59:59.999Z", "America/Los_Angeles"],
+        ["2026-11-01T06:30:00Z", "America/New_York"],
+        ["2026-03-31T22:00:00Z", "Europe/Berlin"],
+        ["2026-10-31T10:00:00Z", "Pacific/Kiritimati"],
+        ["2026-11-01T10:59:00Z", "Pacific/Pago_Pago"],
+        ["2026-10-31T21:00:00Z", "UTC"],
+      ];
+      for (const [instant, zone] of cases) {
+        const now = new Date(instant);
+        const month = computePeriodDates("thisMonth", now, zone);
+        const window = twelveMonthWindow(now, zone);
+        expect(window.toDateExclusive).toBe(month.toDateExclusive);
+        expect(window.fromDate).toBe(monthsBefore(month.fromDate, 11));
+      }
     });
 
     it("stays within the 732-day API limit and covers twelve month starts", () => {
       for (const now of ["2024-02-29T10:00:00Z", "2026-07-01T00:00:00Z", "2028-03-31T23:00:00Z"]) {
-        const window = twelveMonthWindow(new Date(now));
+        const window = twelveMonthWindow(new Date(now), "UTC");
         expect(days(window.fromDate, window.toDateExclusive)).toBeLessThanOrEqual(732);
         expect(window.fromDate.endsWith("-01")).toBe(true);
         const response = analyticsFixture(new URLSearchParams(window));
