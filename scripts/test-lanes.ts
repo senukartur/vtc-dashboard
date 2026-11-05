@@ -24,6 +24,7 @@ import { runTestProcess } from "./test-process.mjs";
 import {
   ciGroups,
   groupSelection,
+  laneShardFiles,
   parseSelection,
   shardableLanes,
   validProject,
@@ -43,6 +44,7 @@ const browserProject =
     ? process.env.VTC_TEST_PROJECT
     : undefined;
 // CI splits the integration and browser lanes into parallel jobs; only those foci accept a shard.
+// A shard runs the explicit file list packed by measured duration (planShards), not --shard.
 const laneShard =
   shardableLanes.includes(lane) && validShard(process.env.VTC_TEST_SHARD)
     ? process.env.VTC_TEST_SHARD
@@ -97,15 +99,12 @@ async function execute(
       allocation.ownerConnectionId += 1;
       await writeFile(path, JSON.stringify(allocation));
     }
+    const targets =
+      files.length || !laneShard || probe || !shardableLanes.includes(name)
+        ? files
+        : laneShardFiles(process.cwd(), name, laneShard);
     const args = ["unit", "contracts", "integration"].includes(name)
-      ? [
-          cli("vitest/vitest.mjs"),
-          "run",
-          "--config",
-          "vitest.config.ts",
-          ...(name === "integration" && laneShard && !probe ? [`--shard=${laneShard}`] : []),
-          ...files,
-        ]
+      ? [cli("vitest/vitest.mjs"), "run", "--config", "vitest.config.ts", ...targets]
       : name === "e2e"
         ? [
             cli("@playwright/test/cli.js"),
@@ -113,8 +112,7 @@ async function execute(
             "--config",
             "playwright.config.ts",
             ...(browserProject && !probe ? [`--project=${browserProject}`] : []),
-            ...(laneShard && !probe ? [`--shard=${laneShard}`] : []),
-            ...files,
+            ...targets,
           ]
         : [
             "--import",
