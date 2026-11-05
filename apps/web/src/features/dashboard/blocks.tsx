@@ -1,4 +1,3 @@
-import type { UseQueryResult } from "@tanstack/react-query";
 import {
   type FormEvent,
   type ReactNode,
@@ -24,6 +23,7 @@ import {
   blockView,
   type Countdown,
   countdown,
+  type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
   responsePressed,
@@ -85,7 +85,7 @@ export function RecentTripsWidget({
   locale,
   displayTimezone,
 }: {
-  query: UseQueryResult<TripListData>;
+  query: QueryView<TripListData>;
   locale: Locale;
   displayTimezone: string;
 }) {
@@ -184,7 +184,7 @@ export function UpcomingEventWidget({
   displayTimezone,
   canRespond,
 }: {
-  query: UseQueryResult<EventData>;
+  query: QueryView<EventData>;
   locale: Locale;
   displayTimezone: string;
   /** events.respond: presentation only, the server still checks the permission. */

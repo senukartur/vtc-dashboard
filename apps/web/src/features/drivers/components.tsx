@@ -15,6 +15,7 @@ import { ChartContainer } from "../../shared/ui/chart.js";
 import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
+import type { QueryView } from "../dashboard/view-model.js";
 import {
   type Assignment,
   COMPANY_TRIPS_WINDOW,
@@ -174,7 +175,7 @@ export function DriverKpis({
   locale,
   onRetry,
 }: {
-  query: UseQueryResult<Analytics>;
+  query: QueryView<Analytics>;
   locale: Locale;
   onRetry: () => void;
 }) {
@@ -601,7 +602,7 @@ export function DistanceByMonth({
   query,
   locale,
 }: {
-  query: UseQueryResult<Analytics>;
+  query: QueryView<Analytics>;
   locale: Locale;
 }) {
   const { t } = useTranslation("drivers");
