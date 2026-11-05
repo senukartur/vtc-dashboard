@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter";
 import {
   browserFailureLine,
@@ -6,11 +6,14 @@ import {
   safeBrowserFailure,
   safeQualificationAnnotations,
 } from "../../scripts/browser-diagnostics.mjs";
+import { fileTimingLine, safeFileTiming } from "../../scripts/ci-result.mjs";
 
 export default class SafeBrowserReporter implements Reporter {
   private started = false;
   private emitted = new Set<string>();
   private files = new Map(Object.entries(browserFiles).map(([path, id]) => [resolve(path), id]));
+  // Summed over all projects; feeds the CI shard weights.
+  private durations = new Map<string, number>();
 
   printsToStdio() {
     return true;
@@ -19,6 +22,8 @@ export default class SafeBrowserReporter implements Reporter {
     this.started = true;
   }
   onTestEnd(test: TestCase, result: TestResult) {
+    const file = relative(process.cwd(), test.location.file).replaceAll("\\", "/");
+    this.durations.set(file, (this.durations.get(file) ?? 0) + result.duration);
     if (!["failed", "timedOut", "interrupted"].includes(result.status)) return;
     const failure = safeBrowserFailure({
       kind: "test",
@@ -44,6 +49,10 @@ export default class SafeBrowserReporter implements Reporter {
     this.emit({ kind: "global", category: "runner-error", status: "failed" });
   }
   onEnd(result: FullResult) {
+    for (const [file, durationMs] of [...this.durations].sort(([a], [b]) => a.localeCompare(b))) {
+      const timing = safeFileTiming({ lane: "e2e", file, durationMs: Math.round(durationMs) });
+      if (timing) console.log(fileTimingLine(timing));
+    }
     if (!this.started && result.status !== "passed")
       this.emit({
         kind: "global",

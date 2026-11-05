@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import {
   collectEvents,
   eventLine,
+  fileTimingLine,
+  fileTimingPrefix,
   qualityReport,
   requiredCi,
   safeEvent,
@@ -116,4 +118,40 @@ test("diagnostic volume is bounded and actual probe failures reject the aggregat
     expect(requiredCi({ quality: "failure" })).toBe(1);
     expect(qualityReport(1, 10, [], lane)).toMatchObject({ category: "probe-not-reached" });
   }
+});
+
+test("file timings keep only committed sharded-lane files and bounded durations", () => {
+  const integration = {
+    lane: "integration",
+    file: "test/integration/trips.test.ts",
+    durationMs: 1234,
+  };
+  const browser = { lane: "e2e", file: "test/e2e/trips-list.spec.ts", durationMs: 0 };
+  const collector = collectEvents();
+  collector.push(
+    [
+      fileTimingLine(integration),
+      fileTimingLine(browser),
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, secret: "private" })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, lane: "unit" })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, file: "test/e2e/trips.spec.ts" })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, file: "/etc/passwd" })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, file: "test/probes/integration.test.ts" })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, durationMs: 1.5 })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, durationMs: -1 })}`,
+      `${fileTimingPrefix}${JSON.stringify({ ...integration, durationMs: 86400001 })}`,
+      `${fileTimingPrefix}not json`,
+      "",
+    ].join("\n"),
+  );
+  expect(collector.fileTimings).toEqual([integration, browser]);
+  expect(qualityReport(0, 1, [], undefined, [], [], collector.fileTimings)).toMatchObject({
+    fileTimings: [integration, browser],
+  });
+  expect(qualityReport(0, 1, [], undefined, [], [], [{ ...browser, extra: 1 }])).toMatchObject({
+    fileTimings: [],
+  });
+  expect(() => fileTimingLine({ ...browser, file: "test/e2e/support/server.ts" })).toThrow(
+    "INVALID_FILE_TIMING",
+  );
 });

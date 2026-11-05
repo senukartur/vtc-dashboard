@@ -39,6 +39,7 @@ Tests and acceptance scenarios: exact concept scenario numbers when applicable
 Checks: exact commands, environment, expected evidence
 Docs to update:
 Remaining verification and integration gates:
+Manual verification after merge: None | each check, environment, steps, expected result and criterion
 Risks / unresolved owner decisions / out of scope:
 ```
 
@@ -121,4 +122,4 @@ Examined files/areas:
 Source provenance / role tools and enforcement limits:
 ```
 
-Blocker/major findings require `CHANGES REQUESTED`. A clean review is bounded by the examined code and evidence; it does not establish owner approval, passing CI, merge or production acceptance.
+When the orchestrator asks, confirm or contest its rejection/deferral of a blocker/major finding with evidence, or check a base delta (old base to new base) against the PR's modules, contracts, catalogs, migrations and permissions; report the result under the same format. Blocker/major findings require `CHANGES REQUESTED`. A clean review is bounded by the examined code and evidence; it does not establish owner approval, passing CI, merge or production acceptance.
