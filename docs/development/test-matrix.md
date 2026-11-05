@@ -8,11 +8,11 @@ The inventory expands parameterized declarations using `pnpm exec vitest list --
 
 There are **680 unit cases in 76 files**, **36 contract cases in 10 files**, **463 integration cases in 24 files**, and **497 browser cases in 34 files**. Native Windows Vitest enumeration lists 674 runnable unit cases: five expanded POSIX launcher cases and one Linux no-follow blob-filesystem case are explicitly skipped there and included in the 680 source inventory. Listing does not execute cases. Ordinary assertion probes are excluded.
 
-The browser policy selects **790 project executions**: desktop 484, tablet 141, mobile 165. Categories are **165 layout**, **287 controlled functional** (including 17 mobile smokes), and **45 real** cases. Selection is not a passed/skipped result: runtime guards or failures can still prevent execution. At base `b40b989cfbddd9e6534b1cd0c7773de21e94d483`, enumeration found 499 cases per project, or 1,497 potential executions before runtime skips. The two case merges and central filtering explain the candidate inventory; the potential-execution difference is not a measured speedup.
+The browser policy selects **790 project executions**: desktop 484, tablet 141, mobile 165. Categories are **165 layout**, **284 controlled functional** (including 17 mobile smokes), and **48 real** cases. Selection is not a passed/skipped result: runtime guards or failures can still prevent execution. At base `b40b989cfbddd9e6534b1cd0c7773de21e94d483`, enumeration found 499 cases per project, or 1,497 potential executions before runtime skips. The two case merges and central filtering explain the candidate inventory; the potential-execution difference is not a measured speedup.
 
 Durations below are seconds, measured **before this change** in [successful Quality run 42065940479](https://github.com/senukartur/vtc-dashboard/actions/runs/42065940479) at that base. Integration timings are whole-file elapsed durations; E2E timings sum test-result durations across the old project selection. They have different semantics and cannot be added as wall time. Unit/contract per-feature durations are **not measured**; their whole-lane durations (33.534s and 5.089s) are not divided among features. Candidate execution durations and comparable hosted before/after measurements belong in the delivery PR after exact-head CI.
 
-Each file is allocated to one row below for additive counting. A zero means no dedicated suite in that layer, not an assertion that the feature is untested elsewhere. Shared journeys are allocated by their primary subject: `trips.spec` to manual reports; real trips and corrections to canonical decisions; dashboard backend reads to analytics; membership administration to members. The source map below makes these boundaries explicit.
+Each file is allocated to one row below for additive counting. A zero means no dedicated suite in that layer, not an assertion that the feature is untested elsewhere. Shared journeys are allocated by their primary subject: `trips.spec` to manual reports; real trips and corrections to canonical decisions; dashboard backend reads to analytics; membership administration to members. The public-pages row includes three real rendered admissions cases in `landing.spec`: one real VTC-015 submission/repeat-email journey and two EN/RU lost-receipt cases whose `route.fetch` reaches the real API/MySQL commit. These are real journeys despite the controlled receipt loss. The source map below makes these boundaries explicit.
 
 ## Feature × layer
 
@@ -24,7 +24,7 @@ Deployment-rehearsal cells attribute shared checkpoints/scenarios using the [reh
 
 | Feature | U | C | I / seconds | Controlled E2E cases / executions / seconds | Layout E2E cases / executions / seconds | Real E2E cases / executions / seconds | Deployment rehearsal | Aggregate baseline E2E seconds |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| Public pages | 23 | 0 | 0 / 0.000 | 11 / 12 / NM | 6 / 18 / NM | 0 / 0 / N/A | No dedicated case; N/A | 53.315 |
+| Public pages | 23 | 0 | 0 / 0.000 | 8 / 9 / NM | 6 / 18 / NM | 3 / 3 / NM | No dedicated case; N/A | 53.315 |
 | Account and identity | 32 | 0 | 64 / 54.442 | 24 / 25 / NM | 8 / 24 / NM | 6 / 6 / NM | Shared ID, W3; NM | 187.579 |
 | Admissions | 15 | 0 | 40 / 21.995 | 12 / 13 / NM | 12 / 29 / NM | 2 / 2 / NM | Shared CODEC, W3; NM | 59.749 |
 | Members and administration | 23 | 4 | 20 / 19.759 | 19 / 20 / NM | 11 / 26 / NM | 18 / 18 / NM | Shared W3; NM | 151.024 |
@@ -43,7 +43,7 @@ Deployment-rehearsal cells attribute shared checkpoints/scenarios using the [reh
 | Settings | 13 | 0 | 0 / 0.000 | 17 / 18 / NM | 8 / 20 / NM | 0 / 0 / N/A | No dedicated company-settings case; N/A | 62.430 |
 | Readiness and built smoke | 0 | 0 | 0 / 0.000 | 6 / 7 / NM | 0 / 0 / N/A | 1 / 1 / NM | Shared ID, OPS; NM | 9.175 |
 | Harness, jobs and platform | 155 | 0 | 24 / 93.344 | 0 / 0 / N/A | 0 / 0 / N/A | 0 / 0 / N/A | Shared OPS, JOBS, W1–9; NM | 0.000 |
-| **Total** | **680** | **36** | **463 / 396.892** | **287 / 304 / NM** | **165 / 441 / NM** | **45 / 45 / NM** | **Shared; non-additive; NM** | **1839.132** |
+| **Total** | **680** | **36** | **463 / 396.892** | **284 / 301 / NM** | **165 / 441 / NM** | **48 / 48 / NM** | **Shared; non-additive; NM** | **1839.132** |
 
 ## Source map
 
@@ -82,12 +82,12 @@ The owner approved desktop/tablet/mobile for layout, desktop for controlled func
 | Layout, `@viewport-mobile` | 12 | Mobile; phone dialogs, bottom navigation and More sheet |
 | Layout, `@viewport-non-mobile` | 5 | Desktop + tablet; simultaneous panes / side navigation |
 | Layout, `@viewport-narrow` | 1 | Tablet + mobile; full-page trip detail instead of the wide panel |
-| Functional, no smoke | 270 | Desktop |
+| Functional, no smoke | 267 | Desktop |
 | Functional, one `@smoke-<area>` | 17 | Desktop + mobile |
-| Real | 45 | Desktop |
+| Real | 48 | Desktop |
 | Assertion probe (outside ordinary inventory) | 1 | All three; required by failure-reporting proof |
 
-Layout therefore selects 441 project executions, functional 304 and real 45. These are per-case categories: `*-layout` files also contain functional cases, and ordinary/real files contain layout cases. Existing breakpoint branches, compact/touch target assertions, keyboard/focus checks and explicit 375px, landscape, 1051–1199px probes remain. The review keyboard case keeps its filter assertions at every width and returns before wide-only panel assertions. The dashboard's former loop over the three configured viewport sizes is now one layout case in each actual project, preserving each size while using the correct mobile touch emulation. Viewport-dependent `test.skip` calls are replaced by central selection; narrow/wide exceptions above preserve their original intent.
+Layout therefore selects 441 project executions, functional 301 and real 48. These are per-case categories: `*-layout` files also contain functional cases, and ordinary/real files contain layout cases. Existing breakpoint branches, compact/touch target assertions, keyboard/focus checks and explicit 375px, landscape, 1051–1199px probes remain. The review keyboard case keeps its filter assertions at every width and returns before wide-only panel assertions. The dashboard's former loop over the three configured viewport sizes is now one layout case in each actual project, preserving each size while using the correct mobile touch emulation. Viewport-dependent `test.skip` calls are replaced by central selection; narrow/wide exceptions above preserve their original intent.
 
 The smoke areas are workflow boundaries, not an assertion of independent backend modules. Each row selects exactly one expanded controlled case on mobile; a test may exercise EN and RU internally without duplicating the smoke.
 

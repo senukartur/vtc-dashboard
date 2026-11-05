@@ -356,7 +356,7 @@ for (const locale of ["ru", "en"] as const) {
 test.describe("real rendered admissions", () => {
   test(
     "rendered form submits to real VTC-015 and repeat email receives the same safe confirmation without a session",
-    browserCase(["@functional"]),
+    browserCase(["@real"]),
     async ({ page, context }) => {
       test.setTimeout(30000);
       const control = await testConnection();
@@ -392,7 +392,7 @@ test.describe("real rendered admissions", () => {
   for (const locale of ["en", "ru"] as const) {
     test(
       `committed but unconfirmed ${locale} submission replays after switching the interface language`,
-      browserCase(["@functional"]),
+      browserCase(["@real"]),
       async ({ page, context }) => {
         const control = await testConnection();
         try {
