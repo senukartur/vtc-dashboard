@@ -9,16 +9,161 @@ import {
   browserPreparationLine,
   browserPreparationPrefix,
   browserProjects,
+  browserTimingLimit,
+  browserTimingLine,
+  browserTimingPrefix,
   qualificationPhaseAnnotation,
   qualificationPhaseScenario,
   qualificationPromotionPhases,
   safeBrowserFailure,
   safeBrowserPreparation,
+  safeBrowserTiming,
   safeQualificationPhase,
 } from "../../scripts/browser-diagnostics.mjs";
 import { collectEvents, qualityReport, safeEvent } from "../../scripts/ci-result.mjs";
 import { browserFailureProof } from "../support/browser-failure-proof.ts";
 import SafeBrowserReporter from "../support/safe-browser-reporter.ts";
+
+const timing = { spec: "landing", project: "desktop-chromium", durationMs: 17 };
+test("case timing pipeline includes passed and failed executions, excludes skips and never reads private runner fields", () => {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const reporter = new SafeBrowserReporter();
+    const forbidden = () => {
+      throw new Error("PRIVATE_TIMING_FIELD_READ");
+    };
+    const testcase = {
+      location: { file: resolve("test/e2e/landing.spec.ts"), line: 12 },
+      parent: { project: () => ({ name: "desktop-chromium" }) },
+      get title() {
+        return forbidden();
+      },
+      get annotations() {
+        return forbidden();
+      },
+    } as unknown as TestCase;
+    for (const status of ["passed", "failed", "timedOut", "interrupted", "skipped"]) {
+      reporter.onTestBegin();
+      reporter.onTestEnd(testcase, {
+        status,
+        duration: status === "skipped" ? 0 : 17,
+        get errors() {
+          return forbidden();
+        },
+        get attachments() {
+          return forbidden();
+        },
+      } as unknown as TestResult);
+    }
+    reporter.onEnd({ status: "failed" } as FullResult);
+    const collector = collectEvents();
+    for (const [line] of output.mock.calls) collector.push(`${line}\n`);
+    expect(collector.browserTimings).toEqual(Array(4).fill(timing));
+    expect(collector.fileTimings).toEqual([
+      { lane: "e2e", file: "test/e2e/landing.spec.ts", durationMs: 68 },
+    ]);
+    const report = qualityReport(
+      1,
+      20,
+      [],
+      undefined,
+      collector.browserFailures,
+      [],
+      collector.fileTimings,
+      collector.browserTimings,
+    );
+    expect(report).toMatchObject({
+      status: "failure",
+      exitCode: 1,
+      browserTimings: Array(4).fill(timing),
+    });
+    expect(JSON.stringify(report)).not.toContain(privateText);
+  } finally {
+    output.mockRestore();
+  }
+});
+test("timings reject unknown identifiers, invalid durations and extra private fields at each public boundary", () => {
+  const invalid = [
+    null,
+    [],
+    privateText,
+    ...["spec", "project"].map((key) => ({ ...timing, [key]: privateText })),
+    ...[-1, 0.1, NaN, Infinity, 86400001, privateText].map((durationMs) => ({
+      ...timing,
+      durationMs,
+    })),
+    ...["title", "error", "url", "path", "token", "attachments"].map((key) => ({
+      ...timing,
+      [key]: privateText,
+    })),
+  ];
+  const collector = collectEvents();
+  for (const value of invalid) {
+    expect(safeBrowserTiming(value)).toBeUndefined();
+    expect(() => browserTimingLine(value)).toThrow("INVALID_BROWSER_TIMING");
+    collector.push(`${browserTimingPrefix}${JSON.stringify(value)}\n`);
+  }
+  expect(collector.browserTimings).toEqual([]);
+  const report = qualityReport(0, 1, [], undefined, [], [], [], invalid);
+  expect(report).toMatchObject({ status: "success", browserTimings: [] });
+  expect(JSON.stringify(report)).not.toContain(privateText);
+  for (const durationMs of [0, 86400000])
+    expect(safeBrowserTiming({ ...timing, durationMs })).toEqual({ ...timing, durationMs });
+  expect(safeBrowserTiming(timing)).not.toBe(timing);
+});
+test("timings survive chunking, discard oversized lines and remain bounded without changing failure verdicts", () => {
+  const collector = collectEvents();
+  const line = browserTimingLine(timing);
+  collector.push(`${browserTimingPrefix}${" ".repeat(1025)}`);
+  collector.push(`${JSON.stringify(timing)}\n`);
+  expect(collector.browserTimings).toEqual([]);
+  for (let index = 0; index < line.length; index++) collector.push(line[index]);
+  collector.push("\n");
+  expect(collector.browserTimings).toEqual([timing]);
+  for (let index = 0; index < browserTimingLimit + 3; index++) collector.push(`${line}\n`);
+  expect(collector.browserTimings).toHaveLength(browserTimingLimit);
+  const report = qualityReport(
+    1,
+    1,
+    [],
+    undefined,
+    [],
+    [],
+    [],
+    Array(browserTimingLimit + 3).fill(timing),
+  );
+  expect(report).toMatchObject({
+    status: "failure",
+    exitCode: 1,
+    browserTimings: collector.browserTimings,
+  });
+});
+test("the reporter bounds case timing output and discards invalid timing metadata", () => {
+  const output = vi.spyOn(console, "log").mockImplementation(() => {});
+  try {
+    const reporter = new SafeBrowserReporter();
+    const testcase = {
+      location: { file: resolve("test/e2e/landing.spec.ts"), line: 12 },
+      parent: { project: () => ({ name: "desktop-chromium" }) },
+    } as unknown as TestCase;
+    for (const duration of [NaN, -1, 0.5, Infinity, 86400001])
+      reporter.onTestEnd(testcase, { status: "passed", duration } as TestResult);
+    reporter.onTestEnd(
+      { ...testcase, location: { file: privateText, line: 12 } } as TestCase,
+      { status: "passed", duration: 1 } as TestResult,
+    );
+    reporter.onTestEnd(
+      { ...testcase, parent: { project: () => ({ name: privateText }) } } as unknown as TestCase,
+      { status: "passed", duration: 1 } as TestResult,
+    );
+    expect(output).not.toHaveBeenCalled();
+    for (let index = 0; index < browserTimingLimit + 3; index++)
+      reporter.onTestEnd(testcase, { status: "passed", duration: 17 } as TestResult);
+    expect(output).toHaveBeenCalledTimes(browserTimingLimit);
+  } finally {
+    output.mockRestore();
+  }
+});
 
 const valid = {
   kind: "test",

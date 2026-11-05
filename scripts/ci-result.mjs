@@ -1,4 +1,10 @@
-import { browserFailurePrefix, safeBrowserFailure } from "./browser-diagnostics.mjs";
+import {
+  browserFailurePrefix,
+  safeBrowserFailure,
+  browserTimingPrefix,
+  browserTimingLimit,
+  safeBrowserTiming,
+} from "./browser-diagnostics.mjs";
 import { safeTripFixture } from "./trip-fixture-diagnostics.mjs";
 
 // Public diagnostics are reconstructed from fixed values; raw child output is never retained.
@@ -97,6 +103,7 @@ export function collectEvents() {
   const browserFailures = [];
   const fixtureDiagnostics = [];
   const fileTimings = [];
+  const browserTimings = [];
   let pending = "";
   let oversized = false;
   return {
@@ -104,6 +111,7 @@ export function collectEvents() {
     browserFailures,
     fixtureDiagnostics,
     fileTimings,
+    browserTimings,
     push(chunk) {
       for (const part of String(chunk).split(/(\n)/)) {
         if (part === "\n") {
@@ -131,6 +139,16 @@ export function collectEvents() {
               if (timing && fileTimings.length < 128) fileTimings.push(timing);
             } catch {
               /* Only the closed timing schema can reach the public report. */
+            }
+          }
+          if (!oversized && pending.startsWith(browserTimingPrefix)) {
+            try {
+              const timing = safeBrowserTiming(
+                JSON.parse(pending.slice(browserTimingPrefix.length)),
+              );
+              if (timing && browserTimings.length < browserTimingLimit) browserTimings.push(timing);
+            } catch {
+              /* Arbitrary runner output never becomes public timing metadata. */
             }
           }
           if (!oversized && pending.startsWith("{")) {
@@ -162,6 +180,7 @@ export function qualityReport(
   browserFailures = [],
   fixtureDiagnostics = [],
   fileTimings = [],
+  browserTimings = [],
 ) {
   const failures = browserFailures.map(safeBrowserFailure).filter(Boolean).slice(0, 32);
   if (
@@ -188,5 +207,9 @@ export function qualityReport(
     browserFailures: failures,
     fixtureDiagnostics: fixtureDiagnostics.map(safeTripFixture).filter(Boolean).slice(0, 64),
     fileTimings: fileTimings.map(safeFileTiming).filter(Boolean).slice(0, 128),
+    browserTimings: browserTimings
+      .map(safeBrowserTiming)
+      .filter(Boolean)
+      .slice(0, browserTimingLimit),
   };
 }

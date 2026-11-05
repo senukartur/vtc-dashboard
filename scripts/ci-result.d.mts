@@ -1,4 +1,4 @@
-import type { BrowserFailure } from "./browser-diagnostics.mjs";
+import type { BrowserFailure, BrowserTiming } from "./browser-diagnostics.mjs";
 export interface SafeEvent {
   stage: string;
   status: string;
@@ -22,6 +22,7 @@ export function collectEvents(): {
   browserFailures: BrowserFailure[];
   fixtureDiagnostics: Record<string, unknown>[];
   fileTimings: FileTiming[];
+  browserTimings: BrowserTiming[];
   push(chunk: unknown): void;
 };
 export function qualityReport(
@@ -32,4 +33,5 @@ export function qualityReport(
   browserFailures?: unknown[],
   fixtureDiagnostics?: unknown[],
   fileTimings?: unknown[],
+  browserTimings?: unknown[],
 ): object;

@@ -36,6 +36,29 @@ export const browserFiles = {
   "test/probes/browser.spec.ts": "assertion-probe",
 };
 export const browserProjects = ["desktop-chromium", "tablet-chromium", "mobile-chromium"];
+// One record per executed case; repeated spec IDs intentionally disclose no test title.
+export const browserTimingPrefix = "VTC_BROWSER_TIMING ";
+export const browserTimingLimit = 4096;
+export function safeBrowserTiming(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "durationMs,project,spec" ||
+    !Object.values(browserFiles).includes(value.spec) ||
+    !browserProjects.includes(value.project) ||
+    !Number.isSafeInteger(value.durationMs) ||
+    value.durationMs < 0 ||
+    value.durationMs > 86400000
+  )
+    return undefined;
+  return { spec: value.spec, project: value.project, durationMs: value.durationMs };
+}
+export function browserTimingLine(value) {
+  const timing = safeBrowserTiming(value);
+  if (!timing) throw new Error("INVALID_BROWSER_TIMING");
+  return `${browserTimingPrefix}${JSON.stringify(timing)}`;
+}
 const statuses = ["failed", "timedOut", "interrupted"];
 const categories = [
   "runner-error",
