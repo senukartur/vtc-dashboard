@@ -1,4 +1,5 @@
 """Stage a reviewed control package; preserve a fenced, retryable multi-file update."""
+import itertools
 import json
 import os
 import pathlib
@@ -121,11 +122,17 @@ def retire_settled(marker, stage, backup):
         return
     o.require(not (o.BASE / 'state/recovery-required').exists() and
               not (o.BASE / 'private/maintenance/enabled').exists(), 'CONTROL_UPDATE_FENCED')
-    archive = o.BASE / f'state/controls-settled-{o.digest(marker)[:16]}'
+    intent = o.BASE / 'state/activation-intent.json'
+    o.require(not intent.exists() or json.loads(intent.read_text()).get('pending') is not True,
+              'ACTIVATION_PENDING')
+    # Same-revision updates can repeat a record exactly. A finished slot holds its record, and an
+    # interrupted one does not, because the record moves last: a rerun resumes the same slot.
+    name = f'state/controls-settled-{o.digest(marker)[:16]}'
+    slot = next(n for n in itertools.count() if not (o.BASE / f'{name}-{n}' / marker.name).exists())
+    archive = o.BASE / f'{name}-{slot}'
     archive.mkdir(mode=0o700, exist_ok=True)
     o.require(archive.is_dir() and not archive.is_symlink() and archive.stat().st_uid == 0 and
               not archive.stat().st_mode & 0o077, 'CONTROL_DIRECTORY_INVALID')
-    # The record moves last, so an interrupted retirement repeats from it under the same name.
     for path in [stage, backup, marker]:
         if path.exists():
             os.replace(path, archive / path.name)
@@ -144,7 +151,8 @@ def install(source):
         active = o.current()
         o.require(active is not None, 'RELEASE_REQUIRED')
         o.require(not any((o.BASE / f'state/{name}').exists() for name in
-                  ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
+                  ['jobs-acceptance', 'identity-acceptance', 'notifications-acceptance', 'ingress-check.json']),
+                  'ACCEPTANCE_WINDOW')
         revision, image = active['revision'], active['imageId']
         o.validate_image(image, revision)
         activation.ingress(o)

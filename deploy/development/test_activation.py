@@ -131,7 +131,7 @@ class ActivationTests(unittest.TestCase):
             (self.base / f'state/controls-{name}').mkdir(mode=0o700)
             (self.base / f'state/controls-{name}/operations.py').write_text(f'# earlier {name}\n')
         (self.base / 'operations.py').write_text('# installed earlier\n')
-        return self.base / f'state/controls-settled-{ops.digest(marker)[:16]}'
+        return self.base / f'state/controls-settled-{ops.digest(marker)[:16]}-0'
 
     def control_install(self):
         return patch.object(ops, 'current', return_value={'revision': self.revision, 'imageId': self.image}), patch.object(
@@ -168,8 +168,50 @@ class ActivationTests(unittest.TestCase):
             self.assertFalse((self.base / 'state/recovery-required').exists())
             self.assertTrue((self.base / 'state/controls-update.json').exists())
             update_controls.install(source)
+        self.assertEqual((archive / 'controls-candidate/operations.py').read_text(), '# earlier candidate\n')
         self.assertEqual((archive / 'controls-previous/operations.py').read_text(), '# earlier previous\n')
+        self.assertIs(json.loads((archive / 'controls-update.json').read_text())['pending'], False)
+        self.assertEqual(len(list((self.base / 'state').glob('controls-settled-*'))), 1)
         self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
+
+    def test_repeated_updates_and_applies_at_one_revision_keep_working(self):
+        source = pathlib.Path(__file__).parent
+        current, image, ingress, jobs, run, fenced = self.control_install()
+        with current, image, ingress, jobs, run, fenced, patch.object(activation, 'validate'), patch.object(
+                activation, 'grants'), patch.object(ops, 'compose'), patch.object(ops, 'ready'), patch.object(ops, 'public_ready'):
+            for _ in range(4):
+                update_controls.install(source)
+                self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
+                self.invoke('apply')
+                self.assertFalse((self.base / 'state/recovery-required').exists())
+                self.assertFalse(activation.controls_pending(ops, self.revision, self.image))
+            update_controls.install(source)
+        # The first record differs; the later ones repeat byte for byte and need their own slots.
+        slots = sorted(path.name[-2:] for path in (self.base / 'state').glob('controls-settled-*'))
+        self.assertEqual(slots, ['-0', '-0', '-1', '-2'])
+        self.assertTrue(all((path / 'controls-update.json').exists() and (path / 'controls-previous').is_dir()
+                            for path in (self.base / 'state').glob('controls-settled-*')))
+
+    def test_settled_update_stays_in_place_during_a_window_or_pending_activation(self):
+        source = pathlib.Path(__file__).parent
+        self.settled_update()
+        marker = self.base / 'state/controls-update.json'
+        settled = marker.read_bytes()
+        window = self.base / 'state/notifications-acceptance'
+        intent = self.base / 'state/activation-intent.json'
+        current, image, ingress, jobs, run, fenced = self.control_install()
+        with current, image, ingress, jobs, run, fenced:
+            window.mkdir()
+            with self.assertRaisesRegex(RuntimeError, '^ACCEPTANCE_WINDOW$'):
+                update_controls.install(source)
+            window.rmdir()
+            intent.write_text(json.dumps({'pending': True}))
+            with self.assertRaisesRegex(RuntimeError, '^ACTIVATION_PENDING$'):
+                update_controls.install(source)
+        self.assertEqual(marker.read_bytes(), settled)
+        self.assertTrue((self.base / 'state/controls-candidate/operations.py').exists())
+        self.assertEqual(list((self.base / 'state').glob('controls-settled-*')), [])
+        self.assertFalse((self.base / 'private/maintenance/enabled').exists())
 
     def test_settled_update_stays_in_place_under_a_fence_or_unknown_state(self):
         source = pathlib.Path(__file__).parent
