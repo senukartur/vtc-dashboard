@@ -113,6 +113,15 @@ def notifications_install(source, restore=False):
         marker.unlink()
 
 
+def sync_directories(*paths):
+    for path in paths:
+        directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+
 def retire_settled(marker, stage, backup):
     """A finished update leaves its record and retained bytes; keep them under a hash name."""
     if not marker.exists():
@@ -133,14 +142,13 @@ def retire_settled(marker, stage, backup):
     archive.mkdir(mode=0o700, exist_ok=True)
     o.require(archive.is_dir() and not archive.is_symlink() and archive.stat().st_uid == 0 and
               not archive.stat().st_mode & 0o077, 'CONTROL_DIRECTORY_INVALID')
-    for path in [stage, backup, marker]:
+    for path in [stage, backup]:
         if path.exists():
             os.replace(path, archive / path.name)
-    directory = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    # After a power loss, a retired record must mean the directories it covers moved too.
+    sync_directories(archive, marker.parent)
+    os.replace(marker, archive / marker.name)
+    sync_directories(archive, marker.parent)
 
 
 def install(source):

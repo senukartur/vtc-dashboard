@@ -174,6 +174,24 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(len(list((self.base / 'state').glob('controls-settled-*'))), 1)
         self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
 
+    def test_retired_record_moves_only_after_its_directories_are_durable(self):
+        archive = self.settled_update()
+        marker, stage, backup = [self.base / f'state/{name}' for name in
+                                 ['controls-update.json', 'controls-candidate', 'controls-previous']]
+        events = []
+        real_replace, real_sync = update_controls.os.replace, update_controls.sync_directories
+        def replace(origin, target):
+            events.append(pathlib.Path(origin).name)
+            return real_replace(origin, target)
+        def sync(*paths):
+            events.append(sorted(path.name for path in paths))
+            return real_sync(*paths)
+        with patch.object(update_controls.os, 'replace', side_effect=replace), patch.object(
+                update_controls, 'sync_directories', side_effect=sync):
+            update_controls.retire_settled(marker, stage, backup)
+        durable = sorted([archive.name, 'state'])
+        self.assertEqual(events, ['controls-candidate', 'controls-previous', durable, 'controls-update.json', durable])
+
     def test_repeated_updates_and_applies_at_one_revision_keep_working(self):
         source = pathlib.Path(__file__).parent
         current, image, ingress, jobs, run, fenced = self.control_install()
