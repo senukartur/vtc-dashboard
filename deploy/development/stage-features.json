@@ -1,4 +1,5 @@
 {
+  "notice": "Development-host choices for synthetic data only; these values say nothing about production.",
   "flags": [
     "EXTERNAL_IDENTITIES_ENABLED",
     "CATALOGS_ENABLED",

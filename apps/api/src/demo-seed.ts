@@ -57,13 +57,16 @@ export async function seedDashboard(
       .select({ id: catalogRevisions.id })
       .from(catalogRevisions)
       .where(eq(catalogRevisions.id, demoId("catalog/ets2")));
-    if (adopted && !installed) {
-      // First install only: this fixture is never written beside real members or a real catalog.
+    if (adopted) {
+      // Any run, reruns included: this fixture is never written beside real members or a real catalog.
+      const fixtureMembers = new Set(installed ? members.map(({ id }) => id) : [director.id]);
       const others = await c.select({ id: membership.userId }).from(membership);
-      if (others.some((member) => member.id !== director.id))
+      if (others.some((member) => !fixtureMembers.has(member.id)))
         throw new Error("DEMO_REFUSES_EXISTING_MEMBERS");
-      const [catalog] = await c.select({ id: catalogRevisions.id }).from(catalogRevisions).limit(1);
-      if (catalog) throw new Error("DEMO_REFUSES_EXISTING_CATALOG");
+      const fixtureCatalogs = new Set(games.map((game) => demoId(`catalog/${game}`)));
+      const catalogs = await c.select({ id: catalogRevisions.id }).from(catalogRevisions);
+      if (catalogs.some((catalog) => !fixtureCatalogs.has(catalog.id)))
+        throw new Error("DEMO_REFUSES_EXISTING_CATALOG");
     }
     if (!installed) {
       for (const member of adopted ? members.slice(1) : members) {

@@ -209,7 +209,14 @@ class ActivationTests(unittest.TestCase):
         enabled = {'TRIPS_ENABLED': 'true'}
         rows = [list(row) for row in activation.privilege_rows(activation.matrix(ops, enabled))]
         activation.check_privileges(ops, rows, complete=True, values=enabled)
-        # A rolled-back identity-only configuration keeps the narrow rights it does not use.
+        # A host that never applied modules must match the baseline exactly.
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, rows, complete=True, values={})
+        with patch.object(activation, 'privileges', side_effect=[[], rows]), patch.object(ops, 'compose') as compose:
+            activation.grants(ops, self.revision, enabled)
+        compose.assert_called_once()
+        self.assertTrue((self.base / activation.STAGE_GRANTS_STATE).exists())
+        # A rolled-back identity-only configuration keeps the narrow rights that apply recorded.
         activation.check_privileges(ops, rows, complete=True, values={})
         with self.assertRaisesRegex(RuntimeError, '^MISSING_EFFECTIVE_PRIVILEGES$'):
             activation.check_privileges(ops, rows[1:], complete=True, values=enabled)
