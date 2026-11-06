@@ -59,6 +59,18 @@ const tableFits = (card: Locator) =>
   });
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+/** Recharts keeps its pixel width until its ResizeObserver runs in the next rendering step. */
+const chartResized = (page: Page) =>
+  expect
+    .poll(() =>
+      chartCard(page)
+        .locator(".recharts-wrapper")
+        .evaluate((chart) => {
+          const area = chart.closest(".chart")?.getBoundingClientRect().right ?? 0;
+          return chart.getBoundingClientRect().right <= area + 0.5;
+        }),
+    )
+    .toBe(true);
 /** Lines whose text breaks inside a word: a line starts right after a letter of the same word. */
 function midWordBreaks(root: Locator, selector: string) {
   return root.evaluate((element, css) => {
@@ -559,6 +571,8 @@ test.describe("Compact driver profile", () => {
         await switchLanguage(page, "ru");
         await expect(tripsCard(page).getByRole("table")).toBeVisible();
         await expect(qualification(page, "ATS").getByRole("definition").first()).toBeVisible();
+        // font-display: swap lays the page out in a fallback font until Huninn arrives.
+        await page.evaluate(() => document.fonts.ready);
         const trips = await box(tripsCard(page));
         const side = await box(qualification(page, "ETS2"));
         expect(side.x).toBeGreaterThan(trips.x + trips.width - 1);
@@ -586,6 +600,7 @@ test.describe("Compact driver profile", () => {
       expect(side.y).toBeGreaterThan(trips.y + trips.height - 1);
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(tripsCard(page).locator(".driver-cell-label").first()).toBeVisible();
+      await chartResized(page);
       expect(await noOverflow(page)).toBe(true);
       expect(await midWordBreaks(main(page), ".driver-trips-table td, .driver-kpi dt")).toEqual([]);
       expect(

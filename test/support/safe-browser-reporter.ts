@@ -7,9 +7,25 @@ import {
   browserTimingLine,
   safeBrowserFailure,
   safeBrowserTiming,
+  safeFailureLocation,
   safeQualificationAnnotations,
 } from "../../scripts/browser-diagnostics.mjs";
 import { fileTimingLine, safeFileTiming } from "../../scripts/ci-result.mjs";
+
+// Reads only structured locations: messages, values, stacks and snippets never enter a record.
+function failureAt(result: TestResult) {
+  try {
+    for (const { location } of result.errors.slice(0, 8)) {
+      if (!location) continue;
+      const file = relative(process.cwd(), location.file).replaceAll("\\", "/");
+      const safe = safeFailureLocation(`${file}:${location.line}`);
+      if (safe) return { failureAt: safe };
+    }
+  } catch {
+    /* Invalid metadata keeps the coarse failure. */
+  }
+  return {};
+}
 
 export default class SafeBrowserReporter implements Reporter {
   private started = false;
@@ -48,6 +64,7 @@ export default class SafeBrowserReporter implements Reporter {
       line: test.location.line,
       project: test.parent.project()?.name,
       status: result.status,
+      ...failureAt(result),
     });
     let phase: ReturnType<typeof safeQualificationAnnotations>;
     if (failure?.kind === "test" && failure.file === "qualifications") {

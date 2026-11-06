@@ -457,6 +457,9 @@ test(
     await expect(table(page)).toBeVisible();
     await page.getByRole("combobox", { name: "Game", exact: true }).focus();
     await page.keyboard.press("ArrowDown");
+    // The new filter replaces the rows with a loading state; a Tab before they return skips them.
+    await expect.poll(() => lists.at(-1)?.get("game")).toBe("ets2");
+    await expect(rowLink(page, first)).toBeVisible();
     await page.keyboard.press("Tab");
     await expect(
       page.getByRole("combobox", { name: "Company decision", exact: true }),
