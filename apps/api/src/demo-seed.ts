@@ -219,15 +219,26 @@ export async function seedDashboard(
       }
     }
     // A member's current assignment decides the credit, including one the director already held.
-    async function creditOf(userId: string, game: (typeof games)[number], rank: number) {
+    // As in real attribution, a trip that started before the assignment existed earns no credit.
+    async function creditOf(
+      userId: string,
+      game: (typeof games)[number],
+      rank: number,
+      start: string,
+    ) {
       const [current] = await c
-        .select({ id: qualificationAssignments.id, levelId: qualificationAssignments.levelId })
+        .select({
+          id: qualificationAssignments.id,
+          levelId: qualificationAssignments.levelId,
+          assignedAt: qualificationAssignments.assignedAt,
+        })
         .from(qualificationStates)
         .innerJoin(
           qualificationAssignments,
           eq(qualificationAssignments.id, qualificationStates.assignmentId),
         )
         .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
+      if (current && new Date(current.assignedAt) > new Date(start)) return null;
       const levels: readonly string[] = structuralLevels[game];
       const held = current ? levels.indexOf(current.levelId) : -1;
       return {
@@ -360,7 +371,9 @@ export async function seedDashboard(
         reasons: reasonCodes,
         createdAt: trip.end,
       });
-      const credit = accepted ? await creditOf(trip.ownerId, trip.game, member.rank) : null;
+      const credit = accepted
+        ? await creditOf(trip.ownerId, trip.game, member.rank, trip.start)
+        : null;
       const [context] = await contributions.contexts(tx, [
         { tripId: trip.id, expectedTripVersion: 1, version: 1, factId },
       ]);
