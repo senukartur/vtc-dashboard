@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "importerVersion": "vtc-catalogs/1",
+  "synthetic": false,
+  "game": "ets2",
+  "gameBuild": "stage-placeholder-1",
+  "releaseInventoryAsOf": "2026-11-06",
+  "sourceManifestSha256": "b59baf8f539154a2e7e71be550763f1a4d319d27be642c49cce3b22609e23688",
+  "packs": [
+    {
+      "packId": "base",
+      "title": "Stage placeholders",
+      "state": "validated",
+      "contributionKinds": ["city", "cargo", "trailer_type"],
+      "provenance": [
+        {
+          "referenceId": "5a1f6c1e-8f4b-4d2a-9c3e-0d7b6a2e1f01",
+          "publicSourceUrl": "https://github.com/senukartur/vtc-dashboard/tree/main/deploy/development",
+          "attribution": "Original placeholder entries written for this project's development host",
+          "permittedUseBasis": "Project-authored placeholder text. Contains no game-derived identifiers, labels or definitions.",
+          "observedAt": "2026-11-06T00:00:00.000Z"
+        }
+      ],
+      "reasonCodes": []
+    }
+  ],
+  "provenance": [
+    {
+      "referenceId": "5a1f6c1e-8f4b-4d2a-9c3e-0d7b6a2e1f01",
+      "publicSourceUrl": "https://github.com/senukartur/vtc-dashboard/tree/main/deploy/development",
+      "attribution": "Original placeholder entries written for this project's development host",
+      "permittedUseBasis": "Project-authored placeholder text. Contains no game-derived identifiers, labels or definitions.",
+      "observedAt": "2026-11-06T00:00:00.000Z"
+    }
+  ],
+  "entities": [
+    {
+      "key": "stage_origin",
+      "kind": "city",
+      "mapNamespace": "stage-placeholder",
+      "packId": "base",
+      "retired": false,
+      "labels": {
+        "en": "Stage placeholder origin",
+        "ru": "Заглушка стенда: отправление"
+      },
+      "aliases": [],
+      "mappings": [],
+      "regionKey": null,
+      "cargoUnitMassKg": null,
+      "adrCategoryKey": null,
+      "trailerBodyTypeKey": null,
+      "trailerChainTypeKey": null
+    },
+    {
+      "key": "stage_destination",
+      "kind": "city",
+      "mapNamespace": "stage-placeholder",
+      "packId": "base",
+      "retired": false,
+      "labels": {
+        "en": "Stage placeholder destination",
+        "ru": "Заглушка стенда: назначение"
+      },
+      "aliases": [],
+      "mappings": [],
+      "regionKey": null,
+      "cargoUnitMassKg": null,
+      "adrCategoryKey": null,
+      "trailerBodyTypeKey": null,
+      "trailerChainTypeKey": null
+    },
+    {
+      "key": "stage_cargo",
+      "kind": "cargo",
+      "mapNamespace": "stage-placeholder",
+      "packId": "base",
+      "retired": false,
+      "labels": {
+        "en": "Stage placeholder cargo",
+        "ru": "Заглушка стенда: груз"
+      },
+      "aliases": [],
+      "mappings": [],
+      "regionKey": null,
+      "cargoUnitMassKg": null,
+      "adrCategoryKey": null,
+      "trailerBodyTypeKey": null,
+      "trailerChainTypeKey": null
+    },
+    {
+      "key": "stage_trailer",
+      "kind": "trailer_type",
+      "mapNamespace": "stage-placeholder",
+      "packId": "base",
+      "retired": false,
+      "labels": {
+        "en": "Stage placeholder trailer",
+        "ru": "Заглушка стенда: прицеп"
+      },
+      "aliases": [],
+      "mappings": [],
+      "regionKey": null,
+      "cargoUnitMassKg": null,
+      "adrCategoryKey": null,
+      "trailerBodyTypeKey": null,
+      "trailerChainTypeKey": null
+    }
+  ],
+  "mappingIssues": []
+}

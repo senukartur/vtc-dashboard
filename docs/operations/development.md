@@ -215,9 +215,26 @@ Watch a jobs tick and memory afterwards: the host now runs every module within t
 
 `activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts, and it does not remove seeded rows; those go only with a restore of the export taken by `stage-seed`.
 
+### Stage placeholder catalog
+
+A trip from a real telemetry client arrives without a game build or map, so its identifiers cannot resolve against any catalog. It stays in review until staff supply the missing facts, and those selections need a published catalog. `deploy/development/stage-catalog-ets2.json` and `stage-catalog-ats.json` are that catalog: four project-authored placeholder entries per game, with no game-derived data. `CATALOGS_EVIDENCE_FILE` points at `stage-catalog-evidence.json` in the image, which trusts exactly those two files by hash. `CATALOGS_SYNTHETIC` stays `false`.
+
+Publishing needs separate owner authorization. It happens in the product, after `stage-seed`, because the seed refuses a database that already has a catalog revision:
+
+1. Signed in as the director, open catalog administration and upload one file from the released revision, unmodified. Any byte change fails the trust check, and publication answers 409.
+2. Import it, confirm the review shows source review approved, and publish. Repeat for the other game.
+
+To accept a trip, one staff member opens it in review and proposes a resolution: placeholder origin, destination, cargo and trailer, plus the actual distance when it is unknown. A different staff member approves it, which also accepts the trip. Nobody can review their own trip, so trips from the director's client need two other staff accounts, such as seeded members 1 and 2.
+
+Know before publishing:
+
+- **It is one-way.** Every later catalog must retain published entities, so importing the real catalog on this database fails with `omitted_historical_entity`. The placeholders go only with a restore of the export taken by `stage-seed`, which also removes everything recorded after it.
+- Accepted trips show placeholder labels and count in this host's analytics. The source identifiers stay in the trip's evidence.
+- A trip whose recording is not `complete` still cannot be accepted, because a resolution cannot supply that. Staff can only reject it.
+- Roll back the configuration with `activation rollback` before going back to an image older than this file. Otherwise the app refuses to start on the missing evidence path.
+
 Limits on this host:
 
-- `CATALOGS_SYNTHETIC` stays `false` because production configuration refuses `true`, and no catalog is published. Seeded trips show their fixture labels, but catalog selectors have no published revision to offer. A trip from a real telemetry client stays in review with unknown origin, destination, cargo and trailer, so staff can reject it but not accept it.
 - `provider-egress` opens all outbound traffic for the app, with no host-level destination restriction.
 - The deployment rehearsal does not exercise this profile. The real-MySQL proof is in `test/integration/demo-seed.test.ts` plus the evidence in the VTC-082 pull request.
 

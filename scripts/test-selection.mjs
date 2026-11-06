@@ -276,6 +276,7 @@ const areas = [
       "apps/api/src/demo-",
       "apps/api/src/stage-seed",
       "deploy/development/stage-features.json",
+      "deploy/development/stage-catalog-",
     ],
     tests: ["demo"],
   },
