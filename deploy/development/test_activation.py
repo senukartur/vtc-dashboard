@@ -1,6 +1,9 @@
 """Failure-path feedback; real configuration, grants and durable flows run in rehearsal.py."""
 import json
 import pathlib
+import signal
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -207,7 +210,7 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual({row[3] for row in activation.privilege_rows({'jobs': {'t': ['UPDATE(a,b)']}})},
                          {'UPDATE(a)', 'UPDATE(b)'})
         enabled = {'TRIPS_ENABLED': 'true'}
-        rows = [list(row) for row in activation.privilege_rows(activation.matrix(ops, enabled))]
+        rows = [list(row) for row in sorted(activation.privilege_rows(activation.matrix(ops, enabled)))]
         activation.check_privileges(ops, rows, complete=True, values=enabled)
         # A host that never applied modules must match the baseline exactly.
         with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
@@ -218,6 +221,15 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue((self.base / activation.STAGE_GRANTS_STATE).exists())
         # A rolled-back identity-only configuration keeps the narrow rights that apply recorded.
         activation.check_privileges(ops, rows, complete=True, values={})
+        # A later control update that narrows the profile cannot disown what is still installed.
+        profile = self.stage_profile()
+        del profile['grants']['runtime']['telemetry_tokens']
+        (self.base / activation.STAGE_PROFILE).write_text(json.dumps(profile))
+        activation.check_privileges(ops, rows, complete=True, values={})
+        with patch.object(activation, 'privileges', side_effect=[rows, rows]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, enabled)
+        recorded = json.loads((self.base / activation.STAGE_GRANTS_STATE).read_text())['privileges']
+        self.assertIn(['\'vtc_runtime\'@\'%\'', 'vtc', 'telemetry_tokens', 'SELECT', 'NO'], recorded)
         with self.assertRaisesRegex(RuntimeError, '^MISSING_EFFECTIVE_PRIVILEGES$'):
             activation.check_privileges(ops, rows[1:], complete=True, values=enabled)
         extra = ["'vtc_runtime'@'%'", 'vtc', 'telemetry_tokens', 'DROP', 'NO']
@@ -280,20 +292,94 @@ class ActivationTests(unittest.TestCase):
             self.invoke('apply')
         self.assertEqual(previous.read_bytes(), second_config)
 
+    def test_unchanged_apply_keeps_the_rollback_target(self):
+        shared = self.base / 'private/identity-mail.env'
+        previous = self.base / 'private/identity-mail.previous.env'
+        original = shared.read_bytes()
+        stack = (patch.object(activation, 'validate'), patch.object(ops, 'fenced', side_effect=self.fence),
+                 patch.object(activation, 'grants'), patch.object(ops, 'compose'), patch.object(ops, 'ready'),
+                 patch.object(ops, 'public_ready'))
+        for item in stack:
+            item.start()
+            self.addCleanup(item.stop)
+        self.invoke('apply')
+        self.invoke('apply')
+        self.assertEqual(previous.read_bytes(), original)
+        self.assertFalse(list((self.base / 'private').glob('identity-mail.previous.*.env')))
+        self.invoke('rollback')
+        self.assertEqual(shared.read_bytes(), original)
+
+    def test_prepare_stage_runs_under_the_owned_control_fence_only(self):
+        self.stage_profile()
+        shared = self.base / 'private/identity-mail.env'
+        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n')
+        candidate = self.base / 'private/activation-input.env'
+        candidate.unlink()
+        handlers = {number: signal.getsignal(number) for number in [signal.SIGHUP, signal.SIGTERM, signal.SIGINT]}
+        for number, handler in handlers.items():
+            self.addCleanup(signal.signal, number, handler)
+        with patch.object(ops, 'current', return_value={'revision': self.revision, 'imageId': self.image}), patch.object(
+                ops, 'validate_image'), patch.object(activation, 'ingress'), patch.object(ops, 'jobs_configuration'), patch.object(
+                ops, 'run', return_value=b''), patch.object(ops, 'fenced', side_effect=self.fence), patch.object(
+                activation, 'private_values', side_effect=lambda _o, path, _k: dict(
+                    line.split('=', 1) for line in path.read_text().splitlines())), patch.object(
+                ops.os, 'geteuid', return_value=0), patch.object(
+                sys, 'argv', ['operations.py', 'activation', 'prepare-stage']):
+            update_controls.install(pathlib.Path(__file__).parent)
+            self.assertTrue((self.base / 'state/recovery-required').exists())
+            ops.main()
+            self.assertIn('TELEMETRY_ENABLED=true\n', candidate.read_text())
+            # Any other recovery stays closed to it.
+            (self.base / 'state/controls-update.json').unlink()
+            with self.assertRaisesRegex(RuntimeError, '^RECOVERY_REQUIRED$'):
+                ops.main()
+
+    def seed_stack(self, **compose):
+        stack = {name: patch.object(ops, name) for name in ['fenced', 'stop_owned_jobs', 'export_locked', 'ready',
+                                                            'public_ready', 'maintenance']}
+        started = {name: item.start() for name, item in stack.items()}
+        for item in stack.values():
+            self.addCleanup(item.stop)
+        item = patch.object(ops, 'compose', **compose)
+        started['compose'] = item.start()
+        self.addCleanup(item.stop)
+        return started
+
     def test_stage_seed_reopens_after_a_refused_transaction_and_keeps_the_login_stable(self):
         password = ops.stage_demo_password()
         self.assertEqual(ops.stage_demo_password(), password)
         self.assertEqual((self.base / 'private/stage-demo-login.env').stat().st_mode & 0o077, 0)
-        with patch.object(ops, 'fenced'), patch.object(ops, 'export_locked') as export, patch.object(
-                ops, 'compose', side_effect=[RuntimeError('FIXED_SEED_REFUSED'), b'']) as compose, patch.object(
-                ops, 'ready') as ready, patch.object(ops, 'public_ready'), patch.object(ops, 'maintenance') as maintenance:
-            with self.assertRaisesRegex(RuntimeError, '^FIXED_SEED_REFUSED$'):
-                ops.stage_seed_locked(self.revision)
-        export.assert_called_once()
-        self.assertEqual(compose.call_args_list[0].kwargs['data'], password)
-        self.assertNotIn(password.decode(), ' '.join(compose.call_args_list[0].args[0]))
-        ready.assert_called_once()
-        maintenance.assert_called_once_with(False)
+        mocks = self.seed_stack(side_effect=[RuntimeError('FIXED_SEED_REFUSED'), b''])
+        with self.assertRaisesRegex(RuntimeError, '^FIXED_SEED_REFUSED$'):
+            ops.stage_seed_locked(self.revision)
+        mocks['export_locked'].assert_called_once()
+        seed = mocks['compose'].call_args_list[0]
+        self.assertEqual(seed.kwargs['data'], password)
+        self.assertNotIn(password.decode(), ' '.join(seed.args[0]))
+        mocks['stop_owned_jobs'].assert_called_once()
+        mocks['ready'].assert_called_once()
+        mocks['maintenance'].assert_called_once_with(False)
+
+    def test_stage_seed_reopens_after_a_failed_export_without_seeding(self):
+        mocks = self.seed_stack(return_value=b'')
+        mocks['export_locked'].side_effect = RuntimeError('EXPORT_FAILED')
+        with self.assertRaisesRegex(RuntimeError, '^EXPORT_FAILED$'):
+            ops.stage_seed_locked(self.revision)
+        self.assertEqual([call.args[0][0] for call in mocks['compose'].call_args_list], ['up'])
+        mocks['maintenance'].assert_called_once_with(False)
+
+    def test_stage_seed_stays_fenced_while_its_container_cannot_be_stopped(self):
+        mocks = self.seed_stack(side_effect=[subprocess.TimeoutExpired('compose', 180)])
+        mocks['stop_owned_jobs'].side_effect = RuntimeError('WORKER_DISCOVERY_DEADLINE')
+        with self.assertRaisesRegex(RuntimeError, '^WORKER_DISCOVERY_DEADLINE$'):
+            ops.stage_seed_locked(self.revision)
+        mocks['maintenance'].assert_not_called()
+
+    def test_stage_seed_returns_the_export_it_took(self):
+        mocks = self.seed_stack(return_value=b'')
+        mocks['export_locked'].return_value = 'fixed-export-id'
+        self.assertEqual(ops.stage_seed_locked(self.revision), 'fixed-export-id')
+        self.assertIn(f'{ops.PROJECT}-stage-seed', mocks['compose'].call_args_list[0].args[0])
 
 
 if __name__ == '__main__':

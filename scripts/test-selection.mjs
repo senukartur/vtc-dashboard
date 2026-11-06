@@ -270,15 +270,10 @@ const areas = [
     ],
     tests: ["jobs"],
   },
+  { paths: ["scripts/demo/", "apps/api/src/demo-", "apps/api/src/stage-seed"], tests: ["demo"] },
   {
-    paths: [
-      "scripts/demo/",
-      "apps/api/src/demo-",
-      "apps/api/src/stage-seed",
-      "deploy/development/stage-features.json",
-      "deploy/development/stage-catalog-",
-    ],
-    tests: ["demo"],
+    paths: ["deploy/development/stage-features.json", "deploy/development/stage-catalog-"],
+    tests: ["demo", "development-deployment", "notifications-acceptance"],
   },
   {
     paths: ["deploy/development/"],

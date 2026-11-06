@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createUnitOfWork, runMigrations, type UnitOfWork } from "@vtc/db";
-import { catalogArtifacts, catalogRevisions } from "@vtc/db/catalogs-schema";
+import {
+  catalogArtifacts,
+  catalogEntities,
+  catalogFacts,
+  catalogRevisions,
+} from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection } from "mysql2/promise";
@@ -202,6 +207,21 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
         .set({ directorUserId: originalId })
         .where(eq(company.singleton, 1)),
     );
+    // A database seeded before the trailer label existed gains it before a later rerun pins it.
+    await unit.run(async (tx) => {
+      const client = unit.client(tx);
+      await client.execute(sql`SET FOREIGN_KEY_CHECKS = 0`);
+      await client.delete(catalogFacts).where(eq(catalogFacts.id, demoId("catalog-fact/ets2/3")));
+      await client.delete(catalogEntities).where(eq(catalogEntities.id, demoId("entity/ets2/3")));
+      await client.execute(sql`SET FOREIGN_KEY_CHECKS = 1`);
+    });
+    const later = await seedDashboard(
+      unit,
+      identity,
+      credential.passwordHash,
+      new Date(now.getTime() + 86400000),
+    );
+    expect(later.addedTrips).toBeGreaterThan(0);
   } finally {
     await app.close();
   }

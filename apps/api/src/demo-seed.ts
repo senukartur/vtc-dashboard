@@ -168,40 +168,54 @@ export async function seedDashboard(
           provenance: [{ source: "Original fictional local fixture; no extracted game data" }],
           createdAt: demoEpoch,
         });
-        const labels =
-          game === "ets2"
-            ? [
-                ["Berlin", "Берлин"],
-                ["Hamburg", "Гамбург"],
-                ["Demo machinery", "Демо: оборудование"],
-                ["Demo curtainsider", "Демо: тентованный прицеп"],
-              ]
-            : [
-                ["Seattle", "Сиэтл"],
-                ["Portland", "Портленд"],
-                ["Demo lumber", "Демо: пиломатериалы"],
-                ["Demo flatbed", "Демо: платформа"],
-              ];
-        for (const [index, label] of labels.entries()) {
-          const entityId = demoId(`entity/${game}/${index}`),
-            kind = index === 3 ? "trailer_type" : index === 2 ? "cargo" : "city";
-          const map = Buffer.from("local-demo");
+      }
+    }
+    // Per label, so a database seeded before a label existed gains it before a new trip pins it.
+    for (const game of games) {
+      const revisionId = demoId(`catalog/${game}`);
+      const present = new Set(
+        (
           await c
-            .insert(catalogEntities)
-            .values({ id: entityId, game, kind, map, sourceKey: Buffer.from(`demo/${index}`) });
-          await c.insert(catalogFacts).values({
-            id: demoId(`catalog-fact/${game}/${index}`),
-            revisionId,
-            entityId,
-            game,
-            kind,
-            map,
-            retired: false,
-            labelEn: label[0],
-            labelRu: label[1],
-            packId: Buffer.from("local-demo"),
-          });
-        }
+            .select({ id: catalogFacts.id })
+            .from(catalogFacts)
+            .where(eq(catalogFacts.revisionId, revisionId))
+        ).map(({ id }) => id),
+      );
+      const labels =
+        game === "ets2"
+          ? [
+              ["Berlin", "Берлин"],
+              ["Hamburg", "Гамбург"],
+              ["Demo machinery", "Демо: оборудование"],
+              ["Demo curtainsider", "Демо: тентованный прицеп"],
+            ]
+          : [
+              ["Seattle", "Сиэтл"],
+              ["Portland", "Портленд"],
+              ["Demo lumber", "Демо: пиломатериалы"],
+              ["Demo flatbed", "Демо: платформа"],
+            ];
+      for (const [index, label] of labels.entries()) {
+        const factId = demoId(`catalog-fact/${game}/${index}`);
+        if (present.has(factId)) continue;
+        const entityId = demoId(`entity/${game}/${index}`),
+          kind = index === 3 ? "trailer_type" : index === 2 ? "cargo" : "city";
+        const map = Buffer.from("local-demo");
+        await c
+          .insert(catalogEntities)
+          .values({ id: entityId, game, kind, map, sourceKey: Buffer.from(`demo/${index}`) });
+        await c.insert(catalogFacts).values({
+          id: factId,
+          revisionId,
+          entityId,
+          game,
+          kind,
+          map,
+          retired: false,
+          labelEn: label[0],
+          labelRu: label[1],
+          packId: Buffer.from("local-demo"),
+        });
       }
     }
     // A member's current assignment decides the credit, including one the director already held.

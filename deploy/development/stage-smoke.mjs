@@ -73,6 +73,8 @@ try {
   const cookie = login.cookies.map((part) => part.split(";", 1)[0]).join("; ");
   const failed = [];
   for (const url of routes) {
+    // Admissions stays the live file's choice: the profile neither enables nor requires it.
+    if (url === "/api/v1/admin/applications" && !config.admissions) continue;
     const { statusCode } = await app.inject({
       method: "GET",
       url,
