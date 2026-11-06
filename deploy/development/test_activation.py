@@ -122,6 +122,74 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
         self.assertEqual((self.base / 'operations.py').read_bytes(), (source / 'operations.py').read_bytes())
 
+    def settled_update(self):
+        """What a finished earlier update and apply leave on a host."""
+        marker = self.base / 'state/controls-update.json'
+        marker.write_text(json.dumps({'pending': False, 'complete': True, 'revision': 'c' * 40,
+                                      'imageId': 'sha256:' + 'd' * 64, 'hashes': {}, 'previous': {}, 'prepared': True}))
+        for name in ['candidate', 'previous']:
+            (self.base / f'state/controls-{name}').mkdir(mode=0o700)
+            (self.base / f'state/controls-{name}/operations.py').write_text(f'# earlier {name}\n')
+        (self.base / 'operations.py').write_text('# installed earlier\n')
+        return self.base / f'state/controls-settled-{ops.digest(marker)[:16]}'
+
+    def control_install(self):
+        return patch.object(ops, 'current', return_value={'revision': self.revision, 'imageId': self.image}), patch.object(
+            ops, 'validate_image'), patch.object(activation, 'ingress'), patch.object(ops, 'jobs_configuration'), patch.object(
+            ops, 'run', return_value=b''), patch.object(ops, 'fenced', side_effect=self.fence)
+
+    def test_update_after_a_finished_update_keeps_the_earlier_bytes(self):
+        source = pathlib.Path(__file__).parent
+        archive = self.settled_update()
+        current, image, ingress, jobs, run, fenced = self.control_install()
+        with current, image, ingress, jobs, run, fenced:
+            update_controls.install(source)
+        self.assertEqual((archive / 'controls-candidate/operations.py').read_text(), '# earlier candidate\n')
+        self.assertEqual((archive / 'controls-previous/operations.py').read_text(), '# earlier previous\n')
+        self.assertIs(json.loads((archive / 'controls-update.json').read_text())['pending'], False)
+        self.assertEqual((self.base / 'state/controls-previous/operations.py').read_text(), '# installed earlier\n')
+        self.assertEqual((self.base / 'operations.py').read_bytes(), (source / 'operations.py').read_bytes())
+        self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
+        self.assertTrue((self.base / 'state/recovery-required').exists())
+
+    def test_interrupted_retirement_repeats_under_the_same_name(self):
+        source = pathlib.Path(__file__).parent
+        archive = self.settled_update()
+        real_replace = update_controls.os.replace
+        def interrupted(origin, target):
+            if pathlib.Path(origin).name == 'controls-previous':
+                raise RuntimeError('FIXED_RETIRE_FAILURE')
+            return real_replace(origin, target)
+        current, image, ingress, jobs, run, fenced = self.control_install()
+        with current, image, ingress, jobs, run, fenced:
+            with patch.object(update_controls.os, 'replace', side_effect=interrupted):
+                with self.assertRaisesRegex(RuntimeError, '^FIXED_RETIRE_FAILURE$'):
+                    update_controls.install(source)
+            self.assertFalse((self.base / 'state/recovery-required').exists())
+            self.assertTrue((self.base / 'state/controls-update.json').exists())
+            update_controls.install(source)
+        self.assertEqual((archive / 'controls-previous/operations.py').read_text(), '# earlier previous\n')
+        self.assertTrue(activation.controls_pending(ops, self.revision, self.image))
+
+    def test_settled_update_stays_in_place_under_a_fence_or_unknown_state(self):
+        source = pathlib.Path(__file__).parent
+        self.settled_update()
+        marker = self.base / 'state/controls-update.json'
+        settled = marker.read_bytes()
+        current, image, ingress, jobs, run, fenced = self.control_install()
+        with current, image, ingress, jobs, run, fenced:
+            for fence in [self.base / 'state/recovery-required', self.base / 'private/maintenance/enabled']:
+                fence.write_text('{}')
+                with self.assertRaisesRegex(RuntimeError, '^CONTROL_UPDATE_FENCED$'):
+                    update_controls.install(source)
+                fence.unlink()
+                self.assertEqual(marker.read_bytes(), settled)
+                self.assertTrue((self.base / 'state/controls-candidate/operations.py').exists())
+            marker.write_text(json.dumps({'pending': False, 'complete': False}))
+            with self.assertRaisesRegex(RuntimeError, '^CONTROL_UPDATE_OWNERSHIP_INVALID$'):
+                update_controls.install(source)
+        self.assertEqual((self.base / 'operations.py').read_text(), '# installed earlier\n')
+
     def copy_interruption(self, target_name, prefix):
         real_copy = activation.private_copy
         original = (self.base / 'private/identity-mail.env').read_bytes()

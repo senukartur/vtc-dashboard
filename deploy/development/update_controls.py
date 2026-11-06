@@ -112,6 +112,30 @@ def notifications_install(source, restore=False):
         marker.unlink()
 
 
+def retire_settled(marker, stage, backup):
+    """A finished update leaves its record and retained bytes; keep them under a hash name."""
+    if not marker.exists():
+        return
+    state = json.loads(marker.read_text())
+    if state.get('pending') is not False or state.get('complete') is not True:
+        return
+    o.require(not (o.BASE / 'state/recovery-required').exists() and
+              not (o.BASE / 'private/maintenance/enabled').exists(), 'CONTROL_UPDATE_FENCED')
+    archive = o.BASE / f'state/controls-settled-{o.digest(marker)[:16]}'
+    archive.mkdir(mode=0o700, exist_ok=True)
+    o.require(archive.is_dir() and not archive.is_symlink() and archive.stat().st_uid == 0 and
+              not archive.stat().st_mode & 0o077, 'CONTROL_DIRECTORY_INVALID')
+    # The record moves last, so an interrupted retirement repeats from it under the same name.
+    for path in [stage, backup, marker]:
+        if path.exists():
+            os.replace(path, archive / path.name)
+    directory = os.open(marker.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
 def install(source):
     o.require(os.geteuid() == 0, 'ROOT_OPERATOR_REQUIRED')
     o.require(o.BASE.is_dir() and o.BASE.stat().st_uid == 0 and not o.BASE.stat().st_mode & 0o022,
@@ -133,6 +157,7 @@ def install(source):
         recovery = o.BASE / 'state/recovery-required'
         backup = o.BASE / 'state/controls-previous'
         stage = o.BASE / 'state/controls-candidate'
+        retire_settled(marker, stage, backup)
         if not marker.exists() and recovery.exists():
             interrupted = json.loads(recovery.read_text())
             recovered = interrupted.get('state', {})
