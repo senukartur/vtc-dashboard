@@ -215,9 +215,27 @@ Watch a jobs tick and memory afterwards: the host now runs every module within t
 
 `activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts only because `apply` recorded the exact rights it installed in `state/stage-grants-installed.json`; a host without that record must match the baseline exactly. It does not remove seeded rows, and no operation does: `restore` proves an export in isolated volumes and never switches active data. Removing them is a separate owner-run recovery from the export whose ID `stage-seed` printed.
 
+### Stage placeholder catalog
+
+A trip from a real telemetry client arrives without a game build or map, so its identifiers cannot resolve against any catalog. It stays in review until staff supply the missing facts, and those selections need a published catalog. `deploy/development/stage-catalog-ets2.json` and `stage-catalog-ats.json` are that catalog: four project-authored placeholder entries per game, with no game-derived data. `CATALOGS_EVIDENCE_FILE` points at `stage-catalog-evidence.json` in the image, which trusts exactly those two files by hash. `CATALOGS_SYNTHETIC` stays `false`.
+
+Publishing needs separate owner authorization. It happens in the product, after `stage-seed`, because the seed refuses a database that already has a catalog revision:
+
+1. Signed in as the director, open catalog administration and upload one file from the released revision, unmodified. Any byte change fails the trust check, and publication answers 409.
+2. Import it, confirm the review shows source review approved, and publish. Repeat for the other game.
+
+To accept a trip, one staff member opens it in review and proposes a resolution: placeholder origin, destination, cargo and trailer, plus the actual distance when it is unknown. A different staff member approves it, which also accepts the trip. Nobody can review their own trip, so trips from the director's client need two other staff accounts, such as seeded members 1 and 2.
+
+Know before publishing:
+
+- **It is one-way.** Every later catalog must retain published entities, so importing the real catalog on this database fails with `omitted_historical_entity`. The placeholders go only with a restore of the export taken by `stage-seed`, which also removes everything recorded after it.
+- `stage-seed` refuses from then on, reruns included, because these revisions are not the fixture's own.
+- Accepted trips show placeholder labels and count in this host's analytics. The source identifiers stay in the trip's evidence.
+- A trip whose recording is not `complete` still cannot be accepted, because a resolution cannot supply that. Staff can only reject it.
+- Roll back the configuration with `activation rollback` before going back to an image older than this file. Otherwise the app refuses to start on the missing evidence path.
+
 Limits on this host:
 
-- `CATALOGS_SYNTHETIC` stays `false` because production configuration refuses `true`, and no catalog is published. Seeded trips show their fixture labels, but catalog selectors have no published revision to offer. A trip from a real telemetry client stays in review with unknown origin, destination, cargo and trailer, so staff can reject it but not accept it.
 - The seed's catalog revisions stay `validated` and are never published, because publishing takes only a draft. A later real import creates its own draft and leaves them in place.
 - `ADMISSIONS_ENABLED` stays whatever the live file says, because enabling it opens a public application form. While it is off, `stage-smoke` skips that route and the administrative applications page answers 404.
 - The profile's `settings`, including the upload and rate limits, are development-only choices for synthetic data and say nothing about production values. Capacity, backup space and the one-year retention that [manual reports](../development/manual-reports.md) require before a real activation remain unproven. Uploads land in the `evidence` volume, which the export taken by `stage-seed` and `export` captures. That is not ongoing data protection, so real evidence does not belong on this host.

@@ -1,0 +1,36 @@
+[
+  {
+    "artifactSha256": "2863ad20da88db638aa5dfcd552747dd3c2d0aee1fb57ed1d17f10a67afa679f",
+    "game": "ets2",
+    "gameBuild": "stage-placeholder-1",
+    "releaseInventoryAsOf": "2026-11-06",
+    "expectedPacks": ["base"],
+    "provenance": [
+      {
+        "referenceId": "5a1f6c1e-8f4b-4d2a-9c3e-0d7b6a2e1f01",
+        "publicSourceUrl": "https://github.com/senukartur/vtc-dashboard/tree/main/deploy/development",
+        "attribution": "Original placeholder entries written for this project's development host",
+        "permittedUseBasis": "Project-authored placeholder text. Contains no game-derived identifiers, labels or definitions.",
+        "observedAt": "2026-11-06T00:00:00.000Z"
+      }
+    ],
+    "englishLabelsReviewed": true
+  },
+  {
+    "artifactSha256": "752c7cf45180621456e0104fe0049f4f5028e2b9cef19606f00ed166e4f867fe",
+    "game": "ats",
+    "gameBuild": "stage-placeholder-1",
+    "releaseInventoryAsOf": "2026-11-06",
+    "expectedPacks": ["base"],
+    "provenance": [
+      {
+        "referenceId": "5a1f6c1e-8f4b-4d2a-9c3e-0d7b6a2e1f02",
+        "publicSourceUrl": "https://github.com/senukartur/vtc-dashboard/tree/main/deploy/development",
+        "attribution": "Original placeholder entries written for this project's development host",
+        "permittedUseBasis": "Project-authored placeholder text. Contains no game-derived identifiers, labels or definitions.",
+        "observedAt": "2026-11-06T00:00:00.000Z"
+      }
+    ],
+    "englishLabelsReviewed": true
+  }
+]

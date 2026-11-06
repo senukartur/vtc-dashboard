@@ -15,6 +15,7 @@
   ],
   "settings": {
     "CATALOGS_SYNTHETIC": "false",
+    "CATALOGS_EVIDENCE_FILE": "/app/operations/stage-catalog-evidence.json",
     "CATALOGS_MAX_FILE_BYTES": "1048576",
     "CATALOGS_ARTIFACT_TTL_MS": "86400000",
     "CATALOGS_POLICY_REVISION": "1",
