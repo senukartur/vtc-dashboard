@@ -10,6 +10,7 @@ import stat
 import struct
 
 STAGE_PROFILE = 'stage-features.json'
+STAGE_GRANTS_STATE = 'state/stage-grants-installed.json'
 # Written out rather than read from the profile: a partly copied control update must still import.
 # test_activation.py keeps these equal to the profile.
 STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
@@ -243,8 +244,9 @@ def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None
     actual = set(map(tuple, rows))
     actual = {row for row in actual if row[1:] != ('global', '*', 'USAGE', 'NO')}
     legacy = ("'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO')
-    # A rollback keeps the reviewed module grants, like every other narrow grant it retains.
-    allowed = expected | privilege_rows(stage_grants(o)) | ({legacy} if allow_legacy else set())
+    # A rollback keeps module grants only where an apply recorded them; any other host matches exactly.
+    retained = privilege_rows(stage_grants(o)) if (o.BASE / STAGE_GRANTS_STATE).exists() else set()
+    allowed = expected | retained | ({legacy} if allow_legacy else set())
     o.require(actual <= allowed, 'UNEXPECTED_EFFECTIVE_PRIVILEGES')
     if complete:
         o.require(expected <= actual, 'MISSING_EFFECTIVE_PRIVILEGES')
@@ -258,6 +260,9 @@ def grants(o, revision, values=None):
     statement = grant_sql(o, values=values)
     if ["'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO'] in before:
         statement += "REVOKE SELECT ON vtc.* FROM 'vtc_runtime'@'%';\n"
+    if values and stage_enabled(values):
+        # Recorded before the nontransactional DDL, so a partial install stays explained.
+        o.atomic_json(o.BASE / STAGE_GRANTS_STATE, {'revision': revision})
     o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
               revision=revision, data=statement.encode())
     check_privileges(o, privileges(o, revision), complete=True, values=values)

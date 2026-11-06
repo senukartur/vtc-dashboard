@@ -228,58 +228,62 @@ test("stage profile validates in production, adopts a bootstrapped company and a
   };
   const app = await createApp({ checkReadiness: async () => true, ...composed });
   try {
+    const addCatalog = (creatorId: string) =>
+      unit.run(async (tx) => {
+        const c = unit.client(tx),
+          artifactId = randomUUID(),
+          sha256 = createHash("sha256").update("existing-catalog").digest();
+        await c.insert(catalogArtifacts).values({
+          id: artifactId,
+          creatorId,
+          sha256,
+          byteLength: 0,
+          content: null,
+          expiresAt: demoEpoch,
+          createdAt: demoEpoch,
+        });
+        await c.insert(catalogRevisions).values({
+          id: randomUUID(),
+          game: "ets2",
+          version: 1,
+          state: "validated",
+          complete: true,
+          artifactId,
+          artifactSha256: sha256,
+          gameBuild: "existing-build",
+          inventoryAsOf: "2026-01-01",
+          synthetic: false,
+          sourceManifestSha256: sha256,
+          provenance: [{ source: "Fictional existing catalog" }],
+          createdAt: demoEpoch,
+        });
+      });
+    const addMember = () =>
+      unit.run((tx) =>
+        identity.insertWithCredential(tx, {
+          userId: demoId("existing-member"),
+          email: "existing.member@example.invalid",
+          name: "Existing Member",
+          passwordHash,
+          roles: ["driver"],
+        }),
+      );
     const { userId } = await start();
     // Without the explicit adoption option an existing company is still refused.
     await expect(seedDashboard(unit, identity, passwordHash)).rejects.toThrow(
       "DEMO_REFUSES_EXISTING_COMPANY",
     );
-    await unit.run(async (tx) => {
-      const c = unit.client(tx),
-        artifactId = randomUUID(),
-        sha256 = createHash("sha256").update("existing-catalog").digest();
-      await c.insert(catalogArtifacts).values({
-        id: artifactId,
-        creatorId: userId,
-        sha256,
-        byteLength: 0,
-        content: null,
-        expiresAt: demoEpoch,
-        createdAt: demoEpoch,
-      });
-      await c.insert(catalogRevisions).values({
-        id: randomUUID(),
-        game: "ets2",
-        version: 1,
-        state: "validated",
-        complete: true,
-        artifactId,
-        artifactSha256: sha256,
-        gameBuild: "existing-build",
-        inventoryAsOf: "2026-01-01",
-        synthetic: false,
-        sourceManifestSha256: sha256,
-        provenance: [{ source: "Fictional existing catalog" }],
-        createdAt: demoEpoch,
-      });
-    });
+    await addCatalog(userId);
     await expect(
       seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
-    await unit.run((tx) =>
-      identity.insertWithCredential(tx, {
-        userId: demoId("existing-member"),
-        email: "existing.member@example.invalid",
-        name: "Existing Member",
-        passwordHash,
-        roles: ["driver"],
-      }),
-    );
+    await addMember();
     await expect(
       seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).rejects.toThrow("DEMO_REFUSES_EXISTING_MEMBERS");
     expect(await tripCount()).toBe(0);
 
-    await start();
+    const { userId: directorId } = await start();
     const expected = demoDataset(new Date());
     expect(
       await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
@@ -339,6 +343,17 @@ test("stage profile validates in production, adopts a bootstrapped company and a
       }),
     });
     expect(decision.statusCode).toBe(200);
+
+    // A rerun also refuses once a real member or catalog sits beside the fixture.
+    await addCatalog(directorId);
+    await expect(
+      seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
+    await addMember();
+    await expect(
+      seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).rejects.toThrow("DEMO_REFUSES_EXISTING_MEMBERS");
+    expect(await tripCount()).toBe(expected.trips.length);
   } finally {
     await app.close();
     rmSync(evidenceRoot, { recursive: true, force: true });
