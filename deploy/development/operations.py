@@ -266,8 +266,9 @@ def fenced(revision, image_id=None):
 def stop_owned_jobs(revision, image_id=None):
     """A Docker client timeout does not stop its container. Keep recovery fenced on failure."""
     try:
-        names = {f'/{PROJECT}-{suffix}': 'heartbeat' if suffix == 'heartbeat' else 'jobs'
-                 for suffix in ['jobs', 'jobs-acceptance-a', 'jobs-acceptance-b', 'heartbeat']}
+        names = {f'/{PROJECT}-{suffix}': service
+                 for suffix, service in [('jobs', 'jobs'), ('jobs-acceptance-a', 'jobs'), ('jobs-acceptance-b', 'jobs'),
+                                         ('heartbeat', 'heartbeat'), ('stage-seed', 'migrate')]}
         inventory = ['docker', 'ps', '-aq', '--no-trunc', '--filter',
                      'name=^/(' + '|'.join(re.escape(name[1:]) for name in names) + ')$']
         discovery_deadline = time.monotonic() + 2 * WORKER_CONTROL_TIMEOUT
@@ -294,7 +295,7 @@ def stop_owned_jobs(revision, image_id=None):
                     wait_owned_jobs_absent(inventory)
                     return
                 # Only a strict subset of the original IDs can be inspected again.
-                # At most three refreshes fit the four-name inventory, and every
+                # At most four refreshes fit the five-name inventory, and every
                 # discovery call shares the original twenty-second deadline.
                 ids = survivors
                 continue
@@ -573,27 +574,31 @@ def stage_seed_locked(revision):
     """Synthetic fixture for this development host: consistent export first, then one transaction."""
     password = stage_demo_password()
     fenced(revision)
-    export_locked(revision)
     try:
+        identity = export_locked(revision)
         # The migrator is the only account with fixture DML; runtime grants stay narrow.
-        compose(['run', '--rm', '--no-deps', '-T', '-e', 'VTC_STAGE_SEED=synthetic-only', 'migrate',
-                 'node', 'dist/stage-seed.js'], revision=revision, data=password, timeout=180)
+        compose(['run', '--rm', '--name', f'{PROJECT}-stage-seed', '--no-deps', '-T',
+                 '-e', 'VTC_STAGE_SEED=synthetic-only', 'migrate', 'node', 'dist/stage-seed.js'],
+                revision=revision, data=password, timeout=180)
     finally:
-        # A refused or failed seed rolled back its single transaction, so service can resume.
+        # A client timeout does not stop the container: end it before service resumes beside it.
+        stop_owned_jobs(revision)
+        # A failed export or seed left the data unchanged, so service can resume.
         compose(['up', '-d', '--no-deps', 'app', 'probe'], revision=revision)
         ready(revision)
         public_ready(revision)
         maintenance(False)
+    return identity
 
 
 def stage_smoke_locked(revision, image_id):
-    """Read-only route check under the real runtime account, beside the serving app's fixed address."""
+    """Route check under the real runtime account; its only write is the fixture's login session."""
     validate_image(image_id, revision)
-    run(['docker', 'run', '--rm', '-i', '--network', f'{PROJECT}_database', '--read-only', '--cap-drop', 'ALL',
-         '--security-opt', 'no-new-privileges:true', '--memory', '192m', '--tmpfs', '/tmp:size=16m,mode=1777',
-         '--env-file', str(BASE / 'private/runtime.env'), '--env-file', str(BASE / 'private/identity-mail.env'),
-         image_id, 'node', 'operations/stage-smoke.mjs'], revision=revision, image_id=image_id,
-        data=stage_demo_password(), timeout=120)
+    return run(['docker', 'run', '--rm', '-i', '--network', f'{PROJECT}_database', '--read-only', '--cap-drop', 'ALL',
+                '--security-opt', 'no-new-privileges:true', '--memory', '192m', '--tmpfs', '/tmp:size=16m,mode=1777',
+                '--env-file', str(BASE / 'private/runtime.env'), '--env-file', str(BASE / 'private/identity-mail.env'),
+                image_id, 'node', 'operations/stage-smoke.mjs'], revision=revision, image_id=image_id,
+               data=stage_demo_password(), timeout=120)
 
 
 def export_locked(revision):
@@ -849,7 +854,7 @@ def main():
         revision = active['revision']
         require(not (BASE / 'state/recovery-required').exists() or operation[0] == 'restore' or
                 operation in [['activation', 'recover'], ['activation', 'rollback']] or
-                (operation in [['activation', 'validate'], ['activation', 'apply']] and
+                (operation in [['activation', 'prepare-stage'], ['activation', 'validate'], ['activation', 'apply']] and
                  activation.controls_pending(sys.modules[__name__], revision, active['imageId'])), 'RECOVERY_REQUIRED')
         require(not (BASE / 'state/notifications-acceptance').exists() or operation[0] in
                 ['notifications-acceptance', 'tick', 'heartbeat'], 'ACCEPTANCE_WINDOW')
@@ -896,11 +901,12 @@ def main():
             print('Synthetic reference: success')
         elif operation == ['stage-seed']:
             require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
-            stage_seed_locked(revision)
-            print('Stage seed: success')
+            identity = stage_seed_locked(revision)
+            print(f'Stage seed: success {identity}')
         elif operation == ['stage-smoke']:
             require(not (BASE / 'private/maintenance/enabled').exists(), 'MAINTENANCE')
-            stage_smoke_locked(revision, active['imageId'])
+            # Fixed statuses and paths only; on failure they stay in state/last-failed-child.stdout.
+            print(stage_smoke_locked(revision, active['imageId']).decode(), end='')
             print('Stage smoke: success')
         elif operation == ['export']:
             fenced(revision)

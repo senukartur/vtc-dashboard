@@ -294,7 +294,7 @@ def prepare_stage(o):
     os.replace(temporary, candidate)
 
 
-def retire_previous(o, shared, previous, intent_path):
+def retire_previous(o, shared, previous, intent_path, candidate):
     """Allow another apply only after a finished one: the older backup is kept, never overwritten."""
     if not previous.exists():
         return
@@ -303,6 +303,9 @@ def retire_previous(o, shared, previous, intent_path):
     settled = intent.get('previousHash' if intent.get('target') == 'previous' else 'candidateHash')
     o.require(intent.get('pending') is False and o.digest(shared) == settled,
               'ACTIVATION_BACKUP_STATE_INVALID')
+    # An unchanged candidate has nothing new to back up: rollback must still reach the older file.
+    if o.digest(candidate) == o.digest(shared):
+        return
     retired = previous.with_name(f'identity-mail.previous.{o.digest(previous)[:16]}.env')
     os.replace(previous, retired)
     directory = os.open(previous.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -382,9 +385,10 @@ def config_operation(o, revision, image_id, mode):
         owned_controls = controls_pending(o, revision, image_id)
         o.require(owned_controls or (not (o.BASE / 'private/maintenance/enabled').exists() and
                   not (o.BASE / 'state/recovery-required').exists()), 'ACTIVATION_FENCED')
-        retire_previous(o, shared, previous, intent_path)
+        retire_previous(o, shared, previous, intent_path, candidate)
         o.atomic_json(intent_path, {'revision': revision, 'imageId': image_id,
-                                   'candidateHash': o.digest(candidate), 'previousHash': o.digest(shared),
+                                   'candidateHash': o.digest(candidate),
+                                   'previousHash': o.digest(previous if previous.exists() else shared),
                                    'pending': True, 'target': 'candidate'})
     else:
         intent = json.loads(intent_path.read_text())
