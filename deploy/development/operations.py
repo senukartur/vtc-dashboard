@@ -592,7 +592,7 @@ def stage_seed_locked(revision):
 
 
 def stage_smoke_locked(revision, image_id):
-    """Route check under the real runtime account; its only write is the fixture's login session."""
+    """Route check under the real runtime account. Not read-only: login and rate limits write."""
     validate_image(image_id, revision)
     return run(['docker', 'run', '--rm', '-i', '--network', f'{PROJECT}_database', '--read-only', '--cap-drop', 'ALL',
                 '--security-opt', 'no-new-privileges:true', '--memory', '192m', '--tmpfs', '/tmp:size=16m,mode=1777',

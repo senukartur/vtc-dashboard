@@ -210,7 +210,7 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual({row[3] for row in activation.privilege_rows({'jobs': {'t': ['UPDATE(a,b)']}})},
                          {'UPDATE(a)', 'UPDATE(b)'})
         enabled = {'TRIPS_ENABLED': 'true'}
-        rows = [list(row) for row in activation.privilege_rows(activation.matrix(ops, enabled))]
+        rows = [list(row) for row in sorted(activation.privilege_rows(activation.matrix(ops, enabled)))]
         activation.check_privileges(ops, rows, complete=True, values=enabled)
         # A host that never applied modules must match the baseline exactly.
         with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
