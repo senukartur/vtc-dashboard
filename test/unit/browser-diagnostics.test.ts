@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { FullResult, TestCase, TestResult } from "@playwright/test/reporter";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import {
   browserFailureLine,
   browserFailurePrefix,
@@ -171,24 +171,31 @@ const valid = {
   status: "failed",
 };
 const privateText = "SYNTHETIC_PRIVATE_TOKEN=never-publish";
+const errorFieldReads: string[] = [];
+// The reporter catches what these getters throw, so a read is proven by the record, not the throw.
+afterEach(() => {
+  const reads = errorFieldReads.splice(0);
+  expect(reads).toEqual([]);
+});
 /** A runner error whose free-text fields must never be read; only `location` is safe. */
 function opaqueError(location?: { file: string; line: number }) {
-  const forbidden = () => {
+  const forbidden = (field: string) => {
+    errorFieldReads.push(field);
     throw new Error("PRIVATE_ERROR_FIELD_READ");
   };
   return {
     location,
     get message() {
-      return forbidden();
+      return forbidden("message");
     },
     get stack() {
-      return forbidden();
+      return forbidden("stack");
     },
     get value() {
-      return forbidden();
+      return forbidden("value");
     },
     get snippet() {
-      return forbidden();
+      return forbidden("snippet");
     },
   };
 }
@@ -209,7 +216,7 @@ function locatedFailures(errors: unknown) {
     output.mockRestore();
   }
 }
-test("failure locations keep the first committed test file and line and read nothing else", () => {
+test("failure locations keep the first existing test file and line and read nothing else", () => {
   const at = (file: string, line: number) => opaqueError({ file: resolve(file), line });
   expect(locatedFailures([at("test/e2e/landing.spec.ts", 40)])).toEqual([
     { ...valid, failureAt: "test/e2e/landing.spec.ts:40" },
@@ -223,11 +230,18 @@ test("failure locations keep the first committed test file and line and read not
       at("test/e2e/landing.spec.ts", 40),
     ]),
   ).toEqual([{ ...valid, failureAt: "test/e2e/support/locale.ts:64" }]);
+  expect(locatedFailures([opaqueError(), at("test/e2e/landing.spec.ts", 40)])).toEqual([
+    { ...valid, failureAt: "test/e2e/landing.spec.ts:40" },
+  ]);
   for (const errors of [
     [],
     [opaqueError()],
     [at("test/e2e/landing.spec.ts", 0)],
     [at("apps/web/src/main.tsx", 1)],
+    // The right shape, but stack-derived text rather than a file of this checkout.
+    [at("test/e2e/support/page-text-slug.ts", 1)],
+    // Only the first eight errors are read.
+    [...Array.from({ length: 8 }, () => opaqueError()), at("test/e2e/landing.spec.ts", 40)],
     undefined,
   ])
     expect(locatedFailures(errors)).toEqual([valid]);
@@ -521,6 +535,7 @@ test("browser diagnostics reject malformed and extra fields at collection and re
       "test/e2e/landing.spec.ts",
       "test/e2e/landing.spec.ts:0",
       "test/e2e/landing.spec.ts:100000",
+      "test/e2e/page-text-slug.ts:1",
       "test/e2e/../../secret.ts:1",
       "test/e2e/a/b.ts:1",
       "apps/web/src/main.tsx:1",
@@ -568,7 +583,7 @@ test("browser collector handles chunks and oversized lines, bounds records and k
   });
 });
 
-test("reporter reads locations and status without touching titles, errors or attachments", () => {
+test("an unavailable errors list keeps the coarse record and leaves titles and attachments unread", () => {
   const output = vi.spyOn(console, "log").mockImplementation(() => {});
   const reporter = new SafeBrowserReporter();
   const forbidden = () => {
@@ -622,16 +637,22 @@ test("unmapped locations and startup errors produce only coarse categories", () 
 });
 
 test("failure proof requires safe assertion records from every configured browser project", () => {
-  const output = browserProjects
-    .map((project) => record({ ...valid, file: "assertion-probe", project }))
-    .join("");
+  const failureAt = "test/support/failure-proof.ts:9";
+  const records = (located: object) =>
+    browserProjects
+      .map((project) => record({ ...valid, file: "assertion-probe", project, ...located }))
+      .join("");
+  const output = records({ failureAt });
   expect(browserFailureProof(`${privateText}\n${output}`)).toHaveLength(3);
   expect(() => browserFailureProof(output.replaceAll("assertion-probe", "landing"))).toThrow(
     "FAILURE_PROBE_BROWSER_DIAGNOSTICS_INVALID",
   );
   expect(() =>
-    browserFailureProof(record({ ...valid, file: "assertion-probe" }).repeat(3)),
+    browserFailureProof(record({ ...valid, file: "assertion-probe", failureAt }).repeat(3)),
   ).toThrow("FAILURE_PROBE_BROWSER_DIAGNOSTICS_INVALID");
+  expect(() => browserFailureProof(records({}))).toThrow(
+    "FAILURE_PROBE_BROWSER_DIAGNOSTICS_INVALID",
+  );
 });
 
 test("preparation wrapper diagnostics retain each actual category and explicit fixture bound", () => {

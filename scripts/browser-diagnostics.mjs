@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 export const browserFiles = {
   "test/e2e/dashboard.spec.ts": "dashboard",
   "test/e2e/dashboard-blocks.spec.ts": "dashboard-blocks",
@@ -143,11 +145,16 @@ export function safeQualificationAnnotations(annotations) {
   }
 }
 
-// Where the failure was thrown: a committed test file and line, never free text or another path.
+// Where the failure was thrown: a test file of this checkout and a line. Playwright derives error
+// locations by parsing stack text, which can include message lines, so the shape is not enough.
 const failureLocation =
   /^test\/(?:e2e\/support|e2e|probes|support)\/[a-z0-9-]{1,64}(?:\.spec)?\.ts:[1-9]\d{0,4}$/;
+const checkoutRoot = new URL("../", import.meta.url);
 export function safeFailureLocation(value) {
-  return typeof value === "string" && failureLocation.test(value) ? value : undefined;
+  if (typeof value !== "string" || !failureLocation.test(value)) return undefined;
+  return existsSync(new URL(value.slice(0, value.lastIndexOf(":")), checkoutRoot))
+    ? value
+    : undefined;
 }
 
 // Reject whole records with extra fields; never serialize arbitrary runner objects.

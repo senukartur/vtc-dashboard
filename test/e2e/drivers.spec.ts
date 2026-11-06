@@ -571,7 +571,7 @@ test.describe("Compact driver profile", () => {
         await switchLanguage(page, "ru");
         await expect(tripsCard(page).getByRole("table")).toBeVisible();
         await expect(qualification(page, "ATS").getByRole("definition").first()).toBeVisible();
-        // font-display: swap lays the page out in a wider fallback until Huninn arrives.
+        // font-display: swap lays the page out in a fallback font until Huninn arrives.
         await page.evaluate(() => document.fonts.ready);
         const trips = await box(tripsCard(page));
         const side = await box(qualification(page, "ETS2"));

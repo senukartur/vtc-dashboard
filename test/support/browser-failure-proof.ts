@@ -13,7 +13,9 @@ export function browserFailureProof(output: string) {
           failure.kind === "test" &&
           failure.file === "assertion-probe" &&
           failure.project === project &&
-          failure.status === "failed",
+          failure.status === "failed" &&
+          // Proves the location survives from real runner errors, not only from unit fakes.
+          typeof failure.failureAt === "string",
       ),
     )
   )
