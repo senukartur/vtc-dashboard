@@ -1002,7 +1002,7 @@ class ControlInstallTests(unittest.TestCase):
 
     def test_completed_receipt_inventories_cover_current_and_published_base_packages(self):
         self.assertEqual(set(completed_controls_receipt()['hashes']), activation.CONTROL_FILES)
-        self.assertEqual(len(activation.CONTROL_FILES), 11)
+        self.assertEqual(len(activation.CONTROL_FILES), 12)
         # This public historical package is fixed at main 06296fc, not the current subset installer.
         self.assertEqual(len(BASE_CONTROL_FILES), 8)
         for inventory in [activation.CONTROL_FILES, BASE_CONTROL_FILES]:

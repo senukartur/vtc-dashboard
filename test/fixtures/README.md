@@ -1,6 +1,6 @@
 # Fixtures
 
-The explicit local dashboard seed lives in [`scripts/demo/`](../../scripts/demo/), outside test resets and application startup. Run `pnpm db:seed` only against the guarded local development target described in [Contributing](../../docs/CONTRIBUTING.md#local-dashboard-demo-data). It provides a fictional company with relative-date trips and convoys; generated login details stay in ignored local storage. It is not production configuration or a source of game catalog data.
+The explicit local dashboard seed has its CLI in [`scripts/demo/`](../../scripts/demo/) and its packaged fixture in `apps/api/src/demo-*.ts`, outside test resets and application startup. Run `pnpm db:seed` only against the guarded local development target described in [Contributing](../../docs/CONTRIBUTING.md#local-dashboard-demo-data). It provides a fictional company with relative-date trips and convoys; generated login details stay in ignored local storage. It is not production configuration or a source of game catalog data.
 
 VTC-006 provides no seed account, company configuration or domain data. The local MySQL volume starts with an empty application database. Structural browser fixtures remain in [the reviewed API examples](../../docs/contracts/dashboard/examples.json); telemetry fixtures remain in [their separate directory](../../docs/contracts/examples/README.md). They are not a database seed or valid credentials.
 

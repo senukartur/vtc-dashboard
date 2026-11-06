@@ -78,7 +78,7 @@ The receiver compares the loaded revision tag's image ID with the manifest ID su
 
 ## Runtime, releases and failure recovery
 
-Only the proxy exposes ports and it has no evidence mount. App/probe run non-root with read-only roots, dropped capabilities, bounded logs/resources and no Docker socket. SQL is on an internal network. The separate authenticated probe adds no domain API/authentication. Only root/operator can inspect Docker; deploy is not in its group.
+Only the proxy exposes ports and it has no evidence mount. App/probe run non-root with read-only roots, dropped capabilities, bounded logs/resources and no Docker socket. SQL is on an internal network. The app also joins `provider-egress`, an unrestricted NAT network for Steam and TruckersMP calls. The separate authenticated probe adds no domain API/authentication. Only root/operator can inspect Docker; deploy is not in its group.
 
 Trial caps are MySQL 512 MiB, app 192 MiB, probe 64 MiB and proxy 64 MiB; short migration replaces stopped app/probe and minute heartbeat uses 64 MiB transiently. MySQL uses 128 MiB buffer pool, bounded temporary tables, 24 connections, performance schema, and dedicated-server auto tuning off. Durability (flush-on-commit and sync-binlog), strict SQL, UTC and exact baseline remain enabled. Headroom is limited and must be measured. Current lazy connections are five readiness slots, one probe, heartbeat and migrator each; future UnitOfWork/jobs/replicas require renewed capacity/grant review.
 
@@ -189,6 +189,40 @@ Before any separately authorized hosted activation, apply the reviewed migration
 The local deployment rehearsal opts its existing positively owned identity-acceptance allocation into an Events command/replay probe. The native fixture requires the existing full run/schema/account/sentinel checks plus test mode, local mail and an `example.invalid` recipient; ordinary or hosted acceptance does not enable this flag. It exercises create/edit/cancel, own RSVP, attendance and private history through the real service under the prepared runtime role. Negative SQL probes reject immutable-history/receipt UPDATE and DELETE. Successful exact-candidate rehearsal remains required evidence; this prepared fixture is not a hosted activation result.
 
 VTC-029 prepares [adjudication grants and activation boundaries](../development/trip-decisions.md#activation-migration-and-rollback). `trip-decisions-grants.prepared.json` is not applied by ordinary startup/cron or added to current hosted activation grants. Default FULL synthetic rehearsal temporarily applies only permission deltas, proves restricted runtime accept/replay/derived correction and separate worker catch-up, then revokes its deltas. Hosted migration/configuration/grants and production activation remain separately authorized operations.
+
+## Stage product modules and synthetic data
+
+A fresh host runs identity only, so every module route answers 404 and there is no data to look at. VTC-082 adds one reviewed profile, `deploy/development/stage-features.json`, and two root operations. Each host step needs separate owner authorization for the exact revision.
+
+After a normal merge and release:
+
+```sh
+sudo deploy/development/update-controls.sh
+sudo python3 /opt/vtc-development/operations.py activation prepare-stage
+sudo python3 /opt/vtc-development/operations.py activation validate
+sudo python3 /opt/vtc-development/operations.py activation apply
+sudo python3 /opt/vtc-development/operations.py activation inspect
+sudo python3 /opt/vtc-development/operations.py stage-seed
+sudo python3 /opt/vtc-development/operations.py stage-smoke
+```
+
+- `prepare-stage` writes `private/activation-input.env` from the live shared file, adds the profile's flags and settings, and generates each module key once. A retry reuses those keys, because replacing them invalidates cursors and stored manual references.
+- `apply` installs the profile's narrow `grants` over the baseline matrix only for a candidate that enables modules. Repeating it with an unchanged candidate keeps the existing rollback target. Column rights such as `UPDATE(created_at)` on a table that is never updated exist because `SELECT ... FOR UPDATE` requires one.
+- `stage-seed` takes a consistent export, then adds the synthetic members, trips, events and original catalog labels in one transaction under the migrator account. It adopts the existing company and director, so the director's own pages have data too: that real account gets a synthetic qualification state and credited trips that stay until the data is rebuilt. An assignment it already holds is kept, and fixture trips that started before that assignment are accepted but earn no credit. So are trips in a game where opening the qualifications page before `stage-seed` already created an empty state; the seed leaves that game unassigned. It refuses a company with other members or any catalog revision, and it keeps refusing on a rerun once a real member or catalog revision sits beside the fixture. Otherwise a same-day rerun adds nothing, while a later rerun adds that day's dated trips and replacements for passed events. Service resumes when the export or seed fails or the seed refuses; it stays fenced if the seed container cannot be stopped or service does not return to ready. Success prints the export ID. Fixture accounts are `demo.driver.N@example.invalid` (member 1 is the deputy director); their generated password stays in root-only `private/stage-demo-login.env` and is passed on stdin only.
+- `stage-smoke` signs in as the deputy under the runtime account and requires each page's read routes to answer. On success it prints statuses and paths only; on failure they stay in root-only `state/last-failed-child.stdout`. It is not strictly read-only: login writes the fixture's session, which expires, and purges expired sessions, and the routes update rate-limit counters, so wait a minute between runs to avoid a false 429. It does not exercise product writes, Steam or the browser.
+
+Watch a jobs tick and memory afterwards: the host now runs every module within the existing `mem_limit` values, and this capacity has not been measured.
+
+`activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts only because `apply` recorded the exact rights it installed in `state/stage-grants-installed.json`; a host without that record must match the baseline exactly. It does not remove seeded rows, and no operation does: `restore` proves an export in isolated volumes and never switches active data. Removing them is a separate owner-run recovery from the export whose ID `stage-seed` printed.
+
+Limits on this host:
+
+- `CATALOGS_SYNTHETIC` stays `false` because production configuration refuses `true`, and no catalog is published. Seeded trips show their fixture labels, but catalog selectors have no published revision to offer. A trip from a real telemetry client stays in review with unknown origin, destination, cargo and trailer, so staff can reject it but not accept it.
+- The seed's catalog revisions stay `validated` and are never published, because publishing takes only a draft. A later real import creates its own draft and leaves them in place.
+- `ADMISSIONS_ENABLED` stays whatever the live file says, because enabling it opens a public application form. While it is off, `stage-smoke` skips that route and the administrative applications page answers 404.
+- The profile's `settings`, including the upload and rate limits, are development-only choices for synthetic data and say nothing about production values. Capacity, backup space and the one-year retention that [manual reports](../development/manual-reports.md) require before a real activation remain unproven. Uploads land in the `evidence` volume, which the export taken by `stage-seed` and `export` captures. That is not ongoing data protection, so real evidence does not belong on this host.
+- `provider-egress` opens all outbound traffic for the app, with no host-level destination restriction.
+- The deployment rehearsal does not exercise this profile. The real-MySQL proof is in `test/integration/demo-seed.test.ts` plus the evidence in the VTC-082 pull request.
 
 ## Isolated notifications acceptance and complete rehearsal
 

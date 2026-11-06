@@ -5,7 +5,7 @@ import {
   demoId,
   demoMembers,
   games,
-} from "../../scripts/demo/dataset.ts";
+} from "../../apps/api/src/demo-dataset.ts";
 
 test("demo seed is restricted to explicitly local development databases", () => {
   const local = { NODE_ENV: "development", MYSQL_HOST: "127.0.0.1", MYSQL_DATABASE: "vtc_dev" };
