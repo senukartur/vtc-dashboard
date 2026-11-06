@@ -239,14 +239,19 @@ def privilege_rows(tables_by_role):
     return rows
 
 
+def installed_stage_rows(o):
+    """What apply actually installed, which a later control update to the profile cannot change."""
+    path = o.BASE / STAGE_GRANTS_STATE
+    return set(map(tuple, json.loads(path.read_text())['privileges'])) if path.exists() else set()
+
+
 def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None):
     expected = privilege_rows(matrix(o, values))
     actual = set(map(tuple, rows))
     actual = {row for row in actual if row[1:] != ('global', '*', 'USAGE', 'NO')}
     legacy = ("'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO')
     # A rollback keeps module grants only where an apply recorded them; any other host matches exactly.
-    retained = privilege_rows(stage_grants(o)) if (o.BASE / STAGE_GRANTS_STATE).exists() else set()
-    allowed = expected | retained | ({legacy} if allow_legacy else set())
+    allowed = expected | installed_stage_rows(o) | ({legacy} if allow_legacy else set())
     o.require(actual <= allowed, 'UNEXPECTED_EFFECTIVE_PRIVILEGES')
     if complete:
         o.require(expected <= actual, 'MISSING_EFFECTIVE_PRIVILEGES')
@@ -262,7 +267,9 @@ def grants(o, revision, values=None):
         statement += "REVOKE SELECT ON vtc.* FROM 'vtc_runtime'@'%';\n"
     if values and stage_enabled(values):
         # Recorded before the nontransactional DDL, so a partial install stays explained.
-        o.atomic_json(o.BASE / STAGE_GRANTS_STATE, {'revision': revision})
+        # A union, because GRANT never revokes what an earlier profile installed.
+        o.atomic_json(o.BASE / STAGE_GRANTS_STATE, {'revision': revision, 'privileges': sorted(
+            installed_stage_rows(o) | privilege_rows(stage_grants(o)))})
     o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
               revision=revision, data=statement.encode())
     check_privileges(o, privileges(o, revision), complete=True, values=values)

@@ -221,6 +221,15 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue((self.base / activation.STAGE_GRANTS_STATE).exists())
         # A rolled-back identity-only configuration keeps the narrow rights that apply recorded.
         activation.check_privileges(ops, rows, complete=True, values={})
+        # A later control update that narrows the profile cannot disown what is still installed.
+        profile = self.stage_profile()
+        del profile['grants']['runtime']['telemetry_tokens']
+        (self.base / activation.STAGE_PROFILE).write_text(json.dumps(profile))
+        activation.check_privileges(ops, rows, complete=True, values={})
+        with patch.object(activation, 'privileges', side_effect=[rows, rows]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, enabled)
+        recorded = json.loads((self.base / activation.STAGE_GRANTS_STATE).read_text())['privileges']
+        self.assertIn(['\'vtc_runtime\'@\'%\'', 'vtc', 'telemetry_tokens', 'SELECT', 'NO'], recorded)
         with self.assertRaisesRegex(RuntimeError, '^MISSING_EFFECTIVE_PRIVILEGES$'):
             activation.check_privileges(ops, rows[1:], complete=True, values=enabled)
         extra = ["'vtc_runtime'@'%'", 'vtc', 'telemetry_tokens', 'DROP', 'NO']
