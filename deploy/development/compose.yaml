@@ -55,6 +55,7 @@ services:
     volumes: [evidence:/app/private-evidence]
     networks:
       database: {}
+      provider-egress: {}
       ingress:
         ipv4_address: ${VTC_INGRESS_APP_IPV4:?Set the ingress app address}
     logging: *logs
@@ -133,6 +134,7 @@ networks:
   frontend: {}
   database: { internal: true }
   mail-egress: {}
+  provider-egress: {}
   ingress:
     internal: true
     ipam:

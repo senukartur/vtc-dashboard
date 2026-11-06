@@ -7,7 +7,7 @@ import {
   catalogRevisions,
 } from "@vtc/db/catalogs-schema";
 import { eventRevisions, events } from "@vtc/db/events-schema";
-import { company, eq, membership } from "@vtc/db/identity-schema";
+import { and, company, eq, membership } from "@vtc/db/identity-schema";
 import {
   qualificationAssignments,
   qualificationRules,
@@ -20,35 +20,53 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
-import type { Identity } from "../../apps/api/src/modules/identity/service.ts";
-import { structuralLevels } from "../../apps/api/src/modules/qualifications/initialization.ts";
-import type {
-  Fact,
-  NormalizedTripEvidence,
-} from "../../apps/api/src/modules/sources/contracts/evidence.ts";
-import { createContributionRegister } from "../../apps/api/src/modules/trips/contributions.ts";
-import { createFactRepository } from "../../apps/api/src/modules/trips/facts.ts";
-import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./dataset.ts";
+import { demoDataset, demoEpoch, demoId, demoMembers, games } from "./demo-dataset.js";
+import type { Identity } from "./modules/identity/service.js";
+import { structuralLevels } from "./modules/qualifications/initialization.js";
+import type { Fact, NormalizedTripEvidence } from "./modules/sources/contracts/evidence.js";
+import { createContributionRegister } from "./modules/trips/contributions.js";
+import { createFactRepository } from "./modules/trips/facts.js";
 
-// Explicit fixture writer: never imported by application startup or production commands.
+// Explicit fixture writer: application startup and the worker never import it. It runs only through
+// the guarded local CLI (scripts/demo/cli.ts) and the root stage operation (stage-seed.ts).
 export async function seedDashboard(
   unit: UnitOfWork,
   identity: Identity,
   passwordHash: string,
   now = new Date(),
+  options: { adoptCompany?: boolean } = {},
 ) {
   const dataset = demoDataset(now);
-  const director = demoMembers[0];
-  if (!director) throw new Error("DEMO_MEMBER_MISSING");
+  const demoDirector = demoMembers[0];
+  if (!demoDirector) throw new Error("DEMO_MEMBER_MISSING");
   const facts = createFactRepository(unit);
   const contributions = createContributionRegister(unit);
   return unit.run(async (tx) => {
     const c = unit.client(tx);
     const [existing] = await c.select().from(company).where(eq(company.singleton, 1)).for("update");
-    if (existing && (existing.id !== demoId("company") || existing.directorUserId !== director.id))
-      throw new Error("DEMO_REFUSES_EXISTING_COMPANY");
-    if (!existing) {
-      for (const member of demoMembers) {
+    if (options.adoptCompany && !existing) throw new Error("DEMO_COMPANY_REQUIRED");
+    const adopted =
+      !!existing &&
+      (existing.id !== demoId("company") || existing.directorUserId !== demoDirector.id);
+    if (adopted && !options.adoptCompany) throw new Error("DEMO_REFUSES_EXISTING_COMPANY");
+    // An adopted director stands in for the first demo member, so their own pages have data too.
+    const director = adopted ? { ...demoDirector, id: existing.directorUserId } : demoDirector;
+    const members = demoMembers.map((member, index) => (index === 0 ? director : member));
+    const ownerOf = (id: string) => (id === demoDirector.id ? director.id : id);
+    const [installed] = await c
+      .select({ id: catalogRevisions.id })
+      .from(catalogRevisions)
+      .where(eq(catalogRevisions.id, demoId("catalog/ets2")));
+    if (adopted && !installed) {
+      // First install only: this fixture is never written beside real members or a real catalog.
+      const others = await c.select({ id: membership.userId }).from(membership);
+      if (others.some((member) => member.id !== director.id))
+        throw new Error("DEMO_REFUSES_EXISTING_MEMBERS");
+      const [catalog] = await c.select({ id: catalogRevisions.id }).from(catalogRevisions).limit(1);
+      if (catalog) throw new Error("DEMO_REFUSES_EXISTING_CATALOG");
+    }
+    if (!installed) {
+      for (const member of adopted ? members.slice(1) : members) {
         await identity.insertWithCredential(tx, {
           userId: member.id,
           email: member.email,
@@ -65,12 +83,18 @@ export async function seedDashboard(
           })
           .where(eq(membership.userId, member.id));
       }
-      await c.insert(company).values({
-        singleton: 1,
-        id: demoId("company"),
-        directorUserId: director.id,
-        reportingTimezone: "Europe/Moscow",
-      });
+      if (!adopted)
+        await c.insert(company).values({
+          singleton: 1,
+          id: demoId("company"),
+          directorUserId: director.id,
+          reportingTimezone: "Europe/Moscow",
+        });
+      else if (!existing.reportingTimezone)
+        await c
+          .update(company)
+          .set({ reportingTimezone: "Europe/Moscow" })
+          .where(eq(company.singleton, 1));
       for (const game of games) {
         for (const [rank, levelId] of structuralLevels[game].entries()) {
           await c.insert(qualificationRules).values({
@@ -85,7 +109,14 @@ export async function seedDashboard(
             reason: "Synthetic local demo thresholds; not company launch configuration",
           });
         }
-        for (const member of demoMembers) {
+        for (const member of members) {
+          const [held] = await c
+            .select({ userId: qualificationStates.userId })
+            .from(qualificationStates)
+            .where(
+              and(eq(qualificationStates.userId, member.id), eq(qualificationStates.game, game)),
+            );
+          if (held) continue;
           const assignmentId = demoId(`assignment/${member.id}/${game}`);
           const levelId = structuralLevels[game][member.rank];
           if (!levelId) throw new Error("DEMO_LEVEL_MISSING");
@@ -140,15 +171,17 @@ export async function seedDashboard(
                 ["Berlin", "Берлин"],
                 ["Hamburg", "Гамбург"],
                 ["Demo machinery", "Демо: оборудование"],
+                ["Demo curtainsider", "Демо: тентованный прицеп"],
               ]
             : [
                 ["Seattle", "Сиэтл"],
                 ["Portland", "Портленд"],
                 ["Demo lumber", "Демо: пиломатериалы"],
+                ["Demo flatbed", "Демо: платформа"],
               ];
         for (const [index, label] of labels.entries()) {
           const entityId = demoId(`entity/${game}/${index}`),
-            kind = index === 2 ? "cargo" : "city";
+            kind = index === 3 ? "trailer_type" : index === 2 ? "cargo" : "city";
           const map = Buffer.from("local-demo");
           await c
             .insert(catalogEntities)
@@ -168,15 +201,33 @@ export async function seedDashboard(
         }
       }
     }
+    // A member's current assignment decides the credit, including one the director already held.
+    async function creditOf(userId: string, game: (typeof games)[number], rank: number) {
+      const [current] = await c
+        .select({ id: qualificationAssignments.id, levelId: qualificationAssignments.levelId })
+        .from(qualificationStates)
+        .innerJoin(
+          qualificationAssignments,
+          eq(qualificationAssignments.id, qualificationStates.assignmentId),
+        )
+        .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
+      const levels: readonly string[] = structuralLevels[game];
+      const held = current ? levels.indexOf(current.levelId) : -1;
+      return {
+        assignmentId: current?.id ?? demoId(`assignment/${userId}/${game}`),
+        ruleVersionId: demoId(`rule/${game}/${held < 0 ? rank : held}`),
+      };
+    }
     let addedTrips = 0,
       addedEvents = 0;
-    for (const trip of dataset.trips) {
+    for (const fixture of dataset.trips) {
+      const trip = { ...fixture, ownerId: ownerOf(fixture.ownerId) };
       const [saved] = await c.select({ id: trips.id }).from(trips).where(eq(trips.id, trip.id));
       if (saved) continue;
       const sourceId = demoId(`source/${trip.id}`),
         messageId = demoId(`message/${trip.id}`),
         factId = demoId(`fact/${trip.id}`);
-      const member = demoMembers.find((member) => member.id === trip.ownerId);
+      const member = members.find((member) => member.id === trip.ownerId);
       if (!member) throw new Error("DEMO_MEMBER_MISSING");
       const accepted = trip.decision === "accepted";
       const open = trip.decision === "unassessed";
@@ -276,7 +327,7 @@ export async function seedDashboard(
         money: null,
         provenance: { synthetic: true },
         wholeTripDistanceSupported: !open,
-        trailers: { complete: false, items: [] },
+        trailers: open ? { complete: false, items: [] } : { complete: true, items: [pin(3)] },
         adrCategory: unknown,
         ruleContextComplete: false,
         reasonCodes,
@@ -292,6 +343,7 @@ export async function seedDashboard(
         reasons: reasonCodes,
         createdAt: trip.end,
       });
+      const credit = accepted ? await creditOf(trip.ownerId, trip.game, member.rank) : null;
       const [context] = await contributions.contexts(tx, [
         { tripId: trip.id, expectedTripVersion: 1, version: 1, factId },
       ]);
@@ -300,8 +352,8 @@ export async function seedDashboard(
         tx,
         context,
         {
-          assignmentId: accepted ? demoId(`assignment/${trip.ownerId}/${trip.game}`) : null,
-          ruleVersionId: accepted ? demoId(`rule/${trip.game}/${member.rank}`) : null,
+          assignmentId: credit?.assignmentId ?? null,
+          ruleVersionId: credit?.ruleVersionId ?? null,
           attributionBasis: accepted ? "actual_start" : "unresolved",
           attributionAt: accepted ? trip.start : null,
         },

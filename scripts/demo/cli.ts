@@ -2,9 +2,9 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createDatabase, createUnitOfWork, settingsFromEnvironment } from "@vtc/db";
 import { company, eq } from "@vtc/db/identity-schema";
+import { assertDemoTarget, demoEmail, demoId } from "../../apps/api/src/demo-dataset.ts";
+import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
-import { assertDemoTarget, demoEmail, demoId } from "./dataset.ts";
-import { seedDashboard } from "./seed.ts";
 
 try {
   assertDemoTarget(process.env);

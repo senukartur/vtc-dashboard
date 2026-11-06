@@ -169,6 +169,125 @@ class ActivationTests(unittest.TestCase):
             activation.private_copy(source, target)
         self.assertEqual(source.read_bytes(), original)
 
+    def stage_profile(self):
+        source = pathlib.Path(__file__).with_name(activation.STAGE_PROFILE)
+        (self.base / activation.STAGE_PROFILE).write_bytes(source.read_bytes())
+        (self.base / 'activation-grants.json').write_bytes(
+            pathlib.Path(__file__).with_name('activation-grants.json').read_bytes())
+        return json.loads(source.read_text())
+
+    def test_stage_profile_matches_the_reviewed_key_allowlist(self):
+        profile = self.stage_profile()
+        self.assertEqual(set(profile['flags']), set(activation.STAGE_FLAGS))
+        self.assertEqual(set(profile['settings']), set(activation.STAGE_SETTINGS))
+        self.assertEqual(set(profile['generatedKeys']), set(activation.STAGE_KEYS))
+        self.assertEqual(set(profile['grants']), {'runtime', 'jobs'})
+        self.assertIn(activation.STAGE_PROFILE, activation.CONTROL_FILES)
+        self.assertLessEqual({*activation.STAGE_FLAGS, *activation.STAGE_SETTINGS, *activation.STAGE_KEYS},
+                             set(activation.SHARED_KEYS))
+        self.assertEqual(profile['settings']['CATALOGS_SYNTHETIC'], 'false')
+
+    def test_module_grants_install_only_for_a_configuration_that_enables_modules(self):
+        self.stage_profile()
+        baseline = activation.grant_sql(ops)
+        self.assertNotIn('telemetry_tokens', baseline)
+        self.assertEqual(activation.grant_sql(ops, values={'TRIPS_ENABLED': 'false'}), baseline)
+        modules = activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
+        self.assertIn('vtc.telemetry_tokens', modules)
+        # MySQL refuses the reserved column name unless it is quoted.
+        self.assertIn('`cursor`', modules)
+        (self.base / activation.STAGE_PROFILE).unlink()
+        with self.assertRaisesRegex(RuntimeError, '^STAGE_PROFILE_REQUIRED$'):
+            activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
+
+    def test_column_grants_read_back_per_column_and_rollback_keeps_module_grants(self):
+        self.stage_profile()
+        self.assertEqual(activation.quoted_columns('UPDATE(a,cursor)'), 'UPDATE(`a`,`cursor`)')
+        self.assertEqual(activation.quoted_columns('SELECT'), 'SELECT')
+        self.assertEqual({row[3] for row in activation.privilege_rows({'jobs': {'t': ['UPDATE(a,b)']}})},
+                         {'UPDATE(a)', 'UPDATE(b)'})
+        enabled = {'TRIPS_ENABLED': 'true'}
+        rows = [list(row) for row in activation.privilege_rows(activation.matrix(ops, enabled))]
+        activation.check_privileges(ops, rows, complete=True, values=enabled)
+        # A rolled-back identity-only configuration keeps the narrow rights it does not use.
+        activation.check_privileges(ops, rows, complete=True, values={})
+        with self.assertRaisesRegex(RuntimeError, '^MISSING_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, rows[1:], complete=True, values=enabled)
+        extra = ["'vtc_runtime'@'%'", 'vtc', 'telemetry_tokens', 'DROP', 'NO']
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, rows + [extra], values=enabled)
+
+    def test_module_flags_ignore_every_other_value(self):
+        path = self.base / 'private/flags.env'
+        path.write_text('TRIPS_ENABLED=true\nEVENTS_ENABLED=false\nDIFFERENT=TRIPS_ENABLED=true\n')
+        self.assertEqual(activation.module_flags(path), {'TRIPS_ENABLED': 'true'})
+
+    def test_prepare_stage_keeps_live_values_and_never_regenerates_keys(self):
+        self.stage_profile()
+        shared = self.base / 'private/identity-mail.env'
+        candidate = self.base / 'private/activation-input.env'
+        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\nTRIPS_CURSOR_KEY=' + 'c' * 64 + '\n')
+        shared.chmod(0o600)
+        candidate.unlink()
+        with patch.object(activation, 'private_values', side_effect=lambda _o, path, _k: dict(
+                line.split('=', 1) for line in path.read_text().splitlines())):
+            self.invoke('prepare-stage')
+            first = candidate.read_text()
+            self.assertEqual(candidate.stat().st_mode & 0o077, 0)
+            self.assertIn('TRIPS_CURSOR_KEY=' + 'c' * 64 + '\n', first)
+            self.assertIn('IDENTITY_ENABLED=true\n', first)
+            self.assertIn('TELEMETRY_ENABLED=true\n', first)
+            self.assertIn('CATALOGS_SYNTHETIC=false\n', first)
+            self.invoke('prepare-stage')
+            self.assertEqual(candidate.read_text(), first)
+            (self.base / 'state/activation-intent.json').write_text(json.dumps({'pending': True}))
+            with self.assertRaisesRegex(RuntimeError, '^ACTIVATION_PENDING$'):
+                self.invoke('prepare-stage')
+            (self.base / 'state/activation-intent.json').unlink()
+            shared.write_text('IDENTITY_ENABLED=false\n')
+            with self.assertRaisesRegex(RuntimeError, '^IDENTITY_REQUIRED$'):
+                self.invoke('prepare-stage')
+
+    def test_second_apply_archives_a_settled_backup_and_refuses_an_unsettled_one(self):
+        shared = self.base / 'private/identity-mail.env'
+        previous = self.base / 'private/identity-mail.previous.env'
+        first_config = shared.read_bytes()
+        stack = (patch.object(activation, 'validate'), patch.object(ops, 'fenced', side_effect=self.fence),
+                 patch.object(activation, 'grants'), patch.object(ops, 'compose'), patch.object(ops, 'ready'),
+                 patch.object(ops, 'public_ready'))
+        for item in stack:
+            item.start()
+            self.addCleanup(item.stop)
+        self.invoke('apply')
+        second_config = shared.read_bytes()
+        (self.base / 'private/activation-input.env').write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\nTRIPS_ENABLED=true\n')
+        self.invoke('apply')
+        self.assertEqual(previous.read_bytes(), second_config)
+        retired = list((self.base / 'private').glob('identity-mail.previous.*.env'))
+        self.assertEqual([path.read_bytes() for path in retired], [first_config])
+        self.invoke('rollback')
+        self.assertEqual(shared.read_bytes(), second_config)
+        # The intent no longer describes the live file: an unexplained edit must not lose the backup.
+        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\nEDITED=1\n')
+        with self.assertRaisesRegex(RuntimeError, '^ACTIVATION_BACKUP_STATE_INVALID$'):
+            self.invoke('apply')
+        self.assertEqual(previous.read_bytes(), second_config)
+
+    def test_stage_seed_reopens_after_a_refused_transaction_and_keeps_the_login_stable(self):
+        password = ops.stage_demo_password()
+        self.assertEqual(ops.stage_demo_password(), password)
+        self.assertEqual((self.base / 'private/stage-demo-login.env').stat().st_mode & 0o077, 0)
+        with patch.object(ops, 'fenced'), patch.object(ops, 'export_locked') as export, patch.object(
+                ops, 'compose', side_effect=[RuntimeError('FIXED_SEED_REFUSED'), b'']) as compose, patch.object(
+                ops, 'ready') as ready, patch.object(ops, 'public_ready'), patch.object(ops, 'maintenance') as maintenance:
+            with self.assertRaisesRegex(RuntimeError, '^FIXED_SEED_REFUSED$'):
+                ops.stage_seed_locked(self.revision)
+        export.assert_called_once()
+        self.assertEqual(compose.call_args_list[0].kwargs['data'], password)
+        self.assertNotIn(password.decode(), ' '.join(compose.call_args_list[0].args[0]))
+        ready.assert_called_once()
+        maintenance.assert_called_once_with(False)
+
 
 if __name__ == '__main__':
     unittest.main()

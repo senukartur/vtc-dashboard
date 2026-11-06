@@ -4,17 +4,34 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import socket
 import stat
 import struct
 
+STAGE_PROFILE = 'stage-features.json'
+# Written out rather than read from the profile: a partly copied control update must still import.
+# test_activation.py keeps these equal to the profile.
+STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
+               'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'RECONCILIATION_ENABLED',
+               'TRIP_DECISIONS_ENABLED', 'ANALYTICS_ENABLED', 'NOTIFICATIONS_ENABLED'}
+STAGE_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
+                  'CATALOGS_POLICY_REVISION', 'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
+                  'MANUAL_MAX_FILES_PER_REPORT', 'MANUAL_POLICY_REVISION', 'MANUAL_ORPHAN_GRACE_MS',
+                  'MANUAL_EVIDENCE_ROOT', 'MANUAL_MAX_FILE_BYTES', 'MANUAL_MAX_PIXELS',
+                  'MANUAL_UPLOAD_TIMEOUT_MS', 'ANALYTICS_REPORTING_TIMEZONE'}
+STAGE_KEYS = {'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY', 'QUALIFICATIONS_CURSOR_KEY', 'TELEMETRY_CURSOR_KEY',
+              'MANUAL_REPORTS_KEY', 'EVENTS_CURSOR_KEY', 'RECONCILIATION_KEY', 'TRIP_DECISIONS_KEY',
+              'ANALYTICS_CURSOR_KEY', 'NOTIFICATIONS_CURSOR_KEY'}
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
                'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
-               'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY'}
+               'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY',
+               *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS}
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
                  'identity_acceptance.py', 'ingress_probe.py', 'receive.sh', 'notifications_acceptance.py',
-                 'notifications.acceptance.compose.yaml', 'notifications-acceptance-grants.json'}
+                 'notifications.acceptance.compose.yaml', 'notifications-acceptance-grants.json',
+                 STAGE_PROFILE}
 
 
 def private_copy(source, destination):
@@ -135,20 +152,52 @@ def ingress(o):
     return values
 
 
-def matrix(o):
-    return json.loads((o.BASE / 'activation-grants.json').read_text())
+def stage_enabled(values):
+    return any(values.get(flag) == 'true' for flag in STAGE_FLAGS)
 
 
-def grant_sql(o, schema='vtc', users=None):
+def module_flags(path):
+    """Only which modules a file enables; `validate` owns its ownership and syntax checks."""
+    lines = path.read_text().splitlines()
+    return {flag: 'true' for flag in STAGE_FLAGS if f'{flag}=true' in lines}
+
+
+def stage_grants(o):
+    """Reviewed module supplement installed by the control update; absent on older installations."""
+    path = o.BASE / STAGE_PROFILE
+    return json.loads(path.read_text())['grants'] if path.exists() else {}
+
+
+def matrix(o, values=None):
+    """The baseline, plus the module supplement only for a configuration that enables modules."""
+    base = json.loads((o.BASE / 'activation-grants.json').read_text())
+    if values is None or not stage_enabled(values):
+        return base
+    supplement = stage_grants(o)
+    o.require(supplement, 'STAGE_PROFILE_REQUIRED')
+    for role, tables in supplement.items():
+        for table, permissions in tables.items():
+            base[role].setdefault(table, [])
+            base[role][table] = base[role][table] + permissions
+    return base
+
+
+def quoted_columns(permission):
+    # Column names may be reserved words (cursor); the matrix itself stays plain.
+    name, _, columns = permission.rstrip(')').partition('(')
+    return f"{name}({','.join(f'`{column}`' for column in columns.split(','))})" if columns else name
+
+
+def grant_sql(o, schema='vtc', users=None, values=None):
     o.require(re.fullmatch(r'vtc(?:_accept_[a-f0-9]{16})?', schema), 'GRANT_SCHEMA_INVALID')
     users = users or {'runtime': 'vtc_runtime', 'jobs': 'vtc_jobs'}
     statements = []
-    for role, tables in matrix(o).items():
+    for role, tables in matrix(o, values).items():
         name = users[role]
         o.require(re.fullmatch(r'vtc_(?:runtime|jobs|ar_[a-f0-9]{16}|aw_[a-f0-9]{16})', name),
                   'GRANT_ACCOUNT_INVALID')
         for table, permissions in tables.items():
-            statements.append(f"GRANT {','.join(permissions)} ON {schema}.{table} TO '{name}'@'%';")
+            statements.append(f"GRANT {','.join(map(quoted_columns, permissions))} ON {schema}.{table} TO '{name}'@'%';")
     return '\n'.join(statements) + '\n'
 
 
@@ -157,7 +206,7 @@ def privileges(o, revision):
     query = """SELECT GRANTEE,'global','*',PRIVILEGE_TYPE,IS_GRANTABLE FROM information_schema.USER_PRIVILEGES
 UNION ALL SELECT GRANTEE,TABLE_SCHEMA,'*',PRIVILEGE_TYPE,IS_GRANTABLE FROM information_schema.SCHEMA_PRIVILEGES
 UNION ALL SELECT GRANTEE,TABLE_SCHEMA,TABLE_NAME,PRIVILEGE_TYPE,IS_GRANTABLE FROM information_schema.TABLE_PRIVILEGES
-UNION ALL SELECT GRANTEE,TABLE_SCHEMA,TABLE_NAME,PRIVILEGE_TYPE,IS_GRANTABLE FROM information_schema.COLUMN_PRIVILEGES;
+UNION ALL SELECT GRANTEE,TABLE_SCHEMA,TABLE_NAME,CONCAT(PRIVILEGE_TYPE,'(',COLUMN_NAME,')'),IS_GRANTABLE FROM information_schema.COLUMN_PRIVILEGES;
 SELECT TO_USER,FROM_USER FROM mysql.role_edges WHERE TO_USER IN ('vtc_runtime','vtc_jobs');
 SELECT User,Db,Routine_name FROM mysql.procs_priv WHERE User IN ('vtc_runtime','vtc_jobs');
 SELECT User,Proxied_user FROM mysql.proxies_priv WHERE User IN ('vtc_runtime','vtc_jobs');
@@ -177,30 +226,85 @@ SELECT User,Host FROM mysql.user WHERE User IN ('vtc_runtime','vtc_jobs') AND Ho
     return sorted(result)
 
 
-def check_privileges(o, rows, *, allow_legacy=False, complete=False):
-    expected = {(f"'vtc_{role}'@'%'", 'vtc', table, privilege, 'NO')
-                for role, tables in matrix(o).items()
-                for table, permissions in tables.items() for privilege in permissions}
+def privilege_rows(tables_by_role):
+    """One row per effective privilege; a column grant reads back once per named column."""
+    rows = set()
+    for role, tables in tables_by_role.items():
+        for table, permissions in tables.items():
+            for permission in permissions:
+                name, _, columns = permission.rstrip(')').partition('(')
+                for privilege in ([f'{name}({column})' for column in columns.split(',')] if columns else [name]):
+                    rows.add((f"'vtc_{role}'@'%'", 'vtc', table, privilege, 'NO'))
+    return rows
+
+
+def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None):
+    expected = privilege_rows(matrix(o, values))
     actual = set(map(tuple, rows))
     actual = {row for row in actual if row[1:] != ('global', '*', 'USAGE', 'NO')}
     legacy = ("'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO')
-    allowed = expected | ({legacy} if allow_legacy else set())
+    # A rollback keeps the reviewed module grants, like every other narrow grant it retains.
+    allowed = expected | privilege_rows(stage_grants(o)) | ({legacy} if allow_legacy else set())
     o.require(actual <= allowed, 'UNEXPECTED_EFFECTIVE_PRIVILEGES')
     if complete:
-        o.require(actual == expected, 'MISSING_EFFECTIVE_PRIVILEGES')
+        o.require(expected <= actual, 'MISSING_EFFECTIVE_PRIVILEGES')
 
 
-def grants(o, revision):
+def grants(o, revision, values=None):
     before = privileges(o, revision)
-    check_privileges(o, before, allow_legacy=True)
+    check_privileges(o, before, allow_legacy=True, values=values)
     if not (o.BASE / 'state/activation-grants-before.json').exists():
         o.atomic_json(o.BASE / 'state/activation-grants-before.json', {'privileges': before})
-    statement = grant_sql(o)
+    statement = grant_sql(o, values=values)
     if ["'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO'] in before:
         statement += "REVOKE SELECT ON vtc.* FROM 'vtc_runtime'@'%';\n"
     o.compose(['exec', '-T', 'db', 'mysql', '--defaults-extra-file=/run/secrets/admin.cnf'],
               revision=revision, data=statement.encode())
-    check_privileges(o, privileges(o, revision), complete=True)
+    check_privileges(o, privileges(o, revision), complete=True, values=values)
+
+
+def prepare_stage(o):
+    """Write the module candidate from the live file; existing keys are never regenerated."""
+    shared = o.BASE / 'private/identity-mail.env'
+    candidate = o.BASE / 'private/activation-input.env'
+    intent_path = o.BASE / 'state/activation-intent.json'
+    o.require(not intent_path.exists() or json.loads(intent_path.read_text()).get('pending') is not True,
+              'ACTIVATION_PENDING')
+    values = private_values(o, shared, SHARED_KEYS)
+    o.require(values.get('IDENTITY_ENABLED') == 'true', 'IDENTITY_REQUIRED')
+    known = private_values(o, candidate, SHARED_KEYS) if candidate.exists() else {}
+    profile = json.loads((o.BASE / STAGE_PROFILE).read_text())
+    values.update({flag: 'true' for flag in profile['flags']})
+    values.update(profile['settings'])
+    for key in profile['generatedKeys']:
+        # Cursor and command keys must stay stable; a retried preparation reuses them.
+        values[key] = values.get(key) or known.get(key) or secrets.token_hex(32)
+    temporary = candidate.with_name(candidate.name + '.prepare')
+    temporary.unlink(missing_ok=True)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'w') as handle:
+        handle.write(''.join(f'{key}={value}\n' for key, value in values.items()))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, candidate)
+
+
+def retire_previous(o, shared, previous, intent_path):
+    """Allow another apply only after a finished one: the older backup is kept, never overwritten."""
+    if not previous.exists():
+        return
+    o.require(intent_path.exists(), 'ACTIVATION_BACKUP_STATE_INVALID')
+    intent = json.loads(intent_path.read_text())
+    settled = intent.get('previousHash' if intent.get('target') == 'previous' else 'candidateHash')
+    o.require(intent.get('pending') is False and o.digest(shared) == settled,
+              'ACTIVATION_BACKUP_STATE_INVALID')
+    retired = previous.with_name(f'identity-mail.previous.{o.digest(previous)[:16]}.env')
+    os.replace(previous, retired)
+    directory = os.open(previous.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def validate(o, revision, image_id, path):
@@ -241,7 +345,10 @@ def validate(o, revision, image_id, path):
 
 
 def config_operation(o, revision, image_id, mode):
-    o.require(mode in ['validate', 'apply', 'recover', 'rollback', 'inspect'], 'ACTIVATION_MODE_INVALID')
+    o.require(mode in ['prepare-stage', 'validate', 'apply', 'recover', 'rollback', 'inspect'], 'ACTIVATION_MODE_INVALID')
+    if mode == 'prepare-stage':
+        prepare_stage(o)
+        return
     shared = o.BASE / 'private/identity-mail.env'
     previous = o.BASE / 'private/identity-mail.previous.env'
     intent_path = o.BASE / 'state/activation-intent.json'
@@ -257,19 +364,20 @@ def config_operation(o, revision, image_id, mode):
               not (o.BASE / 'state/ingress-check.json').exists() and
               not (o.BASE / 'state/notifications-acceptance').exists(), 'ACCEPTANCE_WINDOW')
     if mode == 'inspect':
-        check_privileges(o, privileges(o, revision), complete=True)
+        check_privileges(o, privileges(o, revision), complete=True, values=module_flags(shared))
         validate(o, revision, image_id, shared)
         return
     validate(o, revision, image_id, candidate)
     if mode == 'validate':
-        check_privileges(o, privileges(o, revision), allow_legacy=True)
+        check_privileges(o, privileges(o, revision), allow_legacy=True, values=module_flags(candidate))
         return
-    o.require(not previous.exists() if mode == 'apply' else previous.is_file() or mode == 'recover',
+    o.require(mode == 'apply' or previous.is_file() or mode == 'recover',
               'ACTIVATION_BACKUP_STATE_INVALID')
     if mode == 'apply':
         owned_controls = controls_pending(o, revision, image_id)
         o.require(owned_controls or (not (o.BASE / 'private/maintenance/enabled').exists() and
                   not (o.BASE / 'state/recovery-required').exists()), 'ACTIVATION_FENCED')
+        retire_previous(o, shared, previous, intent_path)
         o.atomic_json(intent_path, {'revision': revision, 'imageId': image_id,
                                    'candidateHash': o.digest(candidate), 'previousHash': o.digest(shared),
                                    'pending': True, 'target': 'candidate'})
@@ -299,7 +407,7 @@ def config_operation(o, revision, image_id, mode):
         o.require(o.digest(shared) == intent.get('previousHash'), 'ACTIVATION_BACKUP_SOURCE_INVALID')
         private_copy(shared, previous)
         o.require(o.digest(previous) == intent.get('previousHash'), 'ACTIVATION_BACKUP_STATE_INVALID')
-    grants(o, revision)
+    grants(o, revision, module_flags(candidate))
     private_copy(candidate, shared)
     o.compose(['up', '-d', '--force-recreate', '--no-deps', 'app', 'probe', 'proxy'],
               revision=revision, image_id=image_id)

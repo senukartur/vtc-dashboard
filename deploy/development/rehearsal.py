@@ -299,7 +299,8 @@ def core():
         assert set(config['services']['db']['networks']) == {'database'}
         assert config['networks']['database']['internal']
         assert not config['networks']['mail-egress'].get('internal', False)
-        assert set(config['services']['app']['networks']) == {'database', 'ingress'}
+        assert set(config['services']['app']['networks']) == {'database', 'ingress', 'provider-egress'}
+        assert not config['networks']['provider-egress'].get('internal', False)
         assert set(config['services']['proxy']['networks']) == {'frontend', 'ingress'}
         assert config['networks']['ingress']['internal']
         config['name'] = project

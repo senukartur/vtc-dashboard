@@ -1,5 +1,9 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createUnitOfWork, runMigrations, type UnitOfWork } from "@vtc/db";
+import { catalogArtifacts, catalogRevisions } from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
 import { sql, trips, tripContributions } from "@vtc/db/trips-schema";
 import type { Connection } from "mysql2/promise";
@@ -12,9 +16,17 @@ import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import { createQualificationInitialization } from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { createQualifications } from "../../apps/api/src/modules/qualifications/service.ts";
 import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
+import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { catalogEvents } from "../../apps/api/src/platform/outbox/events.ts";
-import { demoDataset, demoEmail, demoMembers } from "../../scripts/demo/dataset.ts";
-import { seedDashboard } from "../../scripts/demo/seed.ts";
+import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
+import {
+  demoDataset,
+  demoEmail,
+  demoEpoch,
+  demoId,
+  demoMembers,
+} from "../../apps/api/src/demo-dataset.ts";
+import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import {
   guardedSettings,
   reset,
@@ -152,3 +164,183 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     await app.close();
   }
 }, 60000);
+
+test("stage profile validates in production, adopts a bootstrapped company and accepts a trip", async () => {
+  const profile = JSON.parse(
+    readFileSync(new URL("../../deploy/development/stage-features.json", import.meta.url), "utf8"),
+  ) as { flags: string[]; settings: Record<string, string>; generatedKeys: string[] };
+  const database = guardedSettings();
+  const evidenceRoot = mkdtempSync(join(tmpdir(), "vtc-stage-seed-"));
+  const config = readConfig({
+    NODE_ENV: "production",
+    SERVE_WEB: "false",
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: randomBytes(32).toString("hex"),
+    IDENTITY_ORIGIN: "https://stage.example.invalid",
+    MAIL_MODE: "disabled",
+    MYSQL_HOST: database.host,
+    MYSQL_PORT: String(database.port),
+    MYSQL_DATABASE: database.database,
+    MYSQL_USER: database.user,
+    MYSQL_PASSWORD: database.password,
+    ...Object.fromEntries(profile.flags.map((flag) => [flag, "true"])),
+    ...profile.settings,
+    MANUAL_EVIDENCE_ROOT: evidenceRoot,
+    ...Object.fromEntries(
+      profile.generatedKeys.map((key) => [key, randomBytes(32).toString("hex")]),
+    ),
+  });
+  expect(config.catalogs).toMatchObject({ production: true, synthetic: false });
+  if (!config.identity) throw new Error("SYNTHETIC_IDENTITY_REQUIRED");
+  const composed = composeIdentity(
+    unit,
+    config.identity,
+    config.mail,
+    config.admissions,
+    config.externalIdentities,
+    config.catalogs,
+    config.trips,
+    config.telemetry,
+    config.manualReports,
+    config.qualifications,
+    config.events,
+    config.reconciliation,
+    config.tripDecisions,
+    config.analytics,
+    config.notifications,
+  );
+  const { identity } = composed;
+  if (!identity) throw new Error("SYNTHETIC_IDENTITY_REQUIRED");
+  const owner = { email: "owner@example.invalid", name: "Synthetic Owner" };
+  const ownerPassword = randomBytes(24).toString("base64url");
+  const demoPassword = randomBytes(24).toString("base64url");
+  const { passwordHash } = await identity.prepareCredential(demoPassword);
+  const start = async () => {
+    await reset(control);
+    await runMigrations(guardedSettings());
+    return identity.bootstrap({ ...owner, password: ownerPassword });
+  };
+  const tripCount = async () => {
+    const [row] = await unit.run((tx) =>
+      unit.client(tx).select({ count: sql<number>`count(*)` }).from(trips),
+    );
+    return Number(row?.count);
+  };
+  const app = await createApp({ checkReadiness: async () => true, ...composed });
+  try {
+    const { userId } = await start();
+    // Without the explicit adoption option an existing company is still refused.
+    await expect(seedDashboard(unit, identity, passwordHash)).rejects.toThrow(
+      "DEMO_REFUSES_EXISTING_COMPANY",
+    );
+    await unit.run(async (tx) => {
+      const c = unit.client(tx),
+        artifactId = randomUUID(),
+        sha256 = createHash("sha256").update("existing-catalog").digest();
+      await c.insert(catalogArtifacts).values({
+        id: artifactId,
+        creatorId: userId,
+        sha256,
+        byteLength: 0,
+        content: null,
+        expiresAt: demoEpoch,
+        createdAt: demoEpoch,
+      });
+      await c.insert(catalogRevisions).values({
+        id: randomUUID(),
+        game: "ets2",
+        version: 1,
+        state: "validated",
+        complete: true,
+        artifactId,
+        artifactSha256: sha256,
+        gameBuild: "existing-build",
+        inventoryAsOf: "2026-01-01",
+        synthetic: false,
+        sourceManifestSha256: sha256,
+        provenance: [{ source: "Fictional existing catalog" }],
+        createdAt: demoEpoch,
+      });
+    });
+    await expect(
+      seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
+    await unit.run((tx) =>
+      identity.insertWithCredential(tx, {
+        userId: demoId("existing-member"),
+        email: "existing.member@example.invalid",
+        name: "Existing Member",
+        passwordHash,
+        roles: ["driver"],
+      }),
+    );
+    await expect(
+      seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).rejects.toThrow("DEMO_REFUSES_EXISTING_MEMBERS");
+    expect(await tripCount()).toBe(0);
+
+    await start();
+    const expected = demoDataset(new Date());
+    expect(
+      await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).toEqual({ members: 8, addedTrips: expected.trips.length, addedEvents: 2 });
+    expect(
+      await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
+    ).toEqual({ members: 8, addedTrips: 0, addedEvents: 0 });
+    expect(await tripCount()).toBe(expected.trips.length);
+
+    const session = async (email: string, password: string) => {
+      const login = await identity.login(email, password);
+      return login.cookies.map((part) => part.split(";", 1)[0]).join("; ");
+    };
+    const headers = (cookie: string) => ({ cookie, origin: "https://stage.example.invalid" });
+    const ownerCookie = await session(owner.email, ownerPassword);
+    const mine = await app.inject({
+      method: "GET",
+      url: "/api/v1/trips?scope=mine&limit=5",
+      headers: headers(ownerCookie),
+    });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.json().data.items.length).toBeGreaterThan(0);
+    expect(mine.json().data.items[0].origin.label).toBeTruthy();
+
+    // The seeded review queue is decidable: the Stage review page can be exercised end to end.
+    const reviewer = await session(demoMembers[1]?.email ?? "", demoPassword);
+    const tripId = demoId("queue/1");
+    const review = await app.inject({
+      method: "GET",
+      url: `/api/v1/trips/${tripId}/review`,
+      headers: headers(reviewer),
+    });
+    expect(review.statusCode).toBe(200);
+    const detail = review.json().data;
+    expect(detail.acceptance).toEqual({ mode: "ordinary", blockedReasonCodes: [] });
+    const csrf = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/csrf",
+      headers: headers(reviewer),
+    });
+    const decision = await app.inject({
+      method: "POST",
+      url: `/api/v1/trips/${tripId}/decisions`,
+      headers: {
+        ...headers(reviewer),
+        "x-csrf-token": csrf.json().data.token,
+        "idempotency-key": randomUUID(),
+        "if-match": String(review.headers.etag),
+        "content-type": "application/json",
+      },
+      payload: JSON.stringify({
+        decision: "accept",
+        reviewedRevisionId: detail.factRevisionId,
+        factRevisionId: detail.factRevisionId,
+        proposalId: null,
+        reason: "Fictional evidence review",
+      }),
+    });
+    expect(decision.statusCode).toBe(200);
+  } finally {
+    await app.close();
+    rmSync(evidenceRoot, { recursive: true, force: true });
+  }
+}, 180000);
