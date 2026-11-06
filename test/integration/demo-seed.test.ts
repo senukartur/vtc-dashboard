@@ -11,6 +11,7 @@ import {
   catalogRevisions,
 } from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
+import { and, qualificationAssignments, qualificationStates } from "@vtc/db/qualifications-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
 import type { Connection } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
@@ -27,7 +28,10 @@ import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
-import { createQualificationInitialization } from "../../apps/api/src/modules/qualifications/initialization.ts";
+import {
+  createQualificationInitialization,
+  structuralLevels,
+} from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { createQualifications } from "../../apps/api/src/modules/qualifications/service.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
@@ -324,6 +328,26 @@ test("stage profile validates in production, adopts a bootstrapped company and a
     expect(await tripCount()).toBe(0);
 
     const { userId: directorId } = await start();
+    // An assignment newer than the fixture trips earns them no credit, as in real attribution.
+    await unit.run(async (tx) => {
+      const c = unit.client(tx),
+        assignmentId = randomUUID();
+      await c.insert(qualificationAssignments).values({
+        id: assignmentId,
+        userId: directorId,
+        game: "ets2",
+        levelId: structuralLevels.ets2[0],
+        assignedAt: new Date().toISOString(),
+        endedAt: null,
+        purpose: "initial",
+        actorId: null,
+        reason: "Fictional assignment newer than the fixture trips",
+      });
+      await c
+        .insert(qualificationStates)
+        .values({ userId: directorId, game: "ets2", assignmentId, version: 1 })
+        .onDuplicateKeyUpdate({ set: { assignmentId } });
+    });
     const expected = demoDataset(new Date());
     expect(
       await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
@@ -332,6 +356,19 @@ test("stage profile validates in production, adopts a bootstrapped company and a
       await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).toEqual({ members: 8, addedTrips: 0, addedEvents: 0 });
     expect(await tripCount()).toBe(expected.trips.length);
+    const directorCredit = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ game: trips.game, credited: tripContributions.credited })
+        .from(tripContributions)
+        .innerJoin(trips, eq(trips.id, tripContributions.tripId))
+        .where(and(eq(trips.ownerId, directorId), eq(trips.decision, "accepted"))),
+    );
+    const creditedFor = (game: string) =>
+      directorCredit.filter((row) => row.game === game).map((row) => Boolean(row.credited));
+    expect(creditedFor("ets2").length).toBeGreaterThan(0);
+    expect(creditedFor("ets2")).not.toContain(true);
+    expect(creditedFor("ats")).toContain(true);
 
     const session = async (email: string, password: string) => {
       const login = await identity.login(email, password);
