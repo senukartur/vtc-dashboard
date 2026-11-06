@@ -219,7 +219,7 @@ export async function seedDashboard(
       }
     }
     // A member's current assignment decides the credit, including one the director already held.
-    // As in real attribution, a trip that started before the assignment existed earns no credit.
+    // As in real attribution, a trip earns no credit without an assignment that existed at its start.
     async function creditOf(
       userId: string,
       game: (typeof games)[number],
@@ -238,11 +238,11 @@ export async function seedDashboard(
           eq(qualificationAssignments.id, qualificationStates.assignmentId),
         )
         .where(and(eq(qualificationStates.userId, userId), eq(qualificationStates.game, game)));
-      if (current && new Date(current.assignedAt) > new Date(start)) return null;
+      if (!current || new Date(current.assignedAt) > new Date(start)) return null;
       const levels: readonly string[] = structuralLevels[game];
-      const held = current ? levels.indexOf(current.levelId) : -1;
+      const held = levels.indexOf(current.levelId);
       return {
-        assignmentId: current?.id ?? demoId(`assignment/${userId}/${game}`),
+        assignmentId: current.id,
         ruleVersionId: demoId(`rule/${game}/${held < 0 ? rank : held}`),
       };
     }

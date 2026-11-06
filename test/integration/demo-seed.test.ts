@@ -308,7 +308,8 @@ test("stage profile validates in production, adopts a bootstrapped company and a
     expect(await tripCount()).toBe(0);
 
     const { userId: directorId } = await start();
-    // An assignment newer than the fixture trips earns them no credit, as in real attribution.
+    // As in real attribution, no credit from an assignment newer than the fixture trips (ets2)
+    // or from the empty state that opening the qualifications page creates first (ats).
     await unit.run(async (tx) => {
       const c = unit.client(tx),
         assignmentId = randomUUID();
@@ -327,6 +328,10 @@ test("stage profile validates in production, adopts a bootstrapped company and a
         .insert(qualificationStates)
         .values({ userId: directorId, game: "ets2", assignmentId, version: 1 })
         .onDuplicateKeyUpdate({ set: { assignmentId } });
+      await c
+        .insert(qualificationStates)
+        .values({ userId: directorId, game: "ats", assignmentId: null, version: 1 })
+        .onDuplicateKeyUpdate({ set: { assignmentId: null } });
     });
     const expected = demoDataset(new Date());
     expect(
@@ -336,19 +341,25 @@ test("stage profile validates in production, adopts a bootstrapped company and a
       await seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).toEqual({ members: 8, addedTrips: 0, addedEvents: 0 });
     expect(await tripCount()).toBe(expected.trips.length);
-    const directorCredit = await unit.run((tx) =>
-      unit
-        .client(tx)
-        .select({ game: trips.game, credited: tripContributions.credited })
-        .from(tripContributions)
-        .innerJoin(trips, eq(trips.id, tripContributions.tripId))
-        .where(and(eq(trips.ownerId, directorId), eq(trips.decision, "accepted"))),
-    );
-    const creditedFor = (game: string) =>
-      directorCredit.filter((row) => row.game === game).map((row) => Boolean(row.credited));
-    expect(creditedFor("ets2").length).toBeGreaterThan(0);
-    expect(creditedFor("ets2")).not.toContain(true);
-    expect(creditedFor("ats")).toContain(true);
+    const creditOf = async (ownerId: string) => {
+      const rows = await unit.run((tx) =>
+        unit
+          .client(tx)
+          .select({ game: trips.game, credited: tripContributions.credited })
+          .from(tripContributions)
+          .innerJoin(trips, eq(trips.id, tripContributions.tripId))
+          .where(and(eq(trips.ownerId, ownerId), eq(trips.decision, "accepted"))),
+      );
+      return (game: string) =>
+        rows.filter((row) => row.game === game).map((row) => Boolean(row.credited));
+    };
+    const director = await creditOf(directorId);
+    for (const game of ["ets2", "ats"]) {
+      expect(director(game).length).toBeGreaterThan(0);
+      expect(director(game)).not.toContain(true);
+    }
+    const deputy = await creditOf(demoMembers[1]?.id ?? "");
+    expect([...deputy("ets2"), ...deputy("ats")]).toContain(true);
 
     const session = async (email: string, password: string) => {
       const login = await identity.login(email, password);
