@@ -103,7 +103,7 @@ services:
     environment:
       NODE_OPTIONS: --max-old-space-size=64
     # With every module on, a pass needs about 125 MiB idle and 150 MiB importing a real catalog.
-    # Below that it swaps, and a pass on the host's disk outlives its minute.
+    # Below that it swaps, and on the host's disk a pass outlives the tick's 55-second deadline.
     mem_limit: 192m
     cpus: 0.25
     pids_limit: 32
