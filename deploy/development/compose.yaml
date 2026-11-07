@@ -105,8 +105,8 @@ services:
     # With every module on, a pass needs about 125 MiB idle and 150 MiB importing a real catalog.
     # Below that it swaps, and on the host's disk a pass outlives the tick's 55-second deadline.
     mem_limit: 192m
-    # At 0.25 an idle pass on the host took 53-55 seconds, mostly loading modules twice
-    # (supervisor and worker), and some ticks hit the 55-second deadline.
+    # At 0.25 an idle jobs step on the host took 53-55 seconds and some ticks hit the 55-second
+    # deadline. Measured locally, most of it is loading modules twice (supervisor and worker).
     cpus: 0.5
     pids_limit: 32
     read_only: true
