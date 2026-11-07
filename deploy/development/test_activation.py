@@ -1,4 +1,5 @@
 """Failure-path feedback; real configuration, grants and durable flows run in rehearsal.py."""
+import base64
 import json
 import pathlib
 import signal
@@ -436,6 +437,49 @@ class ActivationTests(unittest.TestCase):
         self.assertFalse(list((self.base / 'private').glob('identity-mail.previous.*.env')))
         self.invoke('rollback')
         self.assertEqual(shared.read_bytes(), original)
+
+    def test_prepare_stage_takes_catalog_trust_only_from_the_private_file(self):
+        self.stage_profile()
+        shared = self.base / 'private/identity-mail.env'
+        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n'
+                          'CATALOGS_EVIDENCE_FILE=/app/operations/stage-catalog-evidence.json\n')
+        candidate = self.base / 'private/activation-input.env'
+        for path in [shared, candidate]:
+            path.chmod(0o600)
+        trust = self.base / activation.CATALOG_EVIDENCE
+        records = [{'artifactSha256': 'e' * 64, 'game': 'ets2', 'provenance': [{'attribution': 'Ünïcode, "quoted"'}]}]
+        trust.write_text(json.dumps(records, indent=2))
+        trust.chmod(0o600)
+
+        def prepared():
+            activation.prepare_stage(ops)
+            return activation.private_values(ops, candidate, activation.SHARED_KEYS)
+
+        values = prepared()
+        self.assertNotIn('CATALOGS_EVIDENCE_FILE', values)
+        self.assertEqual(json.loads(base64.b64decode(values['CATALOGS_EVIDENCE_BASE64'])), records)
+        # Without the private file, the candidate trusts nothing, including the retired placeholder.
+        trust.unlink()
+        values = prepared()
+        self.assertNotIn('CATALOGS_EVIDENCE_FILE', values)
+        self.assertNotIn('CATALOGS_EVIDENCE_BASE64', values)
+        before = candidate.read_bytes()
+        for content, mode in [(json.dumps(records), 0o644), ('not json', 0o600), ('[]', 0o600), ('{}', 0o600)]:
+            trust.write_text(content)
+            trust.chmod(mode)
+            with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):
+                activation.prepare_stage(ops)
+            self.assertEqual(candidate.read_bytes(), before)
+        # Valid trust too large for the shared file is refused before a candidate is written.
+        trust.write_text(json.dumps([{'provenance': 'x' * 20000}]))
+        trust.chmod(0o600)
+        with self.assertRaisesRegex(RuntimeError, '^CONFIGURATION_TOO_LARGE$'):
+            activation.prepare_stage(ops)
+        self.assertEqual(candidate.read_bytes(), before)
+        trust.unlink()
+        trust.symlink_to(self.base / 'private/identity-mail.env')
+        with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):
+            activation.prepare_stage(ops)
 
     def test_prepare_stage_runs_under_the_owned_control_fence_only(self):
         self.stage_profile()

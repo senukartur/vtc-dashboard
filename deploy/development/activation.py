@@ -1,4 +1,5 @@
 """Explicit root activation controls. Imported only by the fixed operations dispatcher."""
+import base64
 import ipaddress
 import json
 import os
@@ -16,7 +17,7 @@ STAGE_GRANTS_STATE = 'state/stage-grants-installed.json'
 STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
                'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'RECONCILIATION_ENABLED',
                'TRIP_DECISIONS_ENABLED', 'ANALYTICS_ENABLED', 'NOTIFICATIONS_ENABLED'}
-STAGE_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_EVIDENCE_FILE', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
+STAGE_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
                   'CATALOGS_POLICY_REVISION', 'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
                   'MANUAL_MAX_FILES_PER_REPORT', 'MANUAL_POLICY_REVISION', 'MANUAL_ORPHAN_GRACE_MS',
                   'MANUAL_EVIDENCE_ROOT', 'MANUAL_MAX_FILE_BYTES', 'MANUAL_MAX_PIXELS',
@@ -27,7 +28,10 @@ STAGE_KEYS = {'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY', 'QUALIFICATIONS_CURSOR_
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
                'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
                'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY',
-               *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS}
+               *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS,
+               # Catalog trust is private per host. The file setting is accepted only to retire it.
+               'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64'}
+CATALOG_EVIDENCE = 'private/catalog-evidence.json'
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
                  'identity_acceptance.py', 'ingress_probe.py', 'receive.sh', 'notifications_acceptance.py',
@@ -275,6 +279,21 @@ def grants(o, revision, values=None):
     check_privileges(o, privileges(o, revision), complete=True, values=values)
 
 
+def catalog_evidence(o, path):
+    """The owner's private trust records, compact so they fit the shared file's size limit."""
+    info = path.lstat()
+    o.require(not path.is_symlink() and path.is_file() and info.st_uid == 0 and
+              not info.st_mode & 0o077 and info.st_size <= 1024 * 1024, 'CATALOG_EVIDENCE_INVALID')
+    try:
+        records = json.loads(path.read_text())
+    except ValueError:
+        raise RuntimeError('CATALOG_EVIDENCE_INVALID') from None
+    o.require(isinstance(records, list) and records and all(isinstance(r, dict) for r in records),
+              'CATALOG_EVIDENCE_INVALID')
+    compact = json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()
+    return base64.b64encode(compact).decode()
+
+
 def prepare_stage(o):
     """Write the module candidate from the live file; existing keys are never regenerated."""
     shared = o.BASE / 'private/identity-mail.env'
@@ -291,11 +310,19 @@ def prepare_stage(o):
     for key in profile['generatedKeys']:
         # Cursor and command keys must stay stable; a retried preparation reuses them.
         values[key] = values.get(key) or known.get(key) or secrets.token_hex(32)
+    values.pop('CATALOGS_EVIDENCE_FILE', None)
+    values.pop('CATALOGS_EVIDENCE_BASE64', None)
+    trust = o.BASE / CATALOG_EVIDENCE
+    if trust.exists() or trust.is_symlink():
+        values['CATALOGS_EVIDENCE_BASE64'] = catalog_evidence(o, trust)
+    content = ''.join(f'{key}={value}\n' for key, value in values.items())
+    # Never write a candidate that validate, and the next preparation, would refuse to read.
+    o.require(len(content) <= 16384, 'CONFIGURATION_TOO_LARGE')
     temporary = candidate.with_name(candidate.name + '.prepare')
     temporary.unlink(missing_ok=True)
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, 'w') as handle:
-        handle.write(''.join(f'{key}={value}\n' for key, value in values.items()))
+        handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, candidate)
