@@ -758,6 +758,10 @@ class WindowTests(unittest.TestCase):
         self.assertEqual({role: service['mem_limit'] for role, service in template['services'].items()},
                          dict(api='192m', proxy='96m', probe='192m', fixture='192m', migrator='192m', worker='192m'))
         self.assertEqual(template['services']['worker']['cpus'], 0.25)
+        # The window runs the same modules as the Stage jobs service, so their limits move together.
+        stage = pathlib.Path(__file__).with_name('compose.yaml').read_text().split('\n  jobs:\n', 1)[1].split('\n  proxy:\n', 1)[0]
+        self.assertIn('\n    mem_limit: 192m\n', stage)
+        self.assertIn('\n      NODE_OPTIONS: --max-old-space-size=64\n', stage)
         source = pathlib.Path(n.__file__).read_text()
         self.assertIn('NODE_OPTIONS=--max-old-space-size={64 if role == "jobs" else 128}', source)
         created = []
