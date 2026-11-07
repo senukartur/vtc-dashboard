@@ -470,6 +470,12 @@ class ActivationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):
                 activation.prepare_stage(ops)
             self.assertEqual(candidate.read_bytes(), before)
+        # Valid trust too large for the shared file is refused before a candidate is written.
+        trust.write_text(json.dumps([{'provenance': 'x' * 20000}]))
+        trust.chmod(0o600)
+        with self.assertRaisesRegex(RuntimeError, '^CONFIGURATION_TOO_LARGE$'):
+            activation.prepare_stage(ops)
+        self.assertEqual(candidate.read_bytes(), before)
         trust.unlink()
         trust.symlink_to(self.base / 'private/identity-mail.env')
         with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):

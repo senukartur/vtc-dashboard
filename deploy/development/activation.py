@@ -315,11 +315,14 @@ def prepare_stage(o):
     trust = o.BASE / CATALOG_EVIDENCE
     if trust.exists() or trust.is_symlink():
         values['CATALOGS_EVIDENCE_BASE64'] = catalog_evidence(o, trust)
+    content = ''.join(f'{key}={value}\n' for key, value in values.items())
+    # Never write a candidate that validate, and the next preparation, would refuse to read.
+    o.require(len(content) <= 16384, 'CONFIGURATION_TOO_LARGE')
     temporary = candidate.with_name(candidate.name + '.prepare')
     temporary.unlink(missing_ok=True)
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, 'w') as handle:
-        handle.write(''.join(f'{key}={value}\n' for key, value in values.items()))
+        handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temporary, candidate)

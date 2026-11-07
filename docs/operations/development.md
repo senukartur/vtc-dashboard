@@ -220,7 +220,7 @@ Watch a jobs tick and memory afterwards: the host now runs every module within t
 
 A trip from a real telemetry client stays in review until staff supply the missing facts, and those selections need a published catalog. `CATALOGS_SYNTHETIC` stays `false`, so publication needs trust records for the exact artifact bytes.
 
-The trust is private to the host. `activation prepare-stage` reads it from `private/catalog-evidence.json`: a root-owned, mode 0600 JSON array of [trusted evidence records](../development/catalogs.md#configuration-and-private-storage), at most 1 MiB. It passes the records compactly as `CATALOGS_EVIDENCE_BASE64` and drops `CATALOGS_EVIDENCE_FILE` from the live file. Without the private file the candidate trusts nothing: imports run, but nothing can publish. The image still ships `stage-catalog-evidence.json`, because an earlier configuration that names it remains a rollback target.
+The trust is private to the host. `activation prepare-stage` reads it from `private/catalog-evidence.json`: a root-owned, mode 0600 JSON array of [trusted evidence records](../development/catalogs.md#configuration-and-private-storage). It passes the records compactly as `CATALOGS_EVIDENCE_BASE64` and drops `CATALOGS_EVIDENCE_FILE` from the candidate. The whole candidate must stay within the 16 KB configuration limit, which leaves room for roughly 10 KB of compact records; a larger file fails with `CONFIGURATION_TOO_LARGE` before anything is written. Without the private file the candidate trusts nothing: imports run, but nothing can publish. The image still ships `stage-catalog-evidence.json`, because an earlier configuration that names it remains a rollback target.
 
 The owner chose the real catalogs for this host on 2026-11-07, under the [closed non-commercial source use basis](../product/mvp-policies.md#catalog-source-use-basis). The artifacts and their trust records live in the owner's private import handoff and never enter Git, the image or a pull request. Each step needs separate owner authorization:
 
@@ -238,7 +238,7 @@ Know before publishing:
 - `stage-seed` refuses from then on, reruns included, because these revisions are not the fixture's own.
 - Accepted trips show the selected catalog labels and count in this host's analytics. The source identifiers stay in the trip's evidence.
 - A trip whose recording is not `complete` still cannot be accepted, because a resolution cannot supply that. Staff can only reject it.
-- Roll back the configuration with `activation rollback` before going back to an image older than `stage-catalog-evidence.json` or than `CATALOGS_EVIDENCE_BASE64` support. Otherwise the app refuses to start.
+- Roll back the configuration with `activation rollback` before going back to an older image. An image older than `stage-catalog-evidence.json` refuses to start on the missing path, and one older than `CATALOGS_EVIDENCE_BASE64` support starts but trusts no catalog.
 
 Limits on this host:
 

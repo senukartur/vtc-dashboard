@@ -79,7 +79,10 @@ test("catalog trust reads the same records from a private file or inline base64,
   assert.deepEqual(inline.catalogs?.evidence, fromFile.catalogs?.evidence);
   assert.deepEqual(readConfig(input).catalogs?.evidence, []);
   for (const changes of [
-    { CATALOGS_EVIDENCE_BASE64: encoded, CATALOGS_EVIDENCE_FILE: "/not/read.json" },
+    // Each half is valid alone, so only the exclusivity check refuses this.
+    { CATALOGS_EVIDENCE_BASE64: encoded, CATALOGS_EVIDENCE_FILE: fileURLToPath(path) },
+    // Valid JSON just over the 1 MiB trust bound once decoded.
+    { CATALOGS_EVIDENCE_BASE64: Buffer.from(`[${" ".repeat(1024 * 1024)}]`).toString("base64") },
     { CATALOGS_EVIDENCE_BASE64: `${encoded}!` },
     { CATALOGS_EVIDENCE_BASE64: encoded.slice(0, -1) },
     { CATALOGS_EVIDENCE_BASE64: "" },
