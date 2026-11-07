@@ -216,24 +216,29 @@ Watch a jobs tick and memory afterwards: the host now runs every module within t
 
 `activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts only because `apply` recorded the exact rights it installed in `state/stage-grants-installed.json`; a host without that record must match the baseline exactly. It does not remove seeded rows, and no operation does: `restore` proves an export in isolated volumes and never switches active data. Removing them is a separate owner-run recovery from the export whose ID `stage-seed` printed.
 
-### Stage placeholder catalog
+### Stage catalogs
 
-A trip from a real telemetry client arrives without a game build or map, so its identifiers cannot resolve against any catalog. It stays in review until staff supply the missing facts, and those selections need a published catalog. `deploy/development/stage-catalog-ets2.json` and `stage-catalog-ats.json` are that catalog: four project-authored placeholder entries per game, with no game-derived data. `CATALOGS_EVIDENCE_FILE` points at `stage-catalog-evidence.json` in the image, which trusts exactly those two files by hash. `CATALOGS_SYNTHETIC` stays `false`.
+A trip from a real telemetry client stays in review until staff supply the missing facts, and those selections need a published catalog. `CATALOGS_SYNTHETIC` stays `false`, so publication needs trust records for the exact artifact bytes.
 
-Publishing needs separate owner authorization. It happens in the product, after `stage-seed`, because the seed refuses a database that already has a catalog revision:
+The trust is private to the host. `activation prepare-stage` reads it from `private/catalog-evidence.json`: a root-owned, mode 0600 JSON array of [trusted evidence records](../development/catalogs.md#configuration-and-private-storage), at most 1 MiB. It passes the records compactly as `CATALOGS_EVIDENCE_BASE64` and drops `CATALOGS_EVIDENCE_FILE` from the live file. Without the private file the candidate trusts nothing: imports run, but nothing can publish. The image still ships `stage-catalog-evidence.json`, because an earlier configuration that names it remains a rollback target.
 
-1. Signed in as the director, open catalog administration and upload one file from the released revision, unmodified. Any byte change fails the trust check, and publication answers 409.
-2. Import it, confirm the review shows source review approved, and publish. Repeat for the other game.
+The owner chose the real catalogs for this host on 2026-11-07, under the [closed non-commercial source use basis](../product/mvp-policies.md#catalog-source-use-basis). The artifacts and their trust records live in the owner's private import handoff and never enter Git, the image or a pull request. Each step needs separate owner authorization:
 
-To accept a trip, one staff member opens it in review and proposes a resolution: placeholder origin, destination, cargo and trailer, plus the actual distance when it is unknown. A different staff member approves it, which also accepts the trip. Nobody can review their own trip, so trips from the director's client need two other staff accounts, such as seeded members 1 and 2.
+1. Copy only the trust records to `private/catalog-evidence.json` with mode 0600, then run `prepare-stage`, `validate`, `apply` and `inspect`.
+2. Signed in as the director, open catalog administration and upload one artifact, unmodified. Any byte change fails the trust check, and publication answers 409.
+3. Import it, confirm the review shows source review approved, and publish. Repeat for the other game.
+
+`deploy/development/stage-catalog-ets2.json`, `stage-catalog-ats.json` and `stage-catalog-evidence.json` are project-authored placeholders with no game-derived data, four entries per game. The integration test publishes them. A host without the real artifacts can use them by copying `stage-catalog-evidence.json` to the private file.
+
+To accept a trip, one staff member opens it in review and proposes a resolution: origin, destination, cargo and trailer from the catalog, plus the actual distance when it is unknown. A different staff member approves it, which also accepts the trip. Nobody can review their own trip, so trips from the director's client need two other staff accounts, such as seeded members 1 and 2.
 
 Know before publishing:
 
-- **It is one-way.** Every later catalog must retain published entities, so importing the real catalog on this database fails with `omitted_historical_entity`. The placeholders go only with a restore of the export taken by `stage-seed`, which also removes everything recorded after it.
+- **It is one-way.** Every later catalog must retain published entities, so after the placeholders a real catalog fails with `omitted_historical_entity`. A published catalog goes only with a restore of the export taken by `stage-seed`, which also removes everything recorded after it.
 - `stage-seed` refuses from then on, reruns included, because these revisions are not the fixture's own.
-- Accepted trips show placeholder labels and count in this host's analytics. The source identifiers stay in the trip's evidence.
+- Accepted trips show the selected catalog labels and count in this host's analytics. The source identifiers stay in the trip's evidence.
 - A trip whose recording is not `complete` still cannot be accepted, because a resolution cannot supply that. Staff can only reject it.
-- Roll back the configuration with `activation rollback` before going back to an image older than this file. Otherwise the app refuses to start on the missing evidence path.
+- Roll back the configuration with `activation rollback` before going back to an image older than `stage-catalog-evidence.json` or than `CATALOGS_EVIDENCE_BASE64` support. Otherwise the app refuses to start.
 
 Limits on this host:
 

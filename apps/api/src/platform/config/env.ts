@@ -141,9 +141,20 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     try {
       if (!identity || ![undefined, "true", "false"].includes(input.CATALOGS_SYNTHETIC))
         throw new Error();
+      // A host can pass trust inline when it cannot mount a private file into every container.
+      const encoded = input.CATALOGS_EVIDENCE_BASE64;
+      if (
+        encoded !== undefined &&
+        (input.CATALOGS_EVIDENCE_FILE !== undefined ||
+          encoded.length % 4 !== 0 ||
+          !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))
+      )
+        throw new Error();
       const evidenceBytes = input.CATALOGS_EVIDENCE_FILE
         ? readFileSync(input.CATALOGS_EVIDENCE_FILE)
-        : undefined;
+        : encoded !== undefined
+          ? Buffer.from(encoded, "base64")
+          : undefined;
       if (evidenceBytes && evidenceBytes.length > 1024 * 1024) throw new Error();
       catalogs = {
         production: env.NODE_ENV === "production",
@@ -157,7 +168,7 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
       validateCatalogConfig(catalogs);
     } catch {
       throw new Error(
-        "Invalid environment fields: CATALOGS_ENABLED, CATALOGS_SYNTHETIC, CATALOGS_CURSOR_KEY, CATALOGS_MAX_FILE_BYTES, CATALOGS_ARTIFACT_TTL_MS, CATALOGS_POLICY_REVISION, CATALOGS_EVIDENCE_FILE",
+        "Invalid environment fields: CATALOGS_ENABLED, CATALOGS_SYNTHETIC, CATALOGS_CURSOR_KEY, CATALOGS_MAX_FILE_BYTES, CATALOGS_ARTIFACT_TTL_MS, CATALOGS_POLICY_REVISION, CATALOGS_EVIDENCE_FILE, CATALOGS_EVIDENCE_BASE64",
       );
     }
   }
