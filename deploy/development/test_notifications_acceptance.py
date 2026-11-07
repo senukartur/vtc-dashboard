@@ -765,7 +765,9 @@ class WindowTests(unittest.TestCase):
         source = pathlib.Path(n.__file__).read_text()
         self.assertIn('NODE_OPTIONS=--max-old-space-size={64 if role == "jobs" else 128}', source)
         created = []
-        with patch.object(self.window.containers, 'create', side_effect=lambda role, arguments, **kwargs: created.append(arguments)):
+        # The rehearsal runs this file with its own allocation set; the fixture mount must not depend on it.
+        with patch.dict(os.environ, REHEARSAL_VOLUME='', REHEARSAL_PROJECT=''), \
+                patch.object(self.window.containers, 'create', side_effect=lambda role, arguments, **kwargs: created.append(arguments)):
             self.window.fixture('worker-permissions')
         self.assertIn(str(self.window.directory / 'jobs.env'), created[0])
         self.assertEqual(flag(created[0], '--memory'), '192m')
