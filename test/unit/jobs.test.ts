@@ -240,6 +240,7 @@ test("the supervisor hands its elapsed time to the worker and bounds it from its
     const { ownedCli } = await import("../../apps/api/src/platform/jobs/process.ts");
     const work = vi.fn(async () => {});
     await ownedCli(work);
+    const after = performance.now();
     expect(work).not.toHaveBeenCalled();
     expect(spawned).toHaveLength(1);
     const env = spawned[0] ?? {};
@@ -248,7 +249,12 @@ test("the supervisor hands its elapsed time to the worker and bounds it from its
     expect(origin).toBeLessThan(0);
     // The hard timer counts from the supervisor's start, not from the spawn.
     const delays = timer.mock.calls.map((call) => call[1]).filter((ms) => typeof ms === "number");
-    expect(delays.some((ms) => ms > 40000 && ms <= passBounds.hardMs + origin + 1)).toBe(true);
+    // Bounded by this process's own clock, so a long-running test worker cannot break it.
+    expect(
+      delays.some(
+        (ms) => ms >= passBounds.hardMs - after - 1 && ms <= passBounds.hardMs + origin + 1,
+      ),
+    ).toBe(true);
     expect(process.exitCode).toBe(0);
   } finally {
     timer.mockRestore();
