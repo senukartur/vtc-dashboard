@@ -745,6 +745,7 @@ class WindowTests(unittest.TestCase):
             added = [arguments[i + 1] for i, value in enumerate(arguments) if value == '--cap-add']
             self.assertEqual(added, ['NET_BIND_SERVICE'] if role == 'proxy' else [])
             self.assertNotIn('--publish', arguments)
+            self.assertEqual(arguments[arguments.index('--memory') + 1], '96m' if role == 'proxy' else '192m')
 
     def test_jobs_worker_has_the_stage_jobs_memory_and_keeps_its_cpu_and_heap(self):
         def flag(arguments, name):
