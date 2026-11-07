@@ -1,4 +1,5 @@
 """Stage a reviewed control package; preserve a fenced, retryable multi-file update."""
+import itertools
 import json
 import os
 import pathlib
@@ -112,6 +113,44 @@ def notifications_install(source, restore=False):
         marker.unlink()
 
 
+def sync_directories(*paths):
+    for path in paths:
+        directory = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+
+def retire_settled(marker, stage, backup):
+    """A finished update leaves its record and retained bytes; keep them under a hash name."""
+    if not marker.exists():
+        return
+    state = json.loads(marker.read_text())
+    if state.get('pending') is not False or state.get('complete') is not True:
+        return
+    o.require(not (o.BASE / 'state/recovery-required').exists() and
+              not (o.BASE / 'private/maintenance/enabled').exists(), 'CONTROL_UPDATE_FENCED')
+    intent = o.BASE / 'state/activation-intent.json'
+    o.require(not intent.exists() or json.loads(intent.read_text()).get('pending') is not True,
+              'ACTIVATION_PENDING')
+    # Same-revision updates can repeat a record exactly. A finished slot holds its record, and an
+    # interrupted one does not, because the record moves last: a rerun resumes the same slot.
+    name = f'state/controls-settled-{o.digest(marker)[:16]}'
+    slot = next(n for n in itertools.count() if not (o.BASE / f'{name}-{n}' / marker.name).exists())
+    archive = o.BASE / f'{name}-{slot}'
+    archive.mkdir(mode=0o700, exist_ok=True)
+    o.require(archive.is_dir() and not archive.is_symlink() and archive.stat().st_uid == 0 and
+              not archive.stat().st_mode & 0o077, 'CONTROL_DIRECTORY_INVALID')
+    for path in [stage, backup]:
+        if path.exists():
+            os.replace(path, archive / path.name)
+    # After a power loss, a retired record must mean the directories it covers moved too.
+    sync_directories(archive, marker.parent)
+    os.replace(marker, archive / marker.name)
+    sync_directories(archive, marker.parent)
+
+
 def install(source):
     o.require(os.geteuid() == 0, 'ROOT_OPERATOR_REQUIRED')
     o.require(o.BASE.is_dir() and o.BASE.stat().st_uid == 0 and not o.BASE.stat().st_mode & 0o022,
@@ -120,7 +159,8 @@ def install(source):
         active = o.current()
         o.require(active is not None, 'RELEASE_REQUIRED')
         o.require(not any((o.BASE / f'state/{name}').exists() for name in
-                  ['jobs-acceptance', 'identity-acceptance', 'ingress-check.json']), 'ACCEPTANCE_WINDOW')
+                  ['jobs-acceptance', 'identity-acceptance', 'notifications-acceptance', 'ingress-check.json']),
+                  'ACCEPTANCE_WINDOW')
         revision, image = active['revision'], active['imageId']
         o.validate_image(image, revision)
         activation.ingress(o)
@@ -133,6 +173,7 @@ def install(source):
         recovery = o.BASE / 'state/recovery-required'
         backup = o.BASE / 'state/controls-previous'
         stage = o.BASE / 'state/controls-candidate'
+        retire_settled(marker, stage, backup)
         if not marker.exists() and recovery.exists():
             interrupted = json.loads(recovery.read_text())
             recovered = interrupted.get('state', {})
