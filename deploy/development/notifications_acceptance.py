@@ -511,8 +511,9 @@ class Window:
         return state
 
     def environment(self, role, *, network=None):
+        # The window enables every module, so its jobs worker needs the same 192 MiB as the Stage jobs service.
         args = ['--network', network or f'{self.o.PROJECT}_database', '--init', '--read-only', '--cap-drop', 'ALL',
-                '--security-opt', 'no-new-privileges:true', '--memory', '96m' if role == 'jobs' else '192m',
+                '--security-opt', 'no-new-privileges:true', '--memory', '192m',
                 '--cpus', '0.25' if role == 'jobs' else '0.75', '--pids-limit', '32',
                 '--tmpfs', '/tmp:size=16m,mode=1777', '--env-file', str(self.directory / f'{role}.env'),
                 '--env-file', str(self.directory / 'shared.env')]
