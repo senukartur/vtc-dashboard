@@ -1,6 +1,17 @@
+import { EventEmitter } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { newId, TransactionCommitOutcomeUnknownError, type UnitOfWork } from "@vtc/db";
+import ts from "typescript";
 import { expect, test, vi } from "vitest";
 import { BlobFailure } from "../../apps/api/src/platform/blob-storage/filesystem.ts";
+import {
+  hardRemainingMs,
+  passBounds,
+  passOrigin,
+  workerDeadlineEnv,
+  workerWatchdogMs,
+} from "../../apps/api/src/platform/jobs/deadline.ts";
 import { fixtureReference } from "../../apps/api/src/platform/jobs/acceptance.ts";
 import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
 import {
@@ -110,6 +121,151 @@ test("runner cleanup cannot hide an unknown COMMIT outcome", async () => {
   await expect(runPass(queue, new AbortController().signal)).rejects.toBe(uncertain);
 });
 
+const repo = resolve(import.meta.dirname, "../..");
+// Static imports a module evaluates on load; dynamic import() and type-only imports load nothing.
+function staticImports(file: string) {
+  const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+  const specifiers: string[] = [];
+  for (const statement of source.statements)
+    if (
+      (ts.isImportDeclaration(statement) && !statement.importClause?.isTypeOnly) ||
+      (ts.isExportDeclaration(statement) && statement.moduleSpecifier && !statement.isTypeOnly)
+    )
+      specifiers.push((statement.moduleSpecifier as ts.StringLiteral).text);
+  return specifiers;
+}
+
+test.each([
+  ["apps/api/src/jobs.ts", "jobs-worker.ts"],
+  ["apps/api/src/jobs-acceptance.ts", "jobs-acceptance-worker.ts"],
+])(
+  "%s supervisor loads only the light process modules, never the application graph",
+  (entry, worker) => {
+    // The supervisor and its worker run the same entry; anything the entry imports statically is
+    // loaded twice per pass, which on the 1 vCPU host costs several seconds of the tick budget.
+    const start = resolve(repo, entry);
+    const allowed = new Set([
+      start,
+      resolve(repo, "apps/api/src/platform/jobs/process.ts"),
+      resolve(repo, "apps/api/src/platform/jobs/deadline.ts"),
+    ]);
+    const seen = new Set<string>();
+    const pending = [start];
+    for (let file = pending.pop(); file; file = pending.pop()) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const specifier of staticImports(file)) {
+        if (!specifier.startsWith(".")) {
+          expect(specifier, `${file} imports ${specifier}`).toMatch(/^node:/);
+          continue;
+        }
+        pending.push(resolve(dirname(file), specifier.replace(/\.js$/, ".ts")));
+      }
+    }
+    expect([...seen].filter((file) => !allowed.has(file))).toEqual([]);
+    // The walk sees declarations only, so also forbid runtime loading in the light modules and
+    // require the entry to be imports plus one `await ownedCli(...)` whose callback loads the worker.
+    for (const file of allowed)
+      if (file !== start)
+        expect(readFileSync(file, "utf8"), file).not.toMatch(
+          /\bimport\(|\brequire\(|createRequire/,
+        );
+    const entry_ = ts.createSourceFile(start, readFileSync(start, "utf8"), ts.ScriptTarget.Latest);
+    const [statement, ...rest] = entry_.statements.filter((node) => !ts.isImportDeclaration(node));
+    expect(rest).toEqual([]);
+    const awaited =
+      statement && ts.isExpressionStatement(statement) && ts.isAwaitExpression(statement.expression)
+        ? statement.expression.expression
+        : undefined;
+    const call = awaited && ts.isCallExpression(awaited) ? awaited : undefined;
+    expect(call?.expression.getText(entry_)).toBe("ownedCli");
+    const callback = call?.arguments[0];
+    expect(callback && ts.isArrowFunction(callback)).toBe(true);
+    expect(callback?.getText(entry_)).toContain(`import("./${worker.replace(/\.ts$/, ".js")}")`);
+    expect(existsSync(resolve(dirname(start), worker))).toBe(true);
+  },
+);
+
+test("worker deadlines count from the supervisor start it was handed", async () => {
+  expect(passOrigin({})).toBe(0);
+  for (const value of ["", "-5", "abc", "Infinity"])
+    expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: value })).toBe(0);
+  expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: "1234" })).toBe(-1234);
+  expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: "999999" })).toBe(-passBounds.hardMs);
+  expect(Number(Object.values(workerDeadlineEnv())[0])).toBeGreaterThan(0);
+  expect(passOrigin(workerDeadlineEnv())).toBeLessThan(0);
+  expect(hardRemainingMs(-passBounds.hardMs - performance.now())).toBe(0);
+  const remaining = hardRemainingMs(performance.now() - 7000);
+  expect(remaining).toBeGreaterThan(passBounds.hardMs - 7500);
+  expect(remaining).toBeLessThanOrEqual(passBounds.hardMs - 7000);
+  expect(bounds).toMatchObject(passBounds);
+  // Under a supervisor its own timer fires first; the worker watchdog is only the backstop.
+  const now = performance.now();
+  expect(workerWatchdogMs(now) - hardRemainingMs(now)).toBeGreaterThanOrEqual(999);
+  expect(workerWatchdogMs(now)).toBeLessThan(55000);
+  // A pass whose budget the supervisor's start already spent claims nothing but still releases.
+  const calls: string[] = [];
+  const queue = {
+    acquireRunner: async () => newId(),
+    renewRunner: async () => calls.push("renew"),
+    route: async () => calls.push("route"),
+    claim: async () => calls.push("claim"),
+    inspect: async () => (calls.push("inspect"), { counts: [] }),
+    releaseRunner: async () => calls.push("release"),
+  } as unknown as Queue;
+  const spent = performance.now() - passBounds.passMs;
+  expect(await runPass(queue, new AbortController().signal, spent)).toMatchObject({
+    status: "completed",
+    processed: 0,
+  });
+  expect(calls).toEqual(["inspect", "release"]);
+});
+
+test("the supervisor hands its elapsed time to the worker and bounds it from its own start", async () => {
+  const spawned: NodeJS.ProcessEnv[] = [];
+  const timer = vi.spyOn(globalThis, "setTimeout");
+  const originalWorker = process.env.VTC_JOBS_WORKER;
+  const originalExitCode = process.exitCode;
+  delete process.env.VTC_JOBS_WORKER;
+  vi.resetModules();
+  vi.doMock("node:child_process", () => ({
+    spawn: (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+      const child = Object.assign(new EventEmitter(), { kill: vi.fn() });
+      spawned.push(options.env);
+      setImmediate(() => child.emit("exit", 0));
+      return child;
+    },
+  }));
+  try {
+    const { ownedCli } = await import("../../apps/api/src/platform/jobs/process.ts");
+    const work = vi.fn(async () => {});
+    await ownedCli(work);
+    const after = performance.now();
+    expect(work).not.toHaveBeenCalled();
+    expect(spawned).toHaveLength(1);
+    const env = spawned[0] ?? {};
+    expect(env.VTC_JOBS_WORKER).toBe("1");
+    const origin = passOrigin(env);
+    expect(origin).toBeLessThan(0);
+    // The hard timer counts from the supervisor's start, not from the spawn.
+    const delays = timer.mock.calls.map((call) => call[1]).filter((ms) => typeof ms === "number");
+    // Bounded by this process's own clock, so a long-running test worker cannot break it.
+    expect(
+      delays.some(
+        (ms) => ms >= passBounds.hardMs - after - 1 && ms <= passBounds.hardMs + origin + 1,
+      ),
+    ).toBe(true);
+    expect(process.exitCode).toBe(0);
+  } finally {
+    timer.mockRestore();
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+    if (originalWorker === undefined) delete process.env.VTC_JOBS_WORKER;
+    else process.env.VTC_JOBS_WORKER = originalWorker;
+    process.exitCode = originalExitCode;
+  }
+});
+
 test("wrapped lost lease takes precedence over a transient-looking database code", async () => {
   let attempts = 0;
   const failure = Object.assign(
@@ -206,7 +362,7 @@ test.each([
       return "complete";
     });
     const inspect = vi.fn(async () => ({ status: "inspected" }));
-    const pass = vi.fn(async () => {
+    const pass = vi.fn(async (..._args: unknown[]) => {
       sequence.push("pass");
       if (scenario === "pass_unknown_commit") throw uncertain;
       return { status: "completed", processed: 1 };
@@ -261,6 +417,8 @@ test.each([
       }),
     }));
     process.argv = ["node", "jobs.js", scenario === "inspect" ? "inspect" : "run"];
+    const originalElapsed = process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS;
+    process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS = "1500";
     process.exitCode = undefined;
     vi.useFakeTimers();
     try {
@@ -273,6 +431,8 @@ test.each([
         "pass_unknown_commit",
       ].includes(scenario);
       expect(pass).toHaveBeenCalledTimes(continued ? 1 : 0);
+      // The pass budget counts from the supervisor's start that the worker was handed.
+      if (continued) expect(pass.mock.calls[0]?.[2]).toBe(-1500);
       expect(maintenance).toHaveBeenCalledTimes(
         ["inspect", "disabled", "configuration_pending"].includes(scenario) ? 0 : 1,
       );
@@ -319,6 +479,8 @@ test.each([
         for (const listener of process.listeners(signal))
           if (!original.includes(listener)) process.removeListener(signal, listener);
       process.argv = originalArgv;
+      if (originalElapsed === undefined) delete process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS;
+      else process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS = originalElapsed;
       process.exitCode = originalExitCode;
       vi.useRealTimers();
       log.mockRestore();

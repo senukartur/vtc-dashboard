@@ -33,12 +33,12 @@ import {
   duplicateKey,
   fingerprint,
 } from "../outbox/events.js";
+import { passBounds } from "./deadline.js";
 
 export const bounds = Object.freeze({
   jobLeaseMs: 15000,
   runnerLeaseMs: 20000,
-  passMs: 40000,
-  hardMs: 50000,
+  ...passBounds,
   maxJobs: 100,
   routeBatch: 25,
   routeScanBatch: 250,
