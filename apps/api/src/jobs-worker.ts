@@ -1,0 +1,179 @@
+import { createUnitOfWork } from "@vtc/db";
+import { cleanupAdmissions } from "./modules/admissions/service.js";
+import { cleanupCatalogs } from "./modules/catalogs/service.js";
+import { manualCleanupPending } from "./modules/manual-reports/service.js";
+import { cleanupMail } from "./modules/messaging/service.js";
+import { BlobFailure } from "./platform/blob-storage/filesystem.js";
+import { readConfig } from "./platform/config/env.js";
+import { hardRemainingMs, passOrigin } from "./platform/jobs/deadline.js";
+import { createQueue, unknownCommit } from "./platform/jobs/queue.js";
+import { runPass } from "./platform/jobs/runner.js";
+import { sql } from "@vtc/db/platform-schema";
+import {
+  acceptanceDiagnostic,
+  acceptanceWorkerScope,
+  acceptanceWorkerPhase,
+  acceptanceSentinelMatches,
+} from "./notifications-acceptance-diagnostics.js";
+import { composeIdentity } from "./use-cases/identity-messaging.js";
+
+// Only the worker process evaluates this module and the application graph it imports; jobs.ts
+// keeps the supervisor light.
+export async function runJobsWorker(): Promise<void> {
+  // This watchdog terminates this owned CLI, including noncooperative handlers/hung SQL.
+  // Promise.race alone would leave work alive. MySQL leases recover abandoned claims.
+  const origin = passOrigin();
+  const watchdog = setTimeout(() => {
+    console.error(JSON.stringify({ event: "jobs_failed", category: "hard_deadline" }));
+    process.exit(1);
+  }, hardRemainingMs(origin));
+  const abort = new AbortController();
+  for (const s of ["SIGINT", "SIGTERM"] as const) process.once(s, () => abort.abort());
+  let unit: ReturnType<typeof createUnitOfWork> | undefined;
+  let diagnosticActive = false,
+    diagnosticStep = "jobs_config";
+  function phase(step: string) {
+    diagnosticStep = step;
+    const record = acceptanceWorkerPhase(diagnosticActive, step);
+    if (record) console.error(JSON.stringify(record));
+  }
+  try {
+    const mode = process.argv[2] ?? "run";
+    if (!["run", "inspect"].includes(mode) || process.argv.length > 3)
+      throw new Error("INVALID_JOBS_MODE");
+    const config = readConfig();
+    unit = createUnitOfWork(config.database);
+    const scope = acceptanceWorkerScope(process.env);
+    if (scope) {
+      try {
+        const [rows] = await unit.run((tx) =>
+          unit!
+            .client(tx)
+            .execute(
+              sql`SELECT run_id,image_id,revision FROM notification_acceptance WHERE singleton=1`,
+            ),
+        );
+        diagnosticActive =
+          Array.isArray(rows) && rows.length === 1 && acceptanceSentinelMatches(scope, rows[0]);
+      } catch {
+        /* A failed ownership check grants no diagnostic output and changes no normal work. */
+      }
+    }
+    phase("jobs_compose");
+    const composed = config.identity
+      ? composeIdentity(
+          unit,
+          config.identity,
+          config.mail,
+          config.admissions,
+          config.externalIdentities,
+          config.catalogs,
+          config.trips,
+          config.telemetry,
+          config.manualReports,
+          config.qualifications,
+          config.events,
+          config.reconciliation,
+          config.tripDecisions,
+          config.analytics,
+          config.notifications,
+        )
+      : undefined;
+    phase("jobs_trip_catchup");
+    if (mode === "run") await composed?.tripDecisions?.catchup();
+    phase("jobs_notification_maintenance");
+    if (mode === "run") await composed?.notifications?.maintenance();
+    const messaging = composed?.messaging;
+    phase("jobs_admissions_cleanup");
+    const admissionsCleanup =
+      mode === "run" ? await cleanupAdmissions(unit, !!composed?.admissions) : "not_run";
+    if (admissionsCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "admissions_cleanup_pending", category: "worker_configuration" }),
+      );
+    phase("jobs_mail_cleanup");
+    const mailCleanup = mode === "run" ? await cleanupMail(unit, !!messaging) : "not_run";
+    if (mailCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
+      );
+    phase("jobs_catalog_cleanup");
+    if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
+    let manualCleanup: "not_run" | "complete" | "configuration_pending" | "storage_unavailable" =
+      "not_run";
+    if (mode === "run") {
+      phase("jobs_manual_cleanup");
+      try {
+        manualCleanup =
+          (await composed?.manualReports?.maintenance(abort.signal)) ??
+          ((await manualCleanupPending(unit)) ? "configuration_pending" : "complete");
+      } catch (error) {
+        if (
+          unknownCommit(error) ||
+          abort.signal.aborted ||
+          !(error instanceof BlobFailure) ||
+          error.category !== "unavailable" ||
+          "cause" in error
+        )
+          throw error;
+        manualCleanup = "storage_unavailable";
+        console.error(
+          JSON.stringify({ event: "manual_cleanup_failed", category: "storage_unavailable" }),
+        );
+        process.exitCode = 1;
+      }
+    }
+    if (manualCleanup === "configuration_pending")
+      console.error(
+        JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
+      );
+    const queue =
+      composed?.jobsQueue ??
+      createQueue(unit, [], [], undefined, [
+        "mail.deliver",
+        "catalog.import",
+        "manual.evidence-delete",
+        "manual.generation-delete",
+        "reconciliation.search",
+        "trips.reevaluate",
+        "notifications.deliver",
+        "notifications.remind",
+      ]);
+    phase("jobs_pass");
+    const result =
+      mode === "inspect" ? await queue.inspect() : await runPass(queue, abort.signal, origin);
+    console.log(
+      JSON.stringify({
+        event: "jobs_result",
+        mailMode: config.mail?.mode ?? "disabled",
+        mailCleanup,
+        admissionsCleanup,
+        manualCleanup,
+        ...result,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "jobs_failed",
+        category: unknownCommit(error) ? "commit_outcome_unknown" : "operation_failed",
+        ...(diagnosticActive ? { diagnostic: acceptanceDiagnostic(error, diagnosticStep) } : {}),
+      }),
+    );
+    process.exitCode = 1;
+  } finally {
+    try {
+      await unit?.close();
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "jobs_failed",
+          category: "close_failed",
+          ...(diagnosticActive ? { diagnostic: acceptanceDiagnostic(error, "jobs_close") } : {}),
+        }),
+      );
+      process.exitCode = 1;
+    }
+    clearTimeout(watchdog);
+  }
+}

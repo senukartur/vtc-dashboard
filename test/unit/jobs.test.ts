@@ -1,6 +1,15 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { newId, TransactionCommitOutcomeUnknownError, type UnitOfWork } from "@vtc/db";
+import ts from "typescript";
 import { expect, test, vi } from "vitest";
 import { BlobFailure } from "../../apps/api/src/platform/blob-storage/filesystem.ts";
+import {
+  hardRemainingMs,
+  passBounds,
+  passOrigin,
+  workerDeadlineEnv,
+} from "../../apps/api/src/platform/jobs/deadline.ts";
 import { fixtureReference } from "../../apps/api/src/platform/jobs/acceptance.ts";
 import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
 import {
@@ -108,6 +117,84 @@ test("runner cleanup cannot hide an unknown COMMIT outcome", async () => {
     },
   } as unknown as Queue;
   await expect(runPass(queue, new AbortController().signal)).rejects.toBe(uncertain);
+});
+
+const repo = resolve(import.meta.dirname, "../..");
+// Static imports a module evaluates on load; dynamic import() and type-only imports load nothing.
+function staticImports(file: string) {
+  const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
+  const specifiers: string[] = [];
+  for (const statement of source.statements)
+    if (
+      (ts.isImportDeclaration(statement) && !statement.importClause?.isTypeOnly) ||
+      (ts.isExportDeclaration(statement) && statement.moduleSpecifier && !statement.isTypeOnly)
+    )
+      specifiers.push((statement.moduleSpecifier as ts.StringLiteral).text);
+  return specifiers;
+}
+
+test.each([
+  ["apps/api/src/jobs.ts", "jobs-worker.ts"],
+  ["apps/api/src/jobs-acceptance.ts", "jobs-acceptance-worker.ts"],
+])(
+  "%s supervisor loads only the light process modules, never the application graph",
+  (entry, worker) => {
+    // The supervisor and its worker run the same entry; anything the entry imports statically is
+    // loaded twice per pass, which on the 1 vCPU host costs several seconds of the tick budget.
+    const start = resolve(repo, entry);
+    const allowed = new Set([
+      start,
+      resolve(repo, "apps/api/src/platform/jobs/process.ts"),
+      resolve(repo, "apps/api/src/platform/jobs/deadline.ts"),
+    ]);
+    const seen = new Set<string>();
+    const pending = [start];
+    for (let file = pending.pop(); file; file = pending.pop()) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      for (const specifier of staticImports(file)) {
+        if (!specifier.startsWith(".")) {
+          expect(specifier, `${file} imports ${specifier}`).toMatch(/^node:/);
+          continue;
+        }
+        pending.push(resolve(dirname(file), specifier.replace(/\.js$/, ".ts")));
+      }
+    }
+    expect([...seen].filter((file) => !allowed.has(file))).toEqual([]);
+    expect(readFileSync(start, "utf8")).toContain(`import("./${worker.replace(/\.ts$/, ".js")}")`);
+    expect(existsSync(resolve(dirname(start), worker))).toBe(true);
+  },
+);
+
+test("worker deadlines count from the supervisor start it was handed", async () => {
+  expect(passOrigin({})).toBe(0);
+  for (const value of ["", "-5", "abc", "Infinity"])
+    expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: value })).toBe(0);
+  expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: "1234" })).toBe(-1234);
+  expect(passOrigin({ VTC_JOBS_SUPERVISOR_ELAPSED_MS: "999999" })).toBe(-passBounds.hardMs);
+  expect(Number(Object.values(workerDeadlineEnv())[0])).toBeGreaterThan(0);
+  expect(passOrigin(workerDeadlineEnv())).toBeLessThan(0);
+  expect(hardRemainingMs(-passBounds.hardMs - performance.now())).toBe(0);
+  const remaining = hardRemainingMs(performance.now() - 7000);
+  expect(remaining).toBeGreaterThan(passBounds.hardMs - 7500);
+  expect(remaining).toBeLessThanOrEqual(passBounds.hardMs - 7000);
+  expect(bounds).toMatchObject(passBounds);
+  // A pass whose budget the supervisor's start already spent claims nothing but still releases.
+  const calls: string[] = [];
+  const queue = {
+    acquireRunner: async () => newId(),
+    renewRunner: async () => calls.push("renew"),
+    route: async () => calls.push("route"),
+    claim: async () => calls.push("claim"),
+    inspect: async () => (calls.push("inspect"), { counts: [] }),
+    releaseRunner: async () => calls.push("release"),
+  } as unknown as Queue;
+  const spent = performance.now() - passBounds.passMs;
+  expect(await runPass(queue, new AbortController().signal, spent)).toMatchObject({
+    status: "completed",
+    processed: 0,
+  });
+  expect(calls).toEqual(["inspect", "release"]);
 });
 
 test("wrapped lost lease takes precedence over a transient-looking database code", async () => {

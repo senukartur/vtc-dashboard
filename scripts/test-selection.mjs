@@ -264,7 +264,9 @@ const areas = [
   {
     paths: [
       "apps/api/src/jobs.ts",
+      "apps/api/src/jobs-worker.ts",
       "apps/api/src/jobs-acceptance.ts",
+      "apps/api/src/jobs-acceptance-worker.ts",
       "packages/jobs/",
       "packages/outbox/",
     ],

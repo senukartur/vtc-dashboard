@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { bounds } from "./queue.js";
+import { hardRemainingMs, workerDeadlineEnv } from "./deadline.js";
 
+// Keep this module and deadline.ts free of application imports: the supervisor should load only
+// them, leaving the application graph to the worker it spawns.
 export async function ownedCli(work: () => Promise<void>): Promise<void> {
   if (process.env.VTC_JOBS_WORKER === "1") {
     const alive = setInterval(() => {}, 1000);
@@ -13,7 +15,7 @@ export async function ownedCli(work: () => Promise<void>): Promise<void> {
   }
   // Independent supervisor can terminate even a synchronous/noncooperative callback.
   const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
-    env: { ...process.env, VTC_JOBS_WORKER: "1" },
+    env: { ...process.env, VTC_JOBS_WORKER: "1", ...workerDeadlineEnv() },
     stdio: "inherit",
     windowsHide: true,
   });
@@ -21,7 +23,7 @@ export async function ownedCli(work: () => Promise<void>): Promise<void> {
   const hard = setTimeout(() => {
     console.error(JSON.stringify({ event: "jobs_failed", category: "hard_deadline" }));
     child.kill("SIGKILL");
-  }, bounds.hardMs);
+  }, hardRemainingMs(0));
   const stop = () => {
     child.kill("SIGTERM");
     drain ??= setTimeout(() => child.kill("SIGKILL"), 5000);
