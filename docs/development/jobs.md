@@ -30,14 +30,14 @@ The external hook commits the claim before network I/O and supplies the durable 
 | --- | --- |
 | Schedule | One invocation each minute |
 | Concurrency / pool | One handler; one shared five-slot UnitOfWork per worker |
-| Normal pass | 40 seconds monotonic elapsed; stop claims on budget/signal |
-| Process ceiling | Independent supervisor kills its owned child at 50 seconds; signals allow five-second drain |
+| Normal pass | 40 seconds monotonic elapsed since the supervisor started; stop claims on budget/signal |
+| Process ceiling | Independent supervisor kills its owned child 50 seconds after the supervisor started; signals allow five-second drain |
 | Worker client ceiling | 55-second Docker client budget, then remove the owned container and verify absence; the [full operations tick](../operations/development.md#durable-jobs-existing-installation-update-and-acceptance) additionally includes heartbeat, image inspection and bounded cleanup |
 | Work/routing | At most 100 executions; 25 events per registered subscription per routing call |
 | Job / runner lease | Database UTC 15 / 20 seconds; renew runner before each route/claim cycle |
 | Attempts/backoff | At most 5 claims; retry delay 1/2/4/8 seconds within this bound, formula capped at 60 seconds |
 
-The independent supervisor can terminate synchronous noncooperative callbacks and unresolved async/SQL work. SIGTERM/SIGINT stops claims and aborts cooperative work. Normal cleanup closes the pool; forced termination relies on MySQL rollback/disconnect and lease expiry. Never set the internal `VTC_JOBS_WORKER` marker in runtime configuration. Killing a Docker client alone does not stop its container or SQL; root operations verifies owned-container absence and keeps recovery fenced on cleanup failure.
+The independent supervisor can terminate synchronous noncooperative callbacks and unresolved async/SQL work. SIGTERM/SIGINT stops claims and aborts cooperative work. Normal cleanup closes the pool; forced termination relies on MySQL rollback/disconnect and lease expiry. The supervisor loads only `platform/jobs/process.ts` and `deadline.ts` (a unit test enforces this); the worker alone imports the application graph, so each pass loads it once. Never set the internal `VTC_JOBS_WORKER` or `VTC_JOBS_SUPERVISOR_ELAPSED_MS` markers in runtime configuration. Killing a Docker client alone does not stop its container or SQL; root operations verifies owned-container absence and keeps recovery fenced on cleanup failure.
 
 Portable artifact commands are `node dist/jobs.js run` and `node dist/jobs.js inspect`; workspace `pnpm jobs` uses the built entry. Output includes fixed state/failure counts, oldest due time, retained/unbound events, bound consumer count and at most 25 failure IDs/kinds/versions/attempts. No raw references, native SQL errors or public failure API exist. Categories are `retryable`, `exhausted`, `missing_handler`, `invalid_input`, `external_ambiguity`, `handler_failed`. Missing handlers/unsupported versions never count as success.
 

@@ -9,6 +9,12 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
+  # A stacked PR whose base becomes the default branch (for example when GitHub retargets it
+  # after the parent PR merges) gets no new CI run, so it would never be reviewed. Only the
+  # automatic review job below reacts to this event; it never checks out or runs PR code, and
+  # the workflow itself is loaded from the new base, the default branch.
+  pull_request_target:
+    types: [edited]
 
 permissions:
   contents: read
@@ -20,12 +26,17 @@ jobs:
   review:
     name: Automatic PR review
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.pull_requests[0].number &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.pull_requests[0].number &&
+        github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'pull_request_target' &&
+        github.event.action == 'edited' &&
+        github.event.changes.base &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch &&
+        github.event.pull_request.head.repo.full_name == github.repository)
     concurrency:
-      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
+      group: claude-review-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -45,8 +56,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          REVIEWED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
+          REVIEWED_HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
@@ -84,7 +95,7 @@ jobs:
           show_full_output: false
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+            PR NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
             EXPECTED PR HEAD: ${{ steps.target.outputs.head_sha }}
 
             You are an advisory reviewer for this pull request. The checkout is
@@ -139,7 +150,7 @@ jobs:
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}
           REVIEW_HEAD_SHA: ${{ steps.target.outputs.head_sha }}
         with:
           script: |
@@ -258,7 +269,7 @@ jobs:
       (needs.review.outputs.eligible == 'true' || needs.review.outputs.exempt == 'true')
     # The latest run for a head publishes last: a newer status job waits for an older one.
     concurrency:
-      group: claude-review-status-${{ github.event.workflow_run.pull_requests[0].number }}-${{ github.event.workflow_run.head_sha }}
+      group: claude-review-status-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number }}-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -333,11 +344,21 @@ jobs:
             --jq '[.author.login, .isCrossRepository, .state, .headRefOid, .baseRefOid, .baseRefName] | @tsv')
           IFS=$'\t' read -r author_login is_cross_repository state head_sha base_sha base_ref <<< "$target"
           eligible=false
-          if [[ "$author_login" != "dependabot[bot]" && "$is_cross_repository" == "false" && "$state" == "OPEN" && \
-                "$base_ref" == "$DEFAULT_BRANCH" ]]; then
+          # A fixed reason code; the notice step below maps it to text without echoing PR data.
+          skip_reason=
+          if [[ "$state" != "OPEN" ]]; then
+            skip_reason=not-open
+          elif [[ "$is_cross_repository" != "false" ]]; then
+            skip_reason=fork
+          elif [[ "$author_login" == "dependabot[bot]" ]]; then
+            skip_reason=dependabot
+          elif [[ "$base_ref" != "$DEFAULT_BRANCH" ]]; then
+            skip_reason=base
+          else
             eligible=true
           fi
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=$skip_reason" >> "$GITHUB_OUTPUT"
           echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -380,6 +401,7 @@ jobs:
             --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Read(./**),Grep(./**),Glob(./**)"
             --disallowedTools "Edit,MultiEdit,Write,NotebookEdit,Read(./.git/**),Grep(./.git/**),Glob(./.git/**),Read(//proc/**),Read(//etc/**),Read(//sys/**),Read(//tmp/**),Read(//var/run/**),Read(//root/**),Read(//home/runner/work/_temp/**),Read(//home/runner/.config/**),Read(//home/runner/.ssh/**),Read(//home/runner/.gitconfig),Read(//home/runner/.git-credentials),Bash(git:*),Bash(*git-push.sh*),mcp__github_file_ops__commit_files,mcp__github_file_ops__delete_files"
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        id: publish
         if: steps.target.outputs.eligible == 'true' && steps.review.outputs.structured_output != ''
         env:
           REVIEW_RESULT: ${{ steps.review.outputs.structured_output }}
@@ -488,4 +510,35 @@ jobs:
               body,
               event: 'COMMENT',
               comments,
+            });
+
+      # Without this notice a skipped or failed request is silent: the run still shows success
+      # and the PR gets nothing. A cancelled run (a newer request for the PR) posts nothing.
+      # The text is fixed; it repeats no PR data and contains no mention, so it cannot re-trigger.
+      - name: Report a skipped or failed request
+        if: ${{ !cancelled() && steps.publish.outcome != 'success' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          ELIGIBLE: ${{ steps.target.outputs.eligible }}
+          SKIP_REASON: ${{ steps.target.outputs.skip_reason }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            const reasons = {
+              'not-open': 'the pull request is no longer open',
+              fork: 'pull requests from forks are not reviewed',
+              dependabot: 'Dependabot pull requests are not reviewed',
+              base: `the pull request does not target the default branch \`${process.env.DEFAULT_BRANCH}\`; ask again after it is retargeted`,
+            };
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const reason = process.env.ELIGIBLE === 'false' ? reasons[process.env.SKIP_REASON] : undefined;
+            const body = reason
+              ? `Claude advisory review was not started: ${reason}.`
+              : `Claude advisory review failed or returned no result; see the [workflow run](${runUrl}) and re-run it.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER),
+              body,
             });

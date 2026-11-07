@@ -1,8 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { bounds, type Queue } from "./queue.js";
 
-export async function runPass(queue: Queue, signal: AbortSignal) {
-  const started = performance.now();
+// `started` lets the jobs worker count the pass budget from its supervisor's start.
+export async function runPass(queue: Queue, signal: AbortSignal, started = performance.now()) {
   const token = await queue.acquireRunner();
   if (!token) return { status: "overlap", processed: 0 };
   let processed = 0;
