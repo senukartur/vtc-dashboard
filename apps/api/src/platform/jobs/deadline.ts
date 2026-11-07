@@ -14,8 +14,7 @@ export function workerDeadlineEnv(): Record<string, string> {
 
 /**
  * Monotonic time, on this process's `performance.now()` clock, at which the owning supervisor
- * started. Zero without a supervisor. The spawn gap itself is not counted, so the supervisor's
- * own hard timer still fires first.
+ * started. Zero without a supervisor. The spawn gap itself is not counted.
  */
 export function passOrigin(env: NodeJS.ProcessEnv = process.env): number {
   const spent = Number(env[supervisorElapsed]);
@@ -25,4 +24,14 @@ export function passOrigin(env: NodeJS.ProcessEnv = process.env): number {
 /** Milliseconds left before the hard deadline measured from `origin`. */
 export function hardRemainingMs(origin: number): number {
   return Math.max(0, passBounds.hardMs - (performance.now() - origin));
+}
+
+// The worker watchdog waits this much longer than the supervisor's hard timer, so under a
+// supervisor the supervisor fires first and alone reports `hard_deadline`. Still inside the
+// host's 55-second client budget.
+const watchdogGraceMs = 1000;
+
+/** Delay for a worker's own watchdog, the backstop when it runs without a supervisor. */
+export function workerWatchdogMs(origin: number): number {
+  return hardRemainingMs(origin) + watchdogGraceMs;
 }

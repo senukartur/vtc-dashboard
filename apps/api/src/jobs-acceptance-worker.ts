@@ -3,7 +3,7 @@ import { sql } from "@vtc/db/platform-schema";
 import { readConfig } from "./platform/config/env.js";
 import { createAcceptanceQueue, fixtureJob } from "./platform/jobs/acceptance.js";
 import { acceptanceFailure } from "./platform/jobs/acceptance-diagnostics.js";
-import { hardRemainingMs, passOrigin } from "./platform/jobs/deadline.js";
+import { passOrigin, workerWatchdogMs } from "./platform/jobs/deadline.js";
 import { bounds } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
 
@@ -11,7 +11,7 @@ import { runPass } from "./platform/jobs/runner.js";
 // worker, only the spawned worker process evaluates this module.
 export async function runAcceptanceWorker(): Promise<void> {
   const origin = passOrigin();
-  const watchdog = setTimeout(() => process.exit(1), hardRemainingMs(origin));
+  const watchdog = setTimeout(() => process.exit(1), workerWatchdogMs(origin));
   const abort = new AbortController();
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.once(signal, () => abort.abort());
   let unit: ReturnType<typeof createUnitOfWork> | undefined;

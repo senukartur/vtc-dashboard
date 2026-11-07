@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { newId, TransactionCommitOutcomeUnknownError, type UnitOfWork } from "@vtc/db";
@@ -9,6 +10,7 @@ import {
   passBounds,
   passOrigin,
   workerDeadlineEnv,
+  workerWatchdogMs,
 } from "../../apps/api/src/platform/jobs/deadline.ts";
 import { fixtureReference } from "../../apps/api/src/platform/jobs/acceptance.ts";
 import type { Queue } from "../../apps/api/src/platform/jobs/queue.ts";
@@ -161,7 +163,25 @@ test.each([
       }
     }
     expect([...seen].filter((file) => !allowed.has(file))).toEqual([]);
-    expect(readFileSync(start, "utf8")).toContain(`import("./${worker.replace(/\.ts$/, ".js")}")`);
+    // The walk sees declarations only, so also forbid runtime loading in the light modules and
+    // require the entry to be imports plus one `await ownedCli(...)` whose callback loads the worker.
+    for (const file of allowed)
+      if (file !== start)
+        expect(readFileSync(file, "utf8"), file).not.toMatch(
+          /\bimport\(|\brequire\(|createRequire/,
+        );
+    const entry_ = ts.createSourceFile(start, readFileSync(start, "utf8"), ts.ScriptTarget.Latest);
+    const [statement, ...rest] = entry_.statements.filter((node) => !ts.isImportDeclaration(node));
+    expect(rest).toEqual([]);
+    const awaited =
+      statement && ts.isExpressionStatement(statement) && ts.isAwaitExpression(statement.expression)
+        ? statement.expression.expression
+        : undefined;
+    const call = awaited && ts.isCallExpression(awaited) ? awaited : undefined;
+    expect(call?.expression.getText(entry_)).toBe("ownedCli");
+    const callback = call?.arguments[0];
+    expect(callback && ts.isArrowFunction(callback)).toBe(true);
+    expect(callback?.getText(entry_)).toContain(`import("./${worker.replace(/\.ts$/, ".js")}")`);
     expect(existsSync(resolve(dirname(start), worker))).toBe(true);
   },
 );
@@ -179,6 +199,10 @@ test("worker deadlines count from the supervisor start it was handed", async () 
   expect(remaining).toBeGreaterThan(passBounds.hardMs - 7500);
   expect(remaining).toBeLessThanOrEqual(passBounds.hardMs - 7000);
   expect(bounds).toMatchObject(passBounds);
+  // Under a supervisor its own timer fires first; the worker watchdog is only the backstop.
+  const now = performance.now();
+  expect(workerWatchdogMs(now) - hardRemainingMs(now)).toBeGreaterThanOrEqual(999);
+  expect(workerWatchdogMs(now)).toBeLessThan(55000);
   // A pass whose budget the supervisor's start already spent claims nothing but still releases.
   const calls: string[] = [];
   const queue = {
@@ -195,6 +219,45 @@ test("worker deadlines count from the supervisor start it was handed", async () 
     processed: 0,
   });
   expect(calls).toEqual(["inspect", "release"]);
+});
+
+test("the supervisor hands its elapsed time to the worker and bounds it from its own start", async () => {
+  const spawned: NodeJS.ProcessEnv[] = [];
+  const timer = vi.spyOn(globalThis, "setTimeout");
+  const originalWorker = process.env.VTC_JOBS_WORKER;
+  const originalExitCode = process.exitCode;
+  delete process.env.VTC_JOBS_WORKER;
+  vi.resetModules();
+  vi.doMock("node:child_process", () => ({
+    spawn: (_command: string, _args: string[], options: { env: NodeJS.ProcessEnv }) => {
+      const child = Object.assign(new EventEmitter(), { kill: vi.fn() });
+      spawned.push(options.env);
+      setImmediate(() => child.emit("exit", 0));
+      return child;
+    },
+  }));
+  try {
+    const { ownedCli } = await import("../../apps/api/src/platform/jobs/process.ts");
+    const work = vi.fn(async () => {});
+    await ownedCli(work);
+    expect(work).not.toHaveBeenCalled();
+    expect(spawned).toHaveLength(1);
+    const env = spawned[0] ?? {};
+    expect(env.VTC_JOBS_WORKER).toBe("1");
+    const origin = passOrigin(env);
+    expect(origin).toBeLessThan(0);
+    // The hard timer counts from the supervisor's start, not from the spawn.
+    const delays = timer.mock.calls.map((call) => call[1]).filter((ms) => typeof ms === "number");
+    expect(delays.some((ms) => ms > 40000 && ms <= passBounds.hardMs + origin + 1)).toBe(true);
+    expect(process.exitCode).toBe(0);
+  } finally {
+    timer.mockRestore();
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+    if (originalWorker === undefined) delete process.env.VTC_JOBS_WORKER;
+    else process.env.VTC_JOBS_WORKER = originalWorker;
+    process.exitCode = originalExitCode;
+  }
 });
 
 test("wrapped lost lease takes precedence over a transient-looking database code", async () => {
@@ -293,7 +356,7 @@ test.each([
       return "complete";
     });
     const inspect = vi.fn(async () => ({ status: "inspected" }));
-    const pass = vi.fn(async () => {
+    const pass = vi.fn(async (..._args: unknown[]) => {
       sequence.push("pass");
       if (scenario === "pass_unknown_commit") throw uncertain;
       return { status: "completed", processed: 1 };
@@ -348,6 +411,8 @@ test.each([
       }),
     }));
     process.argv = ["node", "jobs.js", scenario === "inspect" ? "inspect" : "run"];
+    const originalElapsed = process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS;
+    process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS = "1500";
     process.exitCode = undefined;
     vi.useFakeTimers();
     try {
@@ -360,6 +425,8 @@ test.each([
         "pass_unknown_commit",
       ].includes(scenario);
       expect(pass).toHaveBeenCalledTimes(continued ? 1 : 0);
+      // The pass budget counts from the supervisor's start that the worker was handed.
+      if (continued) expect(pass.mock.calls[0]?.[2]).toBe(-1500);
       expect(maintenance).toHaveBeenCalledTimes(
         ["inspect", "disabled", "configuration_pending"].includes(scenario) ? 0 : 1,
       );
@@ -406,6 +473,8 @@ test.each([
         for (const listener of process.listeners(signal))
           if (!original.includes(listener)) process.removeListener(signal, listener);
       process.argv = originalArgv;
+      if (originalElapsed === undefined) delete process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS;
+      else process.env.VTC_JOBS_SUPERVISOR_ELAPSED_MS = originalElapsed;
       process.exitCode = originalExitCode;
       vi.useRealTimers();
       log.mockRestore();

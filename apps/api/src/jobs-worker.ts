@@ -5,7 +5,7 @@ import { manualCleanupPending } from "./modules/manual-reports/service.js";
 import { cleanupMail } from "./modules/messaging/service.js";
 import { BlobFailure } from "./platform/blob-storage/filesystem.js";
 import { readConfig } from "./platform/config/env.js";
-import { hardRemainingMs, passOrigin } from "./platform/jobs/deadline.js";
+import { passOrigin, workerWatchdogMs } from "./platform/jobs/deadline.js";
 import { createQueue, unknownCommit } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
 import { sql } from "@vtc/db/platform-schema";
@@ -26,7 +26,7 @@ export async function runJobsWorker(): Promise<void> {
   const watchdog = setTimeout(() => {
     console.error(JSON.stringify({ event: "jobs_failed", category: "hard_deadline" }));
     process.exit(1);
-  }, hardRemainingMs(origin));
+  }, workerWatchdogMs(origin));
   const abort = new AbortController();
   for (const s of ["SIGINT", "SIGTERM"] as const) process.once(s, () => abort.abort());
   let unit: ReturnType<typeof createUnitOfWork> | undefined;

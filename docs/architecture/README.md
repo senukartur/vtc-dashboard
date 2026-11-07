@@ -30,6 +30,7 @@ apps/api/src/
   app.ts                    # creates Fastify without listening
   server.ts                 # one HTTP entry, shutdown and readiness
   jobs.ts                   # bounded CLI entry, no HTTP dependency
+  jobs-worker.ts            # jobs work, loaded only by the worker jobs.ts spawns
   modules/<module>/         # domain, commands, queries, routes, repositories
   use-cases/                # cross-module coordinators composed from public facades
   platform/                 # db/tx, auth bridge, authorization, jobs, outbox,
