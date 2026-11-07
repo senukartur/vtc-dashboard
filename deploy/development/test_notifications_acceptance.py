@@ -745,6 +745,32 @@ class WindowTests(unittest.TestCase):
             added = [arguments[i + 1] for i, value in enumerate(arguments) if value == '--cap-add']
             self.assertEqual(added, ['NET_BIND_SERVICE'] if role == 'proxy' else [])
             self.assertNotIn('--publish', arguments)
+            self.assertEqual(arguments[arguments.index('--memory') + 1], '96m' if role == 'proxy' else '192m')
+
+    def test_jobs_worker_has_the_stage_jobs_memory_and_keeps_its_cpu_and_heap(self):
+        def flag(arguments, name):
+            return arguments[arguments.index(name) + 1]
+        for role, cpus in [('jobs', '0.25'), ('runtime', '0.75')]:
+            arguments = self.window.environment(role)
+            self.assertEqual(flag(arguments, '--memory'), '192m')
+            self.assertEqual(flag(arguments, '--cpus'), cpus)
+        template = json.loads(pathlib.Path(__file__).with_name('notifications.acceptance.compose.yaml').read_text())
+        self.assertEqual({role: service['mem_limit'] for role, service in template['services'].items()},
+                         dict(api='192m', proxy='96m', probe='192m', fixture='192m', migrator='192m', worker='192m'))
+        self.assertEqual(template['services']['worker']['cpus'], 0.25)
+        # The window runs the same modules as the Stage jobs service, so their limits move together.
+        stage = pathlib.Path(__file__).with_name('compose.yaml').read_text().split('\n  jobs:\n', 1)[1].split('\n  proxy:\n', 1)[0]
+        self.assertIn('\n    mem_limit: 192m\n', stage)
+        self.assertIn('\n      NODE_OPTIONS: --max-old-space-size=64\n', stage)
+        source = pathlib.Path(n.__file__).read_text()
+        self.assertIn('NODE_OPTIONS=--max-old-space-size={64 if role == "jobs" else 128}', source)
+        created = []
+        # The rehearsal runs this file with its own allocation set; the fixture mount must not depend on it.
+        with patch.dict(os.environ, REHEARSAL_VOLUME='', REHEARSAL_PROJECT=''), \
+                patch.object(self.window.containers, 'create', side_effect=lambda role, arguments, **kwargs: created.append(arguments)):
+            self.window.fixture('worker-permissions')
+        self.assertIn(str(self.window.directory / 'jobs.env'), created[0])
+        self.assertEqual(flag(created[0], '--memory'), '192m')
 
     def test_real_mount_formatter_rejects_mismatched_rehearsal_allocation(self):
         source = self.base / 'private/fictional-exchange'
