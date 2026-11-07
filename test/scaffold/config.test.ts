@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { expectedMysqlVersion, requiredSqlModes } from "@vtc/db";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 
@@ -53,6 +54,41 @@ test("notifications remain off by default and require the complete workflow plus
     { QUALIFICATIONS_ENABLED: "false" },
   ])
     assert.throws(() => readConfig({ ...input, ...changes }));
+});
+
+test("catalog trust reads the same records from a private file or inline base64, never both", async () => {
+  const path = new URL("../../deploy/development/stage-catalog-evidence.json", import.meta.url);
+  const bytes = await readFile(path);
+  const input = {
+    ...fixture,
+    NODE_ENV: "production",
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
+    IDENTITY_ORIGIN: "https://stage.example.invalid",
+    CATALOGS_ENABLED: "true",
+    CATALOGS_SYNTHETIC: "false",
+    CATALOGS_CURSOR_KEY: "3".repeat(64),
+    CATALOGS_MAX_FILE_BYTES: "1048576",
+    CATALOGS_ARTIFACT_TTL_MS: "86400000",
+    CATALOGS_POLICY_REVISION: "1",
+  };
+  const fromFile = readConfig({ ...input, CATALOGS_EVIDENCE_FILE: fileURLToPath(path) });
+  const encoded = bytes.toString("base64");
+  const inline = readConfig({ ...input, CATALOGS_EVIDENCE_BASE64: encoded });
+  assert.equal(inline.catalogs?.evidence.length, 2);
+  assert.deepEqual(inline.catalogs?.evidence, fromFile.catalogs?.evidence);
+  assert.deepEqual(readConfig(input).catalogs?.evidence, []);
+  for (const changes of [
+    // Each half is valid alone, so only the exclusivity check refuses this.
+    { CATALOGS_EVIDENCE_BASE64: encoded, CATALOGS_EVIDENCE_FILE: fileURLToPath(path) },
+    // Valid JSON just over the 1 MiB trust bound once decoded.
+    { CATALOGS_EVIDENCE_BASE64: Buffer.from(`[${" ".repeat(1024 * 1024)}]`).toString("base64") },
+    { CATALOGS_EVIDENCE_BASE64: `${encoded}!` },
+    { CATALOGS_EVIDENCE_BASE64: encoded.slice(0, -1) },
+    { CATALOGS_EVIDENCE_BASE64: "" },
+    { CATALOGS_EVIDENCE_BASE64: Buffer.from("not json").toString("base64") },
+  ])
+    assert.throws(() => readConfig({ ...input, ...changes }), /CATALOGS_EVIDENCE_BASE64/);
 });
 
 test("telemetry activation requires all prerequisites, separate key and uint32-safe validated limits", () => {

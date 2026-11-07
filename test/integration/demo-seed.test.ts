@@ -68,10 +68,9 @@ function stageEnvironment(evidenceRoot: string) {
     readFileSync(new URL("../../deploy/development/stage-features.json", import.meta.url), "utf8"),
   ) as { flags: string[]; settings: Record<string, string>; generatedKeys: string[] };
   const database = guardedSettings();
-  // The image ships exactly the file the profile names.
-  expect(profile.settings.CATALOGS_EVIDENCE_FILE).toBe(
-    "/app/operations/stage-catalog-evidence.json",
-  );
+  // Real trust is private per host, so the profile names none. The image keeps the placeholder
+  // file because an earlier configuration that names it is still a rollback target.
+  expect(profile.settings.CATALOGS_EVIDENCE_FILE).toBeUndefined();
   expect(readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8")).toContain(
     "deploy/development/stage-catalog-evidence.json ./operations/",
   );
