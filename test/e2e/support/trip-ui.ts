@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../../fixtures/manual-images.ts";
-import { entityId, envelope, list, mockCatalogs } from "./catalogs.ts";
+import { catalogItem, entityId, envelope, list, mockCatalogs } from "./catalogs.ts";
 import { expect } from "./fixtures.ts";
 
 export const id = "41000000-0000-4000-8000-000000000001",
@@ -27,34 +27,14 @@ export async function mockTrips(page: Page) {
       self.data.capabilities.push("trips.review");
       return route.fulfill({ json: self });
     }
-    if (path.startsWith("/api/v1/catalogs/entities")) {
-      const historical = path !== "/api/v1/catalogs/entities",
-        kind = historical
-          ? path.endsWith(cargoId)
-            ? "cargo"
-            : path.endsWith(trailerId)
-              ? "trailer_type"
-              : "city"
-          : (url.searchParams.get("kind") ?? "city"),
-        selectedId = kind === "cargo" ? cargoId : kind === "trailer_type" ? trailerId : entityId,
-        locale = url.searchParams.get("locale") === "ru" ? "ru" : "en";
-      const entity = {
-        id: selectedId,
-        revisionId: "61000000-0000-4000-8000-000000000020",
-        game: "ets2",
-        kind,
-        mapNamespace: "base",
-        display: {
-          entityId: selectedId,
-          label: `Fictional ${kind}`,
-          requestedLocale: locale,
-          renderedLocale: "en",
-          englishFallback: locale === "ru",
-          retired: false,
-        },
-        relatedEntityIds: [],
-      };
-      return route.fulfill({ json: historical ? envelope(entity) : list([entity]) });
+    const catalogRow = /^\/api\/v1\/catalogs\/(cities|cargoes|trailers)(?:\/([^/]+))?$/.exec(path);
+    if (catalogRow) {
+      const name = catalogRow[1],
+        locale = url.searchParams.get("locale") === "ru" ? "ru" : "en",
+        selectedId = name === "cargoes" ? cargoId : name === "trailers" ? trailerId : entityId,
+        label = name === "cargoes" ? "cargo" : name === "trailers" ? "trailer_type" : "city",
+        item = catalogItem(selectedId, `Fictional ${label}`, locale);
+      return route.fulfill({ json: catalogRow[2] ? envelope(item) : list([item]) });
     }
     if (path === "/api/v1/trips") {
       const trip = example("getTrip:success").data;
@@ -64,7 +44,7 @@ export async function mockTrips(page: Page) {
         requestedLocale: "en",
         renderedLocale: "en",
         englishFallback: false,
-        retired: false,
+        hidden: false,
       };
       trip.destination = trip.origin;
       trip.actualDistanceM = "0";

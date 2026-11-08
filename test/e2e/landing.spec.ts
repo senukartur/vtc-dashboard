@@ -482,7 +482,7 @@ const catalogLabel = (entityId: string, label: string) => ({
   requestedLocale: "en",
   renderedLocale: "en",
   englishFallback: false,
-  retired: false,
+  hidden: false,
 });
 function liveEvent(
   index: number,

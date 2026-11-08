@@ -384,14 +384,14 @@ for (const status of [404, 503] as const)
   );
 
 test(
-  "R7 catalog publication failure offers Refresh; a game without one shows a note",
+  "R7 a list read failure offers Refresh; a game with no rows shows a note",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     await mockTrips(page);
     let failing = true,
       reads = 0;
     await page.route(
-      (url) => url.pathname === "/api/v1/catalogs/revisions",
+      (url) => /^\/api\/v1\/catalogs\/cities$/.test(url.pathname),
       (route) => {
         reads++;
         return failing
@@ -401,22 +401,20 @@ test(
     );
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const context = page.locator(".manual-report-context");
-    await expect(context.getByRole("alert")).toContainText("service is unavailable");
+    const origin = page.locator("fieldset").filter({ hasText: "Origin city" }).first();
+    await expect(origin.getByRole("alert")).toContainText("could not be read");
     await capture(page, info, "manual-report-catalog-error");
     const before = reads;
     failing = false;
-    await context.getByRole("button", { name: "Refresh", exact: true }).click();
+    await origin.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect.poll(() => reads).toBeGreaterThan(before);
-    await expect(context.getByRole("alert")).toHaveCount(0);
+    await expect(origin.getByRole("alert")).toHaveCount(0);
+    await page.route("**/api/v1/catalogs/cities?*", (route) =>
+      route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
+    );
     await page.locator("#manual-game").selectOption("ats");
-    await expect(
-      context.getByText(
-        "No catalog is published for this game yet. You can save a draft and return later.",
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(context.getByRole("alert")).toHaveCount(0);
+    await expect(origin.getByText("No matching", { exact: false })).toBeVisible();
+    await expect(origin.getByRole("alert")).toHaveCount(0);
   },
 );
 

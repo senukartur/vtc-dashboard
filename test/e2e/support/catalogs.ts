@@ -5,65 +5,77 @@ import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 
 type S = components["schemas"];
-export const catalogId = "61000000-0000-4000-8000-000000000020",
-  candidateId = "62000000-0000-4000-8000-000000000020",
-  entityId = "63000000-0000-4000-8000-000000000020",
+export type CatalogListName = "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+export type CatalogGame = S["CatalogItem"]["game"];
+export const entityId = "63000000-0000-4000-8000-000000000020",
   regionId = "64000000-0000-4000-8000-000000000020",
-  operationId = "65000000-0000-4000-8000-000000000020",
-  artifactId = "66000000-0000-4000-8000-000000000020";
-export const revision = (
-  id = catalogId,
-  state: S["CatalogRevision"]["state"] = "published",
-): S["CatalogRevision"] => ({
-  id,
-  version: 1,
-  publicationVersion: 2,
-  game: "ets2",
-  state,
-  coverageComplete: true,
-  englishLabelsComplete: true,
-  sourceReviewComplete: true,
-  createdAt: "2026-10-20T00:00:00.000Z",
-});
-export const review: S["CatalogReview"] = {
-  revisionId: candidateId,
-  version: 1,
-  comparisonRevisionId: catalogId,
-  gameBuild: "Synthetic reviewed build",
-  releaseInventoryAsOf: "2026-10-20",
-  addedEntities: 2,
-  changedEntities: 1,
-  retiredEntities: 1,
-  expectedPacks: 2,
-  validatedPacks: 1,
-  missingPacks: 0,
-  failedPacks: 0,
-  nonContributingPacks: 1,
-  mappingIssues: 0,
-  sourceReviewState: "approved",
-  provenance: [],
-};
+  cargoRowId = "63000000-0000-4000-8000-000000000021",
+  trailerRowId = "63000000-0000-4000-8000-000000000022",
+  dlcId = "65000000-0000-4000-8000-000000000020";
 export const envelope = (data: unknown) => ({
   data,
   meta: { requestId: "synthetic-catalog-request" },
 });
-export const list = (items: unknown[], nextCursor: string | null = null) =>
-  envelope({ items, nextCursor });
+export const list = (items: unknown[], nextCursor: string | null = null, total?: number) =>
+  envelope({ items, nextCursor, total: total ?? items.length });
 export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
   await switchLanguage(page, locale);
 }
+/** A list row with its display label, in the shape the read routes return. */
+export function catalogItem(
+  id: string,
+  label: string,
+  locale: "ru" | "en" = "en",
+  overrides: Partial<S["CatalogItem"]> = {},
+): S["CatalogItem"] {
+  return {
+    id,
+    game: "ets2",
+    code: label.toLowerCase().replaceAll(" ", "_"),
+    nameEn: label,
+    nameRu: null,
+    hidden: false,
+    display: {
+      entityId: id,
+      label,
+      requestedLocale: locale,
+      renderedLocale: "en",
+      englishFallback: locale === "ru",
+      hidden: false,
+    },
+    dlcId: null,
+    dlc: null,
+    ...overrides,
+  };
+}
+export const defaultRows = (locale: "ru" | "en"): Record<CatalogListName, S["CatalogItem"][]> => ({
+  dlcs: [catalogItem(dlcId, "Fictional base pack", locale, { steamAppId: 1 })],
+  regions: [catalogItem(regionId, "Fictional region", locale)],
+  cities: [catalogItem(entityId, "Fictional city", locale, { regionId })],
+  cargoes: [catalogItem(cargoRowId, "Fictional cargo", locale)],
+  trailers: [catalogItem(trailerRowId, "Fictional trailer", locale)],
+});
+const summaryOf = (rows: S["CatalogItem"][]) => ({
+  visible: rows.filter((r) => !r.hidden).length,
+  hidden: rows.filter((r) => r.hidden).length,
+});
 /** Optional overrides; omitting them keeps the original synthetic responses unchanged. */
 export type CatalogMockOptions = {
-  /** Published revisions per game, current first. */
-  revisions?: Partial<Record<S["CatalogRevision"]["game"], S["CatalogRevision"][]>>;
-  candidate?: Partial<S["CatalogRevision"]>;
-  review?: Partial<S["CatalogReview"]>;
   /** Replaces the session capabilities after the staff adjustment. */
   capabilities?: string[];
   /** Pathname suffix (after /api/v1) answered with this HTTP status instead. */
   failures?: Record<string, number>;
-  /** Published revision discovery waits for this promise. */
+  /** Read routes wait for this promise. */
   gate?: Promise<void>;
+  /** Rows per list and game; other lists keep the defaults for that game. */
+  rows?: Partial<Record<CatalogGame, Partial<Record<CatalogListName, S["CatalogItem"][]>>>>;
+  /** Answers for writes; each receives the request and returns a status with a JSON body. */
+  writes?: (request: {
+    method: string;
+    path: string;
+    body: unknown;
+    headers: Record<string, string>;
+  }) => { status: number; json: unknown } | null;
 };
 export async function mockCatalogs(page: Page, staff = true, options: CatalogMockOptions = {}) {
   const requests: URL[] = [];
@@ -93,102 +105,68 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       return json(self);
     }
     if (path === "/api/v1/auth/csrf") return json(envelope({ token: "NONFUNCTIONAL_FIXTURE" }));
-    if (path === "/api/v1/catalogs/revisions") {
+    const locale = url.searchParams.get("locale") === "ru" ? "ru" : "en";
+    if (path.startsWith("/api/v1/admin/catalogs/")) {
+      if (route.request().method() === "GET") return route.fallback();
+      const response = options.writes?.({
+        method: route.request().method(),
+        path: path.slice("/api/v1".length),
+        body: route.request().postDataBuffer(),
+        headers: route.request().headers(),
+      });
+      if (response) return route.fulfill({ status: response.status, json: response.json });
+      return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
+    }
+    if (path === "/api/v1/catalogs/summary") {
       if (options.gate) await options.gate;
-      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2";
-      return json(
-        list(
-          options.revisions?.[game] ?? (url.searchParams.get("game") === "ats" ? [] : [revision()]),
-        ),
-      );
-    }
-    if (path.startsWith("/api/v1/catalogs/entities")) {
-      const historical = path !== "/api/v1/catalogs/entities",
-        kind = url.searchParams.get("kind") ?? (path.endsWith(regionId) ? "region" : "city"),
-        id = kind === "region" ? regionId : entityId,
-        locale = url.searchParams.get("locale") === "ru" ? "ru" : "en";
-      const entity = {
-        id,
-        revisionId: catalogId,
-        game: "ets2",
-        kind,
-        mapNamespace: "base",
-        display: {
-          entityId: id,
-          label: kind === "region" ? "Fictional region" : "Fictional city",
-          requestedLocale: locale,
-          renderedLocale: "en",
-          englishFallback: locale === "ru",
-          retired: false,
-        },
-        relatedEntityIds: kind === "region" ? [] : [regionId],
-      };
-      return json(
-        historical
-          ? envelope(entity)
-          : list(url.searchParams.get("search") === "absent" ? [] : [entity]),
-      );
-    }
-    if (path === "/api/v1/admin/catalog-import-policy")
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2",
+        rows = { ...defaultRows(locale), ...options.rows?.[game] };
       return json(
         envelope({
-          enabled: true,
-          maxFileBytes: 8388608,
-          maxFilesPerReport: 1,
-          allowedMimeTypes: ["application/json"],
-          policyRevision: 1,
+          game,
+          lists: Object.fromEntries(
+            (Object.keys(rows) as CatalogListName[]).map((name) => [name, summaryOf(rows[name])]),
+          ),
         }),
       );
-    if (path === `/api/v1/admin/catalog-revisions/${candidateId}`)
-      return route.fulfill({
-        json: envelope({ ...revision(candidateId, "draft"), ...options.candidate }),
-        headers: { ETag: '"v1"' },
-      });
-    if (path.endsWith("/review"))
-      return route.fulfill({
-        json: envelope({ ...review, ...options.review }),
-        headers: { ETag: '"v1"' },
-      });
-    if (path.endsWith("/diff"))
-      return json(
-        list(
-          [
-            {
-              entityId,
-              kind: "city",
-              changeKind: "changed",
-              fields: [
-                { field: "label_en", before: "Fictional old city", after: "Fictional city" },
-                { field: "retired", before: false, after: true },
-              ],
-              reasonCodes: [],
+    }
+    const match =
+      /^\/api\/v1\/catalogs\/(dlcs|regions|cities|cargoes|trailers)(?:\/([^/]+))?$/.exec(path);
+    if (match) {
+      if (options.gate) await options.gate;
+      const name = match[1] as CatalogListName,
+        game = url.searchParams.get("game") === "ats" ? "ats" : "ets2",
+        rows = options.rows?.[game]?.[name] ?? (game === "ets2" ? defaultRows(locale)[name] : []);
+      if (match[2]) {
+        const allRows = [
+          ...(options.rows?.ets2?.[name] ?? defaultRows(locale)[name]),
+          ...(options.rows?.ats?.[name] ?? []),
+        ];
+        const found = allRows.find((r) => r.id === match[2]);
+        if (!found)
+          return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
+        return json(
+          envelope({
+            ...found,
+            display: {
+              ...found.display,
+              requestedLocale: locale,
+              englishFallback: locale === "ru",
             },
-          ],
-          url.searchParams.has("cursor") ? null : "synthetic-next",
-        ),
+          }),
+        );
+      }
+      const search = url.searchParams.get("search")?.toLowerCase(),
+        includeHidden = url.searchParams.get("includeHidden") === "true";
+      const visible = rows.filter(
+        (r) =>
+          (includeHidden || !r.hidden) &&
+          (!search ||
+            r.code.toLowerCase().includes(search) ||
+            r.display.label.toLowerCase().includes(search)),
       );
-    if (path.endsWith("/coverage"))
-      return json(
-        list([
-          {
-            packId: "base",
-            title: "Fictional base",
-            state: "validated",
-            contributionKinds: ["city"],
-            provenance: [],
-            reasonCodes: [],
-          },
-          {
-            packId: "fictional-sounds",
-            title: "Fictional sounds",
-            state: "non_contributing",
-            contributionKinds: [],
-            provenance: [],
-            reasonCodes: ["no_catalog_facts"],
-          },
-        ]),
-      );
-    if (path.endsWith("/mapping-issues")) return json(list([]));
+      return json(list(visible));
+    }
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });
   return { requests };

@@ -305,7 +305,7 @@ export function makeTripSummaryListFixture(ownerId: string = member1Id) {
             requestedLocale: "en" as const,
             renderedLocale: "en" as const,
             englishFallback: false,
-            retired: false,
+            hidden: false,
           },
           destination: {
             entityId: "60000000-0000-4000-8000-000000000002",
@@ -313,7 +313,7 @@ export function makeTripSummaryListFixture(ownerId: string = member1Id) {
             requestedLocale: "en" as const,
             renderedLocale: "en" as const,
             englishFallback: false,
-            retired: false,
+            hidden: false,
           },
           cargo: {
             entityId: "63000000-0000-4000-8000-000000000021",
@@ -321,7 +321,7 @@ export function makeTripSummaryListFixture(ownerId: string = member1Id) {
             requestedLocale: "en" as const,
             renderedLocale: "en" as const,
             englishFallback: false,
-            retired: false,
+            hidden: false,
           },
           actualDistanceM: "580000",
           reportingAt: "2026-10-20T14:30:00.000Z",

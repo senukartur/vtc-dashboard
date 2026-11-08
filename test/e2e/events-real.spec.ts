@@ -48,7 +48,7 @@ async function create(
       .selectOption(fixture.ids.fixture_crates as string);
     await page
       .getByRole("combobox", { name: "Prescribed trailer type", exact: true })
-      .selectOption(fixture.ids.fixture_trailer as string);
+      .selectOption(fixture.ids.fixture_box as string);
     await page.getByLabel("Prescribed mass (kg) · Optional", { exact: true }).fill("21000");
   }
   await page.getByRole("button", { name: "Create event", exact: true }).click();
@@ -178,7 +178,7 @@ async function scenario(browser: Browser, page: Page, info: TestInfo, name: stri
       destinationCityId: null,
       prescribedCargoId: prescribed ? (fixture.ids.fixture_crates as string) : null,
       prescribedMassKg: prescribed ? "21000" : null,
-      prescribedTrailerTypeId: prescribed ? (fixture.ids.fixture_trailer as string) : null,
+      prescribedTrailerTypeId: prescribed ? (fixture.ids.fixture_box as string) : null,
     };
     const created = await events.create(fixture.staff, randomUUID(), input),
       id = created.data.event.id;
@@ -518,7 +518,7 @@ test(
       expect(after.confirmedEvent).toMatchObject({
         prescribedMassKg: "21000",
         prescribedCargoId: s.fixture.ids.fixture_crates,
-        prescribedTrailerTypeId: s.fixture.ids.fixture_trailer,
+        prescribedTrailerTypeId: s.fixture.ids.fixture_box,
       });
     } finally {
       await s.close();

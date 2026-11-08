@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../../fixtures/manual-images.ts";
-import { envelope, list, mockCatalogs } from "./catalogs.ts";
+import { catalogItem, envelope, list, mockCatalogs } from "./catalogs.ts";
 import { example } from "./trip-ui.ts";
 
 // Fictional review fixtures only; every identity, label, reason and image is synthetic.
@@ -20,7 +20,6 @@ export const reviewIds = {
 } as const;
 export type ReviewTrip = Exclude<keyof typeof reviewIds, "missing">;
 export const member = accountFixture("en").data.member;
-export const catalogRevisionId = uuid("47100000", 1);
 const entity = (n: number) => uuid("47200000", n);
 export const entities = {
   north: entity(1),
@@ -51,12 +50,12 @@ const labels: Record<string, { kind: string; en: string; ru: string; game?: "ats
     ru: "Вымышленный трансформатор",
   },
   [entities.lowboy]: {
-    kind: "trailer_type",
+    kind: "trailer",
     en: "Fictional lowboy",
     ru: "Вымышленный низкорамный",
   },
   [entities.curtain]: {
-    kind: "trailer_type",
+    kind: "trailer",
     en: "Fictional curtainsider",
     ru: "Вымышленный шторный",
   },
@@ -105,12 +104,11 @@ const label = (id: string, locale: "en" | "ru" = "en"): S["CatalogLabel"] => ({
   requestedLocale: locale,
   renderedLocale: locale,
   englishFallback: false,
-  retired: false,
+  hidden: false,
 });
 const pin = (entityId: string): S["ManualResolvedSelection"] => ({
   status: "resolved",
   entityId,
-  catalogRevisionId,
 });
 const revision = (
   n: number,
@@ -340,7 +338,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
     values: Partial<S["EffectiveTripFacts"]>,
   ): S["EffectiveTripFacts"] => {
     const factRevisionId = uuid("47900000", Object.keys(reviewIds).indexOf(key) + 1),
-      at = (entityId: string) => ({ entityId, catalogRevisionId, factRevisionId });
+      at = (entityId: string) => ({ entityId });
     return {
       factRevisionId,
       provider: "ets2telemetry",
@@ -564,22 +562,20 @@ export async function mockReview(page: Page, options: ReviewMockOptions = {}): P
         });
       return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
     }
-    if (path.startsWith("/api/v1/catalogs/entities/")) {
-      const id = path.split("/").at(-1) ?? "",
+    const row = /^\/api\/v1\/catalogs\/(?:cities|cargoes|trailers)\/(.+)$/.exec(path);
+    if (row?.[1]) {
+      const id = row[1],
         known = labels[id],
         requested = url.searchParams.get("locale") === "ru" ? "ru" : "en";
-      if (!known || url.searchParams.get("revisionId") !== catalogRevisionId)
+      if (!known)
         return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
       return route.fulfill({
-        json: envelope({
-          id,
-          revisionId: catalogRevisionId,
-          game: known.game ?? "ets2",
-          kind: known.kind,
-          mapNamespace: "base",
-          display: { ...label(id, requested), label: known[requested] },
-          relatedEntityIds: [],
-        }),
+        json: envelope(
+          catalogItem(id, known[requested], requested, {
+            game: known.game ?? "ets2",
+            display: { ...label(id, requested), label: known[requested] },
+          }),
+        ),
       });
     }
     if (path === `/api/v1/evidence/${evidence.ready}/content`)

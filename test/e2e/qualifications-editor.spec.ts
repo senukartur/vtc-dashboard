@@ -1,52 +1,38 @@
-import { catalogId, catalogLanguage, envelope, list, revision } from "./support/catalogs.ts";
+import { catalogItem, catalogLanguage, envelope, list } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { levels, mockQualifications, ruleId } from "./support/qualifications.ts";
 
 const trailerId = (i: number) => `63100000-0000-4000-8000-${i.toString().padStart(12, "0")}`;
-const adrId = "63200000-0000-4000-8000-000000000001",
-  otherRevision = "61000000-0000-4000-8000-000000000021";
 for (const locale of ["en", "ru"] as const) {
   test(
-    `controlled qualification ${locale} retained draft catalog labels are bounded named and revision safe`,
+    `controlled qualification ${locale} retained draft trailer labels are bounded, named and keep the sample to one trailer`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
       const state = await mockQualifications(page, locale),
         requests: string[] = [];
-      await page.route("**/api/v1/catalogs/**", async (route) => {
+      await page.route("**/api/v1/catalogs/trailers**", async (route) => {
         const url = new URL(route.request().url()),
           path = url.pathname,
-          rev = url.searchParams.get("revisionId") ?? catalogId,
           lang = url.searchParams.get("locale") === "ru" ? "ru" : "en";
-        if (path.endsWith("/revisions"))
-          return route.fulfill({ json: list([revision(), revision(otherRevision)]) });
-        const id = path.split("/").at(-1) ?? "",
-          kind = url.searchParams.get("kind") ?? (id === adrId ? "adr_category" : "trailer_type");
-        const entity = (entityId: string) => ({
-          id: entityId,
-          revisionId: catalogId,
-          game: "ets2",
-          kind,
-          mapNamespace: "base",
-          display: {
-            entityId,
-            label:
-              kind === "adr_category"
-                ? "Fictional ADR"
-                : `Fictional trailer ${Number(entityId.slice(-12))}`,
-            requestedLocale: lang,
-            renderedLocale: "en",
-            englishFallback: lang === "ru",
-            retired: entityId === trailerId(1),
-          },
-          relatedEntityIds: [],
-        });
-        if (path.endsWith("/entities"))
-          return route.fulfill({
-            json: list((kind === "adr_category" ? [adrId] : [trailerId(27)]).map(entity)),
+        const row = (entityId: string) => {
+          const hidden = entityId === trailerId(1);
+          return catalogItem(entityId, `Fictional trailer ${Number(entityId.slice(-12))}`, lang, {
+            hidden,
+            display: {
+              entityId,
+              label: `Fictional trailer ${Number(entityId.slice(-12))}`,
+              requestedLocale: lang,
+              renderedLocale: "en",
+              englishFallback: lang === "ru",
+              hidden,
+            },
           });
-        requests.push(`${id}:${rev}:${lang}`);
+        };
+        if (path.endsWith("/trailers")) return route.fulfill({ json: list([row(trailerId(27))]) });
+        const id = path.split("/").at(-1) ?? "";
+        requests.push(`${id}:${lang}`);
         if (id === trailerId(2)) return route.fulfill({ status: 503, json: {} });
-        return route.fulfill({ json: envelope(entity(id)) });
+        return route.fulfill({ json: envelope(row(id)) });
       });
       await page.route("**/api/v1/qualification-levels/*/rule-versions/*", (route) =>
         route.fulfill({
@@ -61,7 +47,7 @@ for (const locale of ["en", "ru"] as const) {
                 type: "allowed_trailer_types",
                 entityIds: Array.from({ length: 26 }, (_, i) => trailerId(i + 1)),
               },
-              { type: "allowed_adr_categories", entityIds: [adrId] },
+              { type: "allowed_adr_categories", classes: ["2"] },
             ],
             requiredTrips: 2,
             requiredDistanceM: "100",
@@ -94,7 +80,7 @@ for (const locale of ["en", "ru"] as const) {
       await expect(trailer.locator("li")).toHaveCount(25);
       await expect(trailer.locator("li").first()).toContainText("Fictional trailer 1");
       await expect(trailer.locator("li").first()).toContainText(
-        locale === "en" ? "Retired" : "Архивное",
+        locale === "en" ? "hidden" : "скрыт",
       );
       await expect(trailer.locator("li").nth(1)).toContainText(
         locale === "en" ? "Catalog label unavailable" : "Название из каталога недоступно",
@@ -121,12 +107,14 @@ for (const locale of ["en", "ru"] as const) {
           exact: true,
         })
         .click();
-      await expect(adr.locator("li")).toContainText("Fictional ADR");
-      await adr.getByRole("button", { name: /Fictional ADR/ }).click();
-      await expect(adr.locator("li")).toHaveCount(0);
-      await adr.getByRole("combobox", { name: adrLabel, exact: true }).selectOption(adrId);
-      await adr.getByRole("button", { name: add, exact: true }).click();
-      await expect(adr.locator("li")).toContainText("Fictional ADR");
+      const adrTwo = adr.getByRole("checkbox", {
+        name: locale === "en" ? "ADR class 2" : "Класс ADR 2",
+        exact: true,
+      });
+      await expect(adrTwo).toBeChecked();
+      await adrTwo.uncheck();
+      await expect(adrTwo).not.toBeChecked();
+      await adrTwo.check();
       await trailer
         .getByRole("combobox", { name: trailerLabel, exact: true })
         .selectOption(trailerId(27));
@@ -142,16 +130,16 @@ for (const locale of ["en", "ru"] as const) {
         })
         .last();
       const sampleLabel = locale === "en" ? "Sample trailer type" : "Тип прицепа в примере";
-      for (let i = 0; i < 2; i++) {
-        await sample
-          .getByRole("combobox", { name: sampleLabel, exact: true })
-          .selectOption(trailerId(27));
-        await sample.getByRole("button", { name: add, exact: true }).click();
-      }
-      await expect(sample.locator("li")).toHaveCount(2);
-      await expect(sample.getByRole("button", { name: /1\. Fictional trailer 27/ })).toBeVisible();
-      await sample.getByRole("button", { name: /1\. Fictional trailer 27/ }).click();
+      await sample
+        .getByRole("combobox", { name: sampleLabel, exact: true })
+        .selectOption(trailerId(27));
+      await sample.getByRole("button", { name: add, exact: true }).click();
       await expect(sample.locator("li")).toHaveCount(1);
+      await expect(sample.getByRole("button", { name: /1\. Fictional trailer 27/ })).toBeVisible();
+      await sample
+        .getByRole("combobox", { name: sampleLabel, exact: true })
+        .selectOption(trailerId(27));
+      await expect(sample.getByRole("button", { name: add, exact: true })).toBeDisabled();
       await editor.locator('[id^="reason-"]').fill("Fictional labelled draft");
       const firstPreview = page.waitForResponse(
         (response) =>
@@ -170,12 +158,11 @@ for (const locale of ["en", "ru"] as const) {
           type: "allowed_trailer_types",
           entityIds: Array.from({ length: 27 }, (_, i) => trailerId(i + 1)),
         },
-        { type: "allowed_adr_categories", entityIds: [adrId] },
+        { type: "allowed_adr_categories", classes: ["2"] },
       ]);
       expect(state.previewInputs.at(-1)?.sample.trailerTypeIds).toEqual([trailerId(27)]);
       const unchangedWireInput = JSON.stringify(state.previewInputs.at(-1));
       await catalogLanguage(page, locale === "en" ? "ru" : "en");
-      await expect(editor.getByText(adrId, { exact: true })).toBeVisible();
       await expect(editor.locator('[id^="reason-"]')).toHaveValue("Fictional labelled draft");
       const localePreview = page.waitForResponse(
         (response) =>
@@ -192,7 +179,7 @@ for (const locale of ["en", "ru"] as const) {
       expect(JSON.stringify(state.previewInputs.at(-1))).toBe(unchangedWireInput);
       await catalogLanguage(page, locale);
       await expect(trailer.locator("li").filter({ hasText: "Fictional trailer 27" })).toBeVisible();
-      await expect(adr.locator("li")).toContainText("Fictional ADR");
+      await expect(adrTwo).toBeChecked();
       await expect(sample.locator("li")).toContainText("Fictional trailer 27");
       await editor.screenshot({
         path: info.outputPath(`qualification-labelled-draft-${locale}.png`),
@@ -207,17 +194,6 @@ for (const locale of ["en", "ru"] as const) {
           exact: true,
         }),
       ).toBeDisabled();
-      await trailer
-        .getByRole("combobox", { name: trailerLabel, exact: true })
-        .selectOption(trailerId(27));
-      await editor.locator('[id^="catalog-"]').selectOption(otherRevision);
-      await expect(trailer.getByRole("button", { name: add, exact: true })).toBeDisabled();
-      await expect(adr.locator("li")).toContainText(
-        locale === "en" ? "Catalog label unavailable" : "Название из каталога недоступно",
-      );
-      await expect(sample.locator("li")).toContainText(
-        locale === "en" ? "Catalog label unavailable" : "Название из каталога недоступно",
-      );
       expect(state.previewInputs.at(-1)?.sample.trailerTypeIds).toEqual([trailerId(27)]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
