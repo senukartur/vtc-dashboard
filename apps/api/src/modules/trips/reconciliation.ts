@@ -41,9 +41,9 @@ export function tripMatchDiscovery(
       ? sql.join(
           evidence.facts.map(
             (f) => sql`(s.provider <> ${f.provider}
-            AND ${f.origin.status === "known" ? sql`(f.origin_entity_id IS NULL OR f.origin_entity_id = ${f.origin.value.entityId})` : sql`TRUE`}
-            AND ${f.destination.status === "known" ? sql`(f.destination_entity_id IS NULL OR f.destination_entity_id = ${f.destination.value.entityId})` : sql`TRUE`}
-            AND ${f.cargo.status === "known" ? sql`(f.cargo_entity_id IS NULL OR f.cargo_entity_id = ${f.cargo.value.entityId})` : sql`TRUE`})`,
+            AND ${f.origin.status === "known" ? sql`(f.origin_city_id IS NULL OR f.origin_city_id = ${f.origin.value.entityId})` : sql`TRUE`}
+            AND ${f.destination.status === "known" ? sql`(f.destination_city_id IS NULL OR f.destination_city_id = ${f.destination.value.entityId})` : sql`TRUE`}
+            AND ${f.cargo.status === "known" ? sql`(f.cargo_id IS NULL OR f.cargo_id = ${f.cargo.value.entityId})` : sql`TRUE`})`,
           ),
           sql` OR `,
         )
