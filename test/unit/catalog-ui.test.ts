@@ -173,6 +173,7 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
     "empty",
     "emptyList",
     "fallback",
+    "rowFallback",
     "hidden",
     "staffOnly",
     "choose",

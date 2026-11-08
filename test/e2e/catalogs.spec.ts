@@ -109,7 +109,9 @@ for (const locale of ["en", "ru"] as const) {
       await tab(page, c.tabTrailers).click();
       await expect(page).toHaveURL(/tab=trailers/);
       await tab(page, c.tabDlcs).click();
-      await expect(page.getByText("1234", { exact: false }).first()).toBeVisible();
+      // The Steam app ID is a table column; phone rows carry only the name and code.
+      if (phone(page)) await expect(rowOf(page, "Fictional pack")).toBeVisible();
+      else await expect(rowOf(page, "Fictional pack").getByText("1234")).toBeVisible();
       await capture(page, info, `lists-${locale}-dlcs`);
     },
   );

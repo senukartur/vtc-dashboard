@@ -84,11 +84,17 @@ export async function tripBrowserFixture() {
       ["cargoes", "fixture_crates"],
       ["trailers", "fixture_box"],
     ] as const) {
-      const item = await catalogs.create(staff, list, randomUUID(), {
-        game: "ets2",
-        code,
-        nameEn: `Fictional ${code}`,
-      });
+      // Browser specs share one database within a run, so later fixtures reuse these rows.
+      const existing = (
+        await catalogs.list(staff, list, { game: "ets2", search: code, includeHidden: true })
+      ).items.find((v) => v.code === code);
+      const item =
+        existing ??
+        (await catalogs.create(staff, list, randomUUID(), {
+          game: "ets2",
+          code,
+          nameEn: `Fictional ${code}`,
+        }));
       ids[code] = item.id;
     }
     const level = (await qualifications.levels(staff, "ets2")).items.find(

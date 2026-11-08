@@ -394,7 +394,7 @@ test(
     );
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const origin = page.locator("fieldset").filter({ hasText: "Origin city" }).first();
+    const origin = page.getByRole("group", { name: "Origin city", exact: true });
     await expect(origin.getByRole("alert")).toContainText("could not be read");
     await capture(page, info, "manual-report-catalog-error");
     const before = reads;
