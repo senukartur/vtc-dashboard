@@ -1,94 +1,105 @@
-import { createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { components } from "@vtc/contracts";
-import {
-  applicationId,
-  createAudit,
-  newId,
-  opaqueUtf8,
-  type TxContext,
-  type UnitOfWork,
-} from "@vtc/db";
+import { applicationId, createAudit, newId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
   and,
   asc,
-  catalogAliases,
-  catalogArtifacts,
-  catalogChanges,
-  catalogCommands,
-  catalogCoverage,
-  catalogFacts,
-  catalogMappingIssues,
-  catalogMappingReviews,
-  catalogMappings,
-  catalogOperations,
-  catalogPublications,
-  catalogRelations,
-  catalogRevisions,
-  desc,
+  catalogCargoes,
+  catalogCities,
+  catalogDlcs,
+  catalogRegions,
+  catalogTrailers,
   eq,
   gt,
   inArray,
-  lt,
-  lte,
   or,
   sql,
 } from "@vtc/db/catalogs-schema";
-import { createQueue, retryTransaction } from "../../platform/jobs/queue.js";
+import { alias } from "drizzle-orm/mysql-core";
+import { retryTransaction } from "../../platform/jobs/queue.js";
 import { duplicateKey } from "../../platform/outbox/events.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import {
-  type Artifact,
-  aliasKey,
+  type AdrClass,
+  adrClasses,
+  CATALOG_IMPORT_TOKEN_TTL_MS,
+  CATALOG_PREVIEW_MAX_LINES,
   type CatalogConfig,
-  cursorCodec,
+  type CatalogKind,
+  type CatalogList,
   type Game,
-  hash,
-  type Kind,
-  kinds,
-  mappingSummary,
-  ordered,
-  parseArtifact,
-  semantic,
   validateCatalogConfig,
-} from "./artifact.js";
-import { createImportHandler } from "./importer.js";
+  validCode,
+} from "./config.js";
+import { cursorCodec } from "./cursor.js";
+import { CatalogFileError, type ImportRow, readImportFile } from "./import-file.js";
 
 type S = components["schemas"];
-type Revision = typeof catalogRevisions.$inferSelect;
-type Fact = typeof catalogFacts.$inferSelect;
-type Page = { limit?: number; cursor?: string };
-
+type Locale = "en" | "ru";
 export interface CatalogPorts {
-  identity: Pick<Identity, "authorizeInTransaction" | "onboardingCompany">;
-  published(
-    tx: TxContext,
-    event: { eventId: string; revisionId: string; version: number; occurredAt: string },
-  ): Promise<void>;
+  identity: Pick<Identity, "authorizeInTransaction" | "onboardingCompany" | "externalCommand">;
 }
-const keyBytes = (s: string) => {
-  try {
-    if ([...s].length > 128) throw new Error();
-    return opaqueUtf8(s, 512);
-  } catch {
-    throw identityError(422);
-  }
+const parentKinds = { dlc: catalogDlcs, region: catalogRegions } as const;
+const kindTables = {
+  city: catalogCities,
+  cargo: catalogCargoes,
+  trailer: catalogTrailers,
+} as const;
+const tables = {
+  dlcs: catalogDlcs,
+  regions: catalogRegions,
+  cities: catalogCities,
+  cargoes: catalogCargoes,
+  trailers: catalogTrailers,
+} as const;
+// Column access shared by every list; list-specific columns are read through it deliberately.
+type Common = typeof catalogCities;
+const common = (list: CatalogList) => tables[list] as unknown as Common;
+const dlcParent = alias(catalogDlcs, "dlc_parent");
+const regionParent = alias(catalogRegions, "region_parent");
+
+const catalogError = (status: number, code: string) => identityError(status, code);
+const importInvalid = (lines: S["CatalogImportLine"][]) =>
+  Object.assign(catalogError(422, "CATALOG_IMPORT_INVALID"), {
+    details: lines.slice(0, 50).flatMap((line) =>
+      line.issues.slice(0, 4).map((issue) => ({
+        field: `line:${line.line}:${issue.field}`.slice(0, 128),
+        code: issue.reason,
+      })),
+    ),
+  });
+const sha = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
+function label(
+  id: string,
+  nameEn: string,
+  nameRu: string | null,
+  hidden: boolean,
+  locale: Locale,
+): S["CatalogLabel"] {
+  const ru = locale === "ru" && nameRu !== null;
+  return {
+    entityId: id,
+    label: ru ? nameRu : nameEn,
+    requestedLocale: locale,
+    renderedLocale: ru ? "ru" : "en",
+    englishFallback: locale === "ru" && !ru,
+    hidden,
+  };
+}
+const keyOf = (game: Game, code: Buffer | string) =>
+  `${game}\0${typeof code === "string" ? Buffer.from(code).toString("hex") : code.toString("hex")}`;
+const fileError = (error: unknown): never => {
+  if (error instanceof CatalogFileError) throw catalogError(422, "CATALOG_FILE_INVALID");
+  throw error;
 };
-const digest = (s: unknown) => Buffer.from(hash(ordered(s)), "hex");
-const match = (version: number, expected: number) => {
-  if (version !== expected) throw identityError(409, "VERSION_CONFLICT");
-};
-const operationDto = (o: typeof catalogOperations.$inferSelect): S["Operation"] => ({
-  id: o.id,
-  state: o.state,
-  resultId: o.resultId,
-  failureCode: o.failureCode,
-});
-const artifactDto = (a: typeof catalogArtifacts.$inferSelect): S["CatalogArtifact"] => ({
-  id: a.id,
-  state: a.content === null ? "rejected" : "ready",
-  sha256: a.sha256.toString("hex"),
-  byteLength: a.byteLength,
-});
+
+export interface CatalogEntity {
+  id: string;
+  game: Game;
+  kind: CatalogKind;
+  hidden: boolean;
+  adrClass: AdrClass | null;
+}
 
 export function createCatalogs(
   unit: UnitOfWork,
@@ -99,1169 +110,711 @@ export function createCatalogs(
   validateCatalogConfig(config);
   const c = (tx: TxContext) => unit.client(tx),
     run = <T>(fn: (tx: TxContext) => Promise<T>) => retryTransaction(unit, fn),
-    at = () => now().toISOString(),
     audit = createAudit(unit),
-    cursors = cursorCodec(config.cursorKey);
-  async function authority(tx: TxContext, actor: Actor, admin = true) {
-    await ports.identity.authorizeInTransaction(
+    codec = cursorCodec(config.cursorKey);
+  const authority = (tx: TxContext, actor: Actor, admin: boolean) =>
+    ports.identity.authorizeInTransaction(
       tx,
       actor,
       admin ? "qualifications.manage" : "company.read",
     );
+  const parentTable = (kind: keyof typeof parentKinds) => parentKinds[kind];
+  function selectColumns(list: CatalogList) {
+    const t = common(list);
+    return {
+      id: t.id,
+      game: t.game,
+      code: t.code,
+      nameEn: t.nameEn,
+      nameRu: t.nameRu,
+      hidden: t.hidden,
+      dlcId: list === "dlcs" ? sql<string | null>`NULL` : t.dlcId,
+      regionId: list === "cities" ? catalogCities.regionId : sql<string | null>`NULL`,
+      steamAppId: list === "dlcs" ? catalogDlcs.steamAppId : sql<number | null>`NULL`,
+      adrClass: list === "cargoes" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`,
+      dlcEn: list === "dlcs" ? sql<string | null>`NULL` : dlcParent.nameEn,
+      dlcRu: list === "dlcs" ? sql<string | null>`NULL` : dlcParent.nameRu,
+      dlcHidden: list === "dlcs" ? sql<boolean | null>`NULL` : dlcParent.hidden,
+      regionEn: list === "cities" ? regionParent.nameEn : sql<string | null>`NULL`,
+      regionRu: list === "cities" ? regionParent.nameRu : sql<string | null>`NULL`,
+      regionHidden: list === "cities" ? regionParent.hidden : sql<boolean | null>`NULL`,
+    };
   }
-  async function pointer(tx: TxContext, game: Game) {
-    await c(tx)
-      .insert(catalogPublications)
-      .values({ game, version: 1, revisionId: null })
-      .onDuplicateKeyUpdate({ set: { game } });
+  type ListRow = {
+    id: string;
+    game: Game;
+    code: Buffer;
+    nameEn: string;
+    nameRu: string | null;
+    hidden: boolean;
+    dlcId: string | null;
+    regionId: string | null;
+    steamAppId: number | null;
+    adrClass: AdrClass | null;
+    dlcEn: string | null;
+    dlcRu: string | null;
+    dlcHidden: boolean | null;
+    regionEn: string | null;
+    regionRu: string | null;
+    regionHidden: boolean | null;
+  };
+  async function fetchRows(
+    tx: TxContext,
+    list: CatalogList,
+    where: ReturnType<typeof and>,
+    limit?: number,
+    order?: boolean,
+    locale: Locale = "en",
+  ): Promise<ListRow[]> {
+    const t = common(list);
+    let query = c(tx).select(selectColumns(list)).from(t).$dynamic();
+    if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
+    if (list === "cities")
+      query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
+    query = query.where(where);
+    if (order) {
+      const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
+      query = query.orderBy(asc(display), asc(t.id));
+    }
+    if (limit !== undefined) query = query.limit(limit);
+    return (await query) as unknown as ListRow[];
+  }
+  function itemDto(list: CatalogList, row: ListRow, locale: Locale): S["CatalogItem"] {
+    const dlc =
+      row.dlcId && row.dlcEn !== null
+        ? label(row.dlcId, row.dlcEn, row.dlcRu, row.dlcHidden === true, locale)
+        : null;
+    return {
+      id: row.id,
+      game: row.game,
+      code: row.code.toString(),
+      nameEn: row.nameEn,
+      nameRu: row.nameRu,
+      hidden: row.hidden,
+      display: label(row.id, row.nameEn, row.nameRu, row.hidden, locale),
+      dlcId: list === "dlcs" ? null : row.dlcId,
+      dlc: list === "dlcs" ? null : dlc,
+      ...(list === "dlcs" ? { steamAppId: row.steamAppId } : {}),
+      ...(list === "cities"
+        ? {
+            regionId: row.regionId,
+            region:
+              row.regionId && row.regionEn !== null
+                ? label(row.regionId, row.regionEn, row.regionRu, row.regionHidden === true, locale)
+                : null,
+          }
+        : {}),
+      ...(list === "cargoes" ? { adrClass: row.adrClass } : {}),
+    };
+  }
+  async function itemById(tx: TxContext, list: CatalogList, id: string, locale: Locale) {
+    const [row] = await fetchRows(tx, list, eq(common(list).id, id));
+    if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+    return itemDto(list, row, locale);
+  }
+  async function parent(
+    tx: TxContext,
+    kind: keyof typeof parentKinds,
+    game: Game,
+    id: string | null | undefined,
+  ) {
+    if (id === null || id === undefined) return;
+    const table = parentTable(kind);
     const [row] = await c(tx)
-      .select()
-      .from(catalogPublications)
-      .where(eq(catalogPublications.game, game))
-      .for("update");
-    if (!row) throw identityError(503);
-    return row;
+      .select({ id: table.id })
+      .from(table)
+      .where(and(eq(table.id, applicationId(id)), eq(table.game, game)))
+      .for("share");
+    if (!row) throw catalogError(422, "CATALOG_PARENT_INVALID");
   }
-  async function revision(tx: TxContext, id: string, lock = false) {
-    const query = c(tx)
-      .select()
-      .from(catalogRevisions)
-      .where(eq(catalogRevisions.id, applicationId(id)));
-    const [row] = await (lock ? query.for("update") : query);
-    if (!row?.complete) throw identityError(404);
-    return row;
+  function requireCode(value: string) {
+    if (!validCode(value)) throw identityError(422);
+    return Buffer.from(value);
   }
-  async function once<T>(
+  function fieldsOf(list: CatalogList, input: Record<string, unknown>): Record<string, unknown> {
+    const nameRu = input.nameRu === "" ? null : input.nameRu;
+    return {
+      ...("nameRu" in input ? { nameRu } : {}),
+      ...("nameEn" in input ? { nameEn: input.nameEn } : {}),
+      ...("code" in input ? { code: requireCode(input.code as string) } : {}),
+      ...(list === "dlcs" && "steamAppId" in input ? { steamAppId: input.steamAppId } : {}),
+      ...(list !== "dlcs" && "dlcId" in input ? { dlcId: input.dlcId } : {}),
+      ...(list === "cities" && "regionId" in input ? { regionId: input.regionId } : {}),
+      ...(list === "cargoes" && "adrClass" in input ? { adrClass: input.adrClass } : {}),
+      ...("hidden" in input ? { hidden: input.hidden } : {}),
+    };
+  }
+  async function recordAudit(
     tx: TxContext,
     actor: Actor,
-    scope: string,
-    key: string,
-    input: unknown,
-    fn: () => Promise<T>,
-  ): Promise<T> {
-    const scopeHash = digest([actor.userId, scope]),
-      fingerprint = createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
-        .update("catalogs/command/v1\0")
-        .update(ordered([actor.userId, scope, input]))
-        .digest();
-    applicationId(key);
-    const [saved] = await c(tx)
-      .select()
-      .from(catalogCommands)
-      .where(and(eq(catalogCommands.scope, scopeHash), eq(catalogCommands.key, key)))
-      .for("update");
-    if (saved && saved.expiresAt > at()) {
-      if (!saved.fingerprint.equals(fingerprint)) throw identityError(409, "IDEMPOTENCY_CONFLICT");
-      return saved.result as T;
-    }
-    if (saved)
-      await c(tx)
-        .delete(catalogCommands)
-        .where(and(eq(catalogCommands.scope, scopeHash), eq(catalogCommands.key, key)));
-    const result = await fn();
-    await c(tx)
-      .insert(catalogCommands)
-      .values({
-        scope: scopeHash,
-        key,
-        fingerprint,
-        result,
-        expiresAt: new Date(now().getTime() + config.artifactTtlMs).toISOString(),
-      });
-    return result;
+    operation: "catalog.changed" | "catalog.imported",
+    subjectId: string,
+  ) {
+    const company = await ports.identity.onboardingCompany(tx);
+    await audit.append(tx, {
+      actorKind: "user",
+      actorId: actor.userId,
+      operation,
+      subjectKind: "catalog",
+      subjectId,
+      occurredAt: now().toISOString(),
+      companyId: company.id,
+      reason: "catalog_update",
+    });
   }
-  async function revisionDto(tx: TxContext, r: Revision): Promise<S["CatalogRevision"]> {
-    const [p] = await c(tx)
-      .select()
-      .from(catalogPublications)
-      .where(eq(catalogPublications.game, r.game));
-    const coverage = await c(tx)
-      .select()
-      .from(catalogCoverage)
-      .where(eq(catalogCoverage.revisionId, r.id));
-    const [missingLabel] = await c(tx)
-      .select({ id: catalogFacts.id })
-      .from(catalogFacts)
-      .where(and(eq(catalogFacts.revisionId, r.id), sql`${catalogFacts.labelEn} IS NULL`))
-      .limit(1);
-    const edits = await c(tx)
-      .select({ id: catalogMappingReviews.id })
-      .from(catalogMappingReviews)
-      .where(eq(catalogMappingReviews.revisionId, r.id))
-      .limit(1);
-    const source =
-      trusted(r, coverage) &&
-      (!edits.length || (r.synthetic && config.synthetic && !config.production));
-    return {
-      id: r.id,
-      version: r.version,
-      publicationVersion: p?.version ?? 1,
-      game: r.game,
-      state: r.state,
-      createdAt: r.createdAt,
-      coverageComplete:
-        source && coverage.every((p) => ["validated", "non_contributing"].includes(p.state)),
-      englishLabelsComplete: !missingLabel && source,
-      sourceReviewComplete: source,
-    };
+  function assertPatchShape(list: CatalogList, input: S["CatalogItemPatch"]) {
+    const allowed: readonly string[] = {
+      dlcs: ["code", "nameEn", "nameRu", "steamAppId", "hidden"],
+      regions: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
+      cities: ["code", "nameEn", "nameRu", "regionId", "dlcId", "hidden"],
+      cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
+      trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
+    }[list];
+    if (Object.keys(input).some((key) => !allowed.includes(key))) throw identityError(422);
   }
-  function trusted(r: Revision, packs: (typeof catalogCoverage.$inferSelect)[]) {
-    if (r.synthetic) return config.synthetic && !config.production;
-    return config.evidence.some(
-      (e) =>
-        e.artifactSha256 === r.artifactSha256.toString("hex") &&
-        e.game === r.game &&
-        e.gameBuild === r.gameBuild &&
-        e.releaseInventoryAsOf === r.inventoryAsOf &&
-        semantic(e.expectedPacks) === semantic(packs.map((p) => p.packId.toString())) &&
-        semantic(e.provenance) === semantic(r.provenance),
-    );
-  }
-  function pageOptions(actor: Actor, binding: unknown, page: Page) {
-    const limit = page.limit ?? 25;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
-    const bound = [actor.userId, actor.sessionId, actor.accessEpoch, binding];
-    let after: string | null = null;
-    try {
-      after = page.cursor ? cursors.read(bound, page.cursor) : null;
-    } catch {
-      throw identityError(409, "VERSION_CONFLICT");
-    }
-    return {
-      limit,
-      after,
-      result: <T>(rows: T[], id: (row: T) => string) => ({
-        items: rows.slice(0, limit),
-        nextCursor: rows.length > limit ? cursors.write(bound, id(rows[limit - 1] as T)) : null,
-      }),
-    };
-  }
-  function factDto(f: Fact, locale: "en" | "ru"): S["CatalogEntity"] {
-    const text = locale === "ru" ? (f.labelRu ?? f.labelEn) : f.labelEn;
-    if (!text) throw identityError(409);
-    const renderedLocale = locale === "ru" && f.labelRu ? "ru" : "en";
-    return {
-      id: f.entityId,
-      revisionId: f.revisionId,
-      game: f.game,
-      kind: f.kind,
-      mapNamespace: f.map.toString(),
-      display: {
-        entityId: f.entityId,
-        label: text,
-        requestedLocale: locale,
-        renderedLocale,
-        englishFallback: renderedLocale !== locale,
-        retired: f.retired,
-      },
-      relatedEntityIds: [
-        f.regionId,
-        f.adrCategoryId,
-        f.trailerBodyTypeId,
-        f.trailerChainTypeId,
-      ].filter((v): v is string => v !== null),
-    };
-  }
-  const handler = createImportHandler(unit, config, now);
-  const producer = createQueue(unit, [handler]);
   async function resolveInTransaction(
     tx: TxContext,
-    input: {
-      revisionId: string;
-      game: Game;
-      kind: Kind;
-      mapNamespace: string | null;
-      provider: string;
-      sourceId: string | null;
-      locale: "en" | "ru" | null;
-      label: string | null;
-      regionId: string | null;
-    },
+    input: { game: Game; kind: CatalogKind; code: string },
+  ): Promise<
+    | { status: "resolved"; id: string; adrClass: AdrClass | null }
+    | { status: "unknown"; reasonCode: string }
+  > {
+    if (!validCode(input.code)) return { status: "unknown", reasonCode: "unknown_source_id" };
+    const table = kindTables[input.kind];
+    const adr = input.kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
+    const [row] = await c(tx)
+      .select({ id: table.id, adrClass: adr })
+      .from(table)
+      .where(and(eq(table.game, input.game), eq(table.code, Buffer.from(input.code))));
+    if (!row) return { status: "unknown", reasonCode: "unknown_source_id" };
+    return { status: "resolved", id: row.id, adrClass: (row.adrClass as AdrClass | null) ?? null };
+  }
+  async function selectionsInTransaction(
+    tx: TxContext,
+    selections: readonly { kind: CatalogKind; id: string }[],
   ) {
-    const r = await revision(tx, input.revisionId);
-    if (r.state !== "published" || r.game !== input.game)
-      return { status: "unknown" as const, reasonCode: "catalog_unavailable" };
-    let candidates: Fact[];
-    const scope = and(
-      eq(catalogFacts.revisionId, r.id),
-      eq(catalogFacts.game, input.game),
-      eq(catalogFacts.kind, input.kind),
-      input.mapNamespace === null ? undefined : eq(catalogFacts.map, keyBytes(input.mapNamespace)),
-      input.regionId === null
-        ? undefined
-        : eq(catalogFacts.regionId, applicationId(input.regionId)),
-    );
-    if (input.sourceId !== null) {
-      const mappings = await c(tx)
-        .select({ entityId: catalogMappings.entityId })
-        .from(catalogMappings)
-        .where(
-          and(
-            eq(catalogMappings.revisionId, r.id),
-            eq(catalogMappings.game, input.game),
-            eq(catalogMappings.kind, input.kind),
-            eq(catalogMappings.provider, keyBytes(input.provider)),
-            eq(catalogMappings.sourceId, keyBytes(input.sourceId)),
-            input.mapNamespace === null
-              ? undefined
-              : eq(catalogMappings.map, keyBytes(input.mapNamespace)),
-          ),
-        );
-      candidates = mappings.length
-        ? await c(tx)
-            .select()
-            .from(catalogFacts)
-            .where(
-              and(
-                scope,
-                inArray(
-                  catalogFacts.entityId,
-                  mappings.map((m) => m.entityId),
-                ),
-              ),
-            )
-        : [];
-    } else if (input.label !== null) {
-      const aliases = await c(tx)
-        .select({ entityId: catalogAliases.entityId })
-        .from(catalogAliases)
-        .where(
-          and(
-            eq(catalogAliases.revisionId, r.id),
-            eq(catalogAliases.normalized, opaqueUtf8(aliasKey(input.label), 512)),
-            input.locale === null ? undefined : eq(catalogAliases.locale, input.locale),
-            input.regionId === null
-              ? undefined
-              : sql`(${catalogAliases.regionScope} = ${Buffer.from(input.regionId)} OR ${catalogAliases.regionScope} = ${Buffer.from("*")})`,
-          ),
-        );
-      candidates = aliases.length
-        ? await c(tx)
-            .select()
-            .from(catalogFacts)
-            .where(
-              and(
-                scope,
-                inArray(
-                  catalogFacts.entityId,
-                  aliases.map((a) => a.entityId),
-                ),
-              ),
-            )
-        : [];
-    } else candidates = [];
-    const unique = [...new Map(candidates.map((f) => [f.entityId, f])).values()];
-    if (!unique.length)
-      return {
-        status: "unknown" as const,
-        reasonCode: input.sourceId !== null ? "unknown_source_id" : "unknown_alias",
+    const result = new Map<string, CatalogEntity>();
+    for (const kind of ["city", "cargo", "trailer"] as const) {
+      const ids = selections.filter((s) => s.kind === kind).map((s) => applicationId(s.id));
+      if (!ids.length) continue;
+      const table = kindTables[kind];
+      const adr = kind === "cargo" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`;
+      const rows = await c(tx)
+        .select({ id: table.id, game: table.game, hidden: table.hidden, adrClass: adr })
+        .from(table)
+        .where(inArray(table.id, [...new Set(ids)]));
+      for (const row of rows)
+        result.set(row.id, {
+          id: row.id,
+          game: row.game,
+          kind,
+          hidden: row.hidden,
+          adrClass: (row.adrClass as AdrClass | null) ?? null,
+        });
+    }
+    return result;
+  }
+  async function computeImport(
+    tx: TxContext,
+    list: CatalogList,
+    rows: readonly ImportRow[],
+    lock: boolean,
+  ) {
+    const t = common(list);
+    const games = [
+      ...new Set(
+        rows.flatMap((row) =>
+          row.values.game === "ets2" || row.values.game === "ats" ? [row.values.game] : [],
+        ),
+      ),
+    ];
+    type Existing = ListRow;
+    const existing = new Map<string, Existing>();
+    for (const game of games) {
+      let query = c(tx).select(selectColumns(list)).from(t).$dynamic();
+      if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
+      if (list === "cities")
+        query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
+      query = query.where(eq(t.game, game));
+      const found = (await (lock ? query.for("update") : query)) as unknown as Existing[];
+      for (const row of found) existing.set(keyOf(game, row.code), row);
+    }
+    async function parentCodes(kind: keyof typeof parentKinds) {
+      const table = parentTable(kind);
+      const map = new Map<string, string>();
+      for (const game of games) {
+        const query = c(tx)
+          .select({ id: table.id, code: table.code })
+          .from(table)
+          .where(eq(table.game, game));
+        const found = await (lock ? query.for("share") : query);
+        for (const row of found) map.set(keyOf(game, row.code), row.id);
+      }
+      return map;
+    }
+    const dlcCodes = list === "dlcs" ? new Map<string, string>() : await parentCodes("dlc");
+    const regionCodes = list === "cities" ? await parentCodes("region") : new Map<string, string>();
+    const seen = new Set<string>();
+    const inserts: Record<string, unknown>[] = [];
+    const updates: { id: string; set: Record<string, unknown> }[] = [];
+    const lines: S["CatalogImportLine"][] = [];
+    let added = 0,
+      changedCount = 0,
+      unchanged = 0,
+      errors = 0;
+    for (const row of rows) {
+      const v = row.values;
+      const issues: S["CatalogImportIssue"][] = [...row.fileIssues];
+      const game = v.game === "ets2" || v.game === "ats" ? (v.game as Game) : null;
+      if (!game) issues.push({ field: "game", reason: v.game ? "invalid" : "required" });
+      const code = v.code ?? "";
+      const codeOk = validCode(code);
+      if (!codeOk) issues.push({ field: "code", reason: code === "" ? "required" : "invalid" });
+      const nameEn = v.name_en ?? "";
+      if (!nameEn.trim()) issues.push({ field: "name_en", reason: "required" });
+      else if ([...nameEn].length > 256) issues.push({ field: "name_en", reason: "too_long" });
+      const nameRu = v.name_ru ?? "";
+      if ([...nameRu].length > 256) issues.push({ field: "name_ru", reason: "too_long" });
+      let steamAppId: number | undefined;
+      if (list === "dlcs" && v.steam_app_id) {
+        if (!/^[1-9]\d*$/.test(v.steam_app_id) || Number(v.steam_app_id) > 4294967295)
+          issues.push({ field: "steam_app_id", reason: "invalid" });
+        else steamAppId = Number(v.steam_app_id);
+      }
+      let adrClass: AdrClass | undefined;
+      if (list === "cargoes" && v.adr_class) {
+        if ((adrClasses as readonly string[]).includes(v.adr_class))
+          adrClass = v.adr_class as AdrClass;
+        else issues.push({ field: "adr_class", reason: "invalid" });
+      }
+      let dlcId: string | undefined;
+      if (list !== "dlcs" && v.dlc_code && game) {
+        const found = dlcCodes.get(keyOf(game, v.dlc_code));
+        if (found) dlcId = found;
+        else issues.push({ field: "dlc_code", reason: "unknown_reference" });
+      }
+      let regionId: string | undefined;
+      if (list === "cities" && v.region_code && game) {
+        const found = regionCodes.get(keyOf(game, v.region_code));
+        if (found) regionId = found;
+        else issues.push({ field: "region_code", reason: "unknown_reference" });
+      }
+      if (codeOk && game) {
+        const key = keyOf(game, code);
+        if (seen.has(key)) issues.push({ field: "code", reason: "duplicate_in_file" });
+        seen.add(key);
+      }
+      const reportedCode = codeOk ? code : null;
+      if (issues.length || !game || !codeOk) {
+        errors++;
+        lines.push({
+          line: row.line,
+          code: reportedCode,
+          status: "error",
+          issues: issues.slice(0, 16),
+          changedFields: [],
+        });
+        continue;
+      }
+      const current = existing.get(keyOf(game, code));
+      if (!current) {
+        added++;
+        inserts.push({
+          id: newId(),
+          game,
+          code: Buffer.from(code),
+          nameEn,
+          nameRu: nameRu === "" ? null : nameRu,
+          ...(list === "dlcs" ? { steamAppId: steamAppId ?? null } : {}),
+          ...(list !== "dlcs" ? { dlcId: dlcId ?? null } : {}),
+          ...(list === "cities" ? { regionId: regionId ?? null } : {}),
+          ...(list === "cargoes" ? { adrClass: adrClass ?? null } : {}),
+          hidden: false,
+        });
+        continue;
+      }
+      const set: Record<string, unknown> = {},
+        changedFields: string[] = [];
+      const compare = (field: string, column: string, before: unknown, after: unknown) => {
+        if (before !== after) {
+          set[column] = after;
+          changedFields.push(field);
+        }
       };
-    if (unique.length > 1)
-      return {
-        status: "ambiguous" as const,
-        candidateIds: unique.map((f) => f.entityId).sort(),
-      };
-    const fact = unique[0] as Fact;
-    return { status: "resolved" as const, entityId: fact.entityId, factRevisionId: fact.id };
+      compare("name_en", "nameEn", current.nameEn, nameEn);
+      if (nameRu !== "") compare("name_ru", "nameRu", current.nameRu, nameRu);
+      if (list === "dlcs" && steamAppId !== undefined)
+        compare("steam_app_id", "steamAppId", current.steamAppId, steamAppId);
+      if (list !== "dlcs" && dlcId !== undefined)
+        compare("dlc_code", "dlcId", current.dlcId, dlcId);
+      if (list === "cities" && regionId !== undefined)
+        compare("region_code", "regionId", current.regionId, regionId);
+      if (list === "cargoes" && adrClass !== undefined)
+        compare("adr_class", "adrClass", current.adrClass, adrClass);
+      if (changedFields.length) {
+        changedCount++;
+        updates.push({ id: current.id, set });
+        lines.push({
+          line: row.line,
+          code: reportedCode,
+          status: "changed",
+          issues: [],
+          changedFields,
+        });
+      } else unchanged++;
+    }
+    return { inserts, updates, lines, added, changed: changedCount, unchanged, errors };
+  }
+  const previewLines = (lines: S["CatalogImportLine"][]) => {
+    const sorted = [
+      ...lines.filter((l) => l.status === "error"),
+      ...lines.filter((l) => l.status !== "error"),
+    ].sort((a, b) => a.line - b.line);
+    return {
+      lines: sorted.slice(0, CATALOG_PREVIEW_MAX_LINES),
+      truncated: sorted.length > CATALOG_PREVIEW_MAX_LINES,
+    };
+  };
+  const tokenBinding = (list: CatalogList, fileHash: string, actor: Actor) =>
+    ["catalog-import", list, fileHash, actor.userId] as const;
+  function parseFile(list: CatalogList, bytes: Buffer) {
+    let rows: ImportRow[];
+    try {
+      rows = readImportFile(list, bytes);
+    } catch (error) {
+      fileError(error);
+      throw error;
+    }
+    if (!rows.length) throw catalogError(422, "CATALOG_FILE_INVALID");
+    return rows;
   }
 
   return {
     config,
-    handler,
     async authorize(actor: Actor, admin = true) {
       return run((tx) => authority(tx, actor, admin));
     },
-    async policy(actor: Actor): Promise<S["UploadPolicy"]> {
-      await run((tx) => authority(tx, actor));
-      return {
-        enabled: true,
-        maxFileBytes: config.maxFileBytes,
-        maxFilesPerReport: 1,
-        allowedMimeTypes: ["application/json"],
-        policyRevision: config.policyRevision,
-      };
-    },
-    async upload(actor: Actor, key: string, bytes: Buffer): Promise<S["CatalogArtifact"]> {
-      if (bytes.length > config.maxFileBytes) throw identityError(413);
-      let a: Artifact;
-      try {
-        a = parseArtifact(bytes);
-      } catch {
-        throw identityError(422);
-      }
-      if (a.synthetic && (!config.synthetic || config.production)) throw identityError(422);
-      const sha256 = hash(bytes);
-      return run(async (tx) => {
-        await authority(tx, actor);
-        return once(tx, actor, "upload", key, sha256, async () => {
-          const row = {
-            id: newId(),
-            creatorId: actor.userId,
-            sha256: Buffer.from(sha256, "hex"),
-            byteLength: bytes.length,
-            content: bytes.toString(),
-            payloadExpiresAt: new Date(now().getTime() + config.artifactTtlMs).toISOString(),
-            createdAt: at(),
-            expiresAt: new Date(now().getTime() + config.artifactTtlMs).toISOString(),
-          };
-          await c(tx).insert(catalogArtifacts).values(row);
-          return artifactDto(row);
-        });
-      });
-    },
-    async artifact(actor: Actor, id: string) {
-      return run(async (tx) => {
-        await authority(tx, actor);
-        const [a] = await c(tx)
-          .select()
-          .from(catalogArtifacts)
-          .where(eq(catalogArtifacts.id, applicationId(id)));
-        if (!a || a.creatorId !== actor.userId) throw identityError(404);
-        return artifactDto(a);
-      });
-    },
-    async import(
-      actor: Actor,
-      key: string,
-      input: S["CatalogImportInput"],
-    ): Promise<S["Operation"]> {
-      return run(async (tx) => {
-        await authority(tx, actor);
-        return once(tx, actor, "import", key, input, async () => {
-          const [a] = await c(tx)
-            .select()
-            .from(catalogArtifacts)
-            .where(eq(catalogArtifacts.id, input.artifactId))
-            .for("share");
-          if (!a || a.creatorId !== actor.userId) throw identityError(404);
-          if (!a.content || a.expiresAt <= at() || a.sha256.toString("hex") !== input.sha256)
-            throw identityError(409);
-          const op = {
-            id: newId(),
-            creatorId: actor.userId,
-            artifactId: a.id,
-            game: input.game,
-            state: "processing" as const,
-            resultId: null,
-            failureCode: null,
-            stagingRevisionId: null,
-            phase: "identities" as const,
-            offset: 0,
-            createdAt: at(),
-          };
-          await c(tx).insert(catalogOperations).values(op);
-          await producer.enqueue(tx, {
-            kind: handler.kind,
-            schemaVersion: 1,
-            consumer: handler.consumer,
-            effectKey: op.id,
-            eventId: null,
-            reference: {
-              operationId: op.id,
-              artifactId: a.id,
-              sha256: input.sha256,
-              phase: "identities",
-              offset: 0,
-            },
-            availableAt: at(),
-            maxAttempts: 5,
-          });
-          return operationDto(op);
-        });
-      });
-    },
-    async operation(actor: Actor, id: string) {
-      return run(async (tx) => {
-        await authority(tx, actor);
-        const [op] = await c(tx)
-          .select()
-          .from(catalogOperations)
-          .where(eq(catalogOperations.id, applicationId(id)));
-        if (!op || op.creatorId !== actor.userId) throw identityError(404);
-        const job =
-          op.state === "processing"
-            ? await producer.effectState(
-                tx,
-                handler.consumer,
-                op.phase === "identities" && op.offset === 0
-                  ? op.id
-                  : `${op.id}:${op.phase}:${op.offset}`,
-              )
-            : undefined;
-        return job?.state === "failed"
-          ? {
-              ...operationDto(op),
-              state: "failed" as const,
-              failureCode: "import_processing_failed",
-            }
-          : operationDto(op);
-      });
-    },
-    async detail(actor: Actor, id: string) {
-      return run(async (tx) => {
-        await authority(tx, actor);
-        return revisionDto(tx, await revision(tx, id));
-      });
-    },
-    async revisions(actor: Actor, game: Game, page: Page) {
+    async summary(actor: Actor, game: Game): Promise<S["CatalogSummary"]> {
       return run(async (tx) => {
         await authority(tx, actor, false);
-        const [publication] = await c(tx)
-          .select()
-          .from(catalogPublications)
-          .where(eq(catalogPublications.game, game));
-        const p = pageOptions(
-          actor,
-          ["revisions", game, publication?.version ?? 1, publication?.revisionId ?? null],
-          page,
-        );
-        const current =
-          !p.after && publication?.revisionId ? await revision(tx, publication.revisionId) : null;
-        const after =
-          p.after && p.after !== "current" ? (JSON.parse(p.after) as [string, string]) : null;
-        const rows = await c(tx)
-          .select()
-          .from(catalogRevisions)
-          .where(
-            and(
-              eq(catalogRevisions.game, game),
-              eq(catalogRevisions.state, "published"),
-              publication?.revisionId
-                ? sql`${catalogRevisions.id} <> ${Buffer.from(publication.revisionId)}`
-                : undefined,
-              after
-                ? or(
-                    lt(catalogRevisions.createdAt, after[0]),
-                    and(
-                      eq(catalogRevisions.createdAt, after[0]),
-                      lt(catalogRevisions.id, after[1]),
-                    ),
-                  )
-                : undefined,
-            ),
-          )
-          .orderBy(desc(catalogRevisions.createdAt), desc(catalogRevisions.id))
-          .limit(p.limit + 1);
-        const result = p.result(current ? [current, ...rows] : rows, (r) =>
-          r.id === publication?.revisionId ? "current" : JSON.stringify([r.createdAt, r.id]),
-        );
-        return { ...result, items: await Promise.all(result.items.map((r) => revisionDto(tx, r))) };
+        const lists = {} as S["CatalogSummary"]["lists"];
+        for (const list of Object.keys(tables) as CatalogList[]) {
+          const t = common(list);
+          const rows = await c(tx)
+            .select({ hidden: t.hidden, count: sql<number | string>`COUNT(*)` })
+            .from(t)
+            .where(eq(t.game, game))
+            .groupBy(t.hidden);
+          const count = (flag: boolean) => Number(rows.find((r) => r.hidden === flag)?.count ?? 0);
+          lists[list] = { visible: count(false), hidden: count(true) };
+        }
+        return { game, lists };
       });
     },
-    async entities(
+    async list(
       actor: Actor,
-      options: Page & {
-        revisionId: string;
-        kind: string;
-        locale: "en" | "ru";
+      list: CatalogList,
+      query: {
+        game: Game;
         search?: string;
+        includeHidden?: boolean;
+        dlc?: string;
         regionId?: string;
+        locale?: Locale;
+        limit?: number;
+        cursor?: string;
       },
-    ) {
+    ): Promise<S["CatalogItemList"]> {
       return run(async (tx) => {
         await authority(tx, actor, false);
-        const r = await revision(tx, options.revisionId);
-        if (r.state !== "published") throw identityError(404);
-        if (!(kinds as readonly string[]).includes(options.kind)) throw identityError(422);
-        const p = pageOptions(
-          actor,
-          [
-            "entities",
-            r.id,
-            options.kind,
-            options.locale,
-            options.search ?? null,
-            options.regionId ?? null,
-          ],
-          options,
+        const limit = query.limit ?? 25,
+          locale = query.locale ?? "en";
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+        if (list === "dlcs" && query.dlc) throw identityError(422);
+        if (list !== "cities" && query.regionId) throw identityError(422);
+        const t = common(list),
+          binding = [
+            actor.userId,
+            actor.sessionId,
+            actor.accessEpoch,
+            list,
+            query.game,
+            query.search ?? null,
+            query.includeHidden ?? false,
+            query.dlc ?? null,
+            query.regionId ?? null,
+            locale,
+          ];
+        let after: [string, string] | null = null;
+        if (query.cursor) {
+          try {
+            after = JSON.parse(codec.read(binding, query.cursor));
+          } catch {
+            throw identityError(409, "VERSION_CONFLICT");
+          }
+        }
+        const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
+        const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
+        const filter = and(
+          eq(t.game, query.game),
+          query.includeHidden ? undefined : eq(t.hidden, false),
+          escaped
+            ? or(
+                sql`${t.nameEn} LIKE ${`%${escaped}%`}`,
+                sql`${t.nameRu} LIKE ${`%${escaped}%`}`,
+                sql`CONVERT(${t.code} USING utf8mb4) LIKE ${`%${escaped}%`}`,
+              )
+            : undefined,
+          list !== "dlcs" && query.dlc === "base" ? sql`${t.dlcId} IS NULL` : undefined,
+          list !== "dlcs" && query.dlc && query.dlc !== "base"
+            ? eq(t.dlcId, applicationId(query.dlc))
+            : undefined,
+          list === "cities" && query.regionId
+            ? eq(catalogCities.regionId, applicationId(query.regionId))
+            : undefined,
         );
-        const display =
-          options.locale === "ru"
-            ? sql`COALESCE(${catalogFacts.labelRu}, ${catalogFacts.labelEn})`
-            : catalogFacts.labelEn;
-        const escaped = options.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
-        const rows = await c(tx)
-          .select()
-          .from(catalogFacts)
-          .where(
-            and(
-              eq(catalogFacts.revisionId, r.id),
-              eq(catalogFacts.kind, options.kind as Kind),
-              eq(catalogFacts.retired, false),
-              options.regionId
-                ? eq(catalogFacts.regionId, applicationId(options.regionId))
-                : undefined,
-              p.after ? lt(catalogFacts.entityId, p.after) : undefined,
-              escaped ? sql`${display} LIKE ${`${escaped}%`}` : undefined,
-            ),
-          )
-          .orderBy(desc(catalogFacts.entityId))
-          .limit(p.limit + 1);
-        const result = p.result(rows, (f) => f.entityId);
-        return { ...result, items: result.items.map((f) => factDto(f, options.locale)) };
-      });
-    },
-    async entity(actor: Actor, id: string, revisionId: string, locale: "en" | "ru") {
-      return run(async (tx) => {
-        await authority(tx, actor, false);
-        const r = await revision(tx, revisionId);
-        if (r.state !== "published") throw identityError(404);
-        const [f] = await c(tx)
-          .select()
-          .from(catalogFacts)
-          .where(
-            and(eq(catalogFacts.revisionId, r.id), eq(catalogFacts.entityId, applicationId(id))),
-          );
-        if (!f) throw identityError(404);
-        return factDto(f, locale);
-      });
-    },
-    async review(actor: Actor, id: string): Promise<S["CatalogReview"]> {
-      return run(async (tx) => {
-        await authority(tx, actor);
-        const r = await revision(tx, id),
-          packs = await c(tx)
-            .select()
-            .from(catalogCoverage)
-            .where(eq(catalogCoverage.revisionId, id)),
-          changes = await c(tx)
-            .select({ kind: catalogChanges.changeKind })
-            .from(catalogChanges)
-            .where(eq(catalogChanges.revisionId, id));
-        return {
-          revisionId: id,
-          version: r.version,
-          comparisonRevisionId: r.comparisonRevisionId,
-          gameBuild: r.gameBuild,
-          releaseInventoryAsOf: r.inventoryAsOf,
-          addedEntities: changes.filter((x) => x.kind === "added").length,
-          changedEntities: changes.filter((x) => x.kind === "changed").length,
-          retiredEntities: changes.filter((x) => x.kind === "retired").length,
-          expectedPacks: packs.length,
-          validatedPacks: packs.filter((p) => p.state === "validated").length,
-          missingPacks: packs.filter((p) => p.state === "missing").length,
-          failedPacks: packs.filter((p) => p.state === "failed").length,
-          nonContributingPacks: packs.filter((p) => p.state === "non_contributing").length,
-          mappingIssues: Number(
-            (
-              await c(tx)
-                .select({ count: sql<number>`COUNT(*)` })
-                .from(catalogMappingIssues)
-                .where(
-                  and(
-                    eq(catalogMappingIssues.revisionId, id),
-                    eq(catalogMappingIssues.resolved, false),
-                  ),
-                )
-            )[0]?.count ?? 0,
+        const [total] = await c(tx)
+          .select({ count: sql<number | string>`COUNT(*)` })
+          .from(t)
+          .where(filter);
+        const page = await fetchRows(
+          tx,
+          list,
+          and(
+            filter,
+            after
+              ? or(gt(display, after[0]), and(eq(display, after[0]), gt(t.id, after[1])))
+              : undefined,
           ),
-          sourceReviewState: (await revisionDto(tx, r)).sourceReviewComplete
-            ? "approved"
-            : "pending",
-          provenance: r.provenance as S["CatalogProvenance"][],
+          limit + 1,
+          true,
+          locale,
+        );
+        const visible = page.slice(0, limit);
+        const last = visible[visible.length - 1];
+        return {
+          items: visible.map((row) => itemDto(list, row, locale)),
+          total: Number(total?.count ?? 0),
+          nextCursor:
+            page.length > limit && last
+              ? codec.write(
+                  binding,
+                  JSON.stringify([
+                    locale === "ru" && last.nameRu !== null ? last.nameRu : last.nameEn,
+                    last.id,
+                  ]),
+                )
+              : null,
         };
       });
     },
-    async reviewPage(
-      actor: Actor,
-      id: string,
-      lane: "diff" | "coverage" | "mapping-issues",
-      options: Page & { reviewVersion: number; changeKind?: string },
-    ) {
+    async get(actor: Actor, list: CatalogList, id: string, locale: Locale = "en") {
       return run(async (tx) => {
-        await authority(tx, actor);
-        const r = await revision(tx, id);
-        match(r.version, options.reviewVersion);
-        const p = pageOptions(actor, [lane, id, r.version, options.changeKind ?? null], options);
-        if (lane === "mapping-issues") {
-          const rows = await c(tx)
-            .select()
-            .from(catalogMappingIssues)
-            .where(
-              and(
-                eq(catalogMappingIssues.revisionId, id),
-                eq(catalogMappingIssues.resolved, false),
-                p.after ? lt(catalogMappingIssues.id, p.after) : undefined,
-              ),
-            )
-            .orderBy(desc(catalogMappingIssues.id))
-            .limit(p.limit + 1);
-          const result = p.result(rows, (issue) => issue.id);
-          return {
-            ...result,
-            items: result.items.map((issue) => ({
-              id: issue.id,
-              provider: issue.provider.toString(),
-              mapNamespace: issue.map.toString(),
-              sourceId: issue.sourceId?.toString() ?? null,
-              sourceLocale: issue.sourceLocale,
-              reasonCode: issue.reasonCode,
-              candidateEntityIds: issue.candidateEntityIds,
-            })),
-          };
-        }
-        if (lane === "coverage") {
-          const rows = await c(tx)
-            .select()
-            .from(catalogCoverage)
-            .where(
-              and(
-                eq(catalogCoverage.revisionId, id),
-                p.after ? gt(catalogCoverage.packId, keyBytes(p.after)) : undefined,
-              ),
-            )
-            .orderBy(asc(catalogCoverage.packId))
-            .limit(p.limit + 1);
-          const result = p.result(rows, (p) => p.packId.toString());
-          return {
-            ...result,
-            items: result.items.map(({ revisionId: _, ...pack }) => ({
-              ...pack,
-              packId: pack.packId.toString(),
-            })),
-          };
-        }
-        const rows = await c(tx)
-          .select()
-          .from(catalogChanges)
-          .where(
-            and(
-              eq(catalogChanges.revisionId, id),
-              options.changeKind
-                ? eq(catalogChanges.changeKind, options.changeKind as "added")
-                : undefined,
-              p.after ? lt(catalogChanges.entityId, p.after) : undefined,
-            ),
-          )
-          .orderBy(desc(catalogChanges.entityId))
-          .limit(p.limit + 1);
-        const result = p.result(rows, (f) => f.entityId);
-        return { ...result, items: result.items.map(({ revisionId: _, ...change }) => change) };
+        await authority(tx, actor, false);
+        return itemById(tx, list, applicationId(id), locale);
       });
     },
-    async mapping(actor: Actor, key: string, input: S["CatalogMappingInput"]) {
+    async create(
+      actor: Actor,
+      list: CatalogList,
+      key: string,
+      input: Record<string, unknown> & { game: Game },
+    ): Promise<S["CatalogItem"]> {
       return run(async (tx) => {
-        await authority(tx, actor);
-        return once(tx, actor, "mapping", key, input, async () => {
-          const r = await revision(tx, input.catalogRevisionId, true);
-          if (r.state !== "draft" || r.game !== input.game) throw identityError(409);
-          const [f] = await c(tx)
-            .select()
-            .from(catalogFacts)
-            .where(
-              and(
-                eq(catalogFacts.revisionId, r.id),
-                eq(catalogFacts.entityId, input.entityId),
-                eq(catalogFacts.map, keyBytes(input.mapNamespace)),
-              ),
-            );
-          if (!f) throw identityError(422);
-          try {
-            await c(tx)
-              .insert(catalogMappings)
-              .values({
-                revisionId: r.id,
-                game: r.game,
-                kind: f.kind,
-                map: f.map,
-                provider: keyBytes(input.provider),
-                sourceId: keyBytes(input.sourceId),
-                entityId: f.entityId,
-              });
-          } catch (error) {
-            if (duplicateKey(error)) throw identityError(409);
-            throw error;
-          }
-          await c(tx)
-            .update(catalogMappingIssues)
-            .set({ resolved: true })
-            .where(
-              and(
-                eq(catalogMappingIssues.revisionId, r.id),
-                eq(catalogMappingIssues.provider, keyBytes(input.provider)),
-                eq(catalogMappingIssues.map, f.map),
-                eq(catalogMappingIssues.kind, f.kind),
-                eq(catalogMappingIssues.sourceId, keyBytes(input.sourceId)),
-              ),
-            );
-          const [change] = await c(tx)
-            .select()
-            .from(catalogChanges)
-            .where(
-              and(eq(catalogChanges.revisionId, r.id), eq(catalogChanges.entityId, f.entityId)),
-            );
-          const oldMappings = r.comparisonRevisionId
-            ? await c(tx)
-                .select()
-                .from(catalogMappings)
-                .where(
-                  and(
-                    eq(catalogMappings.revisionId, r.comparisonRevisionId),
-                    eq(catalogMappings.entityId, f.entityId),
-                  ),
-                )
-            : [];
-          const currentMappings = await c(tx)
-            .select()
-            .from(catalogMappings)
-            .where(
-              and(eq(catalogMappings.revisionId, r.id), eq(catalogMappings.entityId, f.entityId)),
-            );
-          const before = mappingSummary(
-              oldMappings.map((m) => ({
-                provider: m.provider.toString(),
-                sourceId: m.sourceId.toString(),
-              })),
-            ),
-            after = mappingSummary(
-              currentMappings.map((m) => ({
-                provider: m.provider.toString(),
-                sourceId: m.sourceId.toString(),
-              })),
-            );
-          const fields = [
-            ...(change?.fields ?? []).filter(
-              (value) =>
-                !(
-                  value &&
-                  typeof value === "object" &&
-                  "field" in value &&
-                  value.field === "source_mapping" &&
-                  !(
-                    "after" in value &&
-                    Array.isArray(value.after) &&
-                    String(value.after[0]).startsWith("aliases-sha256:")
-                  )
-                ),
-            ),
-            { field: "source_mapping", before, after },
-          ];
-          if (change)
-            await c(tx)
-              .update(catalogChanges)
-              .set({ fields })
-              .where(
-                and(eq(catalogChanges.revisionId, r.id), eq(catalogChanges.entityId, f.entityId)),
-              );
-          else
-            await c(tx).insert(catalogChanges).values({
-              revisionId: r.id,
-              entityId: f.entityId,
-              kind: f.kind,
-              changeKind: "changed",
-              fields,
-              reasonCodes: [],
-            });
-          await c(tx)
-            .update(catalogRevisions)
-            .set({ version: r.version + 1 })
-            .where(eq(catalogRevisions.id, r.id));
-          const id = newId();
-          await c(tx)
-            .insert(catalogMappingReviews)
-            .values({
-              id,
-              revisionId: r.id,
-              actorId: actor.userId,
-              reason: input.reason,
-              version: r.version + 1,
-              createdAt: at(),
-            });
-          return { id, version: r.version + 1 };
-        });
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:create:${list}`,
+          key,
+          { list, input },
+          async () => {
+            const id = newId();
+            const fields = fieldsOf(list, input);
+            if (list !== "dlcs" && "dlcId" in input)
+              await parent(tx, "dlc", input.game, input.dlcId as string | null);
+            if (list === "cities" && "regionId" in input)
+              await parent(tx, "region", input.game, input.regionId as string | null);
+            try {
+              await c(tx)
+                .insert(tables[list] as Common)
+                .values({
+                  id,
+                  game: input.game,
+                  nameRu: null,
+                  ...fields,
+                  hidden: false,
+                } as never);
+            } catch (error) {
+              if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
+              throw error;
+            }
+            await recordAudit(tx, actor, "catalog.changed", id);
+            return { item: await itemById(tx, list, id, "en") };
+          },
+        );
+        return saved.item as S["CatalogItem"];
       });
     },
-    async publish(
+    async patch(
       actor: Actor,
+      list: CatalogList,
       id: string,
       key: string,
-      expected: number,
-      input: S["PublicationInput"],
-    ): Promise<S["CatalogRevision"]> {
+      input: S["CatalogItemPatch"],
+    ): Promise<S["CatalogItem"]> {
+      assertPatchShape(list, input);
       return run(async (tx) => {
-        await authority(tx, actor);
-        return once(tx, actor, `publish:${id}`, key, { expected, input }, async () => {
-          const observed = await revision(tx, id),
-            p = await pointer(tx, observed.game),
-            r = await revision(tx, id, true);
-          match(r.version, expected);
-          match(p.version, input.expectedPublicationVersion);
-          if (r.state !== "draft" || r.comparisonRevisionId !== p.revisionId)
-            throw identityError(409);
-          const dto = await revisionDto(tx, r);
-          // Trust is an operator-owned exact-artifact review, never an uploaded boolean.
-          const mappingEdits = await c(tx)
-            .select({ id: catalogMappingReviews.id })
-            .from(catalogMappingReviews)
-            .where(eq(catalogMappingReviews.revisionId, r.id))
-            .limit(1);
-          const issues = await c(tx)
-            .select({ id: catalogMappingIssues.id })
-            .from(catalogMappingIssues)
-            .where(
-              and(
-                eq(catalogMappingIssues.revisionId, r.id),
-                eq(catalogMappingIssues.resolved, false),
-              ),
-            )
-            .limit(1);
-          if (
-            issues.length ||
-            !dto.coverageComplete ||
-            !dto.englishLabelsComplete ||
-            !dto.sourceReviewComplete ||
-            (mappingEdits.length && !(r.synthetic && config.synthetic && !config.production))
-          )
-            throw identityError(409);
-          await c(tx)
-            .update(catalogPublications)
-            .set({ version: p.version + 1, revisionId: id })
-            .where(eq(catalogPublications.game, r.game));
-          await c(tx)
-            .update(catalogRevisions)
-            .set({ state: "published", version: r.version + 1 })
-            .where(eq(catalogRevisions.id, id));
-          const company = await ports.identity.onboardingCompany(tx);
-          await audit.append(tx, {
-            actorKind: "user",
-            actorId: actor.userId,
-            operation: "catalog.published",
-            subjectKind: "catalog",
-            subjectId: id,
-            occurredAt: at(),
-            companyId: company.id,
-            reason: "catalog_update",
-          });
-          await ports.published(tx, {
-            eventId: newId(),
-            revisionId: id,
-            version: r.version + 1,
-            occurredAt: at(),
-          });
-          return {
-            ...dto,
-            state: "published",
-            version: r.version + 1,
-            publicationVersion: p.version + 1,
-          };
-        });
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:patch:${list}:${applicationId(id)}`,
+          key,
+          { list, id, input },
+          async () => {
+            const t = common(list);
+            const [row] = await c(tx)
+              .select({ id: t.id, game: t.game })
+              .from(t)
+              .where(eq(t.id, id))
+              .for("update");
+            if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+            if (list !== "dlcs" && "dlcId" in input) await parent(tx, "dlc", row.game, input.dlcId);
+            if (list === "cities" && "regionId" in input)
+              await parent(tx, "region", row.game, input.regionId);
+            const fields = fieldsOf(list, input);
+            if (Object.keys(fields).length) {
+              try {
+                await c(tx)
+                  .update(t)
+                  .set(fields as never)
+                  .where(eq(t.id, row.id));
+              } catch (error) {
+                if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
+                throw error;
+              }
+            }
+            await recordAudit(tx, actor, "catalog.changed", row.id);
+            return { item: await itemById(tx, list, row.id, "en") };
+          },
+        );
+        return saved.item as S["CatalogItem"];
       });
     },
-    async pinnedFact(input: { revisionId: string; factRevisionId: string }) {
-      return run(async (tx) => {
-        const r = await revision(tx, input.revisionId);
-        if (r.state !== "published") throw identityError(404);
-        const [f] = await c(tx)
-          .select()
-          .from(catalogFacts)
-          .where(
-            and(
-              eq(catalogFacts.revisionId, r.id),
-              eq(catalogFacts.id, applicationId(input.factRevisionId)),
-            ),
-          );
-        if (!f) throw identityError(404);
+    async previewImport(actor: Actor, list: CatalogList, bytes: Buffer) {
+      const fileSha256 = sha(bytes);
+      const rows = parseFile(list, bytes);
+      return run(async (tx): Promise<S["CatalogImportPreview"]> => {
+        await authority(tx, actor, true);
+        const plan = await computeImport(tx, list, rows, false);
+        const { lines, truncated } = previewLines(plan.lines);
         return {
-          factRevisionId: f.id,
-          catalogRevisionId: f.revisionId,
-          entityId: f.entityId,
-          game: f.game,
-          kind: f.kind,
-          mapNamespace: f.map.toString(),
-          retired: f.retired,
-          regionId: f.regionId,
-          cargoUnitMassKg: f.cargoUnitMassKg,
-          adrCategoryId: f.adrCategoryId,
-          trailerBodyTypeId: f.trailerBodyTypeId,
-          trailerChainTypeId: f.trailerChainTypeId,
+          fileSha256,
+          token: plan.errors
+            ? null
+            : codec.write(
+                tokenBinding(list, fileSha256, actor),
+                new Date(now().getTime() + CATALOG_IMPORT_TOKEN_TTL_MS).toISOString(),
+              ),
+          rows: rows.length,
+          added: plan.added,
+          changed: plan.changed,
+          unchanged: plan.unchanged,
+          errors: plan.errors,
+          lines,
+          truncated,
         };
+      });
+    },
+    async applyImport(
+      actor: Actor,
+      list: CatalogList,
+      bytes: Buffer,
+      key: string,
+      token: string,
+    ): Promise<S["CatalogImportResult"]> {
+      const fileSha256 = sha(bytes);
+      let expiresAt: string;
+      try {
+        expiresAt = codec.read(tokenBinding(list, fileSha256, actor), token);
+      } catch {
+        throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+      }
+      if (!(new Date(expiresAt).getTime() > now().getTime()))
+        throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+      const rows = parseFile(list, bytes);
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const result = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:import:${list}`,
+          key,
+          { sha256: fileSha256 },
+          async () => {
+            const plan = await computeImport(tx, list, rows, true);
+            if (plan.errors)
+              throw importInvalid(plan.lines.filter((line) => line.status === "error"));
+            const table = tables[list] as Common;
+            for (let i = 0; i < plan.inserts.length; i += 200) {
+              try {
+                await c(tx)
+                  .insert(table)
+                  .values(plan.inserts.slice(i, i + 200) as never[]);
+              } catch (error) {
+                if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
+                throw error;
+              }
+            }
+            for (const update of plan.updates)
+              await c(tx)
+                .update(table)
+                .set(update.set as never)
+                .where(eq(table.id, update.id));
+            const importId = newId();
+            await recordAudit(tx, actor, "catalog.imported", importId);
+            return {
+              importId,
+              rows: rows.length,
+              added: plan.added,
+              changed: plan.changed,
+              unchanged: plan.unchanged,
+            };
+          },
+        );
+        return result as unknown as S["CatalogImportResult"];
       });
     },
     resolveInTransaction,
-    async publishedInTransaction(tx: TxContext, game: Game, gameBuild: string) {
-      const [p] = await c(tx)
-        .select()
-        .from(catalogPublications)
-        .where(eq(catalogPublications.game, game));
-      const [r] = p?.revisionId
-        ? await c(tx).select().from(catalogRevisions).where(eq(catalogRevisions.id, p.revisionId))
-        : [];
-      if (r?.complete && r.state === "published" && r.gameBuild === gameBuild) return r.id;
-      const [historical] = await c(tx)
-        .select({ id: catalogRevisions.id })
-        .from(catalogRevisions)
-        .where(
-          and(
-            eq(catalogRevisions.game, game),
-            sql`CAST(${catalogRevisions.gameBuild} AS BINARY) = ${Buffer.from(gameBuild)}`,
-            eq(catalogRevisions.complete, true),
-            eq(catalogRevisions.state, "published"),
-          ),
-        )
-        .orderBy(desc(catalogRevisions.createdAt), desc(catalogRevisions.id))
-        .limit(1);
-      return historical?.id ?? null;
+    selectionsInTransaction,
+    async cargoAdrInTransaction(tx: TxContext, cargoId: string) {
+      return (await selectionsInTransaction(tx, [{ kind: "cargo", id: cargoId }])).get(cargoId)
+        ?.adrClass;
     },
-    // Events pins the current published facts on the caller's transaction.
-    async eventReferencesInTransaction(
-      tx: TxContext,
-      game: Game,
-      selections: { field: string; kind: Kind; id: string }[],
-    ) {
-      if (selections.length > 4) throw new Error("EVENT_CATALOG_BOUND_EXCEEDED");
-      const [publication] = await c(tx)
-        .select()
-        .from(catalogPublications)
-        .where(eq(catalogPublications.game, game))
-        .for("share");
-      if (!publication?.revisionId) return null;
-      const r = await revision(tx, publication.revisionId);
-      if (r.state !== "published" || !r.complete || r.game !== game) return null;
-      const pins = [];
-      for (const selection of selections) {
-        const [fact] = await c(tx)
-          .select()
-          .from(catalogFacts)
-          .where(
-            and(
-              eq(catalogFacts.revisionId, r.id),
-              eq(catalogFacts.entityId, applicationId(selection.id)),
-              eq(catalogFacts.kind, selection.kind),
-              eq(catalogFacts.retired, false),
-            ),
-          )
-          .for("share");
-        if (!fact?.labelEn) return null;
-        pins.push({
-          field: selection.field,
-          factId: fact.id,
-          entityId: fact.entityId,
-          catalogRevisionId: r.id,
-          label: {
-            entityId: fact.entityId,
-            label: fact.labelEn,
-            requestedLocale: "en" as const,
-            renderedLocale: "en" as const,
-            englishFallback: false,
-            retired: false,
-          },
-        });
-      }
-      return pins;
-    },
-    async qualificationReferencesInTransaction(
-      tx: TxContext,
-      game: Game,
-      kind: "trailer_type" | "adr_category",
-      ids: string[],
-    ) {
-      if (ids.length > 1000 || new Set(ids).size !== ids.length) return false;
-      if (!ids.length) return true;
-      const [publication] = await c(tx)
-        .select()
-        .from(catalogPublications)
-        .where(eq(catalogPublications.game, game))
-        .for("share");
-      if (!publication?.revisionId) return false;
-      const rows = await c(tx)
-        .select({ id: catalogFacts.entityId })
-        .from(catalogFacts)
-        .where(
-          and(
-            eq(catalogFacts.revisionId, publication.revisionId),
-            eq(catalogFacts.kind, kind),
-            eq(catalogFacts.retired, false),
-            inArray(catalogFacts.entityId, ids.map(applicationId)),
-          ),
-        );
-      return rows.length === ids.length;
-    },
-    async pinnedInTransaction(tx: TxContext, revisionId: string, entityId: string) {
-      const r = await revision(tx, revisionId);
-      if (r.state !== "published") return null;
-      const [fact] = await c(tx)
-        .select()
-        .from(catalogFacts)
-        .where(
-          and(
-            eq(catalogFacts.revisionId, r.id),
-            eq(catalogFacts.entityId, applicationId(entityId)),
-          ),
-        );
-      return fact ?? null;
-    },
+    /** Current labels; names follow the live row, including hidden rows. */
     async labelsInTransaction(
       tx: TxContext,
-      pins: { revisionId: string; entityId: string }[],
-      locale: "en" | "ru",
+      refs: readonly { kind: CatalogKind; id: string }[],
+      locale: Locale,
     ) {
-      if (pins.length > 300) throw new Error("CATALOG_LABEL_BATCH_BOUND_EXCEEDED");
-      if (!pins.length) return new Map<string, S["CatalogLabel"]>();
-      const rows = await c(tx)
-        .select()
-        .from(catalogFacts)
-        .where(
-          or(
-            ...pins.map((pin) =>
-              and(
-                eq(catalogFacts.revisionId, applicationId(pin.revisionId)),
-                eq(catalogFacts.entityId, applicationId(pin.entityId)),
-              ),
-            ),
-          ),
-        );
-      return new Map(
-        rows
-          .filter((f) => f.labelEn)
-          .map((f) => [
-            `${f.revisionId}:${f.entityId}`,
-            {
-              entityId: f.entityId,
-              label: (locale === "ru" ? (f.labelRu ?? f.labelEn) : f.labelEn) as string,
-              requestedLocale: locale,
-              renderedLocale: locale === "ru" && f.labelRu ? ("ru" as const) : ("en" as const),
-              englishFallback: locale === "ru" && !f.labelRu,
-              retired: f.retired,
-            },
-          ]),
-      );
-    },
-    async resolve(input: {
-      revisionId: string;
-      game: Game;
-      kind: Kind;
-      mapNamespace: string | null;
-      provider: string;
-      sourceId: string | null;
-      locale: "en" | "ru" | null;
-      label: string | null;
-      regionId: string | null;
-    }) {
-      return run((tx) => resolveInTransaction(tx, input));
+      if (refs.length > 300) throw new Error("CATALOG_LABEL_BATCH_BOUND_EXCEEDED");
+      const result = new Map<string, S["CatalogLabel"]>();
+      for (const kind of ["city", "cargo", "trailer"] as const) {
+        const ids = [...new Set(refs.filter((r) => r.kind === kind).map((r) => r.id))];
+        if (!ids.length) continue;
+        const table = kindTables[kind];
+        const rows = await c(tx)
+          .select({
+            id: table.id,
+            nameEn: table.nameEn,
+            nameRu: table.nameRu,
+            hidden: table.hidden,
+          })
+          .from(table)
+          .where(inArray(table.id, ids));
+        for (const row of rows)
+          result.set(row.id, label(row.id, row.nameEn, row.nameRu, row.hidden, locale));
+      }
+      return result;
     },
   };
 }
 export type Catalogs = ReturnType<typeof createCatalogs>;
-export async function cleanupCatalogs(unit: UnitOfWork, now = () => new Date()) {
-  const queue = createQueue(unit);
-  await retryTransaction(unit, async (tx) => {
-    const c = unit.client(tx),
-      at = now().toISOString();
-    await c.delete(catalogCommands).where(lte(catalogCommands.expiresAt, at)).limit(100);
-    const pending = await c
-      .select()
-      .from(catalogOperations)
-      .where(eq(catalogOperations.state, "processing"))
-      .limit(25);
-    for (const op of pending) {
-      const [artifact] = await c
-        .select({ expiresAt: catalogArtifacts.expiresAt })
-        .from(catalogArtifacts)
-        .where(eq(catalogArtifacts.id, op.artifactId));
-      const job = await queue.effectState(
-        tx,
-        "catalogs",
-        op.phase === "identities" && op.offset === 0 ? op.id : `${op.id}:${op.phase}:${op.offset}`,
-      );
-      const [current] = await c
-        .select()
-        .from(catalogOperations)
-        .where(eq(catalogOperations.id, op.id))
-        .for("update");
-      if (
-        current?.state !== "processing" ||
-        current.phase !== op.phase ||
-        current.offset !== op.offset
-      )
-        continue;
-      if (artifact && artifact.expiresAt > at && job?.state !== "failed") continue;
-      await c
-        .update(catalogOperations)
-        .set({
-          state: "failed",
-          failureCode:
-            artifact && artifact.expiresAt > at ? "import_processing_failed" : "artifact_expired",
-        })
-        .where(eq(catalogOperations.id, op.id));
-      if (op.stagingRevisionId)
-        await c
-          .update(catalogRevisions)
-          .set({ state: "rejected" })
-          .where(
-            and(
-              eq(catalogRevisions.id, op.stagingRevisionId),
-              eq(catalogRevisions.complete, false),
-            ),
-          );
-    }
-    const rejected = await c
-      .select({ id: catalogRevisions.id })
-      .from(catalogRevisions)
-      .where(
-        and(
-          eq(catalogRevisions.complete, false),
-          eq(catalogRevisions.state, "rejected"),
-          eq(catalogRevisions.pruned, false),
-        ),
-      )
-      .limit(5);
-    for (const { id } of rejected) {
-      // Retain operation/revision metadata; prune inaccessible partial normalized
-      // rows in restrictive FK order and bounded batches. Never touch publication.
-      await c.delete(catalogRelations).where(eq(catalogRelations.revisionId, id)).limit(100);
-      await c.delete(catalogMappings).where(eq(catalogMappings.revisionId, id)).limit(100);
-      await c.delete(catalogAliases).where(eq(catalogAliases.revisionId, id)).limit(100);
-      const [relation] = await c
-        .select({ id: catalogRelations.entityId })
-        .from(catalogRelations)
-        .where(eq(catalogRelations.revisionId, id))
-        .limit(1);
-      const [mapping] = await c
-        .select({ id: catalogMappings.entityId })
-        .from(catalogMappings)
-        .where(eq(catalogMappings.revisionId, id))
-        .limit(1);
-      const [alias] = await c
-        .select({ id: catalogAliases.entityId })
-        .from(catalogAliases)
-        .where(eq(catalogAliases.revisionId, id))
-        .limit(1);
-      if (!relation && !mapping && !alias)
-        await c.delete(catalogFacts).where(eq(catalogFacts.revisionId, id)).limit(100);
-      await c.delete(catalogChanges).where(eq(catalogChanges.revisionId, id)).limit(100);
-      await c.delete(catalogCoverage).where(eq(catalogCoverage.revisionId, id)).limit(100);
-      await c
-        .delete(catalogMappingIssues)
-        .where(eq(catalogMappingIssues.revisionId, id))
-        .limit(100);
-      const [fact] = await c
-        .select({ id: catalogFacts.id })
-        .from(catalogFacts)
-        .where(eq(catalogFacts.revisionId, id))
-        .limit(1);
-      const [change] = await c
-        .select({ id: catalogChanges.entityId })
-        .from(catalogChanges)
-        .where(eq(catalogChanges.revisionId, id))
-        .limit(1);
-      const [coverage] = await c
-        .select({ id: catalogCoverage.packId })
-        .from(catalogCoverage)
-        .where(eq(catalogCoverage.revisionId, id))
-        .limit(1);
-      const [issue] = await c
-        .select({ id: catalogMappingIssues.id })
-        .from(catalogMappingIssues)
-        .where(eq(catalogMappingIssues.revisionId, id))
-        .limit(1);
-      if (!relation && !mapping && !alias && !fact && !change && !coverage && !issue)
-        await c.update(catalogRevisions).set({ pruned: true }).where(eq(catalogRevisions.id, id));
-    }
-    // Keep metadata/history and reference locks; clear only expired private bytes.
-    await c
-      .update(catalogArtifacts)
-      .set({ content: null, payloadExpiresAt: null })
-      .where(lte(catalogArtifacts.payloadExpiresAt, at))
-      .limit(25);
-  });
-}
