@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { type AdmissionsConfig, admissionsSecurity } from "../../modules/admissions/security.js";
 import { type AnalyticsConfig, validateAnalyticsConfig } from "../../modules/analytics/service.js";
-import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/artifact.js";
+import { type CatalogConfig, validateCatalogConfig } from "../../modules/catalogs/config.js";
 import { type EventsConfig, validateEventsConfig } from "../../modules/events/service.js";
 import { validateIdentityConfig } from "../../modules/identity/engine.js";
 import { type ManualConfig, validateManualConfig } from "../../modules/manual-reports/service.js";
@@ -139,37 +138,11 @@ export function readConfig(input: NodeJS.ProcessEnv = process.env) {
     throw new Error("Invalid environment fields: CATALOGS_ENABLED");
   if (input.CATALOGS_ENABLED === "true") {
     try {
-      if (!identity || ![undefined, "true", "false"].includes(input.CATALOGS_SYNTHETIC))
-        throw new Error();
-      // A host can pass trust inline when it cannot mount a private file into every container.
-      const encoded = input.CATALOGS_EVIDENCE_BASE64;
-      if (
-        encoded !== undefined &&
-        (input.CATALOGS_EVIDENCE_FILE !== undefined ||
-          encoded.length % 4 !== 0 ||
-          !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))
-      )
-        throw new Error();
-      const evidenceBytes = input.CATALOGS_EVIDENCE_FILE
-        ? readFileSync(input.CATALOGS_EVIDENCE_FILE)
-        : encoded !== undefined
-          ? Buffer.from(encoded, "base64")
-          : undefined;
-      if (evidenceBytes && evidenceBytes.length > 1024 * 1024) throw new Error();
-      catalogs = {
-        production: env.NODE_ENV === "production",
-        synthetic: input.CATALOGS_SYNTHETIC === "true",
-        cursorKey: input.CATALOGS_CURSOR_KEY ?? "",
-        maxFileBytes: Number(input.CATALOGS_MAX_FILE_BYTES),
-        artifactTtlMs: Number(input.CATALOGS_ARTIFACT_TTL_MS),
-        policyRevision: Number(input.CATALOGS_POLICY_REVISION),
-        evidence: evidenceBytes ? JSON.parse(evidenceBytes.toString()) : [],
-      };
+      if (!identity) throw new Error();
+      catalogs = { cursorKey: input.CATALOGS_CURSOR_KEY ?? "" };
       validateCatalogConfig(catalogs);
     } catch {
-      throw new Error(
-        "Invalid environment fields: CATALOGS_ENABLED, CATALOGS_SYNTHETIC, CATALOGS_CURSOR_KEY, CATALOGS_MAX_FILE_BYTES, CATALOGS_ARTIFACT_TTL_MS, CATALOGS_POLICY_REVISION, CATALOGS_EVIDENCE_FILE, CATALOGS_EVIDENCE_BASE64",
-      );
+      throw new Error("Invalid environment fields: CATALOGS_ENABLED, CATALOGS_CURSOR_KEY");
     }
   }
   let trips: TripsConfig | undefined;

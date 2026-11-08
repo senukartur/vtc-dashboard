@@ -1,6 +1,5 @@
 import { createUnitOfWork } from "@vtc/db";
 import { cleanupAdmissions } from "./modules/admissions/service.js";
-import { cleanupCatalogs } from "./modules/catalogs/service.js";
 import { manualCleanupPending } from "./modules/manual-reports/service.js";
 import { cleanupMail } from "./modules/messaging/service.js";
 import { BlobFailure } from "./platform/blob-storage/filesystem.js";
@@ -97,8 +96,6 @@ export async function runJobsWorker(): Promise<void> {
       console.error(
         JSON.stringify({ event: "mail_cleanup_pending", category: "worker_configuration" }),
       );
-    phase("jobs_catalog_cleanup");
-    if (mode === "run" && composed?.catalogs) await cleanupCatalogs(unit);
     let manualCleanup: "not_run" | "complete" | "configuration_pending" | "storage_unavailable" =
       "not_run";
     if (mode === "run") {
@@ -131,7 +128,6 @@ export async function runJobsWorker(): Promise<void> {
       composed?.jobsQueue ??
       createQueue(unit, [], [], undefined, [
         "mail.deliver",
-        "catalog.import",
         "manual.evidence-delete",
         "manual.generation-delete",
         "reconciliation.search",
