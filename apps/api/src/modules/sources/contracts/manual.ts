@@ -4,28 +4,14 @@ import { createSchemaValidator } from "../../../platform/http/schemas.js";
 import { closed, positive } from "../../../platform/outbox/events.js";
 import { decimal } from "./canonical.js";
 import type {
+  AdrClass,
   Fact,
-  Game,
   NormalizedTripEvidence,
-  PinnedEntity,
+  TripEntity,
   TripSourceAdapter,
 } from "./evidence.js";
 
 // Internal boundary only: VTC-025 owns the authorized report/blob command and wire validation.
-export interface ManualSourceRevision {
-  reportId: string;
-  revisionId: string;
-  revision: number;
-  game: Game;
-  catalogRevisionId: string;
-  originId: string;
-  destinationId: string;
-  cargoId: string;
-  trailerTypeId: string;
-  cargoMassKg: string;
-  actualDistanceM: string;
-  evidenceIds: string[];
-}
 export interface ExtendedManualSourceRevision {
   format: 2;
   reportId: string;
@@ -36,71 +22,26 @@ export interface ExtendedManualSourceRevision {
 const fieldsValidator = createSchemaValidator().compile({
   $ref: "urn:vtc:browser:v1#/$defs/ManualReportFields",
 });
-export function parseManualSource(
-  payload: unknown,
-): ManualSourceRevision | ExtendedManualSourceRevision {
-  if (payload && typeof payload === "object" && "format" in payload) {
-    const p = closed(payload, ["format", "reportId", "revisionId", "revision", "fields"]);
-    if (p.format !== 2 || !fieldsValidator(p.fields)) throw new Error("INVALID_MANUAL_SOURCE");
-    applicationId(p.reportId as string);
-    applicationId(p.revisionId as string);
-    positive(p.revision);
-    const fields = p.fields as ExtendedManualSourceRevision["fields"];
-    if (fields.evidenceIds.length > 100) throw new Error("INVALID_MANUAL_SOURCE");
-    decimal(fields.cargoMassKg);
-    decimal(fields.actualDistanceM);
-    return p as unknown as ExtendedManualSourceRevision;
-  }
-  const p = closed(payload, [
-    "reportId",
-    "revisionId",
-    "revision",
-    "game",
-    "catalogRevisionId",
-    "originId",
-    "destinationId",
-    "cargoId",
-    "trailerTypeId",
-    "cargoMassKg",
-    "actualDistanceM",
-    "evidenceIds",
-  ]);
-  for (const name of [
-    "reportId",
-    "revisionId",
-    "catalogRevisionId",
-    "originId",
-    "destinationId",
-    "cargoId",
-    "trailerTypeId",
-  ])
-    applicationId(p[name] as string);
+export function parseManualSource(payload: unknown): ExtendedManualSourceRevision {
+  const p = closed(payload, ["format", "reportId", "revisionId", "revision", "fields"]);
+  if (p.format !== 2 || !fieldsValidator(p.fields)) throw new Error("INVALID_MANUAL_SOURCE");
+  applicationId(p.reportId as string);
+  applicationId(p.revisionId as string);
   positive(p.revision);
-  if (
-    !["ets2", "ats"].includes(p.game as string) ||
-    typeof p.cargoMassKg !== "string" ||
-    typeof p.actualDistanceM !== "string" ||
-    !Array.isArray(p.evidenceIds) ||
-    p.evidenceIds.length < 1 ||
-    p.evidenceIds.length > 100
-  )
-    throw new Error("INVALID_MANUAL_SOURCE");
-  for (const value of p.evidenceIds) applicationId(value);
-  if (new Set(p.evidenceIds).size !== p.evidenceIds.length)
-    throw new Error("DUPLICATE_EVIDENCE_REFERENCE");
-  decimal(p.cargoMassKg);
-  decimal(p.actualDistanceM);
-  return p as unknown as ManualSourceRevision;
+  const fields = p.fields as ExtendedManualSourceRevision["fields"];
+  if (fields.evidenceIds.length > 100) throw new Error("INVALID_MANUAL_SOURCE");
+  decimal(fields.cargoMassKg);
+  decimal(fields.actualDistanceM);
+  return p as unknown as ExtendedManualSourceRevision;
 }
 export const manualAdapter: TripSourceAdapter = {
   provider: "manual",
   version: 2,
-  versionFor: (payload) => ("format" in parseManualSource(payload) ? 2 : 1),
   identity(payload) {
     const p = parseManualSource(payload);
     return {
       provider: "manual",
-      game: "format" in p ? p.fields.game : p.game,
+      game: p.fields.game,
       sessionKey: p.reportId,
       tripKey: p.reportId,
       eventKey: p.revisionId,
@@ -109,20 +50,16 @@ export const manualAdapter: TripSourceAdapter = {
     };
   },
   async normalize(payload, context) {
-    const original = parseManualSource(payload),
-      extended = "format" in original ? original : null,
-      legacy = "format" in original ? null : original,
-      p = extended
-        ? {
-            reportId: extended.reportId,
-            revisionId: extended.revisionId,
-            revision: extended.revision,
-            game: extended.fields.game,
-            cargoMassKg: extended.fields.cargoMassKg,
-            actualDistanceM: extended.fields.actualDistanceM,
-            evidenceIds: extended.fields.evidenceIds,
-          }
-        : (original as ManualSourceRevision),
+    const source = parseManualSource(payload),
+      p = {
+        reportId: source.reportId,
+        revisionId: source.revisionId,
+        revision: source.revision,
+        game: source.fields.game,
+        cargoMassKg: source.fields.cargoMassKg,
+        actualDistanceM: source.fields.actualDistanceM,
+        evidenceIds: source.fields.evidenceIds,
+      },
       id = context.sourceRecordId;
     const known = <T>(value: T, sourceField: string): Fact<T> => ({
       status: "known",
@@ -135,60 +72,33 @@ export const manualAdapter: TripSourceAdapter = {
       reasonCode,
       sourceRecordId: id,
     });
+    let cargoClass: AdrClass | null = null;
     async function selected(
-      entityId: string | null,
-      kind: string,
+      kind: "city" | "cargo" | "trailer",
       field: string,
-      selection?: components["schemas"]["ManualCatalogSelection"],
-    ): Promise<Fact<PinnedEntity>> {
-      if (selection?.status === "unresolved") return unknown(`manual_${selection.reasonCode}`);
-      const revisionId =
-        selection?.status === "resolved" ? selection.catalogRevisionId : legacy?.catalogRevisionId;
-      if (selection?.status === "resolved") entityId = selection.entityId;
-      if (!entityId || !revisionId) throw new Error("INVALID_PINNED_MANUAL_SELECTION");
-      const fact = await context.catalogs?.pinnedInTransaction(context.tx, revisionId, entityId);
-      if (!fact || fact.game !== p.game || fact.kind !== kind)
-        throw new Error("INVALID_PINNED_MANUAL_SELECTION");
-      return known({ entityId, catalogRevisionId: revisionId, factRevisionId: fact.id }, field);
+      selection: components["schemas"]["ManualCatalogSelection"],
+    ): Promise<Fact<TripEntity>> {
+      if (selection.status === "unresolved") return unknown(`manual_${selection.reasonCode}`);
+      const row = (
+        await context.catalogs?.selectionsInTransaction(context.tx, [
+          { kind, id: selection.entityId },
+        ])
+      )?.get(selection.entityId);
+      if (!row || row.game !== p.game || row.kind !== kind)
+        throw new Error("INVALID_MANUAL_SELECTION");
+      if (kind === "cargo") cargoClass = row.adrClass;
+      return known({ entityId: selection.entityId }, field);
     }
-    const origin = await selected(
-        legacy?.originId ?? null,
-        "city",
-        "originId",
-        extended?.fields.origin,
-      ),
-      destination = await selected(
-        legacy?.destinationId ?? null,
-        "city",
-        "destinationId",
-        extended?.fields.destination,
-      ),
-      cargo = await selected(legacy?.cargoId ?? null, "cargo", "cargoId", extended?.fields.cargo),
-      trailer = await selected(
-        legacy?.trailerTypeId ?? null,
-        "trailer_type",
-        "trailerTypeId",
-        extended?.fields.trailerType,
-      );
-    let adrCategory = unknown<PinnedEntity>("cargo_adr_unknown");
-    if (cargo.status === "known") {
-      const cargoFact = await context.catalogs?.pinnedInTransaction(
-        context.tx,
-        cargo.value.catalogRevisionId,
-        cargo.value.entityId,
-      );
-      if (cargoFact?.adrCategoryId)
-        adrCategory = await selected(
-          cargoFact.adrCategoryId,
-          "adr_category",
-          "catalog.cargo.adrCategoryId",
-          {
-            status: "resolved",
-            entityId: cargoFact.adrCategoryId,
-            catalogRevisionId: cargo.value.catalogRevisionId,
-          },
-        );
-    }
+    const origin = await selected("city", "originId", source.fields.origin),
+      destination = await selected("city", "destinationId", source.fields.destination),
+      cargo = await selected("cargo", "cargoId", source.fields.cargo),
+      trailer = await selected("trailer", "trailerTypeId", source.fields.trailerType);
+    const adrCategory: Fact<AdrClass> =
+      cargo.status !== "known"
+        ? unknown("cargo_adr_unknown")
+        : cargoClass === null
+          ? unknown("cargo_not_adr")
+          : known(cargoClass, "catalog.cargo.adrClass");
     const result: NormalizedTripEvidence = {
       sourceRecordId: id,
       factRevisionId: context.factRevisionId,
@@ -197,7 +107,6 @@ export const manualAdapter: TripSourceAdapter = {
       game: p.game,
       outcome: "delivered",
       recording: "unknown",
-      catalogRevisionId: legacy?.catalogRevisionId ?? null,
       start: { utc: null, basis: "unknown", verifiedActual: false },
       end: { utc: null, basis: "unknown", verifiedActual: false },
       origin,
@@ -212,7 +121,7 @@ export const manualAdapter: TripSourceAdapter = {
       cargoDamageFraction: unknown("not_supported"),
       money: null,
       provenance: {
-        eventId: extended?.fields.eventId ?? null,
+        eventId: source.fields.eventId ?? null,
         reportId: p.reportId,
         revisionId: p.revisionId,
         revision: p.revision,

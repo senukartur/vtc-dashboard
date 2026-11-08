@@ -72,10 +72,7 @@ export interface TripsPorts {
   >;
   catalogs?: Pick<
     Catalogs,
-    | "publishedInTransaction"
-    | "resolveInTransaction"
-    | "pinnedInTransaction"
-    | "labelsInTransaction"
+    "resolveInTransaction" | "selectionsInTransaction" | "labelsInTransaction"
   >;
   // VTC-025 supplies a caller-transaction check of immutable validated evidence references.
   manualEvidence?: (
@@ -576,12 +573,7 @@ export function createTrips(
         deliveryMode: key.deliveryMode,
       });
     await c(tx).insert(sourcePayloads).values({ messageId, content });
-    await factsRepository.insert(
-      tx,
-      originalTripId,
-      fact,
-      adapter.versionFor?.(immutablePayload) ?? adapter.version,
-    );
+    await factsRepository.insert(tx, originalTripId, fact, adapter.version);
     await emit(tx, "source.snapshot_stored", tripId, trip.version, fact);
     if (!newer && conflicts.length === 0) {
       await c(tx).update(trips).set({ assessmentPending: true }).where(eq(trips.id, tripId));
@@ -690,18 +682,17 @@ export function createTrips(
       .for("share");
     let labels = new Map<string, S["CatalogLabel"]>();
     if (ports.catalogs) {
-      const pins = new Map<string, { revisionId: string; entityId: string }>();
+      const refs: { kind: "city" | "cargo"; id: string }[] = [];
       for (const saved of facts.values()) {
         const f = saved.evidence;
-        for (const value of [f.origin, f.destination, f.cargo])
-          if (value.status === "known") {
-            pins.set(`${value.value.catalogRevisionId}:${value.value.entityId}`, {
-              revisionId: value.value.catalogRevisionId,
-              entityId: value.value.entityId,
-            });
-          }
+        for (const [kind, value] of [
+          ["city", f.origin],
+          ["city", f.destination],
+          ["cargo", f.cargo],
+        ] as const)
+          if (value.status === "known") refs.push({ kind, id: value.value.entityId });
       }
-      labels = await ports.catalogs.labelsInTransaction(tx, [...pins.values()], locale);
+      labels = await ports.catalogs.labelsInTransaction(tx, refs, locale);
     }
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     return rows.map((row) => {
@@ -712,9 +703,7 @@ export function createTrips(
         throw new Error("TRIP_FACT_POINTER_INVALID");
       const f = saved?.evidence;
       const label = (value: NormalizedTripEvidence["origin"] | undefined) =>
-        value?.status === "known"
-          ? (labels.get(`${value.value.catalogRevisionId}:${value.value.entityId}`) ?? null)
-          : null;
+        value?.status === "known" ? (labels.get(value.value.entityId) ?? null) : null;
       return {
         view: "summary",
         id: row.id,

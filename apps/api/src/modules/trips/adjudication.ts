@@ -11,14 +11,14 @@ import { and, eq, isNull, sql, tripHistory, tripResolutions, trips } from "@vtc/
 import type { Catalogs } from "../catalogs/service.js";
 import { identityError } from "../identity/service.js";
 import { decimal } from "../sources/contracts/canonical.js";
-import type { Fact, NormalizedTripEvidence, PinnedEntity } from "../sources/contracts/evidence.js";
+import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 import { createFactRepository } from "./facts.js";
 import { createTripGroups, type TripState } from "./groups.js";
 
 type S = components["schemas"];
 export function createTripAdjudication(
   unit: UnitOfWork,
-  catalogs?: Pick<Catalogs, "pinnedInTransaction">,
+  catalogs?: Pick<Catalogs, "selectionsInTransaction">,
 ) {
   const c = (tx: TxContext) => unit.client(tx),
     facts = createFactRepository(unit),
@@ -111,62 +111,63 @@ export function createTripAdjudication(
       const { reason, evidenceIds, correctionRequestId: _request, ...changes } = input;
       if (base.provider === "manual" && (changes.actualStartAt || changes.actualCompletedAt))
         throw identityError(422);
-      if (
-        (changes.originCityId ||
-          changes.destinationCityId ||
-          changes.cargoId ||
-          changes.trailerTypeId) &&
-        !changes.catalogRevisionId
-      )
-        throw identityError(422);
       const evidence = structuredClone(base);
       evidence.factRevisionId = newId();
-      evidence.catalogRevisionId = null;
       const known = <T>(value: T, field: string): Fact<T> => ({
         status: "known",
         value,
         sourceRecordId: base.sourceRecordId,
         sourceField: `resolution/${revisionId}/${field}`,
       });
-      async function pin(id: string, kind: string): Promise<Fact<PinnedEntity>> {
-        if (!catalogs || !changes.catalogRevisionId) throw identityError(503);
-        const p = await catalogs.pinnedInTransaction(
-          tx,
-          changes.catalogRevisionId,
-          applicationId(id),
+      // A hidden row is only acceptable when the trip already carries it.
+      async function select(
+        id: string,
+        kind: "city" | "cargo" | "trailer",
+        current: Fact<TripEntity> | undefined,
+      ) {
+        if (!catalogs) throw identityError(503);
+        const entityId = applicationId(id);
+        const entity = (await catalogs.selectionsInTransaction(tx, [{ kind, id: entityId }])).get(
+          entityId,
         );
-        if (!p || p.game !== row.game || p.kind !== kind) throw identityError(422);
-        return known(
-          {
-            entityId: p.entityId,
-            catalogRevisionId: changes.catalogRevisionId,
-            factRevisionId: p.id,
-          },
-          kind,
-        );
+        if (!entity || entity.game !== row.game || entity.kind !== kind) throw identityError(422);
+        if (entity.hidden && (current?.status !== "known" || current.value.entityId !== entityId))
+          throw identityError(422, "CATALOG_SELECTION_HIDDEN");
+        return entity;
       }
-      if (changes.originCityId) evidence.origin = await pin(changes.originCityId, "city");
-      if (changes.destinationCityId)
-        evidence.destination = await pin(changes.destinationCityId, "city");
-      if (changes.cargoId) {
-        evidence.cargo = await pin(changes.cargoId, "cargo");
-        const p = await catalogs?.pinnedInTransaction(
-          tx,
-          changes.catalogRevisionId as string,
-          changes.cargoId,
+      const reference = (entityId: string, kind: string): Fact<TripEntity> =>
+        known({ entityId }, kind);
+      if (changes.originCityId)
+        evidence.origin = reference(
+          (await select(changes.originCityId, "city", base.origin)).id,
+          "city",
         );
-        if (p?.adrCategoryId) evidence.adrCategory = await pin(p.adrCategoryId, "adr_category");
-        else
-          evidence.adrCategory = {
-            status: "unknown",
-            reasonCode: "cargo_adr_unknown",
-            sourceRecordId: base.sourceRecordId,
-          };
+      if (changes.destinationCityId)
+        evidence.destination = reference(
+          (await select(changes.destinationCityId, "city", base.destination)).id,
+          "city",
+        );
+      if (changes.cargoId) {
+        const cargo = await select(changes.cargoId, "cargo", base.cargo);
+        evidence.cargo = reference(cargo.id, "cargo");
+        evidence.adrCategory =
+          cargo.adrClass === null
+            ? {
+                status: "unknown",
+                reasonCode: "cargo_not_adr",
+                sourceRecordId: base.sourceRecordId,
+              }
+            : known(cargo.adrClass, "adrClass");
       }
       if (changes.trailerTypeId)
         evidence.trailers = {
           complete: true,
-          items: [await pin(changes.trailerTypeId, "trailer_type")],
+          items: [
+            reference(
+              (await select(changes.trailerTypeId, "trailer", base.trailers.items[0])).id,
+              "trailer",
+            ),
+          ],
         };
       if (changes.cargoMassKg)
         evidence.cargoMassKg = known(decimal(changes.cargoMassKg), "cargoMassKg");

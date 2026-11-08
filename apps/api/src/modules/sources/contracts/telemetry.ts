@@ -3,13 +3,14 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { canonicalJson, decimal, sourceKey } from "./canonical.js";
 import type {
+  AdrClass,
   Fact,
   Game,
   NormalizedTripEvidence,
   Outcome,
-  PinnedEntity,
   Recording,
   ReportedTime,
+  TripEntity,
   TripSourceAdapter,
 } from "./evidence.js";
 import schema from "./telemetry-v1.schema.json" with { type: "json" };
@@ -50,7 +51,15 @@ export interface Telemetry {
       cargoName: Available<string>;
       cargoMass: Available<number>;
     };
-    trailers: { complete: boolean; items: { id: Available<string> }[] };
+    trailers: {
+      complete: boolean;
+      items: {
+        index: number;
+        id: Available<string>;
+        bodyType: Available<string>;
+        chainType: Available<string>;
+      }[];
+    };
     plannedDistance: Available<number>;
     observedDistance: Available<number>;
     deliveredDistance: Available<number>;
@@ -184,45 +193,25 @@ export const telemetryAdapter: TripSourceAdapter = {
         return unknown("quantity_out_of_range");
       }
     };
-    const gameBuild =
-      s.context.gameBuild.available && s.context.gameBuild.value ? s.context.gameBuild.value : null;
-    const catalogRevisionId = gameBuild
-      ? ((await context.catalogs?.publishedInTransaction(context.tx, p.source.game, gameBuild)) ??
-        null)
-      : null;
-    const mapNamespace =
-      s.context.mapId.available && s.context.mapId.value ? s.context.mapId.value : null;
+    let cargoAdr: { resolved: boolean; adrClass: AdrClass | null } = {
+      resolved: false,
+      adrClass: null,
+    };
     async function resolve(
       input: Available<string>,
       field: string,
-      kind: "city" | "cargo" | "trailer_type",
-    ): Promise<Fact<PinnedEntity>> {
+      kind: "city" | "cargo" | "trailer",
+    ): Promise<Fact<TripEntity>> {
       if (!context.catalogs) return unknown("catalog_unavailable");
-      if (!gameBuild) return unknown("catalog_build_unknown");
-      if (!catalogRevisionId) return unknown("catalog_build_unavailable");
-      if (!mapNamespace) return unknown("map_unknown");
       if (!input.available || input.value === "") return unknown("source_id_unknown");
       const resolved = await context.catalogs.resolveInTransaction(context.tx, {
-        revisionId: catalogRevisionId,
         game: p.source.game,
         kind,
-        mapNamespace,
-        provider: "ets2telemetry",
-        sourceId: input.value,
-        locale: null,
-        label: null,
-        regionId: null,
+        code: input.value,
       });
-      return resolved.status === "resolved"
-        ? known(
-            {
-              entityId: resolved.entityId,
-              catalogRevisionId,
-              factRevisionId: resolved.factRevisionId,
-            },
-            field,
-          )
-        : unknown(resolved.status === "ambiguous" ? "catalog_ambiguous" : resolved.reasonCode);
+      if (resolved.status !== "resolved") return unknown(resolved.reasonCode);
+      if (kind === "cargo") cargoAdr = { resolved: true, adrClass: resolved.adrClass };
+      return known({ entityId: resolved.id }, field);
     }
     function time(input: Time | null, observed: boolean, isStart: boolean): ReportedTime {
       if (!input) return { utc: null, basis: "unknown", verifiedActual: false };
@@ -265,35 +254,22 @@ export const telemetryAdapter: TripSourceAdapter = {
       "city",
     );
     const cargo = await resolve(s.job.cargoId, "snapshot.job.cargoId", "cargo");
-    const trailers: Fact<PinnedEntity>[] = [];
-    for (let index = 0; index < s.trailers.items.length; index++)
-      trailers.push(
-        await resolve(
-          s.trailers.items[index]?.id ?? { available: false, reason: "not-observed" },
-          `snapshot.trailers.items.${index}.id`,
-          "trailer_type",
-        ),
-      );
-    let adrCategory = unknown<PinnedEntity>("cargo_adr_unknown");
-    if (cargo.status === "known" && context.catalogs && catalogRevisionId) {
-      const fact = await context.catalogs.pinnedInTransaction(
-        context.tx,
-        catalogRevisionId,
-        cargo.value.entityId,
-      );
-      if (fact?.adrCategoryId) {
-        const adr = await context.catalogs.pinnedInTransaction(
-          context.tx,
-          catalogRevisionId,
-          fact.adrCategoryId,
-        );
-        if (adr?.kind === "adr_category")
-          adrCategory = known(
-            { entityId: adr.entityId, catalogRevisionId, factRevisionId: adr.id },
-            "catalog.cargo.adrCategoryId",
-          );
-      }
-    }
+    // A coupling counts as its first trailer's body type; every slot stays in provenance.
+    const first = s.trailers.items.find((t) => t.index === 0);
+    const trailers: Fact<TripEntity>[] = s.trailers.items.length
+      ? [
+          await resolve(
+            first?.bodyType ?? { available: false, reason: "not-observed" },
+            "snapshot.trailers.items.0.bodyType",
+            "trailer",
+          ),
+        ]
+      : [];
+    const adrCategory: Fact<AdrClass> = !cargoAdr.resolved
+      ? unknown("cargo_adr_unknown")
+      : cargoAdr.adrClass === null
+        ? unknown("cargo_not_adr")
+        : known(cargoAdr.adrClass, "catalog.cargo.adrClass");
     const cargoMassKg = quantity(s.job.cargoMass, "snapshot.job.cargoMass");
     const ruleContextComplete =
       s.evidence.ruleContextComplete &&
@@ -304,7 +280,7 @@ export const telemetryAdapter: TripSourceAdapter = {
       origin.status === "known" &&
       destination.status === "known" &&
       cargo.status === "known" &&
-      adrCategory.status === "known" &&
+      (adrCategory.status === "known" || adrCategory.reasonCode === "cargo_not_adr") &&
       cargoMassKg.status === "known";
     if (!start.verifiedActual) reasons.add("actual_start_unknown");
     if (s.outcome !== "open" && !end.verifiedActual) reasons.add("actual_end_unknown");
@@ -320,7 +296,8 @@ export const telemetryAdapter: TripSourceAdapter = {
     )
       reasons.add("distance_conflict");
     for (const [name, fact] of Object.entries({ origin, destination, cargo, adrCategory }))
-      if (fact.status === "unknown") reasons.add(`${name}_unknown`.replace("adrCategory", "adr"));
+      if (fact.status === "unknown" && fact.reasonCode !== "cargo_not_adr")
+        reasons.add(`${name}_unknown`.replace("adrCategory", "adr"));
     const result: NormalizedTripEvidence = {
       sourceRecordId: id,
       factRevisionId: context.factRevisionId,
@@ -329,7 +306,6 @@ export const telemetryAdapter: TripSourceAdapter = {
       game: p.source.game,
       outcome: s.outcome,
       recording: s.recordingCompleteness,
-      catalogRevisionId,
       start,
       end,
       origin,

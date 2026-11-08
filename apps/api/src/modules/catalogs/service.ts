@@ -324,7 +324,7 @@ export function createCatalogs(
     const games = [
       ...new Set(
         rows.flatMap((row) =>
-          row.values.game === "ets2" || row.values.game === "ats" ? [row.values.game] : [],
+          row.values.game === "ets2" || row.values.game === "ats" ? [row.values.game as Game] : [],
         ),
       ),
     ];
@@ -553,7 +553,8 @@ export function createCatalogs(
             throw identityError(409, "VERSION_CONFLICT");
           }
         }
-        const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
+        const display =
+          locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : sql`${t.nameEn}`;
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const filter = and(
           eq(t.game, query.game),
@@ -583,7 +584,10 @@ export function createCatalogs(
           and(
             filter,
             after
-              ? or(gt(display, after[0]), and(eq(display, after[0]), gt(t.id, after[1])))
+              ? or(
+                  sql`${display} > ${after[0]}`,
+                  and(sql`${display} = ${after[0]}`, gt(t.id, after[1])),
+                )
               : undefined,
           ),
           limit + 1,

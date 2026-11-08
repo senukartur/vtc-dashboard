@@ -2,7 +2,7 @@ import type { components } from "@vtc/contracts";
 import { decimal38_18 } from "@vtc/db";
 import { identityError } from "../identity/service.js";
 import { defaultRegistry, evaluateQualificationRules } from "../qualification-rules/index.js";
-import type { Fact, NormalizedTripEvidence, PinnedEntity } from "../sources/contracts/evidence.js";
+import type { AdrClass, Fact, NormalizedTripEvidence } from "../sources/contracts/evidence.js";
 
 type S = components["schemas"];
 export function validateDraftRules(input: readonly S["Rule"][]) {
@@ -13,8 +13,8 @@ export function validateDraftRules(input: readonly S["Rule"][]) {
     for (const rule of input) {
       if (rule.type === "max_mass") decimal38_18(rule.maxKg);
       else if (
-        rule.entityIds.length > 1000 ||
-        new Set(rule.entityIds).size !== rule.entityIds.length
+        rule.type === "allowed_trailer_types" &&
+        (rule.entityIds.length > 1000 || new Set(rule.entityIds).size !== rule.entityIds.length)
       )
         throw new Error();
     }
@@ -41,7 +41,7 @@ export function previewRules(input: S["QualificationPreviewInput"]): S["Qualific
     sample = input.sample;
   try {
     if (sample.cargoMassKg !== null) decimal38_18(sample.cargoMassKg);
-    if ((sample.adr.status === "known") !== (sample.adr.entityId !== null)) throw new Error();
+    if ((sample.adr.status === "known") !== (sample.adr.adrClass !== null)) throw new Error();
   } catch {
     throw identityError(422);
   }
@@ -57,11 +57,6 @@ export function previewRules(input: S["QualificationPreviewInput"]): S["Qualific
     sourceRecordId: marker,
     sourceField: "hypothetical",
   });
-  const pin = (entityId: string): PinnedEntity => ({
-    entityId,
-    catalogRevisionId: marker,
-    factRevisionId: marker,
-  });
   const evidence: NormalizedTripEvidence = {
     sourceRecordId: marker,
     factRevisionId: marker,
@@ -70,7 +65,6 @@ export function previewRules(input: S["QualificationPreviewInput"]): S["Qualific
     game: input.game,
     outcome: "none",
     recording: "unknown",
-    catalogRevisionId: null,
     start: { utc: null, basis: "unknown", verifiedActual: false },
     end: { utc: null, basis: "unknown", verifiedActual: false },
     origin: unknown(),
@@ -88,11 +82,11 @@ export function previewRules(input: S["QualificationPreviewInput"]): S["Qualific
     wholeTripDistanceSupported: false,
     trailers: {
       complete: sample.trailersComplete,
-      items: sample.trailerTypeIds.map((id) => (id === null ? unknown() : known(pin(id)))),
+      items: sample.trailerTypeIds.map((id) => (id === null ? unknown() : known({ entityId: id }))),
     },
     adrCategory:
-      sample.adr.status === "known" && sample.adr.entityId
-        ? known(pin(sample.adr.entityId))
+      sample.adr.status === "known" && sample.adr.adrClass
+        ? known(sample.adr.adrClass as AdrClass)
         : unknown(sample.adr.status === "non_hazardous" ? "cargo_not_adr" : "hypothetical_unknown"),
     ruleContextComplete: false,
     reasonCodes: [],

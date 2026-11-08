@@ -85,7 +85,6 @@ function dto(row: Decision, e: NormalizedTripEvidence, reviewers: Reviewers): S[
       qualificationAssignmentId: row.assignmentId,
       levelId: row.levelId,
       ruleVersionId: row.ruleVersionId,
-      catalogRevisionId: e.catalogRevisionId,
       eventId: row.eventId,
       attendanceRevisionId: row.attendanceRevisionId,
       attributionAt: row.attributionAt,

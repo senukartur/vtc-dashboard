@@ -472,7 +472,6 @@ export function createManualReports(
     const select = (entityId: string) => ({
       status: "resolved" as const,
       entityId,
-      catalogRevisionId: f.catalogRevisionId,
     });
     return {
       game: f.game,
@@ -492,31 +491,27 @@ export function createManualReports(
     fields: S["ManualReportFields"],
     previous?: S["ManualReportFields"],
   ) {
-    for (const [name, kind] of [
-      ["origin", "city"],
-      ["destination", "city"],
-      ["cargo", "cargo"],
-      ["trailerType", "trailer_type"],
-    ] as const) {
+    const selections = (
+      [
+        ["origin", "city"],
+        ["destination", "city"],
+        ["cargo", "cargo"],
+        ["trailerType", "trailer"],
+      ] as const
+    ).flatMap(([name, kind]) => {
       const selection = fields[name];
-      if (selection.status === "unresolved") continue;
-      let fact: Awaited<ReturnType<Catalogs["pinnedInTransaction"]>>;
-      try {
-        fact = await ports.catalogs.pinnedInTransaction(
-          tx,
-          selection.catalogRevisionId,
-          selection.entityId,
-        );
-      } catch {
-        throw manualError(422);
-      }
-      if (
-        !fact ||
-        fact.game !== fields.game ||
-        fact.kind !== kind ||
-        (fact.retired && canonicalJson(previous?.[name] ?? null) !== canonicalJson(selection))
-      )
-        throw manualError(422);
+      return selection.status === "resolved" ? [{ name, kind, selection }] : [];
+    });
+    if (!selections.length) return;
+    const found = await ports.catalogs.selectionsInTransaction(
+      tx,
+      selections.map(({ kind, selection }) => ({ kind, id: selection.entityId })),
+    );
+    for (const { name, kind, selection } of selections) {
+      const row = found.get(selection.entityId);
+      if (!row || row.game !== fields.game || row.kind !== kind) throw manualError(422);
+      if (row.hidden && canonicalJson(previous?.[name] ?? null) !== canonicalJson(selection))
+        throw identityError(422, "CATALOG_SELECTION_HIDDEN");
     }
   }
   async function submit(
@@ -591,22 +586,7 @@ export function createManualReports(
         fields: original ?? fields,
         submittedAt: at(),
       });
-    const payload = original
-      ? {
-          reportId,
-          revisionId,
-          revision: number,
-          game: original.game,
-          catalogRevisionId: original.catalogRevisionId,
-          originId: original.originCityId,
-          destinationId: original.destinationCityId,
-          cargoId: original.cargoId,
-          trailerTypeId: original.trailerTypeId,
-          cargoMassKg: original.cargoMassKg,
-          actualDistanceM: original.actualDistanceM,
-          evidenceIds: original.evidenceIds,
-        }
-      : { format: 2 as const, reportId, revisionId, revision: number, fields };
+    const payload = { format: 2 as const, reportId, revisionId, revision: number, fields };
     const [state] = await ports.trips.statesInTransaction(tx, [tripId]);
     if (!state) throw new Error("MANUAL_TRIP_MISSING");
     const context = {
@@ -2096,36 +2076,7 @@ export function createManualReports(
       revision.format === "legacy"
         ? extendedLegacy(revision.fields as S["ManualInput"])
         : (revision.fields as S["ManualReportFields"]);
-    const actual =
-      "format" in parsed
-        ? parsed.fields
-        : {
-            ...expected,
-            game: parsed.game,
-            cargoMassKg: parsed.cargoMassKg,
-            actualDistanceM: parsed.actualDistanceM,
-            evidenceIds: parsed.evidenceIds,
-            origin: {
-              status: "resolved",
-              entityId: parsed.originId,
-              catalogRevisionId: parsed.catalogRevisionId,
-            },
-            destination: {
-              status: "resolved",
-              entityId: parsed.destinationId,
-              catalogRevisionId: parsed.catalogRevisionId,
-            },
-            cargo: {
-              status: "resolved",
-              entityId: parsed.cargoId,
-              catalogRevisionId: parsed.catalogRevisionId,
-            },
-            trailerType: {
-              status: "resolved",
-              entityId: parsed.trailerTypeId,
-              catalogRevisionId: parsed.catalogRevisionId,
-            },
-          };
+    const actual = parsed.fields;
     if (canonicalJson(expected) !== canonicalJson(actual)) throw manualError(403);
     await evidenceGate(tx, ownerId, expected.evidenceIds, true);
   }

@@ -16,7 +16,7 @@ export interface AllowedTrailerTypesRule {
 
 export interface AllowedAdrCategoriesRule {
   readonly type: "allowed_adr_categories";
-  readonly entityIds: readonly string[];
+  readonly classes: readonly string[];
 }
 
 export interface CustomRule {
