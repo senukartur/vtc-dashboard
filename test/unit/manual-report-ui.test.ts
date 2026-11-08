@@ -6,11 +6,9 @@ import {
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import { schema } from "../../apps/web/src/features/trips/transport.ts";
 
-const revisionId = "61000000-0000-4000-8000-000000000020";
 const pin = (tail: number) => ({
   status: "resolved" as const,
   entityId: `63000000-0000-4000-8000-${String(tail).padStart(12, "0")}`,
-  catalogRevisionId: revisionId,
 });
 const complete = () => ({
   game: "ets2" as const,

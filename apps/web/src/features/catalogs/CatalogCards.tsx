@@ -46,7 +46,7 @@ export function CatalogCards({
               aria-label={t("actions", { name: item.display.label })}
               onClick={() => setSheet(item)}
             >
-              ⋯
+              …
             </Button>
           )}
         </div>

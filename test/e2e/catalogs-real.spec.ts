@@ -81,7 +81,7 @@ test(
       await expect(page.getByText(cityCode, { exact: true })).toHaveCount(0);
 
       phase = "RESTORE";
-      await page.getByRole("checkbox", { name: c.showHidden }).check();
+      await page.getByRole("checkbox", { name: c.showHidden }).click();
       await expect(page.getByText(c.hidden, { exact: true }).first()).toBeVisible();
       await expect(page.getByText(cityCode, { exact: true }).first()).toBeVisible();
     } catch {

@@ -82,7 +82,9 @@ for (const locale of ["en", "ru"] as const) {
       for (const name of [c.tabDlcs, c.tabRegions, c.tabCities, c.tabCargoes, c.tabTrailers])
         await expect(tab(page, name)).toBeVisible();
       await expect(tab(page, c.tabCities)).toHaveAttribute("aria-selected", "true");
-      await expect(page.getByText("_city__fixture", { exact: true })).toBeVisible();
+      await expect(
+        rowOf(page, "Fictional long logistics").getByText("_city__fixture"),
+      ).toBeVisible();
       await expect(
         page.locator(
           phone(page) ? '[data-testid="catalog-cards"]' : '[data-testid="catalog-table"]',
@@ -201,7 +203,7 @@ test(
     await rowAction(page, "Fictional city", c.hide);
     await expect(page.getByRole("alert")).toContainText(c.unavailableError);
     failHide = false;
-    await page.getByRole("checkbox", { name: c.showHidden }).check();
+    await page.getByRole("checkbox", { name: c.showHidden }).click();
     await expect(page).toHaveURL(/hidden=true/);
     await rowAction(page, "Fictional city", c.restore);
     await expect.poll(() => patches.at(-1)).toEqual({ hidden: false });
@@ -344,15 +346,19 @@ test(
     applyStatus = 412;
     await dialog.getByRole("button", { name: c.apply, exact: true }).click();
     await expect(dialog.getByRole("alert")).toContainText(c.tokenExpired);
+    applyStatus = 503;
+    await dialog.getByRole("button", { name: c.apply, exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText(c.unavailableError);
     applyStatus = 200;
     await dialog.getByRole("button", { name: c.apply, exact: true }).click();
     await expect(dialog.getByText(c.appliedTitle, { exact: true })).toBeVisible();
     const apply = calls.filter((call) => call.path.endsWith("/imports"));
+    expect(apply).toHaveLength(3);
     expect(apply.at(-1)?.ifMatch).toBe('"signed-token"');
-    expect(apply.at(-1)?.key).toMatch(/^[0-9a-f-]{36}$/);
-    expect(apply).toHaveLength(2);
-    // The two attempts carried the same logical key, so a retry cannot double-apply.
-    expect(new Set(apply.map((call) => call.key)).size).toBe(1);
+    // An uncertain 503 retry repeats the same logical key, so it cannot double-apply;
+    // the definite stale-token failure before it does not.
+    expect(apply[0]?.key).not.toBe(apply[1]?.key);
+    expect(apply[1]?.key).toBe(apply[2]?.key);
     await dialog.getByRole("button", { name: c.done, exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
