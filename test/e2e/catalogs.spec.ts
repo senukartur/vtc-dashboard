@@ -96,14 +96,16 @@ for (const locale of ["en", "ru"] as const) {
         ),
       ).toBeHidden();
       if (locale === "ru")
-        await expect(rowOf(page, "Fictional long logistics").getByText(c.fallback)).toBeVisible();
-      else await expect(page.getByText(c.fallback, { exact: true })).toHaveCount(0);
+        await expect(
+          rowOf(page, "Fictional long logistics").getByText(c.rowFallback),
+        ).toBeVisible();
+      else await expect(page.getByText(c.rowFallback, { exact: true })).toHaveCount(0);
       await expect(page.getByText("Fictional hidden city", { exact: true })).toHaveCount(0);
       await capture(page, info, `lists-${locale}-cities`);
 
       await tab(page, c.tabCargoes).click();
       await expect(page).toHaveURL(/tab=cargoes/);
-      await expect(page.getByText(c.nonHazardous, { exact: true }).first()).toBeVisible();
+      await expect(rowOf(page, "Fictional plain").getByText(c.nonHazardous)).toBeVisible();
       await tab(page, c.tabTrailers).click();
       await expect(page).toHaveURL(/tab=trailers/);
       await tab(page, c.tabDlcs).click();

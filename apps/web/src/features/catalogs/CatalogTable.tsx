@@ -11,7 +11,7 @@ export function RowBadges({ item }: { item: CatalogItem }) {
   return (
     <>
       {item.hidden && <span className="catalog-badge">{t("hidden")}</span>}
-      {item.display.englishFallback && <span className="catalog-badge">{t("fallback")}</span>}
+      {item.display.englishFallback && <span className="catalog-badge">{t("rowFallback")}</span>}
     </>
   );
 }

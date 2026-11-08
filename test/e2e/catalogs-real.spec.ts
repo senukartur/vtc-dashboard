@@ -63,7 +63,7 @@ test(
       await page.goto(`/account/catalogs?game=ats&tab=cities&q=${unique}`);
       await catalogLanguage(page, "ru");
       await expect(
-        page.getByText(catalogTranslations.ru.fallback, { exact: true }).first(),
+        page.getByText(catalogTranslations.ru.rowFallback, { exact: true }).first(),
       ).toBeVisible();
       await catalogLanguage(page);
 

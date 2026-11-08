@@ -386,7 +386,7 @@ test(
     ).toBeVisible();
     state.failNext = 599;
     await save.click();
-    await expect(dialog.getByRole("alert")).toContainText("result is unknown");
+    await expect(dialog.getByRole("alert").filter({ hasText: "result is unknown" })).toBeVisible();
     state.failNext = 599;
     await save.click();
     await expect.poll(() => state.keys.length).toBe(2);
