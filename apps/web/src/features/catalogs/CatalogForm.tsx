@@ -19,6 +19,7 @@ function ParentSelect({
   game,
   id,
   value,
+  initial,
   emptyLabel,
   onChange,
 }: {
@@ -26,10 +27,12 @@ function ParentSelect({
   game: Game;
   id: string;
   value: string | null;
+  /** The row's stored parent, the only hidden parent the form may keep offering. */
+  initial: string | null;
   emptyLabel: string;
   onChange: (value: string | null) => void;
 }) {
-  const { i18n } = useTranslation("catalogs");
+  const { t, i18n } = useTranslation("catalogs");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const query = useCatalogPages(
     ["parent", list, game, locale],
@@ -37,7 +40,9 @@ function ParentSelect({
     { game, locale, includeHidden: "true" },
     listSchema,
   );
-  const items = query.data?.pages.flatMap((p) => p.data.data.items) ?? [];
+  const items = (query.data?.pages.flatMap((p) => p.data.data.items) ?? []).filter(
+    (item) => !item.hidden || item.id === initial,
+  );
   useEffect(() => {
     if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
   }, [query.hasNextPage, query.isFetchingNextPage, query.fetchNextPage]);
@@ -51,7 +56,7 @@ function ParentSelect({
       <option value="">{emptyLabel}</option>
       {items.map((item) => (
         <option key={item.id} value={item.id}>
-          {item.display.label}
+          {item.hidden ? `${item.display.label} · ${t("hidden")}` : item.display.label}
         </option>
       ))}
     </select>
@@ -186,6 +191,7 @@ export function CatalogForm({
               game={game}
               id={`${id}-region`}
               value={regionId}
+              initial={item?.regionId ?? null}
               emptyLabel={t("regionNone")}
               onChange={setRegionId}
             />
@@ -217,6 +223,7 @@ export function CatalogForm({
               game={game}
               id={`${id}-dlc`}
               value={dlcId}
+              initial={item?.dlcId ?? null}
               emptyLabel={t("baseGame")}
               onChange={setDlcId}
             />

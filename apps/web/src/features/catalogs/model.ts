@@ -1,4 +1,6 @@
+import type { TFunction } from "i18next";
 import {
+  type CatalogDTO,
   type CatalogItem,
   type CatalogList,
   type Game,
@@ -46,6 +48,73 @@ export function filterParams(filters: CatalogFilters): URLSearchParams {
   return next;
 }
 export const fallbackBadge = (item: CatalogItem) => item.display.englishFallback;
+
+const importFieldKeys = new Map([
+  ["code", "fieldCode"],
+  ["game", "game"],
+  ["name_en", "fieldNameEn"],
+  ["name_ru", "fieldNameRu"],
+  ["steam_app_id", "fieldSteam"],
+  ["adr_class", "fieldAdr"],
+  ["dlc_code", "fieldDlc"],
+  ["region_code", "fieldRegion"],
+]);
+const importFieldLabel = (t: TFunction<"catalogs">, field: string): string => {
+  const key = importFieldKeys.get(field);
+  return key ? t(key) : field;
+};
+/** A localized dry-run message; codes this build does not know stay readable. */
+export function importIssueText(
+  t: TFunction<"catalogs">,
+  issue: CatalogDTO["CatalogImportIssue"],
+): string {
+  const field = importFieldLabel(t, issue.field);
+  switch (issue.reason) {
+    case "required":
+      return t("issueRequired", { field });
+    case "invalid":
+      return t("issueInvalid", { field });
+    case "too_long":
+      return t("issueTooLong", { field });
+    case "duplicate_in_file":
+      return t("issueDuplicate");
+    case "unknown_reference":
+      if (issue.field === "dlc_code") return t("issueUnknownDlc");
+      if (issue.field === "region_code") return t("issueUnknownRegion");
+      return t("issueUnknownReference", { field });
+    case "hidden_reference":
+      if (issue.field === "dlc_code") return t("issueHiddenDlc");
+      if (issue.field === "region_code") return t("issueHiddenRegion");
+      return t("issueHiddenReference", { field });
+    case "column_count":
+      return t("issueColumnCount");
+    case "invalid_row":
+      return t("issueInvalidRow");
+    case "unknown_field":
+      return t("issueUnknownField", { field: issue.field });
+    default:
+      return t("issueGeneric", { field, reason: issue.reason });
+  }
+}
+export const importChangedText = (t: TFunction<"catalogs">, fields: readonly string[]) =>
+  t("statusChanged", { fields: fields.map((field) => importFieldLabel(t, field)).join(", ") });
+/** Rebuilds dry-run lines from an apply rejection's `line:<n>:<field>` details. */
+export function importLinesFromDetails(details: unknown): CatalogDTO["CatalogImportLine"][] {
+  if (!Array.isArray(details)) return [];
+  const lines = new Map<number, CatalogDTO["CatalogImportIssue"][]>();
+  for (const detail of details as { field?: unknown; code?: unknown }[]) {
+    const match = typeof detail?.field === "string" ? /^line:(\d+):(.+)$/.exec(detail.field) : null;
+    if (!match || typeof detail.code !== "string") continue;
+    const line = Number(match[1]);
+    lines.set(line, [
+      ...(lines.get(line) ?? []),
+      { field: match[2] as string, reason: detail.code },
+    ]);
+  }
+  return [...lines]
+    .sort(([a], [b]) => a - b)
+    .map(([line, issues]) => ({ line, code: null, status: "error", issues, changedFields: [] }));
+}
 
 export const importColumns: Record<CatalogList, readonly string[]> = {
   dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],

@@ -136,7 +136,8 @@
   display: flex;
   gap: 4px;
 }
-.catalog-page .catalog-badge {
+.catalog-page .catalog-badge,
+.catalog-dialog .catalog-badge {
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border-strong);
@@ -264,8 +265,15 @@
   text-align: left;
   vertical-align: top;
 }
-.catalog-dialog .catalog-lines tr[data-status="error"] td {
+.catalog-dialog .catalog-badge[data-status="error"] {
+  border-color: transparent;
+  background: var(--rejected-surface);
   color: var(--destructive);
+}
+.catalog-dialog .catalog-badge[data-status="changed"] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--focus);
 }
 .catalog-dialog .catalog-columns code {
   overflow-wrap: anywhere;

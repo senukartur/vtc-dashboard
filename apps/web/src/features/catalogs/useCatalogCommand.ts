@@ -31,6 +31,7 @@ export function useCatalogCommand() {
   const [pending, setPending] = useState(false),
     [failure, setFailure] = useState<AccountFailure | null>(null),
     [errorCode, setErrorCode] = useState<string | null>(null),
+    [errorDetails, setErrorDetails] = useState<unknown>(null),
     [waitUntil, setWaitUntil] = useState(0),
     [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -58,6 +59,7 @@ export function useCatalogCommand() {
     setPending(true);
     setFailure(null);
     setErrorCode(null);
+    setErrorDetails(null);
     const timer = window.setTimeout(() => ctl.abort(), 30000);
     attempt.current = catalogAttempt(
       options.fingerprint ?? JSON.stringify([path, options.method, body, options.etag]),
@@ -81,10 +83,12 @@ export function useCatalogCommand() {
       });
       if (response.status !== 200 && response.status !== 201) {
         const payload = (await response.json().catch(() => null)) as {
-          error?: { code?: unknown };
+          error?: { code?: unknown; details?: unknown };
         } | null;
-        if (active.current && typeof payload?.error?.code === "string")
+        if (active.current && typeof payload?.error?.code === "string") {
           setErrorCode(payload.error.code);
+          setErrorDetails(payload.error.details ?? null);
+        }
         throw new AccountFailure(
           statusKinds[response.status] ?? "uncertain",
           retryDelay(response.headers.get("Retry-After")),
@@ -117,11 +121,13 @@ export function useCatalogCommand() {
     pending,
     failure,
     errorCode,
+    errorDetails,
     seconds: Math.max(0, Math.ceil((waitUntil - now) / 1000)),
     reset: () => {
       attempt.current = null;
       setFailure(null);
       setErrorCode(null);
+      setErrorDetails(null);
     },
   };
 }

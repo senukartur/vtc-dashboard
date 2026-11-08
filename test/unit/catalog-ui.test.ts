@@ -5,7 +5,10 @@ import {
   catalogTabs,
   fallbackBadge,
   filterParams,
+  importChangedText,
   importColumns,
+  importIssueText,
+  importLinesFromDetails,
   parseFilters,
   templateCsv,
   templateJson,
@@ -163,6 +166,69 @@ test("web schemas accept server shapes and reject unknown or retired fields", ()
   ).toBe(true);
 });
 
+const translate = (locale: "en" | "ru") =>
+  ((key: string, values: Record<string, string> = {}) =>
+    (catalogTranslations[locale] as Record<string, string>)[key]?.replace(
+      /{{(\w+)}}/g,
+      (_, name: string) => values[name] ?? "",
+    ) ?? key) as unknown as Parameters<typeof importIssueText>[0];
+
+test("dry-run results read as localized text and keep unknown codes readable", () => {
+  const en = translate("en"),
+    ru = translate("ru");
+  expect(importIssueText(en, { field: "dlc_code", reason: "unknown_reference" })).toBe(
+    "This game has no source with this code",
+  );
+  expect(importIssueText(ru, { field: "region_code", reason: "hidden_reference" })).toBe(
+    catalogTranslations.ru.issueHiddenRegion,
+  );
+  expect(importIssueText(en, { field: "name_ru", reason: "too_long" })).toBe("Name RU is too long");
+  expect(importIssueText(ru, { field: "code", reason: "required" })).toBe("Не заполнено поле Код");
+  expect(importIssueText(en, { field: "extra_col", reason: "unknown_field" })).toBe(
+    "Unknown column: extra_col",
+  );
+  expect(importIssueText(en, { field: "constructor", reason: "future_reason" })).toBe(
+    "constructor: future_reason",
+  );
+  expect(importChangedText(en, ["name_ru", "dlc_code", "future_field"])).toBe(
+    "Changed fields: Name RU, Source, future_field",
+  );
+});
+
+test("an apply rejection's line details rebuild the dry-run lines", () => {
+  expect(
+    importLinesFromDetails([
+      { field: "line:12:dlc_code", code: "unknown_reference" },
+      { field: "line:3:code", code: "required" },
+      { field: "line:12:name_en", code: "too_long" },
+      { field: "idempotency-key", code: "x" },
+      { field: "line:x:code", code: "required" },
+      { field: "line:4:code" },
+      null,
+    ]),
+  ).toEqual([
+    {
+      line: 3,
+      code: null,
+      status: "error",
+      issues: [{ field: "code", reason: "required" }],
+      changedFields: [],
+    },
+    {
+      line: 12,
+      code: null,
+      status: "error",
+      issues: [
+        { field: "dlc_code", reason: "unknown_reference" },
+        { field: "name_en", reason: "too_long" },
+      ],
+      changedFields: [],
+    },
+  ]);
+  expect(importLinesFromDetails(undefined)).toEqual([]);
+  expect(importLinesFromDetails([])).toEqual([]);
+});
+
 test("catalog strings keep RU/EN parity and name the shared and owner-required text", () => {
   const { en, ru } = catalogTranslations;
   expect(Object.keys(ru).sort()).toEqual(Object.keys(en).sort());
@@ -174,6 +240,8 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
     "emptyList",
     "fallback",
     "rowFallback",
+    "statusError",
+    "issueGeneric",
     "hidden",
     "staffOnly",
     "choose",

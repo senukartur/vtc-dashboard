@@ -4,7 +4,16 @@ import type { CatalogDTO, CatalogList } from "../../shared/catalog-selectors/con
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
-import { digest, downloadText, importColumns, templateCsv, templateJson } from "./model.js";
+import {
+  digest,
+  downloadText,
+  importChangedText,
+  importColumns,
+  importIssueText,
+  importLinesFromDetails,
+  templateCsv,
+  templateJson,
+} from "./model.js";
 import { importPreviewSchema, importResultSchema } from "./transport.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 
@@ -15,6 +24,42 @@ type Step =
   | { step: "file" }
   | { step: "preview"; file: File; preview: Preview }
   | { step: "done"; file: File; result: Result };
+
+function ImportLines({ lines }: { lines: Preview["lines"] }) {
+  const { t } = useTranslation("catalogs");
+  if (!lines.length) return null;
+  return (
+    <div className="catalog-lines">
+      <table>
+        <thead>
+          <tr>
+            <th>{t("colLine")}</th>
+            <th>{t("colCode")}</th>
+            <th>{t("colResult")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line) => (
+            <tr key={line.line} data-status={line.status}>
+              <td>{line.line}</td>
+              <td>
+                <code>{line.code ?? "—"}</code>
+              </td>
+              <td>
+                <span className="catalog-badge" data-status={line.status}>
+                  {t(line.status === "error" ? "statusError" : "willChange")}
+                </span>{" "}
+                {line.status === "error"
+                  ? line.issues.map((issue) => importIssueText(t, issue)).join("; ")
+                  : importChangedText(t, line.changedFields)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export function CatalogImport({
   list,
@@ -74,6 +119,11 @@ export function CatalogImport({
         return null;
     }
   })();
+  // An apply that the server refused reports the lines the dry run did not catch.
+  const failedLines =
+    command.errorCode === "CATALOG_IMPORT_INVALID"
+      ? importLinesFromDetails(command.errorDetails)
+      : [];
   const pick = (files: FileList | null) => {
     const file = files?.[0];
     if (files && files.length === 1 && file) void check(file);
@@ -165,34 +215,7 @@ export function CatalogImport({
                 <span>{t("errors")}</span>
               </div>
             </div>
-            {step.preview.lines.length > 0 && (
-              <div className="catalog-lines">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{t("colLine")}</th>
-                      <th>{t("colCode")}</th>
-                      <th>{t("colResult")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {step.preview.lines.map((line) => (
-                      <tr key={line.line} data-status={line.status}>
-                        <td>{line.line}</td>
-                        <td>
-                          <code>{line.code ?? "—"}</code>
-                        </td>
-                        <td>
-                          {line.status === "error"
-                            ? line.issues.map((i) => `${i.field}: ${i.reason}`).join("; ")
-                            : t("statusChanged", { fields: line.changedFields.join(", ") })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <ImportLines lines={failedLines.length ? failedLines : step.preview.lines} />
             {step.preview.truncated && <p className="catalog-muted">{t("truncated")}</p>}
             {step.preview.errors > 0 && (
               <p role="alert" className="field-error">

@@ -215,6 +215,41 @@ test(
 );
 
 test(
+  "a hidden source is offered only as the row's current value, marked hidden",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const hiddenDlc = "65000000-0000-4000-8000-000000000021";
+    await mockCatalogs(page, true, {
+      rows: {
+        ets2: {
+          dlcs: [
+            catalogItem(dlcId, "Fictional visible pack"),
+            catalogItem(hiddenDlc, "Fictional hidden pack", "en", {
+              hidden: true,
+              display: { ...catalogItem(hiddenDlc, "Fictional hidden pack").display, hidden: true },
+            }),
+          ],
+          cities: [catalogItem(entityId, "Fictional city", "en", { dlcId: hiddenDlc })],
+        },
+      },
+    });
+    await open(page);
+    await rowAction(page, "Fictional city", c.edit);
+    let form = page.getByRole("dialog");
+    await expect(form.locator(`option[value="${hiddenDlc}"]`)).toHaveText(
+      `Fictional hidden pack · ${c.hidden}`,
+    );
+    await expect(form.getByLabel(c.fieldDlc, { exact: true })).toHaveValue(hiddenDlc);
+    await form.getByRole("button", { name: c.cancel, exact: true }).click();
+    await page.getByRole("button", { name: c.addCities, exact: true }).first().click();
+    form = page.getByRole("dialog");
+    await expect(form.locator(`option[value="${dlcId}"]`)).toBeAttached();
+    await expect(form.locator(`option[value="${hiddenDlc}"]`)).toHaveCount(0);
+  },
+);
+
+test(
   "filters live in the URL, the game switch restarts them and search stays literal",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -287,6 +322,16 @@ test(
           return null;
         calls.push({ path, ifMatch: headers["if-match"], key: headers["idempotency-key"] });
         if (path.endsWith("/import-previews")) return previewResponse;
+        if (applyStatus === 422)
+          return {
+            status: 422,
+            json: {
+              error: {
+                code: "CATALOG_IMPORT_INVALID",
+                details: [{ field: "line:4:dlc_code", code: "hidden_reference" }],
+              },
+            },
+          };
         if (applyStatus !== 200)
           return {
             status: applyStatus,
@@ -343,7 +388,10 @@ test(
     await expect(
       dialog.getByText(c.fixAndRetry.split("{{")[0] ?? "", { exact: false }),
     ).toBeVisible();
-    await expect(dialog.getByText("adr_class: invalid", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(c.statusError, { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText("Invalid value in Hazardous cargo", { exact: false }),
+    ).toBeVisible();
     await expect(dialog.getByRole("button", { name: c.apply, exact: true })).toBeDisabled();
     await dialog.getByRole("button", { name: c.otherFile, exact: true }).click();
     // A clean file offers apply; a stale token asks to check again.
@@ -351,6 +399,14 @@ test(
     await dialog.locator('input[type="file"]').setInputFiles(file());
     await expect(dialog.getByText("fixture_changed", { exact: true })).toBeVisible();
     expect(calls.at(-1)).toMatchObject({ path: "/admin/catalogs/cities/import-previews" });
+    await expect(dialog.getByText(c.willChange, { exact: true }).last()).toBeVisible();
+    await expect(dialog.getByText("Changed fields: Name EN", { exact: false })).toBeVisible();
+    applyStatus = 422;
+    await dialog.getByRole("button", { name: c.apply, exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText(c.importInvalid);
+    await expect(dialog.locator(".catalog-lines")).toContainText(c.issueHiddenDlc);
+    await expect(dialog.getByText(c.statusError, { exact: true })).toBeVisible();
+    await expect(dialog.getByText("fixture_changed", { exact: true })).toHaveCount(0);
     applyStatus = 412;
     await dialog.getByRole("button", { name: c.apply, exact: true }).click();
     await expect(dialog.getByRole("alert")).toContainText(c.tokenExpired);
@@ -361,12 +417,13 @@ test(
     await dialog.getByRole("button", { name: c.apply, exact: true }).click();
     await expect(dialog.getByText(c.appliedTitle, { exact: true })).toBeVisible();
     const apply = calls.filter((call) => call.path.endsWith("/imports"));
-    expect(apply).toHaveLength(3);
+    expect(apply).toHaveLength(4);
     expect(apply.at(-1)?.ifMatch).toBe('"signed-token"');
     // An uncertain 503 retry repeats the same logical key, so it cannot double-apply;
-    // the definite stale-token failure before it does not.
+    // the definite 422 and stale-token failures before it do not.
     expect(apply[0]?.key).not.toBe(apply[1]?.key);
-    expect(apply[1]?.key).toBe(apply[2]?.key);
+    expect(apply[1]?.key).not.toBe(apply[2]?.key);
+    expect(apply[2]?.key).toBe(apply[3]?.key);
     await dialog.getByRole("button", { name: c.done, exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
