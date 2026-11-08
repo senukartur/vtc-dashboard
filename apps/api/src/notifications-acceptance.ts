@@ -66,8 +66,6 @@ assert.ok(
     config.manualReports &&
     config.admissions,
 );
-assert.equal(config.catalogs.production, true);
-assert.equal(config.catalogs.synthetic, false);
 assert.equal(config.identity.origin, "https://notifications-acceptance.invalid");
 const unit = createUnitOfWork(config.database);
 const composed = composeIdentity(
@@ -303,30 +301,14 @@ try {
   assert.equal(allocation[0]?.revision, process.env.VTC_REVISION);
   if (mode === "worker-permissions") {
     operationStep = "worker_permissions";
-    const positive = [
-      sql`DELETE FROM catalog_commands WHERE 1=0`,
-      sql`UPDATE catalog_operations SET \`state\`=\`state\`,failure_code=failure_code WHERE 1=0`,
-      sql`UPDATE catalog_artifacts SET content=content,payload_expires_at=payload_expires_at WHERE 1=0`,
-      sql`UPDATE catalog_revisions SET \`state\`=\`state\`,pruned=pruned WHERE 1=0`,
-      sql`DELETE FROM catalog_relations WHERE 1=0`,
-      sql`DELETE FROM catalog_mappings WHERE 1=0`,
-      sql`DELETE FROM catalog_aliases WHERE 1=0`,
-      sql`DELETE FROM catalog_facts WHERE 1=0`,
-      sql`DELETE FROM catalog_changes WHERE 1=0`,
-      sql`DELETE FROM catalog_coverage WHERE 1=0`,
-      sql`DELETE FROM catalog_mapping_issues WHERE 1=0`,
-    ];
-    for (const statement of positive) await unit.run((tx) => unit.client(tx).execute(statement));
     const negative = [
       sql`UPDATE reconciliation_rules SET version=version WHERE 1=0`,
       sql`DELETE FROM reconciliation_rules WHERE 1=0`,
       sql`UPDATE reconciliation_candidates SET evidence=evidence WHERE 1=0`,
       sql`UPDATE trip_facts SET id=id WHERE 1=0`,
       sql`DELETE FROM source_messages WHERE 1=0`,
-      sql`UPDATE catalog_publications SET version=version WHERE 1=0`,
-      sql`UPDATE catalog_revisions SET complete=complete WHERE 1=0`,
-      sql`UPDATE catalog_artifacts SET id=id WHERE 1=0`,
-      sql`UPDATE catalog_facts SET id=id WHERE 1=0`,
+      sql`UPDATE catalog_cities SET hidden=hidden WHERE 1=0`,
+      sql`DELETE FROM catalog_cargoes WHERE 1=0`,
       sql`UPDATE notification_acceptance SET image_id=image_id WHERE singleton=1`,
       sql`INSERT INTO reconciliation_commands (actor_id,operation,\`key\`,fingerprint,result,created_at) VALUES (${Buffer.from(newId())},'merge',${Buffer.from(newId())},${randomBytes(32)},CAST('{}' AS JSON),UTC_TIMESTAMP(3))`,
       sql`INSERT INTO reconciliation_history (reconciliation_id,version,actor_id,operation,reason,snapshot,created_at) VALUES (${Buffer.from(newId())},1,${Buffer.from(newId())},'apply','Fictional forbidden history write',CAST('{}' AS JSON),UTC_TIMESTAMP(3))`,
@@ -337,7 +319,6 @@ try {
         event: "notifications_fixture",
         phase: "worker_permissions",
         result: "pass",
-        allowedNoops: positive.length,
         deniedMutations: negative.length,
       }),
     );

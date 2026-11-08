@@ -317,7 +317,8 @@ class ActivationTests(unittest.TestCase):
         self.assertIn(activation.STAGE_PROFILE, activation.CONTROL_FILES)
         self.assertLessEqual({*activation.STAGE_FLAGS, *activation.STAGE_SETTINGS, *activation.STAGE_KEYS},
                              set(activation.SHARED_KEYS))
-        self.assertEqual(profile['settings']['CATALOGS_SYNTHETIC'], 'false')
+        self.assertFalse(activation.RETIRED_SETTINGS & set(profile['settings']))
+        self.assertLessEqual(activation.RETIRED_SETTINGS, set(activation.SHARED_KEYS))
 
     def test_module_grants_install_only_for_a_configuration_that_enables_modules(self):
         self.stage_profile()
@@ -385,7 +386,6 @@ class ActivationTests(unittest.TestCase):
             self.assertIn('TRIPS_CURSOR_KEY=' + 'c' * 64 + '\n', first)
             self.assertIn('IDENTITY_ENABLED=true\n', first)
             self.assertIn('TELEMETRY_ENABLED=true\n', first)
-            self.assertIn('CATALOGS_SYNTHETIC=false\n', first)
             self.invoke('prepare-stage')
             self.assertEqual(candidate.read_text(), first)
             (self.base / 'state/activation-intent.json').write_text(json.dumps({'pending': True}))
@@ -438,48 +438,47 @@ class ActivationTests(unittest.TestCase):
         self.invoke('rollback')
         self.assertEqual(shared.read_bytes(), original)
 
-    def test_prepare_stage_takes_catalog_trust_only_from_the_private_file(self):
+    def test_prepare_stage_retires_old_catalog_settings_from_a_live_file(self):
         self.stage_profile()
         shared = self.base / 'private/identity-mail.env'
-        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\n'
-                          'CATALOGS_EVIDENCE_FILE=/app/operations/stage-catalog-evidence.json\n')
+        shared.write_text('IDENTITY_ENABLED=true\nMAIL_MODE=disabled\nCATALOGS_SYNTHETIC=false\n'
+                          'CATALOGS_MAX_FILE_BYTES=1048576\nCATALOGS_ARTIFACT_TTL_MS=86400000\n'
+                          'CATALOGS_POLICY_REVISION=1\nCATALOGS_EVIDENCE_BASE64=e30=\n')
         candidate = self.base / 'private/activation-input.env'
         for path in [shared, candidate]:
             path.chmod(0o600)
-        trust = self.base / activation.CATALOG_EVIDENCE
-        records = [{'artifactSha256': 'e' * 64, 'game': 'ets2', 'provenance': [{'attribution': 'Ünïcode, "quoted"'}]}]
-        trust.write_text(json.dumps(records, indent=2))
-        trust.chmod(0o600)
+        activation.prepare_stage(ops)
+        values = activation.private_values(ops, candidate, activation.SHARED_KEYS)
+        for key in activation.RETIRED_SETTINGS:
+            self.assertNotIn(key, values)
+        self.assertEqual(values['CATALOGS_ENABLED'], 'true')
+        self.assertIn('CATALOGS_CURSOR_KEY', values)
 
-        def prepared():
-            activation.prepare_stage(ops)
-            return activation.private_values(ops, candidate, activation.SHARED_KEYS)
+    def test_apply_revokes_grants_on_tables_dropped_by_the_simple_catalogs_migration(self):
+        self.stage_profile()
+        statement = activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
+        self.assertEqual(len(activation.RETIRED_TABLES), 15)
+        self.assertLess(statement.index('REVOKE IF EXISTS'), statement.index('GRANT '))
+        for user in ['vtc_runtime', 'vtc_jobs']:
+            for table in activation.RETIRED_TABLES:
+                self.assertIn(f"REVOKE IF EXISTS ALL PRIVILEGES ON vtc.{table} FROM '{user}'@'%';", statement)
+        for table in ['catalog_dlcs', 'catalog_regions', 'catalog_cities', 'catalog_cargoes', 'catalog_trailers']:
+            self.assertIn(f"GRANT SELECT,INSERT,UPDATE ON vtc.{table} TO 'vtc_runtime'@'%';", statement)
 
-        values = prepared()
-        self.assertNotIn('CATALOGS_EVIDENCE_FILE', values)
-        self.assertEqual(json.loads(base64.b64decode(values['CATALOGS_EVIDENCE_BASE64'])), records)
-        # Without the private file, the candidate trusts nothing, including the retired placeholder.
-        trust.unlink()
-        values = prepared()
-        self.assertNotIn('CATALOGS_EVIDENCE_FILE', values)
-        self.assertNotIn('CATALOGS_EVIDENCE_BASE64', values)
-        before = candidate.read_bytes()
-        for content, mode in [(json.dumps(records), 0o644), ('not json', 0o600), ('[]', 0o600), ('{}', 0o600)]:
-            trust.write_text(content)
-            trust.chmod(mode)
-            with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):
-                activation.prepare_stage(ops)
-            self.assertEqual(candidate.read_bytes(), before)
-        # Valid trust too large for the shared file is refused before a candidate is written.
-        trust.write_text(json.dumps([{'provenance': 'x' * 20000}]))
-        trust.chmod(0o600)
-        with self.assertRaisesRegex(RuntimeError, '^CONFIGURATION_TOO_LARGE$'):
-            activation.prepare_stage(ops)
-        self.assertEqual(candidate.read_bytes(), before)
-        trust.unlink()
-        trust.symlink_to(self.base / 'private/identity-mail.env')
-        with self.assertRaisesRegex(RuntimeError, '^CATALOG_EVIDENCE_INVALID$'):
-            activation.prepare_stage(ops)
+    def test_retired_table_grants_are_tolerated_only_before_apply(self):
+        self.stage_profile()
+        enabled = {'TRIPS_ENABLED': 'true'}
+        rows = [list(row) for row in activation.privilege_rows(activation.matrix(ops, enabled))]
+        stale = [["'vtc_runtime'@'%'", 'vtc', 'catalog_revisions', 'SELECT', 'NO'],
+                 ["'vtc_runtime'@'%'", 'vtc', 'event_catalog_pins', 'INSERT', 'NO'],
+                 ["'vtc_jobs'@'%'", 'vtc', 'catalog_facts', 'DELETE', 'NO']]
+        activation.check_privileges(ops, rows + stale, allow_legacy=True, values=enabled)
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, rows + stale, complete=True, values=enabled)
+        # A stage record from an earlier apply does not keep the retired tables allowed afterwards.
+        (self.base / activation.STAGE_GRANTS_STATE).write_text(json.dumps({'privileges': stale}))
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, rows + stale, complete=True, values=enabled)
 
     def test_prepare_stage_runs_under_the_owned_control_fence_only(self):
         self.stage_profile()

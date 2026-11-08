@@ -1,5 +1,4 @@
 """Explicit root activation controls. Imported only by the fixed operations dispatcher."""
-import base64
 import ipaddress
 import json
 import os
@@ -17,21 +16,25 @@ STAGE_GRANTS_STATE = 'state/stage-grants-installed.json'
 STAGE_FLAGS = {'EXTERNAL_IDENTITIES_ENABLED', 'CATALOGS_ENABLED', 'TRIPS_ENABLED', 'QUALIFICATIONS_ENABLED',
                'TELEMETRY_ENABLED', 'MANUAL_REPORTS_ENABLED', 'EVENTS_ENABLED', 'RECONCILIATION_ENABLED',
                'TRIP_DECISIONS_ENABLED', 'ANALYTICS_ENABLED', 'NOTIFICATIONS_ENABLED'}
-STAGE_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
-                  'CATALOGS_POLICY_REVISION', 'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
+STAGE_SETTINGS = {'TELEMETRY_IP_PER_MINUTE', 'TELEMETRY_GLOBAL_PER_MINUTE',
                   'MANUAL_MAX_FILES_PER_REPORT', 'MANUAL_POLICY_REVISION', 'MANUAL_ORPHAN_GRACE_MS',
                   'MANUAL_EVIDENCE_ROOT', 'MANUAL_MAX_FILE_BYTES', 'MANUAL_MAX_PIXELS',
                   'MANUAL_UPLOAD_TIMEOUT_MS', 'ANALYTICS_REPORTING_TIMEZONE'}
 STAGE_KEYS = {'CATALOGS_CURSOR_KEY', 'TRIPS_CURSOR_KEY', 'QUALIFICATIONS_CURSOR_KEY', 'TELEMETRY_CURSOR_KEY',
               'MANUAL_REPORTS_KEY', 'EVENTS_CURSOR_KEY', 'RECONCILIATION_KEY', 'TRIP_DECISIONS_KEY',
               'ANALYTICS_CURSOR_KEY', 'NOTIFICATIONS_CURSOR_KEY'}
+# Accepted only so an existing file still parses; prepare-stage drops them.
+RETIRED_SETTINGS = {'CATALOGS_SYNTHETIC', 'CATALOGS_MAX_FILE_BYTES', 'CATALOGS_ARTIFACT_TTL_MS',
+                    'CATALOGS_POLICY_REVISION', 'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64'}
 SHARED_KEYS = {'IDENTITY_ENABLED', 'IDENTITY_SECRET', 'IDENTITY_ORIGIN', 'MAIL_MODE',
                'MAIL_ENCRYPTION_KEY', 'MAIL_SENDER', 'MAIL_API_KEY', 'MAIL_TRACKING_DISABLED',
                'ADMISSIONS_ENABLED', 'ADMISSIONS_ENCRYPTION_KEY',
-               *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS,
-               # Catalog trust is private per host. The file setting is accepted only to retire it.
-               'CATALOGS_EVIDENCE_FILE', 'CATALOGS_EVIDENCE_BASE64'}
-CATALOG_EVIDENCE = 'private/catalog-evidence.json'
+               *STAGE_FLAGS, *STAGE_SETTINGS, *STAGE_KEYS, *RETIRED_SETTINGS}
+# Dropped by migration 0019. MySQL keeps grant rows after DROP TABLE, so apply revokes them.
+RETIRED_TABLES = ('catalog_aliases', 'catalog_artifacts', 'catalog_changes', 'catalog_commands', 'catalog_coverage',
+                  'catalog_entities', 'catalog_facts', 'catalog_mapping_issues', 'catalog_mapping_reviews',
+                  'catalog_mappings', 'catalog_operations', 'catalog_publications', 'catalog_relations',
+                  'catalog_revisions', 'event_catalog_pins')
 INGRESS_KEYS = {'VTC_INGRESS_SUBNET', 'VTC_INGRESS_APP_IPV4', 'VTC_INGRESS_PROXY_IPV4'}
 CONTROL_FILES = {'compose.yaml', 'Caddyfile', 'operations.py', 'activation.py', 'activation-grants.json',
                  'identity_acceptance.py', 'ingress_probe.py', 'receive.sh', 'notifications_acceptance.py',
@@ -196,7 +199,8 @@ def quoted_columns(permission):
 def grant_sql(o, schema='vtc', users=None, values=None):
     o.require(re.fullmatch(r'vtc(?:_accept_[a-f0-9]{16})?', schema), 'GRANT_SCHEMA_INVALID')
     users = users or {'runtime': 'vtc_runtime', 'jobs': 'vtc_jobs'}
-    statements = []
+    statements = [f"REVOKE IF EXISTS ALL PRIVILEGES ON {schema}.{table} FROM '{name}'@'%';"
+                  for name in users.values() for table in RETIRED_TABLES]
     for role, tables in matrix(o, values).items():
         name = users[role]
         o.require(re.fullmatch(r'vtc_(?:runtime|jobs|ar_[a-f0-9]{16}|aw_[a-f0-9]{16})', name),
@@ -246,7 +250,9 @@ def privilege_rows(tables_by_role):
 def installed_stage_rows(o):
     """What apply actually installed, which a later control update to the profile cannot change."""
     path = o.BASE / STAGE_GRANTS_STATE
-    return set(map(tuple, json.loads(path.read_text())['privileges'])) if path.exists() else set()
+    if not path.exists():
+        return set()
+    return {tuple(row) for row in json.loads(path.read_text())['privileges'] if row[2] not in RETIRED_TABLES}
 
 
 def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None):
@@ -255,7 +261,9 @@ def check_privileges(o, rows, *, allow_legacy=False, complete=False, values=None
     actual = {row for row in actual if row[1:] != ('global', '*', 'USAGE', 'NO')}
     legacy = ("'vtc_runtime'@'%'", 'vtc', '*', 'SELECT', 'NO')
     # A rollback keeps module grants only where an apply recorded them; any other host matches exactly.
-    allowed = expected | installed_stage_rows(o) | ({legacy} if allow_legacy else set())
+    # Before apply a host may still hold revoke-pending grants on the tables 0019 dropped.
+    retired = {row for row in actual if row[2] in RETIRED_TABLES} if allow_legacy else set()
+    allowed = expected | installed_stage_rows(o) | ({legacy} if allow_legacy else set()) | retired
     o.require(actual <= allowed, 'UNEXPECTED_EFFECTIVE_PRIVILEGES')
     if complete:
         o.require(expected <= actual, 'MISSING_EFFECTIVE_PRIVILEGES')
@@ -279,21 +287,6 @@ def grants(o, revision, values=None):
     check_privileges(o, privileges(o, revision), complete=True, values=values)
 
 
-def catalog_evidence(o, path):
-    """The owner's private trust records, compact so they fit the shared file's size limit."""
-    info = path.lstat()
-    o.require(not path.is_symlink() and path.is_file() and info.st_uid == 0 and
-              not info.st_mode & 0o077 and info.st_size <= 1024 * 1024, 'CATALOG_EVIDENCE_INVALID')
-    try:
-        records = json.loads(path.read_text())
-    except ValueError:
-        raise RuntimeError('CATALOG_EVIDENCE_INVALID') from None
-    o.require(isinstance(records, list) and records and all(isinstance(r, dict) for r in records),
-              'CATALOG_EVIDENCE_INVALID')
-    compact = json.dumps(records, ensure_ascii=False, separators=(',', ':')).encode()
-    return base64.b64encode(compact).decode()
-
-
 def prepare_stage(o):
     """Write the module candidate from the live file; existing keys are never regenerated."""
     shared = o.BASE / 'private/identity-mail.env'
@@ -310,11 +303,8 @@ def prepare_stage(o):
     for key in profile['generatedKeys']:
         # Cursor and command keys must stay stable; a retried preparation reuses them.
         values[key] = values.get(key) or known.get(key) or secrets.token_hex(32)
-    values.pop('CATALOGS_EVIDENCE_FILE', None)
-    values.pop('CATALOGS_EVIDENCE_BASE64', None)
-    trust = o.BASE / CATALOG_EVIDENCE
-    if trust.exists() or trust.is_symlink():
-        values['CATALOGS_EVIDENCE_BASE64'] = catalog_evidence(o, trust)
+    for key in RETIRED_SETTINGS:
+        values.pop(key, None)
     content = ''.join(f'{key}={value}\n' for key, value in values.items())
     # Never write a candidate that validate, and the next preparation, would refuse to read.
     o.require(len(content) <= 16384, 'CONFIGURATION_TOO_LARGE')

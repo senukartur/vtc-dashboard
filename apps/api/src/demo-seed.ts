@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { UnitOfWork } from "@vtc/db";
 import {
-  catalogArtifacts,
-  catalogEntities,
-  catalogFacts,
-  catalogRevisions,
+  catalogCargoes,
+  catalogCities,
+  catalogDlcs,
+  catalogRegions,
+  catalogTrailers,
 } from "@vtc/db/catalogs-schema";
 import { eventRevisions, events } from "@vtc/db/events-schema";
 import { and, company, eq, membership } from "@vtc/db/identity-schema";
@@ -54,18 +55,26 @@ export async function seedDashboard(
     const members = demoMembers.map((member, index) => (index === 0 ? director : member));
     const ownerOf = (id: string) => (id === demoDirector.id ? director.id : id);
     const [installed] = await c
-      .select({ id: catalogRevisions.id })
-      .from(catalogRevisions)
-      .where(eq(catalogRevisions.id, demoId("catalog/ets2")));
+      .select({ id: catalogCities.id })
+      .from(catalogCities)
+      .where(eq(catalogCities.id, demoId("entity/ets2/0")));
     if (adopted) {
       // Any run, reruns included: this fixture is never written beside real members or a real catalog.
       const fixtureMembers = new Set(installed ? members.map(({ id }) => id) : [director.id]);
       const others = await c.select({ id: membership.userId }).from(membership);
       if (others.some((member) => !fixtureMembers.has(member.id)))
         throw new Error("DEMO_REFUSES_EXISTING_MEMBERS");
-      const fixtureCatalogs = new Set(games.map((game) => demoId(`catalog/${game}`)));
-      const catalogs = await c.select({ id: catalogRevisions.id }).from(catalogRevisions);
-      if (catalogs.some((catalog) => !fixtureCatalogs.has(catalog.id)))
+      const fixtureRows = new Set(
+        games.flatMap((game) => [0, 1, 2, 3].map((index) => demoId(`entity/${game}/${index}`))),
+      );
+      const catalogRows = [
+        ...(await c.select({ id: catalogDlcs.id }).from(catalogDlcs)),
+        ...(await c.select({ id: catalogRegions.id }).from(catalogRegions)),
+        ...(await c.select({ id: catalogCities.id }).from(catalogCities)),
+        ...(await c.select({ id: catalogCargoes.id }).from(catalogCargoes)),
+        ...(await c.select({ id: catalogTrailers.id }).from(catalogTrailers)),
+      ];
+      if (catalogRows.some((row) => !fixtureRows.has(row.id)))
         throw new Error("DEMO_REFUSES_EXISTING_CATALOG");
     }
     if (!installed) {
@@ -141,46 +150,10 @@ export async function seedDashboard(
             version: 1,
           });
         }
-        const artifactId = demoId(`artifact/${game}`),
-          revisionId = demoId(`catalog/${game}`);
-        const hash = createHash("sha256").update(`original-demo-labels/${game}`).digest();
-        await c.insert(catalogArtifacts).values({
-          id: artifactId,
-          creatorId: director.id,
-          sha256: hash,
-          byteLength: 0,
-          content: null,
-          expiresAt: demoEpoch,
-          createdAt: demoEpoch,
-        });
-        await c.insert(catalogRevisions).values({
-          id: revisionId,
-          game,
-          version: 1,
-          state: "validated",
-          complete: true,
-          artifactId,
-          artifactSha256: hash,
-          gameBuild: "synthetic-demo",
-          inventoryAsOf: "2026-01-01",
-          synthetic: true,
-          sourceManifestSha256: hash,
-          provenance: [{ source: "Original fictional local fixture; no extracted game data" }],
-          createdAt: demoEpoch,
-        });
       }
     }
-    // Per label, so a database seeded before a label existed gains it before a new trip pins it.
+    // Per row, so a database seeded before a label existed gains it before a new trip refers to it.
     for (const game of games) {
-      const revisionId = demoId(`catalog/${game}`);
-      const present = new Set(
-        (
-          await c
-            .select({ id: catalogFacts.id })
-            .from(catalogFacts)
-            .where(eq(catalogFacts.revisionId, revisionId))
-        ).map(({ id }) => id),
-      );
       const labels =
         game === "ets2"
           ? [
@@ -196,26 +169,36 @@ export async function seedDashboard(
               ["Demo flatbed", "Демо: платформа"],
             ];
       for (const [index, label] of labels.entries()) {
-        const factId = demoId(`catalog-fact/${game}/${index}`);
-        if (present.has(factId)) continue;
-        const entityId = demoId(`entity/${game}/${index}`),
-          kind = index === 3 ? "trailer_type" : index === 2 ? "cargo" : "city";
-        const map = Buffer.from("local-demo");
-        await c
-          .insert(catalogEntities)
-          .values({ id: entityId, game, kind, map, sourceKey: Buffer.from(`demo/${index}`) });
-        await c.insert(catalogFacts).values({
-          id: factId,
-          revisionId,
-          entityId,
+        const id = demoId(`entity/${game}/${index}`);
+        const row = {
+          id,
           game,
-          kind,
-          map,
-          retired: false,
-          labelEn: label[0],
-          labelRu: label[1],
-          packId: Buffer.from("local-demo"),
-        });
+          nameEn: label[0] as string,
+          nameRu: label[1] as string,
+          hidden: false,
+        };
+        const code = Buffer.from(
+          index === 3 ? `demo_body_${game}` : `demo_${index === 2 ? "cargo" : "city"}_${index}`,
+        );
+        if (index === 3) {
+          const [present] = await c
+            .select({ id: catalogTrailers.id })
+            .from(catalogTrailers)
+            .where(eq(catalogTrailers.id, id));
+          if (!present) await c.insert(catalogTrailers).values({ ...row, code });
+        } else if (index === 2) {
+          const [present] = await c
+            .select({ id: catalogCargoes.id })
+            .from(catalogCargoes)
+            .where(eq(catalogCargoes.id, id));
+          if (!present) await c.insert(catalogCargoes).values({ ...row, code });
+        } else {
+          const [present] = await c
+            .select({ id: catalogCities.id })
+            .from(catalogCities)
+            .where(eq(catalogCities.id, id));
+          if (!present) await c.insert(catalogCities).values({ ...row, code });
+        }
       }
     }
     // A member's current assignment decides the credit, including one the director already held.
@@ -319,14 +302,7 @@ export async function seedDashboard(
         sourceRecordId: messageId,
       };
       const pin = (index: number) =>
-        known(
-          {
-            entityId: demoId(`entity/${trip.game}/${index}`),
-            catalogRevisionId: demoId(`catalog/${trip.game}`),
-            factRevisionId: demoId(`catalog-fact/${trip.game}/${index}`),
-          },
-          `demo/catalog/${index}`,
-        );
+        known({ entityId: demoId(`entity/${trip.game}/${index}`) }, `demo/catalog/${index}`);
       const evidence: NormalizedTripEvidence = {
         sourceRecordId: messageId,
         factRevisionId: factId,
@@ -335,7 +311,6 @@ export async function seedDashboard(
         game: trip.game,
         outcome: open ? "open" : "delivered",
         recording: open ? "partial" : "complete",
-        catalogRevisionId: null,
         start: { utc: trip.start, basis: "event", verifiedActual: true },
         end: {
           utc: open ? null : trip.end,

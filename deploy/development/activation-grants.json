@@ -41,7 +41,6 @@
     "event_revisions": ["SELECT", "INSERT"],
     "event_response_revisions": ["SELECT", "INSERT"],
     "event_attendance_revisions": ["SELECT", "INSERT"],
-    "event_catalog_pins": ["SELECT", "INSERT"],
     "event_commands": ["SELECT", "INSERT"]
   },
   "jobs": {

@@ -172,7 +172,7 @@ def worker_failure(output, tables):
         return {'workerCategory': choice(record.get('category'), {'operation_failed', 'commit_outcome_unknown', 'close_failed'}, 'operation_failed'),
                 'category': choice(diagnostic.get('category'), {'operation', 'database', 'assertion'}, 'operation'),
                 'step': choice(diagnostic.get('step'), {'jobs_config', 'jobs_compose', 'jobs_trip_catchup', 'jobs_notification_maintenance',
-                    'jobs_admissions_cleanup', 'jobs_mail_cleanup', 'jobs_catalog_cleanup', 'jobs_manual_cleanup', 'jobs_pass', 'jobs_close'}, 'unknown'),
+                    'jobs_admissions_cleanup', 'jobs_mail_cleanup', 'jobs_manual_cleanup', 'jobs_pass', 'jobs_close'}, 'unknown'),
                 'nativeErrno': errno if type(errno) is int and errno in {1040,1044,1045,1049,1054,1059,1062,1142,1143,1146,1205,1213,1292,1317,1364,1406,1451,1452,2013} else None,
                 'sqlOperation': choice(diagnostic.get('sqlOperation'), {'select', 'insert', 'update', 'delete'}, 'unknown'),
                 'lockingMode': choice(diagnostic.get('lockingMode'), {'for_update', 'for_share', 'none'}, 'unknown'),
@@ -184,7 +184,7 @@ def worker_failure(output, tables):
 def worker_phase(output):
     phase = None
     allowed = {'jobs_compose', 'jobs_trip_catchup', 'jobs_notification_maintenance',
-               'jobs_admissions_cleanup', 'jobs_mail_cleanup', 'jobs_catalog_cleanup',
+               'jobs_admissions_cleanup', 'jobs_mail_cleanup',
                'jobs_manual_cleanup', 'jobs_pass'}
     for line in output[-65536:].decode(errors='replace').splitlines():
         try:
@@ -583,8 +583,7 @@ class Window:
                   'API_TRUSTED_PROXY_IPV4': state['proxyIp'], 'API_HOST': '0.0.0.0', 'API_PORT': '3000',
                   'VTC_NOTIFICATIONS_ACCEPTANCE': 'synthetic-only', 'VTC_NOTIFICATIONS_ACCEPTANCE_RUN': self.run_id,
                   'VTC_NOTIFICATIONS_ACCEPTANCE_IMAGE_ID': self.image_id, 'VTC_NOTIFICATIONS_ACCEPTANCE_REVISION': self.revision,
-                  'CATALOGS_SYNTHETIC': 'false', 'CATALOGS_MAX_FILE_BYTES': '1048576', 'CATALOGS_ARTIFACT_TTL_MS': '86400000',
-                  'CATALOGS_POLICY_REVISION': '1', 'MANUAL_MAX_FILES_PER_REPORT': '5', 'MANUAL_POLICY_REVISION': '1',
+                  'MANUAL_MAX_FILES_PER_REPORT': '5', 'MANUAL_POLICY_REVISION': '1',
                   'MANUAL_ORPHAN_GRACE_MS': '60000', 'SERVE_WEB': 'true'}
         for feature in ['IDENTITY', 'ADMISSIONS', 'CATALOGS', 'TRIPS', 'QUALIFICATIONS', 'MANUAL_REPORTS', 'EVENTS', 'RECONCILIATION', 'TRIP_DECISIONS', 'NOTIFICATIONS']:
             shared[feature + '_ENABLED'] = 'true'
