@@ -217,15 +217,18 @@ export function createCatalogs(
     kind: keyof typeof parentKinds,
     game: Game,
     id: string | null | undefined,
+    current: string | null = null,
   ) {
     if (id === null || id === undefined) return;
     const table = parentTable(kind);
     const [row] = await c(tx)
-      .select({ id: table.id })
+      .select({ id: table.id, hidden: table.hidden })
       .from(table)
       .where(and(eq(table.id, applicationId(id)), eq(table.game, game)))
       .for("share");
-    if (!row) throw catalogError(422, "CATALOG_PARENT_INVALID");
+    // A hidden parent stays valid only as the unchanged link it already was.
+    if (!row || (row.hidden && row.id !== current))
+      throw catalogError(422, "CATALOG_PARENT_INVALID");
   }
   function requireCode(value: string) {
     if (!validCode(value)) throw identityError(422);
@@ -341,19 +344,20 @@ export function createCatalogs(
     }
     async function parentCodes(kind: keyof typeof parentKinds) {
       const table = parentTable(kind);
-      const map = new Map<string, string>();
+      const map = new Map<string, { id: string; hidden: boolean }>();
       for (const game of games) {
         const query = c(tx)
-          .select({ id: table.id, code: table.code })
+          .select({ id: table.id, code: table.code, hidden: table.hidden })
           .from(table)
           .where(eq(table.game, game));
         const found = await (lock ? query.for("share") : query);
-        for (const row of found) map.set(keyOf(game, row.code), row.id);
+        for (const row of found) map.set(keyOf(game, row.code), row);
       }
       return map;
     }
-    const dlcCodes = list === "dlcs" ? new Map<string, string>() : await parentCodes("dlc");
-    const regionCodes = list === "cities" ? await parentCodes("region") : new Map<string, string>();
+    type ParentCodes = Awaited<ReturnType<typeof parentCodes>>;
+    const dlcCodes: ParentCodes = list === "dlcs" ? new Map() : await parentCodes("dlc");
+    const regionCodes: ParentCodes = list === "cities" ? await parentCodes("region") : new Map();
     const seen = new Set<string>();
     const inserts: Record<string, unknown>[] = [];
     const updates: { id: string; set: Record<string, unknown> }[] = [];
@@ -387,17 +391,23 @@ export function createCatalogs(
           adrClass = v.adr_class as AdrClass;
         else issues.push({ field: "adr_class", reason: "invalid" });
       }
+      // A hidden parent stays valid only as the unchanged link the row already has.
+      const linkedRow = game && codeOk ? existing.get(keyOf(game, code)) : undefined;
       let dlcId: string | undefined;
       if (list !== "dlcs" && v.dlc_code && game) {
         const found = dlcCodes.get(keyOf(game, v.dlc_code));
-        if (found) dlcId = found;
-        else issues.push({ field: "dlc_code", reason: "unknown_reference" });
+        if (!found) issues.push({ field: "dlc_code", reason: "unknown_reference" });
+        else if (found.hidden && linkedRow?.dlcId !== found.id)
+          issues.push({ field: "dlc_code", reason: "hidden_reference" });
+        else dlcId = found.id;
       }
       let regionId: string | undefined;
       if (list === "cities" && v.region_code && game) {
         const found = regionCodes.get(keyOf(game, v.region_code));
-        if (found) regionId = found;
-        else issues.push({ field: "region_code", reason: "unknown_reference" });
+        if (!found) issues.push({ field: "region_code", reason: "unknown_reference" });
+        else if (found.hidden && linkedRow?.regionId !== found.id)
+          issues.push({ field: "region_code", reason: "hidden_reference" });
+        else regionId = found.id;
       }
       if (codeOk && game) {
         const key = keyOf(game, code);
@@ -676,15 +686,26 @@ export function createCatalogs(
           { list, id, input },
           async () => {
             const t = common(list);
-            const [row] = await c(tx)
-              .select({ id: t.id, game: t.game })
+            const [row] = (await c(tx)
+              .select({
+                id: t.id,
+                game: t.game,
+                ...(list !== "dlcs" ? { dlcId: t.dlcId } : {}),
+                ...(list === "cities" ? { regionId: catalogCities.regionId } : {}),
+              })
               .from(t)
               .where(eq(t.id, id))
-              .for("update");
+              .for("update")) as {
+              id: string;
+              game: Game;
+              dlcId?: string | null;
+              regionId?: string | null;
+            }[];
             if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
-            if (list !== "dlcs" && "dlcId" in input) await parent(tx, "dlc", row.game, input.dlcId);
+            if (list !== "dlcs" && "dlcId" in input)
+              await parent(tx, "dlc", row.game, input.dlcId, row.dlcId ?? null);
             if (list === "cities" && "regionId" in input)
-              await parent(tx, "region", row.game, input.regionId);
+              await parent(tx, "region", row.game, input.regionId, row.regionId ?? null);
             const fields = fieldsOf(list, input);
             if (Object.keys(fields).length) {
               try {
@@ -737,15 +758,6 @@ export function createCatalogs(
       token: string,
     ): Promise<S["CatalogImportResult"]> {
       const fileSha256 = sha(bytes);
-      let expiresAt: string;
-      try {
-        expiresAt = codec.read(tokenBinding(list, fileSha256, actor), token);
-      } catch {
-        throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
-      }
-      if (!(new Date(expiresAt).getTime() > now().getTime()))
-        throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
-      const rows = parseFile(list, bytes);
       return run(async (tx) => {
         await authority(tx, actor, true);
         const result = await ports.identity.externalCommand(
@@ -754,6 +766,16 @@ export function createCatalogs(
           key,
           { sha256: fileSha256 },
           async () => {
+            // Runs only on a first attempt: a retry with an expired token gets the stored result.
+            let expiresAt: string;
+            try {
+              expiresAt = codec.read(tokenBinding(list, fileSha256, actor), token);
+            } catch {
+              throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+            }
+            if (!(new Date(expiresAt).getTime() > now().getTime()))
+              throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+            const rows = parseFile(list, bytes);
             const plan = await computeImport(tx, list, rows, true);
             if (plan.errors)
               throw importInvalid(plan.lines.filter((line) => line.status === "error"));

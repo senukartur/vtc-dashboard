@@ -180,6 +180,40 @@ test("parents must belong to the same game", async () => {
   ).rejects.toMatchObject({ publicCode: "CATALOG_PARENT_INVALID" });
 });
 
+test("a hidden parent cannot be newly linked but stays valid while unchanged", async () => {
+  const dlc = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "pack",
+    nameEn: "Fictional pack",
+  });
+  const region = await catalogs.create(director, "regions", newId(), {
+    game: "ets2",
+    code: "region",
+    nameEn: "Fictional region",
+  });
+  const linked = await city("linked", "ets2", { dlcId: dlc.id, regionId: region.id });
+  const free = await city("free");
+  await catalogs.patch(director, "dlcs", dlc.id, newId(), { hidden: true });
+  await catalogs.patch(director, "regions", region.id, newId(), { hidden: true });
+  const parentInvalid = { statusCode: 422, publicCode: "CATALOG_PARENT_INVALID" };
+  await expect(city("new_row", "ets2", { dlcId: dlc.id })).rejects.toMatchObject(parentInvalid);
+  await expect(city("new_row", "ets2", { regionId: region.id })).rejects.toMatchObject(
+    parentInvalid,
+  );
+  await expect(
+    catalogs.patch(director, "cities", free.id, newId(), { dlcId: dlc.id }),
+  ).rejects.toMatchObject(parentInvalid);
+  await expect(
+    catalogs.patch(director, "cities", free.id, newId(), { regionId: region.id }),
+  ).rejects.toMatchObject(parentInvalid);
+  const unchanged = await catalogs.patch(director, "cities", linked.id, newId(), {
+    dlcId: dlc.id,
+    regionId: region.id,
+    nameEn: "Fictional renamed",
+  });
+  expect(unchanged).toMatchObject({ dlcId: dlc.id, regionId: region.id });
+});
+
 test("keyset pages keep a stable order across duplicate names and hidden rows filter", async () => {
   for (const code of ["c1", "c2", "c3", "c4", "c5"])
     await catalogs.create(director, "cities", newId(), {
@@ -259,6 +293,42 @@ test("apply is all-or-nothing when a referenced parent disappears after preview"
   ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_IMPORT_INVALID" });
   expect(await count("catalog_cities")).toBe(0);
   expect(await auditCount("catalog.imported")).toBe(0);
+});
+
+test("import rejects a newly linked hidden parent but keeps an unchanged hidden link", async () => {
+  const dlc = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "hidden_pack",
+    nameEn: "Fictional pack",
+  });
+  const linked = await city("linked_row", "ets2", { dlcId: dlc.id });
+  await catalogs.patch(director, "dlcs", dlc.id, newId(), { hidden: true });
+  const preview = await catalogs.previewImport(
+    director,
+    "cities",
+    csv(
+      cityHeader,
+      cityRow("linked_row", "Fictional renamed", "", "", "hidden_pack"),
+      cityRow("new_row", "Fictional new", "", "", "hidden_pack"),
+    ),
+  );
+  expect(preview.token).toBeNull();
+  expect(preview.errors).toBe(1);
+  expect(preview.changed).toBe(1);
+  expect(preview.lines).toContainEqual(
+    expect.objectContaining({
+      code: "new_row",
+      status: "error",
+      issues: [{ field: "dlc_code", reason: "hidden_reference" }],
+    }),
+  );
+  const clean = csv(cityHeader, cityRow("linked_row", "Fictional renamed", "", "", "hidden_pack"));
+  const checked = await catalogs.previewImport(director, "cities", clean);
+  await catalogs.applyImport(director, "cities", clean, newId(), checked.token as string);
+  expect(await catalogs.get(director, "cities", linked.id)).toMatchObject({
+    nameEn: "Fictional renamed",
+    dlcId: dlc.id,
+  });
 });
 
 test("import updates only named values, never deletes and keeps parents and hidden state", async () => {
@@ -359,6 +429,21 @@ test("an import token binds the actor, file and time", async () => {
     catalogs.applyImport(director, "cities", file, newId(), token),
   ).rejects.toMatchObject({ publicCode: "CATALOG_IMPORT_TOKEN_INVALID" });
   expect(await count("catalog_cities")).toBe(0);
+});
+
+test("a retry after the import token expires returns the stored summary", async () => {
+  const file = csv(cityHeader, cityRow("retry_row"));
+  const preview = await catalogs.previewImport(director, "cities", file);
+  const token = preview.token as string;
+  const key = newId();
+  const first = await catalogs.applyImport(director, "cities", file, key, token);
+  instant += 30 * 60 * 1000 + 1000;
+  await expect(catalogs.applyImport(director, "cities", file, key, token)).resolves.toEqual(first);
+  await expect(
+    catalogs.applyImport(director, "cities", file, newId(), token),
+  ).rejects.toMatchObject({ statusCode: 412, publicCode: "CATALOG_IMPORT_TOKEN_INVALID" });
+  expect(await count("catalog_cities")).toBe(1);
+  expect(await auditCount("catalog.imported")).toBe(1);
 });
 
 test("HTTP enforces read permission, staff writes, CSRF and import size", async () => {
