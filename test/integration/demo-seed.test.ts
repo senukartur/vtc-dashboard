@@ -4,12 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createUnitOfWork, runMigrations, type UnitOfWork } from "@vtc/db";
-import {
-  catalogArtifacts,
-  catalogEntities,
-  catalogFacts,
-  catalogRevisions,
-} from "@vtc/db/catalogs-schema";
+import { catalogDlcs, catalogTrailers } from "@vtc/db/catalogs-schema";
 import { company, eq } from "@vtc/db/identity-schema";
 import { and, qualificationAssignments, qualificationStates } from "@vtc/db/qualifications-schema";
 import { sql, tripContributions, trips } from "@vtc/db/trips-schema";
@@ -26,6 +21,7 @@ import {
 import { seedDashboard } from "../../apps/api/src/demo-seed.ts";
 import { createAnalytics } from "../../apps/api/src/modules/analytics/service.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
+import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import { createIdentity } from "../../apps/api/src/modules/identity/service.ts";
 import {
@@ -37,7 +33,6 @@ import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/tel
 import { createTrips } from "../../apps/api/src/modules/trips/service.ts";
 import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { catalogEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
   guardedSettings,
@@ -46,7 +41,6 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
-import { completeCatalogImport } from "../support/catalog-import-fixture.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -68,12 +62,6 @@ function stageEnvironment(evidenceRoot: string) {
     readFileSync(new URL("../../deploy/development/stage-features.json", import.meta.url), "utf8"),
   ) as { flags: string[]; settings: Record<string, string>; generatedKeys: string[] };
   const database = guardedSettings();
-  // Real trust is private per host, so the profile names none. The image keeps the placeholder
-  // file because an earlier configuration that names it is still a rollback target.
-  expect(profile.settings.CATALOGS_EVIDENCE_FILE).toBeUndefined();
-  expect(readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8")).toContain(
-    "deploy/development/stage-catalog-evidence.json ./operations/",
-  );
   return {
     NODE_ENV: "production",
     SERVE_WEB: "false",
@@ -88,9 +76,6 @@ function stageEnvironment(evidenceRoot: string) {
     MYSQL_PASSWORD: database.password,
     ...Object.fromEntries(profile.flags.map((flag) => [flag, "true"])),
     ...profile.settings,
-    CATALOGS_EVIDENCE_FILE: fileURLToPath(
-      new URL("../../deploy/development/stage-catalog-evidence.json", import.meta.url),
-    ),
     MANUAL_EVIDENCE_ROOT: evidenceRoot,
     ...Object.fromEntries(
       profile.generatedKeys.map((key) => [key, randomBytes(32).toString("hex")]),
@@ -116,19 +101,7 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
     addedEvents: 0,
   });
   const cursorKey = randomBytes(32).toString("hex");
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey,
-      maxFileBytes: 1000000,
-      artifactTtlMs: 60000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-  );
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity });
   const tripService = createTrips(unit, { cursorKey }, { identity, catalogs });
   const qualifications = createQualifications(
     unit,
@@ -210,12 +183,11 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
         .set({ directorUserId: originalId })
         .where(eq(company.singleton, 1)),
     );
-    // A database seeded before the trailer label existed gains it before a later rerun pins it.
+    // A demo list row removed since the last run is restored before a rerun uses it.
     await unit.run(async (tx) => {
       const client = unit.client(tx);
       await client.execute(sql`SET FOREIGN_KEY_CHECKS = 0`);
-      await client.delete(catalogFacts).where(eq(catalogFacts.id, demoId("catalog-fact/ets2/3")));
-      await client.delete(catalogEntities).where(eq(catalogEntities.id, demoId("entity/ets2/3")));
+      await client.delete(catalogTrailers).where(eq(catalogTrailers.id, demoId("entity/ets2/3")));
       await client.execute(sql`SET FOREIGN_KEY_CHECKS = 1`);
     });
     const later = await seedDashboard(
@@ -233,7 +205,7 @@ test("local demo feeds real dashboard APIs, preserves reruns and refuses another
 test("stage profile validates in production, adopts a bootstrapped company and accepts a trip", async () => {
   const evidenceRoot = mkdtempSync(join(tmpdir(), "vtc-stage-seed-"));
   const config = readConfig(stageEnvironment(evidenceRoot));
-  expect(config.catalogs).toMatchObject({ production: true, synthetic: false });
+  expect(config.catalogs).toMatchObject({ cursorKey: expect.any(String) });
   if (!config.identity) throw new Error("SYNTHETIC_IDENTITY_REQUIRED");
   const composed = composeIdentity(
     unit,
@@ -271,35 +243,17 @@ test("stage profile validates in production, adopts a bootstrapped company and a
   };
   const app = await createApp({ checkReadiness: async () => true, ...composed });
   try {
-    const addCatalog = (creatorId: string) =>
+    const addCatalog = () =>
       unit.run(async (tx) => {
-        const c = unit.client(tx),
-          artifactId = randomUUID(),
-          sha256 = createHash("sha256").update("existing-catalog").digest();
-        await c.insert(catalogArtifacts).values({
-          id: artifactId,
-          creatorId,
-          sha256,
-          byteLength: 0,
-          content: null,
-          expiresAt: demoEpoch,
-          createdAt: demoEpoch,
-        });
-        await c.insert(catalogRevisions).values({
-          id: randomUUID(),
-          game: "ets2",
-          version: 1,
-          state: "validated",
-          complete: true,
-          artifactId,
-          artifactSha256: sha256,
-          gameBuild: "existing-build",
-          inventoryAsOf: "2026-01-01",
-          synthetic: false,
-          sourceManifestSha256: sha256,
-          provenance: [{ source: "Fictional existing catalog" }],
-          createdAt: demoEpoch,
-        });
+        await unit
+          .client(tx)
+          .insert(catalogDlcs)
+          .values({
+            id: randomUUID(),
+            game: "ets2",
+            code: Buffer.from(`fixture_existing_pack_${randomUUID()}`),
+            nameEn: "Fictional existing pack",
+          });
       });
     const addMember = () =>
       unit.run((tx) =>
@@ -316,7 +270,7 @@ test("stage profile validates in production, adopts a bootstrapped company and a
     await expect(seedDashboard(unit, identity, passwordHash)).rejects.toThrow(
       "DEMO_REFUSES_EXISTING_COMPANY",
     );
-    await addCatalog(userId);
+    await addCatalog();
     await expect(
       seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
@@ -432,7 +386,7 @@ test("stage profile validates in production, adopts a bootstrapped company and a
     expect(decision.statusCode).toBe(200);
 
     // A rerun also refuses once a real member or catalog sits beside the fixture.
-    await addCatalog(directorId);
+    await addCatalog();
     await expect(
       seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
@@ -447,14 +401,11 @@ test("stage profile validates in production, adopts a bootstrapped company and a
   }
 }, 180000);
 
-test("Stage placeholder catalog publishes in production mode and telemetry resolves to ordinary acceptance", async () => {
+test("Stage telemetry resolves against listed rows and stays conservative for a partial client trip", async () => {
   const evidenceRoot = mkdtempSync(join(tmpdir(), "vtc-stage-catalog-"));
   const environment = stageEnvironment(evidenceRoot);
   const config = readConfig(environment);
-  expect(config.catalogs).toMatchObject({ production: true, synthetic: false });
-  expect(() => readConfig({ ...environment, CATALOGS_SYNTHETIC: "true" })).toThrow(
-    "CATALOGS_SYNTHETIC",
-  );
+  expect(config.catalogs).toMatchObject({ cursorKey: expect.any(String) });
   if (!config.identity) throw new Error("SYNTHETIC_IDENTITY_REQUIRED");
   const composed = composeIdentity(
     unit,
@@ -550,111 +501,36 @@ test("Stage placeholder catalog publishes in production mode and telemetry resol
   };
 
   try {
-    // Before any publication a trip cannot be accepted, whatever staff do.
+    // Before any list rows exist the fixture cannot be recognized, whatever staff do.
     const early = await receive();
     expect((await review(early.tripId)).json().data.acceptance.mode).toBe("unavailable");
 
-    const revisions = new Map<string, string>();
-    for (const game of ["ets2", "ats"] as const) {
-      const bytes = readFileSync(
-        new URL(`../../deploy/development/stage-catalog-${game}.json`, import.meta.url),
-      );
-      const artifact = await catalogs.upload(actor, randomUUID(), bytes);
-      const operation = await catalogs.import(actor, randomUUID(), {
-        artifactId: artifact.id,
-        sha256: artifact.sha256,
-        game,
-      });
-      const { resultId } = await completeCatalogImport(
-        operation.id,
-        {
-          read: (id) => catalogs.operation(actor, id),
-          pass: (signal) => runPass(composed.jobsQueue, signal),
-        },
-        { deadlineAt: performance.now() + 25000 },
-      );
-      const candidate = await catalogs.detail(actor, resultId);
-      expect(candidate.sourceReviewComplete).toBe(true);
-      await catalogs.publish(actor, resultId, randomUUID(), candidate.version, {
-        expectedPublicationVersion: candidate.publicationVersion,
-        reason: "Stage placeholder catalog",
-      });
-      revisions.set(game, resultId);
-    }
-    // The seed never writes beside a catalog that is not its own, reruns included.
+    for (const [list, code, nameEn] of [
+      ["cities", "fixture_north", "Fictional north"],
+      ["cities", "fixture_south", "Fictional south"],
+      ["cargoes", "fixture_crates", "Fictional crates"],
+      ["trailers", "fixture_box", "Fictional box"],
+    ] as const)
+      await catalogs.create(actor, list, randomUUID(), { game: "ets2", code, nameEn });
+
+    // The seed never writes beside rows that are not its own, reruns included.
     await expect(
       seedDashboard(unit, identity, passwordHash, new Date(), { adoptCompany: true }),
     ).rejects.toThrow("DEMO_REFUSES_EXISTING_CATALOG");
-    const catalogRevisionId = revisions.get("ets2") as string;
-    const pick = async (kind: string, label: string) => {
-      const { items } = await catalogs.entities(actor, {
-        revisionId: catalogRevisionId,
-        kind,
-        locale: "en",
-      });
-      const found = items.find((item) => item.display.label === label);
-      if (!found) throw new Error("SYNTHETIC_ENTITY_MISSING");
-      return found.id;
-    };
-    const selection = {
-      catalogRevisionId,
-      originCityId: await pick("city", "Stage placeholder origin"),
-      destinationCityId: await pick("city", "Stage placeholder destination"),
-      cargoId: await pick("cargo", "Stage placeholder cargo"),
-      trailerTypeId: await pick("trailer_type", "Stage placeholder trailer"),
-    };
 
-    const resolve = async (tripId: string, changes: Record<string, string>, author = director) => {
-      const before = await review(tripId);
-      expect(before.json().data.acceptance.mode).toBe("unavailable");
-      const proposed = await command(
-        author,
-        `/api/v1/trips/${tripId}/resolution-proposals`,
-        before.headers.etag,
-        { reason: "Stage check of a client integration trip", evidenceIds: [], ...changes },
-      );
-      expect(proposed.statusCode).toBe(201);
-      const proposal = await app.inject({
-        method: "GET",
-        url: `/api/v1/trips/${tripId}/proposals/${proposed.json().data.id}`,
-        headers: { cookie: deputy, origin },
-      });
-      const approved = await command(
-        deputy,
-        `/api/v1/trips/${tripId}/proposals/${proposed.json().data.id}/decisions`,
-        proposal.headers.etag,
-        {
-          decision: "approve",
-          reviewedRevisionId: proposal.json().data.revisionId,
-          reason: "Second reviewer confirmed the Stage check",
-        },
-      );
-      expect(approved.statusCode).toBe(200);
-      expect((await review(tripId)).json().data.acceptance).toEqual({
-        mode: "ordinary",
-        blockedReasonCodes: [],
-      });
-      const [row] = await unit.run((tx) =>
-        unit
-          .client(tx)
-          .select({ decision: trips.decision })
-          .from(trips)
-          .where(eq(trips.id, tripId)),
-      );
-      expect(row?.decision).toBe("accepted");
-    };
+    // A complete fixture trip is recognized from its telemetry alone, even without a build.
+    const fixture = await receive((payload) => {
+      const absent = { available: false, reason: "not-observed" } as const;
+      payload.snapshot.context.gameBuild = absent;
+      payload.snapshot.context.mapId = absent;
+    });
+    expect((await review(fixture.tripId)).json().data.acceptance).toEqual({
+      mode: "ordinary",
+      blockedReasonCodes: [],
+    });
 
-    // The committed fixture sends no game build, so its identifiers cannot resolve on their own.
-    const fixture = await receive();
-    expect((await review(fixture.tripId)).json().data.acceptance.blockedReasonCodes).toEqual([
-      "cargo_unknown",
-      "destination_unknown",
-      "origin_unknown",
-      "trailer_context_unknown",
-    ]);
-    await resolve(fixture.tripId, selection);
-
-    // The shape ET-103a projects today: no build or map, incomplete trailers and a quality reason.
+    // The shape the desktop client projects today: no build or map, incomplete trailers and a
+    // quality reason. Facts resolve, but the trip stays conservative for human review.
     // The owner's client is bound to the director, who cannot review their own trip.
     const client = await receive((payload) => {
       const absent = { available: false, reason: "not-observed" } as const;
@@ -664,15 +540,18 @@ test("Stage placeholder catalog publishes in production mode and telemetry resol
       payload.snapshot.evidence.ruleContextComplete = false;
       payload.snapshot.evidence.reasons = ["catalog-context-unavailable"];
     }, actor.userId);
-    expect((await review(client.tripId)).json().data.acceptance.blockedReasonCodes).toEqual([
-      "actual_distance_unknown",
-      "cargo_unknown",
-      "destination_unknown",
-      "origin_unknown",
-      "trailer_context_unknown",
-      "whole_trip_distance_unknown",
-    ]);
-    await resolve(client.tripId, { ...selection, actualDistanceM: "123400" }, dispatcher);
+    const blocked: string[] = (await review(client.tripId)).json().data.acceptance
+      .blockedReasonCodes;
+    for (const reason of ["cargo_unknown", "destination_unknown", "origin_unknown"])
+      expect(blocked).not.toContain(reason);
+    const [clientRow] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ decision: trips.decision })
+        .from(trips)
+        .where(eq(trips.id, client.tripId)),
+    );
+    expect(clientRow?.decision).toBe("pending_review");
   } finally {
     await app.close();
     rmSync(evidenceRoot, { recursive: true, force: true });
