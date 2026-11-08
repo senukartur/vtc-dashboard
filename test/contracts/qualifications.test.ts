@@ -10,7 +10,7 @@ const sample = {
     cargoMassKg: null,
     trailerTypeIds: [null],
     trailersComplete: false,
-    adr: { status: "unknown", entityId: null },
+    adr: { status: "unknown", adrClass: null },
   },
 };
 test("preview wire facts and safe results are closed, bounded and carry no decision authority", () => {

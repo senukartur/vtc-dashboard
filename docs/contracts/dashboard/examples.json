@@ -5380,7 +5380,7 @@
           "trailersComplete": false,
           "adr": {
             "status": "unknown",
-            "entityId": null
+            "adrClass": null
           }
         }
       },

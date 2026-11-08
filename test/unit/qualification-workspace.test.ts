@@ -21,13 +21,13 @@ const input = (mass: string | null = "10"): S["QualificationPreviewInput"] => ({
   rules: [
     { type: "max_mass", maxKg: "10" },
     { type: "allowed_trailer_types", entityIds: [id] },
-    { type: "allowed_adr_categories", entityIds: [id] },
+    { type: "allowed_adr_categories", classes: ["2"] },
   ],
   sample: {
     cargoMassKg: mass,
     trailerTypeIds: [id],
     trailersComplete: true,
-    adr: { status: "known", entityId: id },
+    adr: { status: "known", adrClass: "2" },
   },
 });
 test("hypothetical preview preserves exact equality, missing facts and failure precedence without mutable evidence", () => {
@@ -46,10 +46,10 @@ test("hypothetical preview preserves exact equality, missing facts and failure p
   missing.sample.trailerTypeIds = [other];
   expect(previewRules(missing).outcome).toBe("fail");
   const nonhazardous = input();
-  nonhazardous.sample.adr = { status: "non_hazardous", entityId: null };
-  nonhazardous.rules = [{ type: "allowed_adr_categories", entityIds: [] }];
+  nonhazardous.sample.adr = { status: "non_hazardous", adrClass: null };
+  nonhazardous.rules = [{ type: "allowed_adr_categories", classes: [] }];
   expect(previewRules(nonhazardous).outcome).toBe("pass");
-  nonhazardous.sample.adr = { status: "unknown", entityId: null };
+  nonhazardous.sample.adr = { status: "unknown", adrClass: null };
   expect(previewRules(nonhazardous).outcome).toBe("unknown");
   const original = input(),
     before = structuredClone(original);
@@ -76,7 +76,7 @@ test("publication and preview share lossless bounds and unique supported conditi
     validateDraftRules([{ type: "max_mass", maxKg: "99999999999999999999.999999999999999999" }]),
   ).not.toThrow();
   const bad = input();
-  bad.sample.adr = { status: "known", entityId: null };
+  bad.sample.adr = { status: "known", adrClass: null };
   expect(() => previewRules(bad)).toThrow();
 });
 test("form values retain exact precision and distinguish unset from zero; UTC fields ignore browser timezone", () => {

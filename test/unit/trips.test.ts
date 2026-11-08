@@ -9,6 +9,7 @@ import {
 } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type {
   AdapterContext,
+  AdrClass,
   CatalogPort,
 } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import { manualAdapter } from "../../apps/api/src/modules/sources/contracts/manual.ts";
@@ -252,99 +253,121 @@ test("valid terminal distance uncertainty remains separate from unchanged verifi
     });
   }
 });
-test("catalog normalization pins a single publication, uses exact IDs, keeps ambiguous and missing mappings unknown", async () => {
-  const revisionId = newId(),
-    entityId = newId(),
-    factId = newId();
-  let pointerReads = 0;
+test("telemetry normalization resolves exact codes, ignores the game build and keeps unknowns unknown", async () => {
+  const entityId = newId();
+  const lookups: unknown[] = [];
   const catalogs: CatalogPort = {
-    async publishedInTransaction(_tx, _game, build) {
-      pointerReads++;
-      expect(build).toBe("synthetic-build");
-      return revisionId;
-    },
     async resolveInTransaction(_tx, p) {
-      expect(p.revisionId).toBe(revisionId);
-      expect(p.label).toBeNull();
-      return p.sourceId === "fixture_north"
-        ? { status: "resolved", entityId, factRevisionId: factId }
-        : { status: "ambiguous", candidateIds: [newId(), newId()] };
+      lookups.push(p);
+      return p.code === "fixture_north"
+        ? { status: "resolved", id: entityId, adrClass: null }
+        : { status: "unknown", reasonCode: "unknown_source_id" };
     },
-    async pinnedInTransaction() {
-      return null;
+    async selectionsInTransaction() {
+      return new Map();
     },
   };
+  const absent = { available: false, reason: "not-observed" } as const;
   const p = input();
-  p.snapshot.context.gameBuild = { available: true, value: "synthetic-build" };
+  p.snapshot.context.gameBuild = absent;
+  p.snapshot.context.mapId = absent;
   const f = await telemetryAdapter.normalize(p, { ...context(), catalogs });
-  expect(pointerReads).toBe(1);
-  expect(f.origin).toMatchObject({
-    status: "known",
-    value: { entityId, catalogRevisionId: revisionId, factRevisionId: factId },
-  });
-  expect(f.destination).toMatchObject({ status: "unknown", reasonCode: "catalog_ambiguous" });
-  const missingBuild = await telemetryAdapter.normalize(input(), { ...context(), catalogs });
-  expect(missingBuild.origin).toMatchObject({
+  expect(lookups).toContainEqual({ game: "ets2", kind: "city", code: "fixture_north" });
+  expect(f.origin).toMatchObject({ status: "known", value: { entityId } });
+  expect(f.destination).toMatchObject({ status: "unknown", reasonCode: "unknown_source_id" });
+  const withoutPort = await telemetryAdapter.normalize(input(), context());
+  expect(withoutPort.origin).toMatchObject({
     status: "unknown",
-    reasonCode: "catalog_build_unknown",
+    reasonCode: "catalog_unavailable",
   });
-  expect(pointerReads).toBe(1);
 });
-test("manual adapter requires immutable validated references and never supplies source times or acceptance", async () => {
+test("manual adapter validates selected rows and never supplies source times or acceptance", async () => {
   const reportId = newId(),
     revisionId = newId(),
-    catalogRevisionId = newId(),
     originId = newId(),
     destinationId = newId(),
     cargoId = newId(),
     trailerTypeId = newId();
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
   const p = {
+    format: 2 as const,
     reportId,
     revisionId,
     revision: 1,
-    game: "ets2",
-    catalogRevisionId,
-    originId,
-    destinationId,
-    cargoId,
-    trailerTypeId,
-    cargoMassKg: "0",
-    actualDistanceM: "1.250",
-    evidenceIds: [newId()],
+    fields: {
+      game: "ets2" as const,
+      origin: resolved(originId),
+      destination: resolved(destinationId),
+      cargo: resolved(cargoId),
+      trailerType: resolved(trailerTypeId),
+      cargoMassKg: "0",
+      actualDistanceM: "1.25",
+      evidenceIds: [newId()],
+      eventId: null,
+      comment: null,
+    },
   };
   expect(() => manualAdapter.identity({ ...p, accepted: true })).toThrow();
-  expect(() => manualAdapter.identity({ ...p, evidenceIds: [] })).toThrow();
-  expect(() => manualAdapter.identity({ ...p, actualDistanceM: "1e999999999" })).toThrow(
-    "INVALID_NONNEGATIVE_DECIMAL",
-  );
-  const kinds = new Map([
+  expect(() =>
+    manualAdapter.identity({ ...p, fields: { ...p.fields, evidenceIds: [] } }),
+  ).toThrow();
+  expect(() =>
+    manualAdapter.identity({ ...p, fields: { ...p.fields, actualDistanceM: "1e999999999" } }),
+  ).toThrow("INVALID_MANUAL_SOURCE");
+  expect(() =>
+    manualAdapter.identity({ ...p, fields: { ...p.fields, catalogRevisionId: newId() } }),
+  ).toThrow("INVALID_MANUAL_SOURCE");
+  let cargoClass: AdrClass | null = null;
+  const kinds = new Map<string, "city" | "cargo" | "trailer">([
     [originId, "city"],
     [destinationId, "city"],
     [cargoId, "cargo"],
-    [trailerTypeId, "trailer_type"],
+    [trailerTypeId, "trailer"],
   ]);
   const catalogs: CatalogPort = {
-    async publishedInTransaction() {
-      return catalogRevisionId;
-    },
     async resolveInTransaction() {
       return { status: "unknown", reasonCode: "unused" };
     },
-    async pinnedInTransaction(_tx, _r, id) {
-      return {
-        id: newId(),
-        entityId: id,
-        game: "ets2",
-        kind: kinds.get(id) ?? "invalid",
-        adrCategoryId: null,
-      };
+    async selectionsInTransaction(_tx, selections) {
+      return new Map(
+        selections.flatMap(({ id }) => {
+          const kind = kinds.get(id);
+          return kind
+            ? [
+                [
+                  id,
+                  {
+                    id,
+                    game: "ets2" as const,
+                    kind,
+                    hidden: false,
+                    adrClass: kind === "cargo" ? cargoClass : null,
+                  },
+                ],
+              ]
+            : [];
+        }),
+      );
     },
   };
   const f = await manualAdapter.normalize(p, { ...context(), catalogs });
   expect(f.start.utc).toBeNull();
   expect(f.end.verifiedActual).toBe(false);
   expect(f.actualDistanceM).toMatchObject({ value: "1.25" });
+  expect(f.adrCategory).toMatchObject({ status: "unknown", reasonCode: "cargo_not_adr" });
+  expect(f.trailers).toMatchObject({
+    complete: true,
+    items: [{ value: { entityId: trailerTypeId } }],
+  });
   expect(f.reasonCodes).toContain("manual_review_required");
+  cargoClass = "3";
+  await expect(manualAdapter.normalize(p, { ...context(), catalogs })).resolves.toMatchObject({
+    adrCategory: { status: "known", value: "3", sourceField: "catalog.cargo.adrClass" },
+  });
+  kinds.set(cargoId, "city");
+  await expect(manualAdapter.normalize(p, { ...context(), catalogs })).rejects.toThrow(
+    "INVALID_MANUAL_SELECTION",
+  );
 });
 test("trip event registry is closed and contains safe references only", () => {
   const sourceRecordId = newId(),

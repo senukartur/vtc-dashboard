@@ -69,7 +69,7 @@ describe("qualification levels model", () => {
       ruleSummary([
         { type: "max_mass", maxKg: "10" },
         { type: "allowed_trailer_types", entityIds: [] },
-        { type: "allowed_adr_categories", entityIds: ids },
+        { type: "allowed_adr_categories", classes: ["1", "2", "3"] },
       ]),
     ).toEqual({
       mass: { kind: "value", maxKg: "10" },

@@ -1,7 +1,8 @@
 import type {
+  AdrClass,
   Fact,
   NormalizedTripEvidence,
-  PinnedEntity,
+  TripEntity,
 } from "../../../apps/api/src/modules/sources/contracts/evidence.js";
 import type { EvaluationContext } from "../../../apps/api/src/modules/qualification-rules/contracts.js";
 import { SYNTHETIC_IDS } from "./synthetic-rules.js";
@@ -34,15 +35,9 @@ export function pinnedEntityFact(
   entityId: string,
   kind = "entity",
   field = "synthetic.pinned",
-): Fact<PinnedEntity> {
-  return knownFact(
-    {
-      entityId,
-      catalogRevisionId: "cat-rev-synthetic-001",
-      factRevisionId: `fact-${kind}-001`,
-    },
-    field,
-  );
+): Fact<TripEntity> {
+  void kind;
+  return knownFact({ entityId }, field);
 }
 
 /**
@@ -59,7 +54,6 @@ export function createSyntheticTripEvidence(
     game: "ets2",
     outcome: "delivered",
     recording: "complete",
-    catalogRevisionId: "cat-rev-synthetic-001",
     start: {
       utc: "2026-10-21T10:00:00.000Z",
       basis: "event",
@@ -93,7 +87,7 @@ export function createSyntheticTripEvidence(
         pinnedEntityFact(SYNTHETIC_IDS.TRAILER_STANDARD, "trailer_type", "snapshot.trailers.0"),
       ],
     },
-    adrCategory: unknownFact<PinnedEntity>("cargo_not_adr"), // non-ADR cargo
+    adrCategory: unknownFact<AdrClass>("cargo_not_adr"), // non-ADR cargo
     ruleContextComplete: true,
     reasonCodes: [],
   };
@@ -118,7 +112,6 @@ export function createSyntheticManualEvidence(
     game: "ets2",
     outcome: "delivered",
     recording: "unknown",
-    catalogRevisionId: "cat-rev-synthetic-001",
     start: { utc: null, basis: "unknown", verifiedActual: false },
     end: { utc: null, basis: "unknown", verifiedActual: false },
     origin: pinnedEntityFact("00000000-0000-4000-8000-000000000010", "city", "manual.originId"),
@@ -149,7 +142,7 @@ export function createSyntheticManualEvidence(
         pinnedEntityFact(SYNTHETIC_IDS.TRAILER_STANDARD, "trailer_type", "manual.trailerTypeId"),
       ],
     },
-    adrCategory: unknownFact<PinnedEntity>("cargo_not_adr"),
+    adrCategory: unknownFact<AdrClass>("cargo_not_adr"),
     ruleContextComplete: false,
     reasonCodes: ["manual_review_required", "manual_times_unknown"],
   };

@@ -32,7 +32,7 @@ async function fact(): Promise<NormalizedTripEvidence> {
   for (const field of ["origin", "destination", "cargo"] as const)
     f[field] = {
       status: "known",
-      value: { entityId: newId(), factRevisionId: newId(), catalogRevisionId: newId() },
+      value: { entityId: newId() },
       sourceRecordId: f.sourceRecordId,
       sourceField: `synthetic.${field}`,
     };

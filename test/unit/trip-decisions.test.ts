@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { PinnedEntity } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
+import type { AdrClass } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
   acceptance,
   classify,
@@ -192,7 +192,7 @@ describe("over-limit acceptance and qualification check details", () => {
       rules: [
         { type: "max_mass", maxKg: "20000" },
         { type: "allowed_trailer_types", entityIds: [ids.TRAILER_STANDARD] },
-        { type: "allowed_adr_categories", entityIds: [ids.ADR_GASES_CLASS_2] },
+        { type: "allowed_adr_categories", classes: ["2"] },
       ],
     },
     manualOnly = { hasTelemetrySource: false, eventInvalid: false, eventReviewRequired: false },
@@ -263,7 +263,7 @@ describe("over-limit acceptance and qualification check details", () => {
           pinnedEntityFact(ids.TRAILER_DISALLOWED, "trailer_type"),
         ],
       },
-      adrCategory: pinnedEntityFact(ids.ADR_DISALLOWED_RADIOACTIVE, "adr"),
+      adrCategory: knownFact<AdrClass>("6", "snapshot.adr"),
     });
     expect(acceptance(e, limits, null, manualOnly)).toEqual({
       mode: "over_limits",
@@ -278,7 +278,7 @@ describe("over-limit acceptance and qualification check details", () => {
     expect(rules.map((r) => [r.ruleType, r.outcome, r.entityIds])).toEqual([
       ["max_mass", "fail", []],
       ["allowed_trailer_types", "fail", [ids.TRAILER_DISALLOWED]],
-      ["allowed_adr_categories", "fail", [ids.ADR_DISALLOWED_RADIOACTIVE]],
+      ["allowed_adr_categories", "fail", ["6"]],
     ]);
   });
   test("a telemetry source, an event review or a non-limit violation makes acceptance unavailable", () => {
@@ -316,7 +316,7 @@ describe("over-limit acceptance and qualification check details", () => {
   test("unknown limits, missing facts and unresolved history block acceptance even beside a proven breach", () => {
     const e = createSyntheticManualEvidence({
       cargoMassKg: mass("21000"),
-      adrCategory: unknownFact<PinnedEntity>("data_unknown"),
+      adrCategory: unknownFact<AdrClass>("data_unknown"),
     });
     expect(classify(e, limits, null, [], true).reasons).toEqual(["rule_mass_exceeded"]);
     expect(acceptance(e, limits, null, manualOnly)).toEqual({

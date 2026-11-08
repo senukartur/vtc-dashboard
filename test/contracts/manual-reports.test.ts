@@ -24,9 +24,10 @@ test("published legacy manual schema objects remain unchanged from the contract-
   const spec = JSON.parse(
     readFileSync(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
   ) as { components: { schemas: Record<string, unknown> } };
-  // Serialized schema-object hashes from ef6f2a5; whitespace outside objects is irrelevant.
+  // Serialized schema-object hashes; whitespace outside objects is irrelevant. ManualRevision is
+  // from ef6f2a5; ManualInput was re-pinned when VTC-084 dropped its catalog revision field.
   for (const [name, expected] of [
-    ["ManualInput", "8061f266cc93442c5b7d44b971ca657383ab05bf76b90820c0657462f0e0d1b3"],
+    ["ManualInput", "55467aa8de85770eb40847180bb4ed64cd32308a164286a4e6c8c7a861754991"],
     ["ManualRevision", "6d3137675bdc843a9e031fd1b277ef561f4d9e57e4bda00fc77afb4d702c3073"],
   ] as const)
     expect(
@@ -90,7 +91,8 @@ test("submitted catalog selections are disjoint diagnostics or real pinned ident
   expect(valid("ManualCatalogSelection", request.fields.origin)).toBe(true);
   expect(valid("ManualCatalogSelection", request.fields.cargo)).toBe(true);
   for (const selection of [
-    { status: "resolved", entityId: request.targetTrip?.tripId },
+    { status: "resolved" },
+    { ...request.fields.origin, catalogRevisionId: request.targetTrip?.tripId },
     { status: "unresolved", entityId: request.targetTrip?.tripId },
     { ...request.fields.cargo, entityId: request.targetTrip?.tripId },
     { ...request.fields.origin, label: "Fictional extra label" },
