@@ -382,9 +382,7 @@ test(
     expect(state.requests.some((r) => r.includes("/catalogs/"))).toBe(false);
     await dialog.getByRole("button", { name: "Choose catalog selections", exact: true }).click();
     await expect(
-      dialog.getByText("Catalog selection is unavailable. Existing selections are retained.", {
-        exact: true,
-      }),
+      dialog.getByRole("alert").filter({ hasText: "Catalog data could not be read" }).first(),
     ).toBeVisible();
     state.failNext = 599;
     await save.click();

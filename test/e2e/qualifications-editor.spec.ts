@@ -1,4 +1,4 @@
-import { catalogItem, catalogLanguage, envelope, list } from "./support/catalogs.ts";
+import { catalogItem, catalogLanguage, catalogList, envelope, list } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { levels, mockQualifications, ruleId } from "./support/qualifications.ts";
 
@@ -28,7 +28,8 @@ for (const locale of ["en", "ru"] as const) {
             },
           });
         };
-        if (path.endsWith("/trailers")) return route.fulfill({ json: list([row(trailerId(27))]) });
+        if (path.endsWith("/trailers"))
+          return route.fulfill({ json: catalogList([row(trailerId(27))]) });
         const id = path.split("/").at(-1) ?? "";
         requests.push(`${id}:${lang}`);
         if (id === trailerId(2)) return route.fulfill({ status: 503, json: {} });

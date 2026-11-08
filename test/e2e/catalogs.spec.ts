@@ -3,12 +3,12 @@ import { catalogTranslations } from "../../apps/web/src/features/catalogs/transl
 import {
   catalogItem,
   catalogLanguage,
+  catalogList,
   cargoRowId,
   dlcId,
   defaultRows,
   entityId,
   envelope,
-  list,
   mockCatalogs,
   regionId,
   trailerRowId,
@@ -286,7 +286,11 @@ test(
         if (applyStatus !== 200)
           return {
             status: applyStatus,
-            json: { error: { code: "CATALOG_IMPORT_TOKEN_INVALID" } },
+            json: {
+              error: {
+                code: applyStatus === 412 ? "CATALOG_IMPORT_TOKEN_INVALID" : "UNAVAILABLE",
+              },
+            },
           };
         return {
           status: 200,
@@ -455,7 +459,7 @@ test(
       catalogItem(id, name, "ru", overrides);
     await page.route("**/api/v1/catalogs/cities?*", (route) =>
       route.fulfill({
-        json: list([
+        json: catalogList([
           city(entityId, "Fictional visible"),
           city(hiddenId, "Fictional hidden", {
             hidden: true,

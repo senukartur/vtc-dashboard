@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../../fixtures/manual-images.ts";
-import { catalogItem, entityId, envelope, list, mockCatalogs } from "./catalogs.ts";
+import { catalogItem, catalogList, entityId, envelope, list, mockCatalogs } from "./catalogs.ts";
 import { expect } from "./fixtures.ts";
 
 export const id = "41000000-0000-4000-8000-000000000001",
@@ -34,7 +34,7 @@ export async function mockTrips(page: Page) {
         selectedId = name === "cargoes" ? cargoId : name === "trailers" ? trailerId : entityId,
         label = name === "cargoes" ? "cargo" : name === "trailers" ? "trailer_type" : "city",
         item = catalogItem(selectedId, `Fictional ${label}`, locale);
-      return route.fulfill({ json: catalogRow[2] ? envelope(item) : list([item]) });
+      return route.fulfill({ json: catalogRow[2] ? envelope(item) : catalogList([item]) });
     }
     if (path === "/api/v1/trips") {
       const trip = example("getTrip:success").data;

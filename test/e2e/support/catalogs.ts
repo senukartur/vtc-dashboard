@@ -16,8 +16,14 @@ export const envelope = (data: unknown) => ({
   data,
   meta: { requestId: "synthetic-catalog-request" },
 });
-export const list = (items: unknown[], nextCursor: string | null = null, total?: number) =>
-  envelope({ items, nextCursor, total: total ?? items.length });
+export const list = (items: unknown[], nextCursor: string | null = null) =>
+  envelope({ items, nextCursor });
+/** Catalog list routes also return `total` for the pager. */
+export const catalogList = (
+  items: unknown[],
+  nextCursor: string | null = null,
+  total = items.length,
+) => envelope({ items, nextCursor, total });
 export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
   await switchLanguage(page, locale);
 }
@@ -165,7 +171,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
             r.code.toLowerCase().includes(search) ||
             r.display.label.toLowerCase().includes(search)),
       );
-      return json(list(visible));
+      return json(catalogList(visible));
     }
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });
