@@ -15,7 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
-import { catalogFacts, catalogRevisions } from "../catalogs/index.js";
+import { adrClasses, catalogCargoes, catalogCities, catalogTrailers } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 import { qualificationAssignments, qualificationRules } from "../qualifications/index.js";
 
@@ -154,9 +154,6 @@ export const tripFacts = mysqlTable(
       .notNull()
       .references(() => trips.id, { onDelete: "restrict" }),
     adapterVersion: int("adapter_version", { unsigned: true }).notNull(),
-    catalogRevisionId: idColumn("catalog_revision_id").references(() => catalogRevisions.id, {
-      onDelete: "restrict",
-    }),
     outcome: mysqlEnum("outcome", ["open", "delivered", "cancelled", "none"]).notNull(),
     recording: mysqlEnum("recording", ["complete", "partial", "unknown"]).notNull(),
     startUtc: utcColumn("start_utc"),
@@ -165,18 +162,10 @@ export const tripFacts = mysqlTable(
     endUtc: utcColumn("end_utc"),
     endBasis: basis("end_basis").notNull(),
     endVerified: boolean("end_verified").notNull(),
-    originCatalogRevisionId: idColumn("origin_catalog_revision_id"),
-    originEntityId: idColumn("origin_entity_id"),
-    originFactId: idColumn("origin_fact_id"),
-    destinationCatalogRevisionId: idColumn("destination_catalog_revision_id"),
-    destinationEntityId: idColumn("destination_entity_id"),
-    destinationFactId: idColumn("destination_fact_id"),
-    cargoCatalogRevisionId: idColumn("cargo_catalog_revision_id"),
-    cargoEntityId: idColumn("cargo_entity_id"),
-    cargoFactId: idColumn("cargo_fact_id"),
-    adrCatalogRevisionId: idColumn("adr_catalog_revision_id"),
-    adrEntityId: idColumn("adr_entity_id"),
-    adrFactId: idColumn("adr_fact_id"),
+    originCityId: idColumn("origin_city_id"),
+    destinationCityId: idColumn("destination_city_id"),
+    cargoId: idColumn("cargo_id"),
+    adrClass: mysqlEnum("adr_class", adrClasses),
     cargoMassKg: decimalColumn("cargo_mass_kg"),
     actualDistanceM: decimalColumn("actual_distance_m"),
     measuredSegmentM: decimalColumn("measured_segment_m"),
@@ -199,67 +188,24 @@ export const tripFacts = mysqlTable(
     ),
     uniqueIndex("trip_fact_resolution").on(t.resolutionRevisionId),
     uniqueIndex("trip_fact_message").on(t.messageId),
-    uniqueIndex("trip_fact_catalog_scope").on(t.id, t.catalogRevisionId),
-    uniqueIndex("trip_fact_adapter_scope").on(t.id, t.adapterVersion),
-    check(
-      "trip_fact_format2_pin_mode",
-      sql`${t.adapterVersion} <> 2 OR ${t.catalogRevisionId} IS NULL`,
-    ),
     index("trip_fact_history").on(t.canonicalTripId, t.id),
     check("trip_fact_trailer_count", sql`${t.trailerCount} <= 10`),
     foreignKey({
-      name: "trip_origin_individual_pin_fk",
-      columns: [t.originFactId, t.originCatalogRevisionId, t.originEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+      name: "trip_fact_origin_city_fk",
+      columns: [t.originCityId],
+      foreignColumns: [catalogCities.id],
     }).onDelete("restrict"),
     foreignKey({
-      name: "trip_fact_origin_pin_fk",
-      columns: [t.originFactId, t.catalogRevisionId, t.originEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+      name: "trip_fact_destination_city_fk",
+      columns: [t.destinationCityId],
+      foreignColumns: [catalogCities.id],
     }).onDelete("restrict"),
     foreignKey({
-      name: "trip_destination_individual_pin_fk",
-      columns: [t.destinationFactId, t.destinationCatalogRevisionId, t.destinationEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+      name: "trip_fact_cargo_fk",
+      columns: [t.cargoId],
+      foreignColumns: [catalogCargoes.id],
     }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_fact_destination_pin_fk",
-      columns: [t.destinationFactId, t.catalogRevisionId, t.destinationEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_cargo_individual_pin_fk",
-      columns: [t.cargoFactId, t.cargoCatalogRevisionId, t.cargoEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_fact_cargo_pin_fk",
-      columns: [t.cargoFactId, t.catalogRevisionId, t.cargoEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_adr_individual_pin_fk",
-      columns: [t.adrFactId, t.adrCatalogRevisionId, t.adrEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_fact_adr_pin_fk",
-      columns: [t.adrFactId, t.catalogRevisionId, t.adrEntityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    ...(
-      [
-        ["origin", t.originEntityId, t.originFactId, t.originCatalogRevisionId],
-        ["destination", t.destinationEntityId, t.destinationFactId, t.destinationCatalogRevisionId],
-        ["cargo", t.cargoEntityId, t.cargoFactId, t.cargoCatalogRevisionId],
-        ["adr", t.adrEntityId, t.adrFactId, t.adrCatalogRevisionId],
-      ] as const
-    ).map(([name, entity, fact, pin]) =>
-      check(
-        `trip_fact_${name}_shape`,
-        sql`(${entity} IS NULL AND ${fact} IS NULL AND ${pin} IS NULL) OR (${entity} IS NOT NULL AND ${fact} IS NOT NULL AND ((${t.catalogRevisionId} IS NOT NULL AND (${pin} IS NULL OR ${pin} = ${t.catalogRevisionId})) OR (${t.catalogRevisionId} IS NULL AND ${pin} IS NOT NULL)))`,
-      ),
-    ),
+    check("trip_fact_adr_requires_cargo", sql`${t.adrClass} IS NULL OR ${t.cargoId} IS NOT NULL`),
     check(
       "trip_fact_start_supported",
       sql`${t.startVerified} = 0 OR ((${t.startBasis} = 'event' OR (${t.kind} = 'derived' AND ${t.startBasis} = 'staff-resolution')) AND ${t.startUtc} IS NOT NULL)`,
@@ -282,38 +228,21 @@ export const tripFactTrailers = mysqlTable(
       .notNull()
       .references(() => tripFacts.id, { onDelete: "restrict" }),
     position: int("position", { unsigned: true }).notNull(),
-    catalogRevisionId: idColumn("catalog_revision_id"),
-    sourceAdapterVersion: int("source_adapter_version", { unsigned: true }).notNull().default(1),
-    legacyCatalogRevisionId: idColumn("legacy_catalog_revision_id").generatedAlwaysAs(
-      sql.raw("IF(`source_adapter_version` = 1, `catalog_revision_id`, NULL)"),
-      { mode: "stored" },
-    ),
-    entityId: idColumn("entity_id"),
-    catalogFactId: idColumn("catalog_fact_id"),
+    trailerId: idColumn("trailer_id"),
     sourceField: varchar("source_field", { length: 128 }),
     unknownReason: varchar("unknown_reason", { length: 128 }),
   },
   (t) => [
     primaryKey({ columns: [t.tripFactId, t.position] }),
     foreignKey({
-      name: "trip_trailer_pin_fk",
-      columns: [t.catalogFactId, t.catalogRevisionId, t.entityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_trailer_adapter_scope_fk",
-      columns: [t.tripFactId, t.sourceAdapterVersion],
-      foreignColumns: [tripFacts.id, tripFacts.adapterVersion],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "trip_trailer_legacy_source_catalog_fk",
-      columns: [t.tripFactId, t.legacyCatalogRevisionId],
-      foreignColumns: [tripFacts.id, tripFacts.catalogRevisionId],
+      name: "trip_trailer_catalog_fk",
+      columns: [t.trailerId],
+      foreignColumns: [catalogTrailers.id],
     }).onDelete("restrict"),
     check("trip_trailer_position", sql`${t.position} < 10`),
     check(
       "trip_trailer_shape",
-      sql`(${t.entityId} IS NULL AND ${t.catalogFactId} IS NULL AND ${t.catalogRevisionId} IS NULL AND ${t.sourceField} IS NULL AND ${t.unknownReason} IS NOT NULL) OR (${t.entityId} IS NOT NULL AND ${t.catalogFactId} IS NOT NULL AND ${t.catalogRevisionId} IS NOT NULL AND ${t.sourceField} IS NOT NULL AND ${t.unknownReason} IS NULL)`,
+      sql`(${t.trailerId} IS NULL AND ${t.sourceField} IS NULL AND ${t.unknownReason} IS NOT NULL) OR (${t.trailerId} IS NOT NULL AND ${t.sourceField} IS NOT NULL AND ${t.unknownReason} IS NULL)`,
     ),
   ],
 );

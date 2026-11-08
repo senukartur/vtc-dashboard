@@ -7,6 +7,8 @@ export const auditOperations = [
   "report.reviewed",
   "leadership.transferred",
   "catalog.published",
+  "catalog.imported",
+  "catalog.changed",
   "application.submitted",
   "application.reviewed",
   "invitation.reissued",
