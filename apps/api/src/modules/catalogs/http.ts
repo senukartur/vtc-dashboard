@@ -144,7 +144,10 @@ export async function registerCatalogRoutes(
       }
     } catch (error) {
       if (oversized.has(request)) throw tooLarge();
-      if (error && typeof error === "object" && "statusCode" in error) throw error;
+      if (error && typeof error === "object") {
+        if ("code" in error && error.code === "FST_REQ_FILE_TOO_LARGE") throw tooLarge();
+        if ("statusCode" in error) throw error;
+      }
       throw identityError(422);
     }
     if (oversized.has(request)) throw tooLarge();
