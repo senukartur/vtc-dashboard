@@ -2,7 +2,6 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
-import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
 import { EventFailureView, useEventTimezone } from "./components.js";
 import { type DTO, eventTime, utcInput } from "./model.js";
@@ -249,23 +248,8 @@ function EventCatalogFields({
   form: DTO["EventInput"];
   onChange: (key: keyof DTO["EventInput"], value: string | null) => void;
 }) {
-  const { t } = useTranslation("events"),
-    revisions = usePublishedRevisions(form.game),
-    revision = revisions.data?.pages
-      .flatMap((p) => p.data.data.items)
-      .find((r) => r.state === "published")?.id;
-  return revisions.isPending ? (
-    <p role="status">{t("loadingCatalog")}</p>
-  ) : !revision ? (
-    <div className="stack">
-      <p>{t("catalogUnavailable")}</p>
-      {revisions.isError && (
-        <Button type="button" variant="outline" onClick={() => void revisions.refetch()}>
-          {t("retry")}
-        </Button>
-      )}
-    </div>
-  ) : (
+  const { t } = useTranslation("events");
+  return (
     <div className="stack">
       {(
         [
@@ -279,16 +263,15 @@ function EventCatalogFields({
           key={key}
           label={t(key)}
           game={form.game}
-          revisionId={revision}
           kind={
             key === "prescribedCargoId"
               ? "cargo"
               : key === "prescribedTrailerTypeId"
-                ? "trailer_type"
+                ? "trailer"
                 : "city"
           }
-          value={form[key] ? { entityId: form[key], revisionId: revision } : null}
-          onChange={(v) => onChange(key, v?.entityId ?? null)}
+          value={form[key] ?? null}
+          onChange={(v) => onChange(key, v)}
         />
       ))}
     </div>

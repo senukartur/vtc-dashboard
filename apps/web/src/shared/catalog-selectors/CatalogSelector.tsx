@@ -2,20 +2,19 @@ import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input, Label } from "../ui/primitives.js";
 import {
-  catalogParams,
+  type CatalogItem,
   compatibleSelection,
-  entitiesSchema,
-  entitySchema,
   type Game,
+  itemSchema,
   type Kind,
-  type Selection,
+  listOfKind,
+  listSchema,
 } from "./contracts.js";
 import { useCatalogPages, useCatalogQuery } from "./queries.js";
 
 export function CatalogSelector({
   label,
   game,
-  revisionId,
   kind,
   regionId,
   value,
@@ -23,15 +22,15 @@ export function CatalogSelector({
 }: {
   label: string;
   game: Game;
-  revisionId: string;
   kind: Kind;
   regionId?: string | undefined;
-  value: Selection | null;
-  onChange: (value: Selection | null) => void;
+  value: string | null;
+  onChange: (value: string | null) => void;
 }) {
   const { t, i18n } = useTranslation("catalogs"),
     id = useId();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  const list = listOfKind[kind];
   const [search, setSearch] = useState(""),
     [effective, setEffective] = useState("");
   useEffect(() => {
@@ -39,24 +38,24 @@ export function CatalogSelector({
     return () => window.clearTimeout(timer);
   }, [search]);
   const query = useCatalogPages(
-    ["entities", game, revisionId, kind, locale, regionId, effective],
-    "/catalogs/entities",
-    { revisionId, kind, locale, regionId, search: effective || undefined },
-    entitiesSchema,
-    !!revisionId,
+    ["selector", list, game, locale, regionId, effective],
+    `/catalogs/${list}`,
+    { game, locale, regionId, search: effective || undefined },
+    listSchema,
   );
   const selected = useCatalogQuery(
-    ["entity", value?.entityId, value?.revisionId, locale],
-    `/catalogs/entities/${value?.entityId}?${catalogParams({ revisionId: value?.revisionId, locale })}`,
-    entitySchema,
+    ["item", list, value, locale],
+    `/catalogs/${list}/${value}?locale=${locale}`,
+    itemSchema,
     !!value,
   );
   const items = query.data?.pages.flatMap((p) => p.data.data.items) ?? [];
   const current = selected.data?.data.data;
-  const compatible = current && compatibleSelection(current, game, revisionId, kind, regionId);
-  const describe = (entity: typeof current) =>
-    entity
-      ? `${entity.display.label}${entity.display.englishFallback ? ` · ${t("fallback")}` : ""}${entity.display.retired ? ` · ${t("retired")}` : ""}`
+  const usable = current?.game === game && (!regionId || current.regionId === regionId);
+  const compatible = !!current && compatibleSelection(current, game, regionId);
+  const describe = (item: CatalogItem | undefined) =>
+    item
+      ? `${item.display.label}${item.display.englishFallback ? ` · ${t("fallback")}` : ""}${item.display.hidden ? ` · ${t("hidden")}` : ""}`
       : "";
   return (
     <div className="stack catalog-selector">
@@ -76,25 +75,24 @@ export function CatalogSelector({
           )
             event.preventDefault();
         }}
-        disabled={!revisionId}
       />
       <Label htmlFor={id}>{label}</Label>
       <select
         className="input"
         id={id}
-        value={compatible ? current.id : ""}
-        disabled={!revisionId || query.isPending}
-        onChange={(e) => onChange(e.target.value ? { entityId: e.target.value, revisionId } : null)}
+        value={usable && current ? current.id : ""}
+        disabled={query.isPending}
+        onChange={(e) => onChange(e.target.value || null)}
       >
         <option value="">{t("choose")}</option>
-        {compatible && !items.some((e) => e.id === current.id) && (
+        {usable && current && !items.some((e) => e.id === current.id) && (
           <option value={current.id}>{describe(current)}</option>
         )}
         {items
-          .filter((e) => compatibleSelection(e, game, revisionId, kind, regionId))
+          .filter((e) => compatibleSelection(e, game, regionId))
           .map((e) => (
             <option key={e.id} value={e.id}>
-              {describe(e)} · {e.mapNamespace} · {e.id.slice(0, 8)}
+              {describe(e)} · {e.code}
             </option>
           ))}
       </select>
@@ -108,15 +106,12 @@ export function CatalogSelector({
           ) : (
             <p>{t(selected.isError ? "historyError" : "loading")}</p>
           )}
-          <small>
-            {value.entityId} · {value.revisionId}
-          </small>
           <Button type="button" variant="ghost" onClick={() => onChange(null)}>
             {t("clear")}
           </Button>
         </div>
       )}
-      {query.isPending && revisionId && <p role="status">{t("loading")}</p>}
+      {query.isPending && <p role="status">{t("loading")}</p>}
       {query.isError && (
         <p role="alert">
           {t("readError")}{" "}

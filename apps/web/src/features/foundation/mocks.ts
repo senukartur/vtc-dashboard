@@ -2,7 +2,7 @@ import type { components, operations } from "@vtc/contracts";
 import type { Locale } from "../../shared/formatting.js";
 
 type TripList = operations["listTrips"]["responses"][200]["content"]["application/json"];
-type Catalog = operations["getCatalogEntity"]["responses"][200]["content"]["application/json"];
+type Catalog = operations["getCatalogItem"]["responses"][200]["content"]["application/json"];
 type Analytics = operations["getCompanyAnalytics"]["responses"][200]["content"]["application/json"];
 type ErrorResponse = components["schemas"]["Error"];
 export const fixtureId = "41000000-0000-4000-8000-000000000001";
@@ -13,19 +13,21 @@ export function createFoundationMocks(locale: Locale) {
   const catalog: Catalog = {
     data: {
       id: fixtureId,
-      revisionId: fixtureId,
       game: "ets2",
-      kind: "city",
-      mapNamespace: "synthetic-example",
+      code: "fixture_city",
+      nameEn: "Fixture City — North Riverside Distribution Centre",
+      nameRu: null,
+      hidden: false,
+      dlcId: null,
+      dlc: null,
       display: {
         entityId: fixtureId,
         label: "Fixture City — North Riverside Distribution Centre",
         requestedLocale: locale,
         renderedLocale: "en",
         englishFallback: locale === "ru",
-        retired: false,
+        hidden: false,
       },
-      relatedEntityIds: [],
     },
     meta: { ...meta },
   };

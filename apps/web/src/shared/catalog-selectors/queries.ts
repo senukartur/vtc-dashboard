@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { z } from "zod";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure, read } from "../../features/account/transport.js";
-import { catalogParams, envelope, type Game, revisionsSchema } from "./contracts.js";
+import { catalogParams, envelope } from "./contracts.js";
 
 export function useCatalogAccess() {
   const session = useSession();
@@ -26,7 +26,6 @@ export function useCatalogQuery<T extends z.ZodType>(
   path: string,
   schema: T,
   enabled = true,
-  poll = false,
 ) {
   const access = useCatalogAccess();
   const query = useQuery({
@@ -35,22 +34,9 @@ export function useCatalogQuery<T extends z.ZodType>(
     enabled,
     retry: false,
     gcTime: 0,
-    staleTime: poll ? 0 : 10000,
-    refetchOnWindowFocus: poll,
-    refetchOnReconnect: poll,
+    staleTime: 10000,
+    refetchOnWindowFocus: false,
     queryFn: ({ signal }) => access.read(path, schema, signal),
-    refetchInterval: (query) =>
-      poll &&
-      document.visibilityState === "visible" &&
-      navigator.onLine &&
-      !(
-        query.state.error instanceof AccountFailure &&
-        ["forbidden", "unauthorized"].includes(query.state.error.kind)
-      ) &&
-      (query.state.data?.data.data as { state?: string } | undefined)?.state === "processing"
-        ? 1500
-        : false,
-    refetchIntervalInBackground: false,
   });
   return { ...query, data: query.isError ? undefined : query.data };
 }
@@ -71,8 +57,8 @@ export function useCatalogPages<
     retry: false,
     gcTime: 0,
     staleTime: 10000,
-    refetchOnWindowFocus: key[0] === "published",
-    refetchOnReconnect: key[0] === "published",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     initialPageParam: null as string | null,
     queryFn: ({ signal, pageParam }) =>
       access.read(
@@ -83,7 +69,4 @@ export function useCatalogPages<
     getNextPageParam: (last) => last.data.data.nextCursor ?? undefined,
   });
   return { ...query, data: query.isError ? undefined : query.data };
-}
-export function usePublishedRevisions(game: Game) {
-  return useCatalogPages(["published", game], "/catalogs/revisions", { game }, revisionsSchema);
 }

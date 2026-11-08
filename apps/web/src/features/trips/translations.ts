@@ -103,7 +103,6 @@ export const tripTranslations = {
     unresolvedLabel: "Diagnostic label",
     unresolvedReason: "Mapping reason",
     context: "Context (optional)",
-    catalogRevision: "Catalog publication",
     catalogField: "Catalog field to correct",
     target: "Attach to my telemetry trip",
     targetHelp:
@@ -123,7 +122,6 @@ export const tripTranslations = {
     qualificationAssignmentId: "Qualification assignment",
     ruleVersionId: "Rule version",
     levelId: "Level",
-    catalogRevisionId: "Catalog revision",
     eventId: "Event",
     attendanceRevisionId: "Attendance revision",
     attributionAt: "Qualification instant",
@@ -475,7 +473,6 @@ export const tripTranslations = {
     unresolvedLabel: "Диагностическое название",
     unresolvedReason: "Причина сопоставления",
     context: "Контекст (необязательно)",
-    catalogRevision: "Публикация каталога",
     catalogField: "Поле каталога для исправления",
     target: "Прикрепить к моему рейсу телеметрии",
     targetHelp:
@@ -495,7 +492,6 @@ export const tripTranslations = {
     qualificationAssignmentId: "Назначение квалификации",
     ruleVersionId: "Версия правил",
     levelId: "Уровень",
-    catalogRevisionId: "Ревизия каталога",
     eventId: "Мероприятие",
     attendanceRevisionId: "Ревизия участия",
     attributionAt: "Момент квалификационного учёта",

@@ -2,7 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { entitySchema, type Game, type Kind } from "../../shared/catalog-selectors/contracts.js";
+import {
+  type Game,
+  itemSchema,
+  type Kind,
+  listOfKind,
+} from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
@@ -74,38 +79,30 @@ export function CodeLabel({ code }: { code: string }) {
 /** Localized label of a pinned catalog entity; the canonical ID stays available as text. */
 export function EntityLabel({
   entityId,
-  revisionId,
   game,
   kind,
 }: {
   entityId: string;
-  revisionId: string | null;
   game: Game;
   kind: Kind;
 }) {
   const { t } = useTranslation("trips"),
     locale = useLocale(),
     query = useCatalogQuery(
-      ["review-entity", entityId, revisionId, locale],
-      `/catalogs/entities/${entityId}?revisionId=${revisionId}&locale=${locale}`,
-      entitySchema,
-      !!revisionId,
+      ["review-entity", kind, entityId, locale],
+      `/catalogs/${listOfKind[kind]}/${entityId}?locale=${locale}`,
+      itemSchema,
     ),
     entity = query.data?.data.data,
-    valid =
-      entity?.id === entityId &&
-      entity.revisionId === revisionId &&
-      entity.game === game &&
-      entity.kind === kind;
+    valid = entity?.id === entityId && entity.game === game;
   return (
     <span className="review-entity">
-      {valid
-        ? entity.display.label
-        : revisionId && query.isPending
-          ? t("loading")
-          : t("unknownEntity")}
+      {valid ? entity.display.label : query.isPending ? t("loading") : t("unknownEntity")}
       {valid && entity.display.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
+      )}
+      {valid && entity.display.hidden && (
+        <small className="trip-fallback"> · {t("catalogs:hidden")}</small>
       )}
       <span className="visually-hidden"> {entityId}</span>
     </span>
@@ -151,16 +148,7 @@ export function TripFacts({
       </ReviewSection>
     );
   const pin = (value: DTO["EffectiveCatalogPin"] | null, kind: Kind) =>
-    value ? (
-      <EntityLabel
-        entityId={value.entityId}
-        revisionId={value.catalogRevisionId}
-        game={game}
-        kind={kind}
-      />
-    ) : (
-      t("unknown")
-    );
+    value ? <EntityLabel entityId={value.entityId} game={game} kind={kind} /> : t("unknown");
   const rows: [string, ReactNode][] = [
     ["origin", pin(facts.origin, "city")],
     ["destination", pin(facts.destination, "city")],
@@ -174,7 +162,7 @@ export function TripFacts({
             // biome-ignore lint/suspicious/noArrayIndexKey: positional trailer slots
             <span key={index}>
               {index > 0 && ", "}
-              {pin(trailer, "trailer_type")}
+              {pin(trailer, "trailer")}
             </span>
           ))
         : t("unknown"),
@@ -205,7 +193,7 @@ const catalogKind: Partial<Record<DiffRow["field"], Kind>> = {
   origin: "city",
   destination: "city",
   cargo: "cargo",
-  trailerType: "trailer_type",
+  trailerType: "trailer",
 };
 function FieldValue({
   field,
@@ -222,12 +210,7 @@ function FieldValue({
   if (kind && value && typeof value === "object" && !Array.isArray(value)) {
     const selection = value as DTO["ManualCatalogSelection"];
     return selection.status === "resolved" ? (
-      <EntityLabel
-        entityId={selection.entityId}
-        revisionId={selection.catalogRevisionId}
-        game={game}
-        kind={kind}
-      />
+      <EntityLabel entityId={selection.entityId} game={game} kind={kind} />
     ) : (
       <>
         {selection.label} <small className="review-muted">· {t(selection.reasonCode)}</small>
@@ -431,15 +414,7 @@ export function EvidenceList({ evidence }: { evidence: DTO["Evidence"][] }) {
   );
 }
 
-function RuleDetail({
-  row,
-  game,
-  revisionId,
-}: {
-  row: CheckRow;
-  game: Game;
-  revisionId: string | null;
-}) {
+function RuleDetail({ row, game }: { row: CheckRow; game: Game }) {
   const { t } = useTranslation("trips"),
     locale = useLocale();
   if (row.observedMassKg && row.limitMassKg)
@@ -451,37 +426,28 @@ function RuleDetail({
         })}
       </>
     );
-  if (row.entityIds.length)
+  if (row.ruleType === "allowed_adr_categories" && row.entityIds.length)
     return (
       <>
         {t("notAllowed")}{" "}
-        <Entities
-          ids={row.entityIds}
-          game={game}
-          revisionId={revisionId}
-          kind={row.ruleType === "allowed_adr_categories" ? "adr_category" : "trailer_type"}
-        />
+        {row.entityIds.map((value) => t("catalogs:adrClass", { class: value })).join(", ")}
+      </>
+    );
+  if (row.entityIds.length)
+    return (
+      <>
+        {t("notAllowed")} <Entities ids={row.entityIds} game={game} kind="trailer" />
       </>
     );
   return row.reasonCode ? <CodeLabel code={row.reasonCode} /> : null;
 }
-function Entities({
-  ids,
-  game,
-  revisionId,
-  kind,
-}: {
-  ids: string[];
-  game: Game;
-  revisionId: string | null;
-  kind: Kind;
-}) {
+function Entities({ ids, game, kind }: { ids: string[]; game: Game; kind: Kind }) {
   return (
     <>
       {ids.map((id, index) => (
         <span key={id}>
           {index > 0 && ", "}
-          <EntityLabel entityId={id} revisionId={revisionId} game={game} kind={kind} />
+          <EntityLabel entityId={id} game={game} kind={kind} />
         </span>
       ))}
     </>
@@ -492,11 +458,9 @@ function Entities({
 export function QualificationCheckList({
   check,
   game,
-  revisionId,
 }: {
   check: DTO["QualificationCheck"];
   game: Game;
-  revisionId: string | null;
 }) {
   const { t } = useTranslation("trips"),
     rows = checkRows(check);
@@ -521,7 +485,7 @@ export function QualificationCheckList({
                   )}
                 </span>
                 <span className="review-check-detail">
-                  <RuleDetail row={row} game={game} revisionId={revisionId} />
+                  <RuleDetail row={row} game={game} />
                 </span>
               </span>
             </li>
@@ -586,12 +550,10 @@ function LimitList({
   id,
   rules,
   game,
-  revisionId,
 }: {
   id?: string;
   rules: DTO["QualificationRuleCheck"][];
   game: Game;
-  revisionId: string | null;
 }) {
   const { t } = useTranslation("trips"),
     locale = useLocale();
@@ -608,12 +570,11 @@ function LimitList({
             ["allowed_trailer_types", "allowed_adr_categories"].includes(rule.ruleType) ? (
             <>
               {t(rule.ruleType === "allowed_adr_categories" ? "limitAdr" : "limitTrailer")}{" "}
-              <Entities
-                ids={rule.entityIds}
-                game={game}
-                revisionId={revisionId}
-                kind={rule.ruleType === "allowed_adr_categories" ? "adr_category" : "trailer_type"}
-              />
+              {rule.ruleType === "allowed_adr_categories" ? (
+                rule.entityIds.map((value) => t("catalogs:adrClass", { class: value })).join(", ")
+              ) : (
+                <Entities ids={rule.entityIds} game={game} kind="trailer" />
+              )}
             </>
           ) : (
             <CodeLabel code={rule.reasonCode} />
@@ -633,12 +594,10 @@ export function DecisionForm({
   tripId,
   review,
   etag,
-  revisionId,
 }: {
   tripId: string;
   review: DTO["Review"];
   etag: string | null;
-  revisionId: string | null;
 }) {
   const { t } = useTranslation("trips"),
     command = useTripCommand(),
@@ -785,7 +744,7 @@ export function DecisionForm({
             <span aria-hidden="true">! </span>
             {t("overTitle")}
           </legend>
-          <LimitList id={limitsId} rules={state.exceeded} game={game} revisionId={revisionId} />
+          <LimitList id={limitsId} rules={state.exceeded} game={game} />
           <p className="review-muted">{t("overHelp")}</p>
           <label className="review-check-option">
             <input
@@ -847,7 +806,7 @@ export function DecisionForm({
                 <p>
                   <strong>{t("overLimitsMarker")}</strong>
                 </p>
-                <LimitList rules={state.exceeded} game={game} revisionId={revisionId} />
+                <LimitList rules={state.exceeded} game={game} />
               </>
             )}
             <p className="review-multiline">{reason}</p>

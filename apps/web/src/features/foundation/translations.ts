@@ -38,8 +38,7 @@ export const foundationTranslations = {
     fallback: "English name fallback",
     selection: "Catalog selection",
     selectedId: "Canonical entity ID",
-    selectorHelp:
-      "Display labels may change; the selected UUID and catalog revision stay the same.",
+    selectorHelp: "Display labels may change; the selected row stays the same.",
     formTitle: "Try a local form",
     formHelp:
       "A presentation exercise. Nothing is sent to the company or stored after leaving this page.",

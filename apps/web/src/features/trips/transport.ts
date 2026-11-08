@@ -170,7 +170,6 @@ export function revisionFields(revision: DTO["ManualRevisionRead"]): DTO["Manual
     pin = (entityId: string): DTO["ManualResolvedSelection"] => ({
       status: "resolved",
       entityId,
-      catalogRevisionId: f.catalogRevisionId,
     });
   return {
     game: f.game,

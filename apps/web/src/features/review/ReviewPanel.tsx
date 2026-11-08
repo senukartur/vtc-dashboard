@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CatalogSelector, type Selection } from "../../shared/catalog-selectors/index.js";
-import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
+import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { Card, Input, Label } from "../../shared/ui/primitives.js";
 import { EvidenceItem } from "../manual-reports/fields.js";
 import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
@@ -63,13 +62,10 @@ function ResolutionForm({
     [open, setOpen] = useState(false),
     [error, setError] = useState(false),
     [saved, setSaved] = useState(false),
-    [publication, setPublication] = useState(""),
     [catalogField, setCatalogField] = useState("cargoId"),
     [requestCursor, setRequestCursor] = useState<string | null>(null),
     [assignmentCursor, setAssignmentCursor] = useState<string | null>(null);
-  const pub = usePublishedRevisions(trip.summary.game),
-    active = publication || pub.data?.pages[0]?.data.data.items[0]?.id || "",
-    requests = useTripQuery(
+  const requests = useTripQuery(
       `/trips/${tripId}/correction-requests?limit=25${requestCursor ? `&cursor=${encodeURIComponent(requestCursor)}` : ""}`,
       "EnvelopeListManualCorrectionRequest",
       open,
@@ -141,38 +137,6 @@ function ResolutionForm({
                 </div>
               ))}
             </div>
-            <Label htmlFor="resolution-publication">{t("catalogRevision")}</Label>
-            <select
-              className="input"
-              id="resolution-publication"
-              value={active}
-              onChange={(e) => {
-                setPublication(e.target.value);
-                setChanges((prev) =>
-                  Object.fromEntries(
-                    Object.entries(prev).filter(
-                      ([key]) =>
-                        ![
-                          "catalogRevisionId",
-                          "originCityId",
-                          "destinationCityId",
-                          "cargoId",
-                          "trailerTypeId",
-                        ].includes(key),
-                    ),
-                  ),
-                );
-              }}
-            >
-              <option value="">{t("unknown")}</option>
-              {pub.data?.pages
-                .flatMap((p) => p.data.data.items)
-                .map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.id}
-                  </option>
-                ))}
-            </select>
             <Label htmlFor="resolution-field">{t("catalogField")}</Label>
             <select
               className="input"
@@ -197,7 +161,7 @@ function ResolutionForm({
                   ["originCityId", "origin", "city"],
                   ["destinationCityId", "destination", "city"],
                   ["cargoId", "cargo", "cargo"],
-                  ["trailerTypeId", "trailerType", "trailer_type"],
+                  ["trailerTypeId", "trailerType", "trailer"],
                 ] as const
               )
                 .filter(([key]) => key === catalogField)
@@ -206,32 +170,13 @@ function ResolutionForm({
                     key={key}
                     label={t(label)}
                     game={trip.summary.game}
-                    revisionId={active}
                     kind={kind}
-                    value={
-                      changes[key]
-                        ? {
-                            entityId: changes[key],
-                            revisionId: changes.catalogRevisionId ?? active,
-                          }
-                        : null
-                    }
-                    onChange={(s: Selection | null) => {
+                    value={changes[key] ?? null}
+                    onChange={(value) => {
                       setChanges((prev) => {
                         const next = { ...prev };
-                        if (s) {
-                          next[key] = s.entityId;
-                          next.catalogRevisionId = s.revisionId;
-                        } else delete next[key];
-                        if (
-                          ![
-                            next.originCityId,
-                            next.destinationCityId,
-                            next.cargoId,
-                            next.trailerTypeId,
-                          ].some(Boolean)
-                        )
-                          delete next.catalogRevisionId;
+                        if (value) next[key] = value;
+                        else delete next[key];
                         return next;
                       });
                     }}

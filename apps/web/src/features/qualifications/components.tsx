@@ -1,8 +1,8 @@
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
-import { entitySchema } from "../../shared/catalog-selectors/contracts.js";
-import { useCatalogQuery, usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
+import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
+import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatUtc } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, PageNav, State } from "../trips/components.js";
@@ -79,12 +79,14 @@ export function RulesView({ rules, game }: { rules: DTO["Rule"][]; game: Game })
         <Fact key={rule.type} label={t(rule.type)}>
           {rule.type === "max_mass" ? (
             `${rule.maxKg} kg`
+          ) : rule.type === "allowed_adr_categories" ? (
+            rule.classes.length ? (
+              rule.classes.map((value) => t("catalogs:adrClass", { class: value })).join(", ")
+            ) : (
+              t("emptyAllowlist")
+            )
           ) : rule.entityIds.length ? (
-            <EntityList
-              ids={rule.entityIds}
-              game={game}
-              kind={rule.type === "allowed_trailer_types" ? "trailer_type" : "adr_category"}
-            />
+            <EntityList ids={rule.entityIds} game={game} />
           ) : (
             t("emptyAllowlist")
           )}
@@ -95,25 +97,15 @@ export function RulesView({ rules, game }: { rules: DTO["Rule"][]; game: Game })
     <p>{t("unrestricted")}</p>
   );
 }
-function EntityList({
-  ids,
-  game,
-  kind,
-}: {
-  ids: string[];
-  game: Game;
-  kind: "trailer_type" | "adr_category";
-}) {
+function EntityList({ ids, game }: { ids: string[]; game: Game }) {
   const { t } = useTranslation("trips"),
-    [visible, setVisible] = useState(25),
-    published = usePublishedRevisions(game),
-    revision = published.data?.pages[0]?.data.data.items[0]?.id ?? "";
+    [visible, setVisible] = useState(25);
   return (
     <>
       <ul>
         {ids.slice(0, visible).map((id) => (
           <li key={id}>
-            <EntityName id={id} revision={revision} game={game} kind={kind} />
+            <EntityName id={id} game={game} />
           </li>
         ))}
       </ul>
@@ -125,38 +117,23 @@ function EntityList({
     </>
   );
 }
-export function EntityName({
-  id,
-  revision,
-  game,
-  kind,
-}: {
-  id: string;
-  revision: string;
-  game: Game;
-  kind: string;
-}) {
+export function EntityName({ id, game }: { id: string; game: Game }) {
   const { t, i18n } = useTranslation("qualifications"),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     query = useCatalogQuery(
-      ["qualification-label", id, revision, locale],
-      `/catalogs/entities/${id}?revisionId=${revision}&locale=${locale}`,
-      entitySchema,
-      !!revision,
+      ["qualification-label", id, locale],
+      `/catalogs/trailers/${id}?locale=${locale}`,
+      itemSchema,
     ),
     entity = query.data?.data.data,
-    valid =
-      entity?.id === id &&
-      entity.revisionId === revision &&
-      entity.game === game &&
-      entity.kind === kind;
+    valid = entity?.id === id && entity.game === game;
   return (
     <>
       {valid
         ? entity.display.label
-        : t(query.isPending && revision ? "catalogLabelLoading" : "catalogLabelUnavailable")}
+        : t(query.isPending ? "catalogLabelLoading" : "catalogLabelUnavailable")}
       {valid && entity.display.englishFallback ? ` · ${t("catalogs:fallback")}` : ""}
-      {valid && entity.display.retired ? ` · ${t("catalogs:retired")}` : ""}
+      {valid && entity.display.hidden ? ` · ${t("catalogs:hidden")}` : ""}
       {" · "}
       <code>{id}</code>
     </>
@@ -164,17 +141,13 @@ export function EntityName({
 }
 export function DraftEntities({
   ids,
-  revision,
   game,
-  kind,
   page,
   onPage,
   onRemove,
 }: {
   ids: (string | null)[];
-  revision: string;
   game: Game;
-  kind: "trailer_type" | "adr_category";
   page: number;
   onPage: (page: number) => void;
   onRemove: (index: number) => void;
@@ -194,12 +167,7 @@ export function DraftEntities({
           return (
             <li key={labelId}>
               <span id={labelId}>
-                {ordinal + 1}.{" "}
-                {id ? (
-                  <EntityName id={id} revision={revision} game={game} kind={kind} />
-                ) : (
-                  t("unknown")
-                )}
+                {ordinal + 1}. {id ? <EntityName id={id} game={game} /> : t("unknown")}
               </span>
               <Button
                 type="button"

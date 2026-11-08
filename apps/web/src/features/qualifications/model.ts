@@ -49,7 +49,7 @@ export function ruleSummary(rules: readonly DTO["Rule"][]): RuleSummary {
   for (const rule of rules) {
     if (rule.type === "max_mass") summary.mass = { kind: "value", maxKg: rule.maxKg };
     else if (rule.type === "allowed_trailer_types") summary.trailers = allowlist(rule.entityIds);
-    else if (rule.type === "allowed_adr_categories") summary.adr = allowlist(rule.entityIds);
+    else if (rule.type === "allowed_adr_categories") summary.adr = allowlist(rule.classes);
   }
   return summary;
 }
