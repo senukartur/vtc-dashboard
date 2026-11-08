@@ -35,6 +35,7 @@ export function validCode(value: unknown): value is string {
     value.length > 0 &&
     Buffer.byteLength(value) <= 128 &&
     Buffer.from(value).toString() === value &&
-    /^[^\s\u0000-\u001f\u007f]+$/u.test(value)
+    /^\S+$/u.test(value) &&
+    ![...value].some((ch) => ch <= "\u001f" || ch === "\u007f")
   );
 }
