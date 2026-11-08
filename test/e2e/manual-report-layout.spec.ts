@@ -406,7 +406,7 @@ test(
       route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
     );
     await page.locator("#manual-game").selectOption("ats");
-    await expect(origin.getByText("No matching", { exact: false })).toBeVisible();
+    await expect(origin.getByText("No rows match these filters.", { exact: true })).toBeVisible();
     await expect(origin.getByRole("alert")).toHaveCount(0);
   },
 );
