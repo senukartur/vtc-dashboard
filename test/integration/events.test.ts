@@ -8,6 +8,7 @@ import {
   type UnitOfWork,
   type TxContext,
 } from "@vtc/db";
+import { catalogCities } from "@vtc/db/catalogs-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
 import type { components } from "@vtc/contracts";
 import type { Connection, RowDataPacket } from "mysql2/promise";
@@ -15,7 +16,7 @@ import { beforeEach, expect, test, afterAll as after, beforeAll as before } from
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import { createApp } from "../../apps/api/src/app.ts";
 import {
   createIdentity,
@@ -23,11 +24,7 @@ import {
   type Identity,
 } from "../../apps/api/src/modules/identity/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
-import {
-  createOutbox,
-  identityAccessEvents,
-  catalogEvents,
-} from "../../apps/api/src/platform/outbox/events.ts";
+import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import {
   guardedSettings,
   reset,
@@ -41,11 +38,6 @@ import {
   knownFact,
 } from "../fixtures/qualification-rules/fixtures.ts";
 import { deferred } from "../support/concurrency.ts";
-import {
-  completeCatalogImport,
-  catalogFixtureLifecycle,
-  type CatalogFixtureDiagnostic,
-} from "../support/catalog-import-fixture.ts";
 const { beforeAll, afterAll } = schemaLifecycleHooks(before, after);
 let control: Connection,
   unit: UnitOfWork,
@@ -61,10 +53,6 @@ let control: Connection,
 const origin = "http://127.0.0.1:4173",
   password = "Fictional-event-passphrase-42",
   config = { cursorKey: randomBytes(32).toString("hex") };
-const catalogLifecycle = catalogFixtureLifecycle();
-function trackCatalogCompletion(...args: Parameters<typeof completeCatalogImport>) {
-  return catalogLifecycle.track(() => completeCatalogImport(...args));
-}
 let instant = Date.parse("2026-10-22T12:00:00.000Z");
 const now = () => new Date(instant);
 const input = (
@@ -149,28 +137,23 @@ beforeAll(async () => {
   service = createEvents(unit, config, { identity }, now);
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
-  await catalogLifecycle.reset(async () => {
-    instant = Date.parse("2026-10-22T12:00:00.000Z");
-    for (const table of [
-      "event_commands",
-      "event_catalog_pins",
-      "event_responses",
-      "event_attendances",
-      "event_attendance_revisions",
-      "event_response_revisions",
-      "event_revisions",
-      "events",
-      "outbox_events",
-      "audit_entries",
-    ])
-      await control.query(`DELETE FROM ${table}`);
-  });
+  instant = Date.parse("2026-10-22T12:00:00.000Z");
+  for (const table of [
+    "event_commands",
+    "event_responses",
+    "event_attendances",
+    "event_attendance_revisions",
+    "event_response_revisions",
+    "event_revisions",
+    "events",
+    "outbox_events",
+    "audit_entries",
+  ])
+    await control.query(`DELETE FROM ${table}`);
 });
 afterAll(async () => {
-  await catalogLifecycle.close(async () => {
-    await unit?.close();
-    await control?.end();
-  });
+  await unit?.close();
+  await control?.end();
 }, SCHEMA_SETUP_TIMEOUT_MS);
 test("Director/Deputy manage, additive Driver/trainee respond, dispatcher denied, anonymous privacy", async () => {
   const e = await create(),
@@ -650,7 +633,13 @@ test("validation rejects blank reasons, invalid UTC/calendar/decimal and unavail
   const denied = createEvents(
     unit,
     config,
-    { identity, catalogs: { eventReferencesInTransaction: async () => null } },
+    {
+      identity,
+      catalogs: {
+        selectionsInTransaction: async () => new Map(),
+        labelsInTransaction: async () => new Map(),
+      },
+    },
     now,
   );
   await expect(
@@ -879,224 +868,36 @@ test("server IDs stay independent of actor-scoped keys and historic confirmation
     code: "ER_ROW_IS_REFERENCED_2",
   });
 });
-function catalogFixtureRecord(record: CatalogFixtureDiagnostic) {
-  console.log(JSON.stringify(record));
-}
-const catalogPhases = ["identities", "facts", "links", "issues", "finalize"] as const;
-type CatalogPhase = (typeof catalogPhases)[number];
-async function catalogImportSurface(target: CatalogPhase, mode: "committed" | "rolled_back") {
-  const deadlineAt = performance.now() + 25000;
-  const observed = new WeakMap<TxContext, CatalogPhase>();
-  const callbacks = new Map<CatalogPhase, number>();
-  const rollback = new Error("SYNTHETIC_CATALOG_PHASE_ROLLBACK");
-  let injected = 0,
-    reserved = false;
-  const wrapped: UnitOfWork = {
-    client: (tx) => unit.client(tx),
-    close: async () => {},
-    async run<T>(command: (tx: TxContext) => Promise<T>): Promise<T> {
-      let selected = false;
-      const started = performance.now();
-      try {
-        const result = await unit.run(async (tx) => {
-          const value = await command(tx);
-          if (observed.get(tx) === target && !reserved) {
-            reserved = true;
-            selected = true;
-            if (mode === "rolled_back") throw rollback;
-          }
-          return value;
-        });
-        if (!selected) return result;
-      } catch (error) {
-        if (error !== rollback) throw error;
-      }
-      injected++;
-      console.log(
-        JSON.stringify({
-          event: "catalog_import_surface",
-          phase: target,
-          mode,
-          transactionElapsedMs: Math.round(performance.now() - started),
-          mechanism: "injected_unit_of_work_surface",
-        }),
-      );
-      // Underlying MySQL COMMIT/ROLLBACK has settled. This injects the public unknown
-      // outcome surface; it does not withhold or time a physical wire acknowledgment.
-      throw new TransactionCommitOutcomeUnknownError(
-        Object.assign(new Error("SYNTHETIC_CATALOG_RECEIPT_LOSS"), {
-          code: "PROTOCOL_SEQUENCE_TIMEOUT",
-        }),
-      );
-    },
-  };
-  const catalogs = createCatalogs(
-    wrapped,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 8 * 1024 * 1024,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
+test("event selections use same-game rows, labels follow renames and hidden rows stay only when unchanged", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity });
+  const rows = await seedCatalog(unit, "ets2", {
+    cities: [
+      { code: "event_city", nameEn: "Fictional original city" },
+      { code: "event_hidden_city", hidden: true },
+    ],
+    cargoes: ["event_cargo"],
+    trailers: ["event_trailer"],
+  });
+  const city = rows.id("event_city"),
+    cargo = rows.id("event_cargo"),
+    trailer = rows.id("event_trailer"),
+    hidden = rows.id("event_hidden_city");
+  const integrated = createEvents(unit, config, { identity, catalogs }, now);
+  const created = await integrated.create(
+    director,
+    newId(),
+    input({ originCityId: city, prescribedCargoId: cargo, prescribedTrailerTypeId: trailer }),
   );
-  const handler = {
-    ...catalogs.handler,
-    async local(...args: Parameters<NonNullable<typeof catalogs.handler.local>>) {
-      const [tx, reference] = args;
-      const phase = (reference as { phase: CatalogPhase }).phase;
-      observed.set(tx, phase);
-      callbacks.set(phase, (callbacks.get(phase) ?? 0) + 1);
-      await catalogs.handler.local?.(...args);
-    },
-  };
-  const data = artifact("ets2", [entity("event_city"), entity("event_cargo", { kind: "cargo" })]);
-  const uploadKey = newId(),
-    importKey = newId();
-  const uploaded = await catalogs.upload(director, uploadKey, Buffer.from(JSON.stringify(data)));
-  const input = { artifactId: uploaded.id, sha256: uploaded.sha256, game: "ets2" as const };
-  const operation = await catalogs.import(director, importKey, input);
-  const records: CatalogFixtureDiagnostic[] = [];
-  const started = performance.now();
-  const completed = await trackCatalogCompletion(
-    operation.id,
-    {
-      read: (id) => catalogs.operation(director, id),
-      pass: (signal) => runPass(createQueue(wrapped, [handler]), signal),
-    },
-    {
-      deadlineAt,
-      observe(record) {
-        records.push(record);
-        catalogFixtureRecord(record);
-      },
-    },
-  );
-  expect(completed.id).toBe(operation.id);
-  expect(completed.state).toBe("completed");
-  expect(injected).toBe(1);
-  expect(records.filter((record) => record.state === "commit_unknown")).toHaveLength(1);
-  if (mode === "rolled_back") expect(performance.now() - started).toBeGreaterThanOrEqual(15000);
-  const queue = createQueue(unit, [catalogs.handler]);
-  const receipts = await Promise.all(
-    catalogPhases.map((phase, index) =>
-      queue.receipt("catalogs", index === 0 ? operation.id : `${operation.id}:${phase}:0`),
-    ),
-  );
-  expect(receipts.every(Boolean)).toBe(true);
-  expect(new Set(receipts.map((receipt) => receipt?.jobId)).size).toBe(5);
-  const [jobs] = await control.query<RowDataPacket[]>(
-    "SELECT state,attempts FROM durable_jobs WHERE JSON_UNQUOTE(JSON_EXTRACT(reference,'$.operationId'))=? ORDER BY id",
-    [operation.id],
-  );
-  expect(jobs).toHaveLength(5);
-  expect(jobs.every((job) => job.state === "completed")).toBe(true);
-  expect(jobs.map((job) => Number(job.attempts)).sort()).toEqual(
-    mode === "rolled_back" ? [1, 1, 1, 1, 2] : [1, 1, 1, 1, 1],
-  );
-  for (const phase of catalogPhases)
-    expect(callbacks.get(phase)).toBe(mode === "rolled_back" && phase === target ? 2 : 1);
-  const [revisions] = await control.query<RowDataPacket[]>(
-    "SELECT id,complete FROM catalog_revisions WHERE artifact_id=?",
-    [uploaded.id],
-  );
-  expect(revisions).toHaveLength(1);
-  const rawRevisionId: unknown = revisions[0]?.id;
-  expect(Buffer.isBuffer(rawRevisionId)).toBe(true);
-  if (!Buffer.isBuffer(rawRevisionId)) throw new Error("SYNTHETIC_CATALOG_ID_SHAPE_INVALID");
-  expect(rawRevisionId.toString("utf8")).toBe(completed.resultId);
-  expect(Number(revisions[0]?.complete)).toBe(1);
-  const [facts] = await control.query<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM catalog_facts WHERE revision_id=?",
-    [completed.resultId],
-  );
-  expect(Number(facts[0]?.n)).toBe(2);
-  const [operations] = await control.query<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM catalog_operations WHERE artifact_id=?",
-    [uploaded.id],
-  );
-  expect(Number(operations[0]?.n)).toBe(1);
-  expect(await catalogs.import(director, importKey, input)).toEqual(operation);
-  const empty = await runPass(queue, new AbortController().signal);
-  expect(empty.processed).toBe(0);
-  expect(await catalogs.operation(director, operation.id)).toEqual(completed);
-  expect([...callbacks.values()].reduce((sum, count) => sum + count, 0)).toBe(
-    mode === "rolled_back" ? 6 : 5,
-  );
-}
-
-test.each(["identities", "facts", "finalize"] as const)(
-  "catalog fixture reconciles committed %s uncertainty through exact operation and receipts",
-  async (phase) => {
-    await catalogImportSurface(phase, "committed");
-  },
-  30000,
-);
-test("catalog fixture resumes rolled-back facts only after natural claim expiry with exact durable effects", async () => {
-  await catalogImportSurface("facts", "rolled_back");
-}, 30000);
-
-test("published same-game catalog facts are pinned immutably and mismatched kinds/games fail closed", async () => {
-  const deadlineAt = performance.now() + 25000;
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 8 * 1024 * 1024,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-  );
-  async function publish(label: string) {
-    const data = artifact("ets2", [
-      entity("event_city", { labels: { en: label, ru: null } }),
-      entity("event_cargo", { kind: "cargo" }),
-    ]);
-    const uploaded = await catalogs.upload(director, newId(), Buffer.from(JSON.stringify(data)));
-    const op = await catalogs.import(director, newId(), {
-      artifactId: uploaded.id,
-      sha256: uploaded.sha256,
-      game: "ets2",
-    });
-    const result = await trackCatalogCompletion(
-        op.id,
-        {
-          read: (id) => catalogs.operation(director, id),
-          pass: (signal) => runPass(createQueue(unit, [catalogs.handler]), signal),
-        },
-        { deadlineAt, observe: catalogFixtureRecord },
-      ),
-      id = result.resultId as string,
-      detail = await catalogs.detail(director, id);
-    await catalogs.publish(director, id, newId(), detail.version, {
-      expectedPublicationVersion: detail.publicationVersion,
-      reason: "Fictional catalog review",
-    });
-    return id;
-  }
-  const first = await publish("Fictional original city");
-  const city = (
-      await catalogs.entities(director, { revisionId: first, kind: "city", locale: "en" })
-    ).items[0]?.id as string,
-    cargo = (await catalogs.entities(director, { revisionId: first, kind: "cargo", locale: "en" }))
-      .items[0]?.id as string;
-  const integrated = createEvents(unit, config, { identity, catalogs }, now),
-    created = await integrated.create(
-      director,
-      newId(),
-      input({ originCityId: city, prescribedCargoId: cargo }),
-    );
   expect(created.data.event.origin?.label).toBe("Fictional original city");
-  await publish("Fictional later city");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCities)
+      .set({ nameEn: "Fictional later city" })
+      .where(eq(catalogCities.id, city)),
+  );
   expect((await integrated.get(trainee, created.data.event.id)).data).toMatchObject({
-    event: { origin: { label: "Fictional original city" } },
+    event: { origin: { label: "Fictional later city" } },
   });
   await expect(
     integrated.create(director, newId(), input({ game: "ats", originCityId: city })),
@@ -1104,7 +905,28 @@ test("published same-game catalog facts are pinned immutably and mismatched kind
   await expect(
     integrated.create(director, newId(), input({ originCityId: cargo })),
   ).rejects.toMatchObject({ statusCode: 422 });
-}, 30000);
+  await expect(
+    integrated.create(director, newId(), input({ originCityId: hidden })),
+  ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_SELECTION_HIDDEN" });
+  await unit.run((tx) =>
+    unit.client(tx).update(catalogCities).set({ hidden: true }).where(eq(catalogCities.id, city)),
+  );
+  await expect(
+    integrated.update(director, created.data.event.id, newId(), 1, {
+      ...input({
+        title: "Fictional unchanged origin",
+        originCityId: city,
+        prescribedCargoId: cargo,
+      }),
+      prescribedTrailerTypeId: trailer,
+    }),
+  ).resolves.toBeDefined();
+  await expect(
+    integrated.update(director, created.data.event.id, newId(), 2, {
+      ...input({ title: "Fictional hidden origin", originCityId: hidden }),
+    }),
+  ).rejects.toMatchObject({ publicCode: "CATALOG_SELECTION_HIDDEN" });
+});
 // Concurrent commands share the current definition lock and must observe a serial outcome.
 test("RSVP versus cancellation/rescheduling and competing attendance batches preserve one serial history", async () => {
   const e = await create(),

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
+import { catalogCities } from "@vtc/db/catalogs-schema";
 import { membership, roles } from "@vtc/db/identity-schema";
 import {
   eq,
@@ -37,12 +38,8 @@ import {
 } from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import {
-  catalogEvents,
-  createOutbox,
-  identityAccessEvents,
-} from "../../apps/api/src/platform/outbox/events.ts";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   hasCode,
@@ -74,6 +71,40 @@ const context = (id = owner.userId): SourceContext => ({
 });
 const receive = (p: Telemetry, target = service, ctx = context()) =>
   retryTransaction(unit, (tx) => target.storeInTransaction(tx, "ets2telemetry", p, ctx));
+let listed: Promise<{
+  catalogs: ReturnType<typeof createCatalogs>;
+  trips: Trips;
+  rows: Awaited<ReturnType<typeof seedCatalog>>;
+}> | null = null;
+/** One seeded set of list rows per suite; a telemetry fixture resolves only against these. */
+const listedTrips = () => {
+  listed ??= (async () => {
+    const catalogs = createCatalogs(unit, catalogConfig(), { identity });
+    const rows = await seedCatalog(unit, "ets2", {
+      cities: [
+        { code: "fixture_north", nameEn: "Fictional north" },
+        { code: "fixture_south", nameEn: "Fictional south" },
+      ],
+      cargoes: [
+        { code: "fixture_crates", nameEn: "Fictional crates" },
+        { code: "fixture_gas", nameEn: "Fictional gas", adrClass: "2" },
+      ],
+      trailers: [
+        { code: "fixture_box", nameEn: "Fictional box" },
+        { code: "fixture_hidden_body", nameEn: "Fictional hidden body", hidden: true },
+      ],
+    });
+    return { catalogs, trips: createTrips(unit, config, { identity, catalogs }), rows };
+  })();
+  return listed;
+};
+const fresh = () => {
+  const p = fixture();
+  p.eventId = newId();
+  p.source.tripId = newId();
+  p.source.pluginSessionId = newId();
+  return p;
+};
 async function addMember() {
   const id = newId(),
     email = `${id}@example.invalid`,
@@ -598,7 +629,7 @@ test("valid unrepresentable telemetry quantity is durably retained with unknown 
   expect((await receive(p)).duplicate).toBe(true);
   expect((await totals()).messages).toBe(1);
 });
-test("relational facts preserve zero, precision, nulls, times and ordered trailers independently of redundant evidence", async () => {
+test("relational facts preserve zero, precision, nulls, times and one coupling row independently of redundant evidence", async () => {
   const p = fixture();
   Object.assign(p.snapshot.job.cargoMass, { value: 0 });
   Object.assign(p.snapshot.observedDistance, { value: 0 });
@@ -620,13 +651,12 @@ test("relational facts preserve zero, precision, nulls, times and ordered traile
     actualDistanceM: "0.000000000000000000",
     measuredSegmentM: "0.000000000000000000",
     fuelUsedL: "0.123456789012345680",
-    originEntityId: null,
-    originFactId: null,
+    originCityId: null,
     startBasis: "event",
     startVerified: true,
     endBasis: "event",
     endVerified: true,
-    trailerCount: 2,
+    trailerCount: 1,
     trailersComplete: true,
   });
   const before = await unit.run((tx) =>
@@ -663,8 +693,8 @@ test("relational facts preserve zero, precision, nulls, times and ordered traile
       .where(eq(tripFactTrailers.tripFactId, saved.id))
       .orderBy(tripFactTrailers.position),
   );
-  expect(children.map((row) => row.position)).toEqual([0, 1]);
-  expect(children.every((row) => row.entityId === null && row.unknownReason !== null)).toBe(true);
+  expect(children.map((row) => row.position)).toEqual([0]);
+  expect(children.every((row) => row.trailerId === null && row.unknownReason !== null)).toBe(true);
 });
 
 test("an explicit coordinator target links another source identity without summing metrics and rejects stale/foreign targets", async () => {
@@ -1054,63 +1084,31 @@ test("restrictive relationships retain historical ownership and normalized evide
   expect((await totals()).trips).toBe(1);
   expect((await totals()).facts).toBe(1);
 });
-test("manual internal adapter uses published canonical selections, evidence port and unknown source dates", async () => {
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 1024 * 1024,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-  );
-  const mapped = (sourceId: string) => ({
-    mapNamespace: "official",
-    mappings: [{ provider: "ets2telemetry", sourceId }],
-  });
-  const a = artifact("ets2", [
-    entity("north", mapped("fixture_north")),
-    entity("south", mapped("fixture_south")),
-    entity("load", { ...mapped("fixture_crates"), kind: "cargo" }),
-    entity("box", { ...mapped("fixture_trailer"), kind: "trailer_type" }),
-  ]);
-  const uploaded = await catalogs.upload(staff, newId(), Buffer.from(JSON.stringify(a)));
-  const op = await catalogs.import(staff, newId(), {
-    artifactId: uploaded.id,
-    sha256: uploaded.sha256,
-    game: "ets2",
-  });
-  await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-  const revisionId = (await catalogs.operation(staff, op.id)).resultId as string;
-  const r = await catalogs.detail(staff, revisionId);
-  await catalogs.publish(staff, revisionId, newId(), r.version, {
-    expectedPublicationVersion: r.publicationVersion,
-    reason: "Fictional reviewed source",
-  });
-  const city = await catalogs.entities(staff, { revisionId, kind: "city", locale: "en" });
-  const cargo = await catalogs.entities(staff, { revisionId, kind: "cargo", locale: "en" });
-  const trailer = await catalogs.entities(staff, {
-    revisionId,
-    kind: "trailer_type",
-    locale: "en",
-  });
+test("manual internal adapter uses current canonical selections, evidence port and unknown source dates", async () => {
+  const { catalogs, rows } = await listedTrips();
+  const city = (code: string) => rows.id(code),
+    originId = city("fixture_north"),
+    destinationId = city("fixture_south");
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
+  const cargoId = rows.id("fixture_crates"),
+    trailerTypeId = rows.id("fixture_box");
   const p = {
+    format: 2 as const,
     reportId: newId(),
     revisionId: newId(),
     revision: 1,
-    game: "ets2",
-    catalogRevisionId: revisionId,
-    originId: city.items.find((item) => item.display.label === "Fictional north")?.id,
-    destinationId: city.items.find((item) => item.display.label === "Fictional south")?.id,
-    cargoId: cargo.items[0]?.id,
-    trailerTypeId: trailer.items[0]?.id,
-    cargoMassKg: "1000.5",
-    actualDistanceM: "1234.5",
-    evidenceIds: [newId()],
+    fields: {
+      game: "ets2" as const,
+      origin: resolved(originId),
+      destination: resolved(destinationId),
+      cargo: resolved(cargoId),
+      trailerType: resolved(trailerTypeId),
+      cargoMassKg: "1000.5",
+      actualDistanceM: "1234.5",
+      evidenceIds: [newId()],
+      eventId: null,
+      comment: null,
+    },
   };
   const withoutEvidence = createTrips(unit, config, { identity, catalogs });
   await expect(
@@ -1132,11 +1130,11 @@ test("manual internal adapter uses published canonical selections, evidence port
   if (!sourceFact) throw new Error("SYNTHETIC_FACT_EXPECTED");
   expect(sourceFact.cargo).toMatchObject({
     status: "known",
-    value: { entityId: p.cargoId, catalogRevisionId: revisionId },
+    value: { entityId: cargoId },
   });
   expect(sourceFact.trailers.items[0]).toMatchObject({
     status: "known",
-    value: { entityId: p.trailerTypeId, catalogRevisionId: revisionId },
+    value: { entityId: trailerTypeId },
   });
   expect(
     await unit
@@ -1144,7 +1142,7 @@ test("manual internal adapter uses published canonical selections, evidence port
         unit
           .client(tx)
           .update(tripFacts)
-          .set({ cargoEntityId: p.originId })
+          .set({ cargoId: originId })
           .where(eq(tripFacts.id, sourceFact.factRevisionId)),
       )
       .then(() => false, hasCode("ER_NO_REFERENCED_ROW_2")),
@@ -1155,7 +1153,7 @@ test("manual internal adapter uses published canonical selections, evidence port
         unit
           .client(tx)
           .update(tripFactTrailers)
-          .set({ entityId: p.cargoId })
+          .set({ trailerId: cargoId })
           .where(eq(tripFactTrailers.tripFactId, sourceFact.factRevisionId)),
       )
       .then(() => false, hasCode("ER_NO_REFERENCED_ROW_2")),
@@ -1255,46 +1253,186 @@ test("manual internal adapter uses published canonical selections, evidence port
       }),
     ),
   ).rejects.toThrow("MANUAL_RETENTION_OUT_OF_SCOPE");
-  const next = structuredClone(a);
-  next.gameBuild = "synthetic-build-next";
-  for (const item of next.entities) item.labels.en = `Later ${item.labels.en}`;
-  const nextUpload = await catalogs.upload(staff, newId(), Buffer.from(JSON.stringify(next)));
-  const nextOp = await catalogs.import(staff, newId(), {
-    artifactId: nextUpload.id,
-    sha256: nextUpload.sha256,
-    game: "ets2",
-  });
-  await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-  const nextId = (await catalogs.operation(staff, nextOp.id)).resultId as string;
-  const nextRevision = await catalogs.detail(staff, nextId);
-  await catalogs.publish(staff, nextId, newId(), nextRevision.version, {
-    expectedPublicationVersion: nextRevision.publicationVersion,
-    reason: "Fictional later build",
-  });
-  expect(
-    await unit.run((tx) => catalogs.publishedInTransaction(tx, "ets2", "synthetic-build")),
-  ).toBe(revisionId);
   const pinnedView = await manual.detail(owner, result.tripId);
   if (pinnedView.view !== "private") throw new Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
   expect(pinnedView.summary.origin?.label).toBe("Fictional north");
-  const mismatch = fixture();
-  mismatch.eventId = newId();
-  mismatch.source.tripId = newId();
-  mismatch.snapshot.context.gameBuild = { available: true, value: "SYNTHETIC-BUILD" };
-  const unknown = await receive(mismatch, manual);
-  const [unknownFact] = await unit.run((tx) =>
-    unit.client(tx).select().from(tripFacts).where(eq(tripFacts.canonicalTripId, unknown.tripId)),
+  // Names follow the row, not a pin: staff edits show up on trips already recorded.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCities)
+      .set({ nameEn: "Renamed north" })
+      .where(eq(catalogCities.id, originId)),
   );
-  if (!unknownFact) throw new Error("SYNTHETIC_FACT_EXPECTED");
-  expect(unknownFact.catalogRevisionId).toBeNull();
-  expect(
-    (await unit.run((tx) => manual.sourceEvidenceInTransaction(tx, unknown.sourceRecordId)))?.cargo,
-  ).toMatchObject({
-    status: "unknown",
-    reasonCode: "catalog_build_unavailable",
-  });
-  expect((await state(unknown.tripId))?.decision).toBe("unassessed");
+  const renamed = await manual.detail(owner, result.tripId);
+  if (renamed.view !== "private") throw new Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(renamed.summary.origin?.label).toBe("Renamed north");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCities)
+      .set({ nameEn: "Fictional north" })
+      .where(eq(catalogCities.id, originId)),
+  );
 });
+
+// Telemetry recognition against editable lists: the first trailer's body type names the coupling.
+const coupling = (
+  first: Partial<Telemetry["snapshot"]["trailers"]["items"][number]>,
+  ...rest: Telemetry["snapshot"]["trailers"]["items"]
+) => {
+  const p = fresh();
+  const base = p.snapshot.trailers.items[0];
+  if (!base) throw new Error("SYNTHETIC_TRAILER_EXPECTED");
+  p.snapshot.trailers.items = [{ ...base, ...first }, ...rest];
+  return p;
+};
+const tokenTrailer = (index: number, bodyType: string, id = "fixture_other_trailer") => ({
+  index,
+  id: { available: true as const, value: id },
+  bodyType: { available: true as const, value: bodyType },
+  chainType: { available: true as const, value: "fixture_single" },
+});
+const noBodyType = { available: false as const, reason: "not-observed" as const };
+const stored = async (p: Telemetry) => {
+  const { trips } = await listedTrips();
+  const result = await receive(p, trips);
+  const evidence = await unit.run((tx) =>
+    trips.sourceEvidenceInTransaction(tx, result.sourceRecordId),
+  );
+  if (!evidence) throw new Error("SYNTHETIC_EVIDENCE_EXPECTED");
+  const [fact] = await unit.run((tx) =>
+    unit.client(tx).select().from(tripFacts).where(eq(tripFacts.messageId, result.sourceRecordId)),
+  );
+  const children = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select()
+      .from(tripFactTrailers)
+      .where(eq(tripFactTrailers.tripFactId, fact?.id ?? "")),
+  );
+  return { evidence, fact, children };
+};
+
+test("telemetry recognizes a coupling by the first body type when the trailer id matches nothing", async () => {
+  const { rows } = await listedTrips();
+  const { evidence, fact, children } = await stored(
+    coupling({ id: { available: true, value: "fixture_unlisted_trailer" } }),
+  );
+  expect(evidence.trailers.items).toHaveLength(1);
+  expect(evidence.trailers.items[0]).toMatchObject({
+    status: "known",
+    value: { entityId: rows.id("fixture_box") },
+  });
+  expect(fact).toMatchObject({ trailerCount: 1, ruleContextComplete: true });
+  expect(children.map((row) => [row.position, row.trailerId])).toEqual([
+    [0, rows.id("fixture_box")],
+  ]);
+});
+
+test("later slots never block the coupling and stay in provenance", async () => {
+  const { rows } = await listedTrips();
+  const later = { ...tokenTrailer(1, "ignored"), bodyType: noBodyType };
+  const { evidence, fact, children } = await stored(coupling({}, later));
+  expect(fact?.ruleContextComplete).toBe(true);
+  expect(evidence.trailers.items[0]).toMatchObject({ status: "known" });
+  expect(evidence.trailers.items).toHaveLength(1);
+  expect(children.map((row) => row.position)).toEqual([0]);
+  expect(
+    (evidence.provenance as { trailerEvidence: { items: unknown[] } }).trailerEvidence.items,
+  ).toHaveLength(2);
+  expect(rows.ids.size).toBeGreaterThan(0);
+});
+
+test("the first body type has no fallback to the trailer id, chain type or another slot", async () => {
+  const unavailable = await stored(
+    coupling(
+      { id: { available: true, value: "fixture_box" }, bodyType: noBodyType },
+      tokenTrailer(1, "fixture_box"),
+    ),
+  );
+  expect(unavailable.evidence.trailers.items[0]).toMatchObject({
+    status: "unknown",
+    reasonCode: "source_id_unknown",
+  });
+  expect(unavailable.fact?.ruleContextComplete).toBe(false);
+  const later = await stored(coupling({ bodyType: { available: true, value: "" } }));
+  expect(later.evidence.trailers.items[0]).toMatchObject({ status: "unknown" });
+});
+
+test("items without index zero and unlisted body types stay unknown", async () => {
+  const p = fresh();
+  p.snapshot.trailers.items = [tokenTrailer(1, "fixture_box")];
+  const missingZero = await stored(p);
+  expect(missingZero.evidence.trailers.items[0]).toMatchObject({
+    status: "unknown",
+    reasonCode: "source_id_unknown",
+  });
+  expect(missingZero.fact?.ruleContextComplete).toBe(false);
+  const unlisted = await stored(
+    coupling({ bodyType: { available: true, value: "fixture_unlisted_body" } }),
+  );
+  expect(unlisted.evidence.trailers.items[0]).toMatchObject({
+    status: "unknown",
+    reasonCode: "unknown_source_id",
+  });
+  expect(unlisted.fact?.ruleContextComplete).toBe(false);
+});
+
+test("telemetry stays incomplete when the client reports an incomplete coupling or context", async () => {
+  const incomplete = fresh();
+  incomplete.snapshot.trailers.complete = false;
+  expect((await stored(incomplete)).fact?.ruleContextComplete).toBe(false);
+});
+
+test("resolution does not depend on the game build or map", async () => {
+  const { rows } = await listedTrips();
+  for (const change of [
+    { gameBuild: { available: true, value: "another-build" } },
+    { gameBuild: { available: false, reason: "not-observed" } },
+    {
+      gameBuild: { available: false, reason: "not-observed" },
+      mapId: { available: false, reason: "not-observed" },
+    },
+  ]) {
+    const p = fresh();
+    Object.assign(p.snapshot.context, change);
+    const { evidence } = await stored(p);
+    expect(evidence.origin).toMatchObject({
+      status: "known",
+      value: { entityId: rows.id("fixture_north") },
+    });
+    expect(evidence.cargo).toMatchObject({ status: "known" });
+  }
+});
+
+test("non-hazardous and unlisted cargo give distinct ADR outcomes and hidden rows stay recognized", async () => {
+  const nonHazardous = await stored(fresh());
+  expect(nonHazardous.evidence.adrCategory).toMatchObject({
+    status: "unknown",
+    reasonCode: "cargo_not_adr",
+  });
+  expect(nonHazardous.fact?.ruleContextComplete).toBe(true);
+  const hazardous = fresh();
+  Object.assign(hazardous.snapshot.job.cargoId, { value: "fixture_gas" });
+  const known = await stored(hazardous);
+  expect(known.evidence.adrCategory).toMatchObject({ status: "known", value: "2" });
+  expect(known.fact?.adrClass).toBe("2");
+  const unlisted = fresh();
+  Object.assign(unlisted.snapshot.job.cargoId, { value: "fixture_unlisted_cargo" });
+  const missing = await stored(unlisted);
+  expect(missing.evidence.adrCategory).toMatchObject({
+    status: "unknown",
+    reasonCode: "cargo_adr_unknown",
+  });
+  expect(missing.fact?.ruleContextComplete).toBe(false);
+  const hidden = await stored(
+    coupling({ bodyType: { available: true, value: "fixture_hidden_body" } }),
+  );
+  expect(hidden.evidence.trailers.items[0]).toMatchObject({ status: "known" });
+  expect(hidden.fact?.ruleContextComplete).toBe(true);
+});
+
 test("review queue filters hold and order, binds them to cursors and projects manual revisions once per page", async () => {
   const created: string[] = [];
   for (let n = 0; n < 4; n++) {

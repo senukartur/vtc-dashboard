@@ -52,7 +52,7 @@ import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/tel
 import { tripMatchDiscovery } from "../../apps/api/src/modules/trips/reconciliation.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import { retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
-import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
   EXTENDED_TEST_TIMEOUT_MS,
@@ -95,15 +95,7 @@ const password = "Fictional-reconciliation-passphrase-42",
     key: randomBytes(32).toString("hex"),
     rule: { version: 1, startToleranceMs: 1000, endToleranceMs: 1000, distanceToleranceM: "0.01" },
   },
-  catalogConfig = {
-    production: false,
-    synthetic: true,
-    cursorKey: randomBytes(32).toString("hex"),
-    maxFileBytes: 1048576,
-    artifactTtlMs: 86400000,
-    policyRevision: 1,
-    evidence: [],
-  },
+  catalogConfig = { cursorKey: randomBytes(32).toString("hex") },
   manualConfig = {
     key: randomBytes(32).toString("hex"),
     maxFilesPerReport: 5,
@@ -151,12 +143,7 @@ beforeAll(async () => {
   other = await member();
   dispatcher = await member(["dispatcher"]);
   deputy = await member(["deputy_director"]);
-  const catalogs = createCatalogs(
-    unit,
-    catalogConfig,
-    { identity, published: catalogEvents(unit).append },
-    now,
-  );
+  const catalogs = createCatalogs(unit, catalogConfig, { identity }, now);
   tripService = createTrips(
     unit,
     tripConfig,
@@ -852,7 +839,7 @@ test(
     for (const field of ["origin", "destination", "cargo"] as const)
       known[field] = {
         status: "known",
-        value: { entityId: newId(), catalogRevisionId: newId(), factRevisionId: newId() },
+        value: { entityId: newId() },
         sourceRecordId: known.sourceRecordId,
         sourceField: `synthetic.${field}`,
       };
