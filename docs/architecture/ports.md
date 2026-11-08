@@ -59,7 +59,7 @@ type DecimalString = string;
 type Fact<T> =
   | { status: "known"; value: T; sourceRecordId: Id; sourceField: string }
   | { status: "unknown"; reasonCode: string; sourceRecordId: Id };
-type PinnedEntity = { entityId: Id; catalogRevisionId: Id; factRevisionId: Id };
+type TripEntity = { entityId: Id };
 type ReportedTime = { utc: string | null;
   basis: "event" | "checkpoint" | "last-known" | "receipt" | "unknown";
   verifiedActual: boolean };
@@ -73,17 +73,17 @@ interface NormalizedTripEvidence {
   recording: "complete" | "partial" | "unknown";
   start: ReportedTime;
   end: ReportedTime;
-  origin: Fact<PinnedEntity>;
-  destination: Fact<PinnedEntity>;
-  cargo: Fact<PinnedEntity>;
+  origin: Fact<TripEntity>;
+  destination: Fact<TripEntity>;
+  cargo: Fact<TripEntity>;
   cargoMassKg: Fact<DecimalString>;
   actualDistanceM: Fact<DecimalString>;
   measuredSegmentM: Fact<DecimalString>;
   plannedDistanceM: Fact<DecimalString>;
   deliveredDistanceM: Fact<DecimalString>;
   wholeTripDistanceSupported: boolean;
-  trailers: { complete: boolean; items: readonly Fact<PinnedEntity>[] };
-  adrCategory: Fact<PinnedEntity>;
+  trailers: { complete: boolean; items: readonly Fact<TripEntity>[] };
+  adrCategory: Fact<AdrClass>;
   ruleContextComplete: boolean;
   reasonCodes: readonly string[];
 }
@@ -113,7 +113,7 @@ Rule evaluators are registered pure functions over evidence, context and typed i
 | Auth engine | Better Auth behind an application facade. No public catch-all library route, admin plugin or unrestricted signup/reset/change-email route. Browser DTOs/capabilities belong to this project, not generated library internals |
 | Blob | Local private persistent filesystem initially, replaceable storage later. Metadata/ref/retention stays in MySQL. Stage object first, verify content/checksum, then attach transactionally; clean unattached orphans after a configured grace period. Never delete an attached object before the one-year/latest-decision and under-review checks |
 | Mail | Local fake in tests/staging by default; production provider selected in VTC-014. Durable delivery identity, bounded retries, sanitised failures. No email failure may block administrator copy of a valid invitation. Leadership code expiry does not extend because a mail retry is delayed |
-| Catalogs | Read pinned local published facts. Import/extraction happens outside the production app; source licensing, all-DLC coverage, readable labels and publication review remain VTC-019 gates. Own RU/EN labels/fallback do not become trusted identity mappings |
+| Catalogs | Read editable per-game lists and resolve exact telemetry codes in the caller's transaction. Staff maintain rows by hand or CSV/JSON import; RU/EN labels never become trusted identity mappings |
 | Trip sources | Own telemetry uses its frozen contract and durable receipt. Manual uses revised forms/evidence. Future company-wide Trucky/VTCBase adapters authenticate and persist to the same source/acceptance pipeline, not another statistics path |
 | Steam/TruckersMP | Bound verified external IDs and narrow reads; cache with explicit stale/unavailable state. Provider outage cannot silently change ownership, revoke historical trips or infer verification. Steam replacement requires director/deputy, audit, epoch change and token revocation |
 
@@ -132,7 +132,7 @@ VTC-014 supplies the [private messaging port](../operations/email.md) on the sam
 
 VTC-015 now installs the [admissions coordinator](../development/admissions.md), its same-transaction identity provisioning/current-authority facades, a qualifications-owned initial assignment initializer, and actual admissions validity/invalidation callbacks in both API and jobs composition. These are opt-in implementation seams; full qualification rules/progress and verified Steam identity remain VTC-028/VTC-018. Disabled-mail approval retains independent invitation copy, while required rejection mail fails closed without a durable adapter.
 
-VTC-019 implements the local published-fact resolver and [bounded normalized catalog import](../development/catalogs.md). Its private JSON artifact store is deliberately catalog-owned MySQL MEDIUMTEXT, capped below byte capacity and expired without erasing immutable published facts; this does not generalize report evidence storage. API/worker composition registers the safe catalog handler alongside mail. Operator-reviewed exact artifact/inventory/provenance evidence remains separate from uploaded assertions; actual full production datasets and permitted distribution are pending.
+VTC-084 replaced the versioned catalog with [plain per-game lists](../development/catalogs.md). The port resolves `(game, kind, code)` to a row id plus the cargo ADR class, and resolves selections for manual reports, events and rules.
 
 VTC-022 now exports the internal `TripSourceAdapter`, `NormalizedTripEvidence` and caller-transaction trip/source facade in the [trip implementation](../development/trips.md). Telemetry and manual adapters are registered; no future webhook or public ingestion transport is activated. Catalog normalization uses additive transaction-scoped published/resolve/pinned/label facades and current member summaries remain identity-owned.
 

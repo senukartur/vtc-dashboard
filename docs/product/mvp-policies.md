@@ -14,19 +14,11 @@ Change this file only when the owner approves new or changed behavior. Edit the 
 
 ## Game catalogs and localization
 
-Maintain local, versioned catalogs for ETS2/ATS cities, regions, cargo, and trailer classifications. Investigate reliable data/API/extraction sources in VTC-002 before promising complete coverage.
+The owner chose on 2026-11-08 to replace the versioned catalog system (staged imports, revisions, publication, source trust, mapping review) with five plain per-game lists: DLCs, regions, cities, cargo and trailer types. Staff keep them by hand or by CSV/JSON import from `qualifications.manage`; there is no build, map or publication gate.
 
-The owner confirmed the MVP launch target on 2026-10-17: cover the base games and **all official DLCs for both ETS2 and ATS**, rather than only the packs used by the current members. Pin the launch build/release inventory and verify every pack's catalog contribution; record packs that add no relevant entities as checked/non-contributing. A partially tested installation or sample is not evidence of this complete coverage. New DLCs after that baseline enter the versioned update workflow.
+Rows are matched to telemetry by exact `(game, code)`. Trailers are identified by telemetry body type, and a coupling takes its first trailer's type. A cargo's ADR class is one of 1, 2, 3, 4, 6 or 8 or empty for non-hazardous cargo; it travels with the trip as evaluated, so a later edit does not rewrite past results. Cities, cargo and trailer types are selected by canonical row IDs; changing language changes labels only. Hidden rows stay readable but leave new selections; a rule or event can keep a row that has since been hidden.
 
-The owner approved handing the unavailable Louisiana, Illinois and South Dakota ATS source checks from VTC-002 discovery to VTC-019, with their resolution still mandatory before launch. Record explicit coverage gaps rather than blocking unrelated architecture work or claiming the research sample is a complete production catalog.
-
-Canonical identity is independent of RU/EN labels. Prefer provider/game IDs and scoped mappings; name-only aliases need game, locale, region/map context and an ambiguity path. Changing language must not alter selected IDs or rule outcomes. Distinguish cargo unit mass from actual shipment mass.
-
-Maintain project-reviewed RU/EN labels separately from canonical/source IDs. The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly and keep untranslated entries in a translation queue. An unreadable source token is a diagnostic value, not a completed English label. Fallback display does not establish a trusted name-matching alias or change qualification results.
-
-Track game build, DLC/map coverage, provenance, publication version, and additions/changes/retirements. Preserve historical entities and rule references after DLC updates. Use an explicit import/diff/review/publish workflow; arbitrary mod support is later work.
-
-The project's technical maintainer prepares updates; the Director or Deputy Director reviews and publishes them. Maintenance is an operational responsibility, not an additional dashboard role. The [VTC-002 source hand-off](../research/catalog-source-follow-up.md) records the measured coverage and remaining source/import/release gates.
+The owner approved an explicit English-name fallback when a Russian translation is missing; complete Russian translation is not a launch prerequisite. Mark the fallback visibly.
 
 ### Catalog source use basis
 

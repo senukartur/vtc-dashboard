@@ -57,7 +57,7 @@ The normal CLI registers mail.deliver only when mail is explicitly configured; d
 
 ## Catalog import preparation and bounded local batches
 
-VTC-019 registers `catalog.import` with safe operation/artifact/hash/phase/offset references. The optional local-handler `prepare` callback performs bounded immutable input parsing before the local effect transaction. The existing token/expiry fence and receipt still own effect commit; the module rechecks its immutable reference and durable cursor. Preparation errors use the normal durable failure path, including visible terminal operation readback. Chained batches advance the cursor/enqueue their successor atomically; incomplete revisions stay unreadable. Composition combines catalog and mail handlers without changing provider delivery. Disabled catalog workers pause `catalog.import`, just as disabled mail pauses `mail.deliver`. [Catalog import recovery](catalogs.md#durable-import-and-recovery) retains the exact COMMIT-unknown and cleanup boundaries. No catalog notification/cache subscriber is installed.
+VTC-084 removed the `catalog.import` handler and its cleanup pass with the versioned catalog; staff imports run in the request's transaction.
 
 
 ## VTC-025 evidence maintenance

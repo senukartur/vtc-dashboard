@@ -100,6 +100,8 @@ Admissions staff rate admission authenticates and checks current `applications.m
 
 ## Implemented catalog lists
 
+Catalog errors: `CATALOG_ROW_NOT_FOUND` (404), `CATALOG_CODE_CONFLICT` (409), `CATALOG_PARENT_INVALID`, `CATALOG_FILE_INVALID`, `CATALOG_IMPORT_INVALID`, `CATALOG_SELECTION_HIDDEN` (422), `CATALOG_FILE_TOO_LARGE` (413), `CATALOG_IMPORT_TOKEN_REQUIRED` (428), `CATALOG_IMPORT_TOKEN_INVALID` (412).
+
 VTC-084 replaces the versioned catalog routes. `GET /catalogs/{list}` pages rows ordered by display name for the requested locale, then `id`, with a signed keyset cursor bound to the session and filters. `code` is opaque and compared byte-exact; search escapes LIKE wildcards and matches names and code case-insensitively. [Catalogs](../../development/catalogs.md) documents list columns, the import file format and the telemetry code rules per list.
 
 ## Implemented qualification semantics
