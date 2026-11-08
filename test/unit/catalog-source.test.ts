@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { expect, test } from "vitest";
-import { buildArtifact } from "../../apps/api/src/modules/catalogs/preparation.ts";
 import { parseRegistries } from "../../scripts/catalogs/registry.mjs";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
 
+const execFileAsync = promisify(execFile);
+const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
 const options = { resolution: "unique_providers" as const };
 async function fixture(files: Record<string, string>) {
   const root = await mkdtemp(join(tmpdir(), "vtc-source-"));
@@ -172,213 +175,135 @@ test("unique source mode keeps closed fields, typed tuples, UTF8, limits and all
   }
 });
 
-test("normalization validates actual kg unit mass, exact derived tokens and reviewed country references", async () => {
-  const root = await fixture({
-    "def/root.sii":
-      '@include "country/fiction.sui" @include "city.sui" @include "cargo.sui" @include "trailer.sui"',
-    "def/country/fiction.sui": 'country_data : country.data.fiction { name: "Fiction Region" }',
-    "def/city.sui": 'city_data : city.fiction { city_name: "Fiction City" country: fiction }',
-    "def/cargo.sui":
-      "cargo_data : cargo.fiction { mass: 12.500 adr_class: 3 body_types[]: box body_types[]: tank }",
-    "def/trailer.sui": "trailer_def : trailer.fiction { body_type: box chain_type: chain }",
-  });
+test("offline active registries preserve ordered overlay/include provenance and typed city arrays", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vtc-catalog-"));
   try {
-    const parsed = await parseRegistries(
-      [{ root, packId: "base", registries: ["def/root.sii"] }],
-      options,
+    await mkdir(join(root, "base"));
+    await mkdir(join(root, "dlc"));
+    await writeFile(join(root, "base", "registry.sii"), 'SiiNunit { @include "city.sui" }');
+    await writeFile(
+      join(root, "base", "city.sui"),
+      'city_data : city.fictional { city_name: "Fictional City" country: country.example key_city: true map_x_offsets[]: 1 map_y_offsets[]: -2 population: 42 vehicle_brands[]: "fictional" }',
     );
-    const entities = [
-      entity("country.data.fiction", { kind: "region" }),
-      entity("city.fiction", { regionKey: "country.data.fiction" }),
-      entity("cargo.fiction", { kind: "cargo", cargoUnitMassKg: "12.5", adrCategoryKey: "3" }),
-      entity("trailer.fiction", {
-        kind: "trailer_type",
-        trailerBodyTypeKey: "box",
-        trailerChainTypeKey: "chain",
-      }),
-      entity("3", { kind: "adr_category" }),
-      entity("box", { kind: "trailer_body_type" }),
-      entity("chain", { kind: "trailer_chain_type" }),
+    await writeFile(
+      join(root, "dlc", "registry.sii"),
+      'city_data : city.fictional { city_name: "Reviewed Overlay" country: country.example }',
+    );
+    const layers = [
+      { root: join(root, "base"), packId: "base", registries: ["registry.sii"] },
+      { root: join(root, "dlc"), packId: "dlc", registries: ["registry.sii"], overlay: true },
     ];
-    const { sourceManifestSha256: _, ...a } = artifact("ats", entities);
-    const find = (id: string) => {
-      const unit = parsed.units.find((u) => u.id === id);
-      if (!unit) throw new Error("MISSING_FICTIONAL_UNIT");
-      return unit;
-    };
-    const binding = (
-      kind: string,
-      key: string,
-      id: string,
-      classification?: { field: string; token: string },
-    ) => ({
-      kind,
-      mapNamespace: "base",
-      key,
-      unitType: find(id).type,
-      unitId: id,
-      sourceFacts: find(id).values,
-      ...(classification ? { classification } : {}),
-    });
-    const review = {
-      artifact: a,
-      ignoredUnits: [],
-      bindings: [
-        binding("region", "country.data.fiction", "country.data.fiction"),
-        binding("city", "city.fiction", "city.fiction"),
-        binding("cargo", "cargo.fiction", "cargo.fiction"),
-        binding("trailer_type", "trailer.fiction", "trailer.fiction"),
-        binding("adr_category", "3", "cargo.fiction", { field: "adr_class", token: "3" }),
-        binding("trailer_body_type", "box", "cargo.fiction", {
-          field: "body_types[]",
-          token: "box",
-        }),
-        binding("trailer_chain_type", "chain", "trailer.fiction", {
-          field: "chain_type",
-          token: "chain",
-        }),
-      ],
-      sourceReferences: [
-        {
-          mapNamespace: "base",
-          sourceUnitId: "city.fiction",
-          sourceToken: "fiction",
-          targetUnitId: "country.data.fiction",
-        },
-      ],
-    };
-    const output = buildArtifact(parsed, review);
-    expect(output.entities.find((e) => e.kind === "cargo")?.cargoUnitMassKg).toBe("12.5");
-    expect(output.sourceManifestSha256).not.toBe(parsed.sourceManifestSha256);
-    expect(() => buildArtifact(parsed, { ...review, sourceReferences: [] })).toThrow(
-      "MISSING_SOURCE_REFERENCE",
+    const parsed = await parseRegistries(layers);
+    expect(parsed.units).toHaveLength(1);
+    expect(parsed.units[0]?.overlays).toHaveLength(1);
+    expect(parsed.manifest).toHaveLength(3);
+    expect(parsed.units[0]?.values.city_name).toBe("Reviewed Overlay");
+    const ordered = await parseRegistries(layers.map((layer) => ({ ...layer, overlay: true })));
+    const reversed = await parseRegistries(
+      [...layers].reverse().map((layer) => ({ ...layer, overlay: true })),
     );
-    expect(() =>
-      buildArtifact(parsed, {
-        ...review,
-        sourceReferences: [{ ...review.sourceReferences[0], sourceToken: "other" }],
+    expect(ordered.sourceManifestSha256).not.toBe(reversed.sourceManifestSha256);
+    expect(ordered.units[0]?.values.city_name).not.toBe(reversed.units[0]?.values.city_name);
+    await expect(
+      parseRegistries([
+        { ...(layers[1] as (typeof layers)[0]), overlay: false },
+        layers[0] as (typeof layers)[0],
+      ]),
+    ).rejects.toThrow("unapproved_overlay");
+    await writeFile(join(root, "base", "city.sui"), '@include "registry.sii"');
+    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
+      "include_cycle",
+    );
+    await writeFile(join(root, "base", "city.sui"), '@include "missing.sui"');
+    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
+      "missing_include",
+    );
+    await writeFile(join(root, "base", "city.sui"), "city_data : .a { unreviewed_field: 1 }");
+    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
+      "unsupported_or_duplicate_field",
+    );
+    await writeFile(
+      join(root, "base", "city.sui"),
+      'city_data : .a { name: "A" } city_data : .a { name: "B" }',
+    );
+    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
+      "duplicate_unit",
+    );
+    await expect(
+      parseRegistries([
+        { ...(layers[0] as (typeof layers)[0]), registries: ["../dlc/registry.sii"] },
+      ]),
+    ).rejects.toThrow("path_escape");
+    await symlink(join(root, "dlc", "registry.sii"), join(root, "base", "escape.sui"));
+    await expect(
+      parseRegistries([{ ...(layers[0] as (typeof layers)[0]), registries: ["escape.sui"] }]),
+    ).rejects.toThrow("symlink_path");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("preparation validates every closed layer before source reads and accepts only explicit boolean overlays", async () => {
+  const root = await mkdtemp(join(tmpdir(), "vtc-catalog-manifest-"));
+  const script = fileURLToPath(new URL("../../scripts/catalogs/prepare.mjs", import.meta.url));
+  const source = 'SiiNunit { city_data : city.fictional { city_name: "Fictional" } }';
+  const layer = { root, packId: "base", registries: ["registry.sii"] };
+  try {
+    await writeFile(join(root, "registry.sii"), source);
+    const malformed: unknown[] = [
+      ...["false", "true", 0, 1, null, {}].map((overlay) => ({ ...layer, overlay })),
+      { ...layer, unexpected: true },
+      { ...layer, root: 1 },
+      { ...layer, packId: 1 },
+      { ...layer, registries: "registry.sii" },
+      { ...layer, registries: [1] },
+      { ...layer, registries: [] },
+      null,
+      [],
+    ];
+    for (const [index, invalid] of malformed.entries()) {
+      const input = join(root, `invalid-${index}.json`),
+        output = join(root, `invalid-output-${index}.json`);
+      await writeFile(input, JSON.stringify({ layers: [layer, invalid] }));
+      await expect(execFileAsync(process.execPath, [script, input, output])).rejects.toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: `${JSON.stringify({ event: "catalog_preparation_failed" })}\n`,
+      });
+      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
+      const unreadableFirst = { ...layer, root: join(root, "nonexistent-source") };
+      await expect(
+        parseRegistries([unreadableFirst, invalid] as Parameters<typeof parseRegistries>[0]),
+      ).rejects.toThrow("invalid_layer");
+    }
+    const expected = hash(
+      JSON.stringify({
+        layers: [{ packId: "base", overlay: false, registries: ["registry.sii"] }],
+        filesInExpansionOrder: [{ packId: "base", file: "registry.sii", sha256: hash(source) }],
       }),
-    ).toThrow("INVALID_SOURCE_REFERENCE");
-    expect(() =>
-      buildArtifact(parsed, {
-        ...review,
-        bindings: review.bindings.map((b) =>
-          b.kind === "trailer_body_type"
-            ? { ...b, classification: { field: "body_types[]", token: "invented" } }
-            : b,
-        ),
-      }),
-    ).toThrow("INVALID_CLASSIFICATION_BINDING");
-    expect(() =>
-      buildArtifact(parsed, {
-        ...review,
-        artifact: {
-          ...a,
-          entities: a.entities.map((e) =>
-            e.kind === "cargo" ? { ...e, cargoUnitMassKg: "13" } : e,
-          ),
-        },
-      }),
-    ).toThrow("UNIT_MASS_MISMATCH");
-    const conflict = {
-      ...parsed,
-      units: parsed.units.map((u) =>
-        u.type === "cargo_data" ? { ...u, values: { ...u.values, unit_mass: "13" } } : u,
-      ),
-    };
-    const conflictingCargo = conflict.units.find((u) => u.type === "cargo_data");
-    if (!conflictingCargo) throw new Error("MISSING_FICTIONAL_UNIT");
-    expect(() =>
-      buildArtifact(conflict, {
-        ...review,
-        bindings: review.bindings.map((b) =>
-          b.unitType === "cargo_data" ? { ...b, sourceFacts: conflictingCargo.values } : b,
-        ),
-      }),
-    ).toThrow("MASS_FIELD_CONFLICT");
-    const variantCity = {
-        ...find("city.fiction"),
-        values: { ...find("city.fiction").values, country: "FICTION" },
-      },
-      variantSource = {
-        ...parsed,
-        units: parsed.units.map((u) => (u.id === variantCity.id ? variantCity : u)),
-      },
-      variantReview = {
-        ...review,
-        bindings: review.bindings.map((b) =>
-          b.unitId === variantCity.id ? { ...b, sourceFacts: variantCity.values } : b,
-        ),
-        sourceReferences: [
-          { ...review.sourceReferences[0], sourceToken: "FICTION", targetSourceToken: "fiction" },
-        ],
-      };
-    const variant = buildArtifact(variantSource, variantReview);
-    expect(variant.entities.find((e) => e.kind === "city")?.regionKey).toBe("country.data.fiction");
-    expect(variant.sourceManifestSha256).not.toBe(output.sourceManifestSha256);
-    for (const reference of [
-      { ...review.sourceReferences[0], sourceToken: "FICTION" },
-      { ...variantReview.sourceReferences[0], targetSourceToken: "other" },
-    ])
-      expect(() =>
-        buildArtifact(variantSource, { ...variantReview, sourceReferences: [reference] }),
-      ).toThrow("INVALID_SOURCE_REFERENCE");
-    const missingFacts = {
-      ...parsed,
-      units: parsed.units.map((u) => {
-        const values = { ...u.values };
-        if (u.type === "cargo_data") delete values.adr_class;
-        if (u.type === "trailer_def") delete values.chain_type;
-        return { ...u, values };
-      }),
-    };
-    const missingReview = {
-      ...review,
-      artifact: {
-        ...a,
-        packs: a.packs.map((p) => ({
-          ...p,
-          contributionKinds: p.contributionKinds.filter(
-            (kind) => !["adr_category", "trailer_chain_type"].includes(kind),
-          ),
-        })),
-        entities: a.entities
-          .filter((e) => !["adr_category", "trailer_chain_type"].includes(e.kind))
-          .map((e) =>
-            e.kind === "cargo"
-              ? { ...e, adrCategoryKey: null }
-              : e.kind === "trailer_type"
-                ? { ...e, trailerChainTypeKey: null }
-                : e,
-          ),
-      },
-      bindings: review.bindings
-        .filter((b) => !["adr_category", "trailer_chain_type"].includes(b.kind))
-        .map((b) => ({
-          ...b,
-          sourceFacts: missingFacts.units.find((u) => u.id === b.unitId)?.values,
-        })),
-    };
-    const unknown = buildArtifact(missingFacts, missingReview);
-    expect(unknown.entities.find((e) => e.kind === "cargo")?.adrCategoryKey).toBeNull();
-    expect(unknown.entities.find((e) => e.kind === "trailer_type")?.trailerChainTypeKey).toBeNull();
-    const missingMass = {
-      ...parsed,
-      units: parsed.units.map((u) => {
-        const values = { ...u.values };
-        if (u.type === "cargo_data") delete values.mass;
-        return { ...u, values };
-      }),
-    };
-    expect(() =>
-      buildArtifact(missingMass, {
-        ...review,
-        bindings: review.bindings.map((b) => ({
-          ...b,
-          sourceFacts: missingMass.units.find((u) => u.id === b.unitId)?.values,
-        })),
-      }),
-    ).toThrow("MISSING_UNIT_MASS");
+    );
+    for (const [index, valid] of [
+      layer,
+      { ...layer, overlay: false },
+      { ...layer, overlay: true },
+    ].entries()) {
+      const input = join(root, `valid-${index}.json`),
+        output = join(root, `valid-output-${index}.json`);
+      await writeFile(input, JSON.stringify({ layers: [valid] }));
+      const result = await execFileAsync(process.execPath, [script, input, output]);
+      expect(JSON.parse(result.stdout)).toMatchObject({ files: 1, units: 1 });
+      const parsed = JSON.parse(await readFile(output, "utf8"));
+      if (index < 2) expect(parsed.sourceManifestSha256).toBe(expected);
+      else expect(parsed.sourceManifestSha256).not.toBe(expected);
+    }
+    const input = join(root, "override.json"),
+      output = join(root, "override-output.json");
+    await writeFile(
+      input,
+      JSON.stringify({ layers: [layer, { ...layer, packId: "dlc", overlay: true }] }),
+    );
+    await execFileAsync(process.execPath, [script, input, output]);
+    expect(JSON.parse(await readFile(output, "utf8")).units[0].overlays).toHaveLength(1);
   } finally {
     await rm(root, { recursive: true });
   }

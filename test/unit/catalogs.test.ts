@@ -1,348 +1,206 @@
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import {
-  aliasKey,
+  CATALOG_IMPORT_MAX_ROWS,
   type CatalogConfig,
-  cursorCodec,
-  gates,
-  hash,
-  mappingSummary,
-  ordered,
-  parseArtifact,
-  semantic,
+  catalogLists,
+  importColumns,
   validateCatalogConfig,
-} from "../../apps/api/src/modules/catalogs/artifact.ts";
-import { buildArtifact } from "../../apps/api/src/modules/catalogs/preparation.ts";
-import { parseRegistries } from "../../scripts/catalogs/registry.mjs";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+  validCode,
+} from "../../apps/api/src/modules/catalogs/config.ts";
+import { cursorCodec } from "../../apps/api/src/modules/catalogs/cursor.ts";
+import {
+  CatalogFileError,
+  parseCsv,
+  readImportFile,
+} from "../../apps/api/src/modules/catalogs/import-file.ts";
 
-const bytes = (v: unknown) => Buffer.from(JSON.stringify(v));
-const execFileAsync = promisify(execFile);
-const config: CatalogConfig = {
-  production: false,
-  synthetic: true,
-  cursorKey: "1".repeat(64),
-  maxFileBytes: 1048576,
-  artifactTtlMs: 86400000,
-  policyRevision: 1,
-  evidence: [],
+const header = importColumns.cities.join(",");
+const csv = (...lines: string[]) => Buffer.from(lines.join("\r\n"));
+const reason = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (error) {
+    if (error instanceof CatalogFileError) return error.message;
+    throw error;
+  }
+  return "no error";
 };
-test("closed artifact retains exact identities; aliases normalize separately with accents intact", () => {
-  const a = artifact("ats", [
-    entity("A"),
-    entity("a"),
-    entity("é"),
-    entity("e\u0301"),
-    entity("tail "),
+
+test("the CSV reader keeps quotes, commas and CRLF inside a field and numbers physical lines", () => {
+  expect(parseCsv('a,b\r\n"x,1","he said ""ok"""\r\n')).toEqual([
+    { line: 1, cells: ["a", "b"] },
+    { line: 2, cells: ["x,1", 'he said "ok"'] },
   ]);
-  expect(parseArtifact(bytes(a))).toEqual(a);
-  expect(aliasKey("  E\u0301cole \t EAST ")).toBe("école east");
-  expect(aliasKey("École")).not.toBe(aliasKey("Ecole"));
-  expect(semantic({ a: ["b", "a"], c: true })).toBe(semantic({ c: true, a: ["a", "b"] }));
+  // A record that spans lines keeps its first line; the next record starts after the span.
+  expect(parseCsv('h\n"one\ntwo\r\nthree"\nnext\n')).toEqual([
+    { line: 1, cells: ["h"] },
+    { line: 2, cells: ["one\ntwo\r\nthree"] },
+    { line: 5, cells: ["next"] },
+  ]);
+  // Blank physical lines still advance the count and produce no record.
+  expect(parseCsv("h\n\n\nrow\n")).toEqual([
+    { line: 1, cells: ["h"] },
+    { line: 4, cells: ["row"] },
+  ]);
+  expect(parseCsv("a\rb")).toEqual([
+    { line: 1, cells: ["a"] },
+    { line: 2, cells: ["b"] },
+  ]);
+  expect(parseCsv('""')).toEqual([{ line: 1, cells: [""] }]);
+  expect(reason(() => parseCsv('a\n"open'))).toBe("unterminated_quote");
 });
-test("artifact rejects unknown/private fields, invalid UTF8, malformed JSON and lossy decimals before durable storage", () => {
-  for (const a of [
-    { ...artifact(), privatePath: "nonfunctional-placeholder" },
-    { ...artifact(), approved: true },
-    { ...artifact(), schemaVersion: 2 },
-    {
-      ...artifact(),
-      entities: [
-        { ...entity("cargo", { kind: "cargo" }), cargoUnitMassKg: "0.0000000000000000001" },
-      ],
-    },
-    { ...artifact(), entities: [entity("cargo", { kind: "cargo", cargoUnitMassKg: "1.0" })] },
-    { ...artifact(), entities: [entity("city", { cargoUnitMassKg: "2" })] },
-    {
-      ...artifact(),
-      entities: [
-        entity("alias", { aliases: [{ locale: "en", label: "漢".repeat(200), regionKey: null }] }),
-      ],
-    },
-  ])
-    expect(() => parseArtifact(bytes(a))).toThrow();
-  expect(() => parseArtifact(Buffer.from([255]))).toThrow();
-  expect(() => parseArtifact(Buffer.from("{"))).toThrow();
-});
-test("typed same-map relations and per-pack evidence reject incomplete or contradictory artifacts", () => {
-  const region = entity("region", { kind: "region" }),
-    city = entity("city", { regionKey: "region" });
-  expect(parseArtifact(bytes(artifact("ats", [region, city]))).entities).toHaveLength(2);
-  for (const entities of [
-    [city],
-    [region, { ...city, mapNamespace: "other" }],
-    [region, { ...city, adrCategoryKey: "region" }],
-    [region, city, city],
-  ])
-    expect(() => parseArtifact(bytes(artifact("ats", entities)))).toThrow();
-  expect(() =>
-    parseArtifact(bytes({ ...artifact(), packs: [{ ...artifact().packs[0], state: "missing" }] })),
-  ).toThrow();
-  expect(() =>
-    parseArtifact(
-      bytes({ ...artifact(), entities: [entity("x", { labels: { en: "@@token@@", ru: null } })] }),
+
+test("an import file reads BOM-prefixed UTF-8, keeps code bytes and reports the physical line", () => {
+  const bom = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    csv(
+      header,
+      'ets2,_fixture__a,"North, fictional",Северный,,',
+      'ets2,fixture_b,"Two',
+      'lines",,,',
     ),
-  ).toThrow();
-});
-test("production source review requires operator exact-hash inventory/provenance, never artifact flags or synthetic mode", () => {
-  const a = { ...artifact(), synthetic: false },
-    prod = { ...config, synthetic: false, production: true };
-  expect(gates(a, hash(bytes(a)), prod).sourceReviewComplete).toBe(false);
-  expect(() => validateCatalogConfig({ ...config, production: true })).toThrow();
-  expect(gates(artifact(), hash(bytes(artifact())), config).coverageComplete).toBe(true);
-  const provenance = {
-    referenceId: "10000000-0000-4000-8000-000000000001",
-    publicSourceUrl: "https://example.invalid/catalog",
-    attribution: "Fictional metadata",
-    permittedUseBasis: "Fictional test basis",
-    observedAt: "2026-10-20T00:00:00.000Z",
-  };
-  a.provenance = [provenance];
-  const trusted = {
-    ...prod,
-    evidence: [
-      {
-        artifactSha256: hash(bytes(a)),
-        game: a.game,
-        gameBuild: a.gameBuild,
-        releaseInventoryAsOf: a.releaseInventoryAsOf,
-        expectedPacks: ["base"],
-        provenance: a.provenance,
-        englishLabelsReviewed: true as const,
-      },
-    ],
-  };
-  expect(gates(a, hash(bytes(a)), trusted).sourceReviewComplete).toBe(true);
-  expect(gates(a, "b".repeat(64), trusted).sourceReviewComplete).toBe(false);
-  a.packs.push({
-    packId: "missing",
-    title: "Fictional missing",
-    state: "missing",
-    contributionKinds: [],
-    provenance: [],
-    reasonCodes: ["source_missing"],
+  ]);
+  const rows = readImportFile("cities", bom);
+  expect(rows.map((row) => row.line)).toEqual([2, 3]);
+  expect(rows[0]).toEqual({
+    line: 2,
+    values: {
+      game: "ets2",
+      code: "_fixture__a",
+      name_en: "North, fictional",
+      name_ru: "Северный",
+      region_code: "",
+      dlc_code: "",
+    },
+    fileIssues: [],
   });
-  expect(gates(a, hash(bytes(a)), trusted).coverageComplete).toBe(false);
+  expect(rows[1]?.values.name_en).toBe("Two\r\nlines");
+  // Whitespace in a code reaches validation verbatim instead of being trimmed away.
+  expect(readImportFile("cities", csv(header, "ets2, a ,n,,,"))[0]?.values.code).toBe(" a ");
 });
-test("signed cursors bind exact candidate/review/filter/actor and reject tampering", () => {
-  const codec = cursorCodec(config.cursorKey),
-    binding = ["revision", 1, "ru", "city"],
-    cursor = codec.write(binding, "after");
-  expect(codec.read(binding, cursor)).toBe("after");
-  expect(() => codec.read(["revision", 2, "ru", "city"], cursor)).toThrow();
-  expect(() => codec.read(binding, `${cursor}a`)).toThrow();
-  for (const [original, swapped] of [
-    [
-      ["revision", "en", "city", "cargo"],
-      ["revision", "en", "cargo", "city"],
-    ],
-    [
-      ["revision", "en", "city", "ru"],
-      ["revision", "ru", "city", "en"],
-    ],
-  ]) {
-    expect(() => codec.read(swapped, codec.write(original, "after"))).toThrow();
-    expect(ordered(original)).not.toBe(ordered(swapped));
-  }
-  expect(ordered({ b: ["city", "cargo"], a: true })).toBe(
-    ordered({ a: true, b: ["city", "cargo"] }),
-  );
-  expect(semantic([{ locale: "en", normalized: "ru" }])).not.toBe(
-    semantic([{ locale: "ru", normalized: "en" }]),
-  );
-});
-test("mapping diff summaries preserve exact pair scope within existing 256-scalar item bounds", () => {
-  const pairs = [
-    { provider: "漢".repeat(128), sourceId: "🚛".repeat(128) },
-    { provider: "A", sourceId: "a" },
-    { provider: "a", sourceId: "A" },
-  ];
-  const summary = mappingSummary(pairs);
-  expect(summary).toEqual(mappingSummary([...pairs].reverse()));
-  expect(summary.every((value) => [...value].length <= 256)).toBe(true);
-});
-test("offline normalization binds reviewed entities to exact active units without turning tokens into labels", () => {
-  const a = artifact("ats", [entity("fictional")]);
-  const parsed = {
-    units: [
-      {
-        type: "city_data",
-        id: "city.fictional",
-        values: { city_name_localized: "@@fictional@@", country: "country.example" },
-        origin: { packId: "base", file: "city.sui", sha256: "b".repeat(64) },
-        overlays: [],
-      },
-    ],
-    manifest: [],
-    sourceManifestSha256: "c".repeat(64),
-  };
-  const { sourceManifestSha256: _, ...reviewed } = a;
-  const review = {
-    artifact: reviewed,
-    ignoredUnits: [],
-    bindings: [
-      {
-        kind: "city",
-        mapNamespace: "base",
-        key: "fictional",
-        unitType: "city_data",
-        unitId: "city.fictional",
-        sourceFacts: parsed.units[0]?.values,
-      },
-    ],
-  };
-  const output = buildArtifact(parsed, review);
-  expect(output.sourceManifestSha256).toBe(parsed.sourceManifestSha256);
-  expect(output.entities[0]?.labels.en).toBe("Fictional fictional");
-  expect(output.entities[0]?.aliases[0]?.label).toBe("Fictional fictional");
-  expect(() => buildArtifact(parsed, { ...review, bindings: [] })).toThrow("UNBOUND_CATALOG_UNIT");
-  expect(() =>
-    buildArtifact(
-      {
-        ...parsed,
-        units: [
-          { ...(parsed.units[0] as (typeof parsed.units)[0]), values: { country: "changed" } },
-        ],
-      },
-      review,
+
+test("an import file rejects invalid UTF-8, empty input and every wrong header shape", () => {
+  expect(reason(() => readImportFile("cities", Buffer.alloc(0)))).toBe("empty");
+  expect(
+    reason(() =>
+      readImportFile("cities", Buffer.concat([csv(header, "ets2,"), Buffer.from([0xc3, 0x28])])),
     ),
-  ).toThrow("SOURCE_BINDING_MISMATCH");
+  ).toBe("invalid_utf8");
+  expect(reason(() => readImportFile("cities", Buffer.from("\r\n\r\n")))).toBe("empty");
+  expect(reason(() => readImportFile("cities", csv(`${header},extra`)))).toBe("unknown_column");
+  expect(reason(() => readImportFile("cities", csv(`${header},code`)))).toBe("unknown_column");
+  expect(reason(() => readImportFile("cities", csv("game,code,name_en")))).toBe("missing_column");
+  // Header order is free; values follow their own column.
+  expect(
+    readImportFile("cities", csv("code,game,name_en,name_ru,region_code,dlc_code", "a,ats,n,,,"))[0]
+      ?.values,
+  ).toMatchObject({ code: "a", game: "ats" });
+  const short = readImportFile("cities", csv(header, "ets2,a"))[0];
+  expect(short?.fileIssues).toEqual([{ field: "file", reason: "column_count" }]);
 });
-test("offline active registries preserve ordered overlay/include provenance and typed city arrays", async () => {
-  const root = await mkdtemp(join(tmpdir(), "vtc-catalog-"));
-  try {
-    await mkdir(join(root, "base"));
-    await mkdir(join(root, "dlc"));
-    await writeFile(join(root, "base", "registry.sii"), 'SiiNunit { @include "city.sui" }');
-    await writeFile(
-      join(root, "base", "city.sui"),
-      'city_data : city.fictional { city_name: "Fictional City" country: country.example key_city: true map_x_offsets[]: 1 map_y_offsets[]: -2 population: 42 vehicle_brands[]: "fictional" }',
-    );
-    await writeFile(
-      join(root, "dlc", "registry.sii"),
-      'city_data : city.fictional { city_name: "Reviewed Overlay" country: country.example }',
-    );
-    const layers = [
-      { root: join(root, "base"), packId: "base", registries: ["registry.sii"] },
-      { root: join(root, "dlc"), packId: "dlc", registries: ["registry.sii"], overlay: true },
-    ];
-    const parsed = await parseRegistries(layers);
-    expect(parsed.units).toHaveLength(1);
-    expect(parsed.units[0]?.overlays).toHaveLength(1);
-    expect(parsed.manifest).toHaveLength(3);
-    expect(parsed.units[0]?.values.city_name).toBe("Reviewed Overlay");
-    const ordered = await parseRegistries(layers.map((layer) => ({ ...layer, overlay: true })));
-    const reversed = await parseRegistries(
-      [...layers].reverse().map((layer) => ({ ...layer, overlay: true })),
-    );
-    expect(ordered.sourceManifestSha256).not.toBe(reversed.sourceManifestSha256);
-    expect(ordered.units[0]?.values.city_name).not.toBe(reversed.units[0]?.values.city_name);
-    await expect(
-      parseRegistries([
-        { ...(layers[1] as (typeof layers)[0]), overlay: false },
-        layers[0] as (typeof layers)[0],
+
+test("JSON rows read like CSV rows, with array positions as line numbers", () => {
+  const fromJson = readImportFile(
+    "cargoes",
+    Buffer.from(
+      JSON.stringify([
+        {
+          game: "ets2",
+          code: "fixture_gas",
+          name_en: "Fictional gas",
+          name_ru: null,
+          adr_class: 2,
+          dlc_code: "",
+        },
       ]),
-    ).rejects.toThrow("unapproved_overlay");
-    await writeFile(join(root, "base", "city.sui"), '@include "registry.sii"');
-    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
-      "include_cycle",
+    ),
+  );
+  const fromCsv = readImportFile(
+    "cargoes",
+    csv(importColumns.cargoes.join(","), "ets2,fixture_gas,Fictional gas,,2,"),
+  );
+  expect(fromJson[0]?.line).toBe(1);
+  expect(fromCsv[0]?.line).toBe(2);
+  expect(fromJson[0]?.values).toEqual(fromCsv[0]?.values);
+
+  const issues = readImportFile(
+    "trailers",
+    Buffer.from(JSON.stringify([{ game: "ets2", code: "a", extra: "x", name_en: true }, 7])),
+  );
+  expect(issues[0]?.fileIssues).toEqual([
+    { field: "extra", reason: "unknown_field" },
+    { field: "name_en", reason: "invalid" },
+  ]);
+  expect(issues[1]).toMatchObject({
+    line: 2,
+    fileIssues: [{ field: "row", reason: "invalid_row" }],
+  });
+  expect(reason(() => readImportFile("trailers", Buffer.from("[1,")))).toBe("invalid_json");
+});
+
+test("an import file is bounded by row count at the shared limit", () => {
+  const rows = (count: number) =>
+    Buffer.from(
+      `${importColumns.trailers.join(",")}\n${"ets2,code,name,,\n".repeat(count)}`,
+      "utf8",
     );
-    await writeFile(join(root, "base", "city.sui"), '@include "missing.sui"');
-    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
-      "missing_include",
-    );
-    await writeFile(join(root, "base", "city.sui"), "city_data : .a { unreviewed_field: 1 }");
-    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
-      "unsupported_or_duplicate_field",
-    );
-    await writeFile(
-      join(root, "base", "city.sui"),
-      'city_data : .a { name: "A" } city_data : .a { name: "B" }',
-    );
-    await expect(parseRegistries([layers[0] as (typeof layers)[0]])).rejects.toThrow(
-      "duplicate_unit",
-    );
-    await expect(
-      parseRegistries([
-        { ...(layers[0] as (typeof layers)[0]), registries: ["../dlc/registry.sii"] },
-      ]),
-    ).rejects.toThrow("path_escape");
-    await symlink(join(root, "dlc", "registry.sii"), join(root, "base", "escape.sui"));
-    await expect(
-      parseRegistries([{ ...(layers[0] as (typeof layers)[0]), registries: ["escape.sui"] }]),
-    ).rejects.toThrow("symlink_path");
-  } finally {
-    await rm(root, { recursive: true, force: true });
+  expect(readImportFile("trailers", rows(CATALOG_IMPORT_MAX_ROWS))).toHaveLength(
+    CATALOG_IMPORT_MAX_ROWS,
+  );
+  expect(reason(() => readImportFile("trailers", rows(CATALOG_IMPORT_MAX_ROWS + 1)))).toBe(
+    "too_many_rows",
+  );
+});
+
+test("every list declares its import columns, and a template header round-trips through the reader", () => {
+  for (const list of catalogLists) {
+    expect(importColumns[list]).toEqual(expect.arrayContaining(["game", "code", "name_en"]));
+    expect(readImportFile(list, Buffer.from(`${importColumns[list].join(",")}\r\n`))).toEqual([]);
   }
 });
 
-test("preparation validates every closed layer before source reads and accepts only explicit boolean overlays", async () => {
-  const root = await mkdtemp(join(tmpdir(), "vtc-catalog-manifest-"));
-  const script = fileURLToPath(new URL("../../scripts/catalogs/prepare.mjs", import.meta.url));
-  const source = 'SiiNunit { city_data : city.fictional { city_name: "Fictional" } }';
-  const layer = { root, packId: "base", registries: ["registry.sii"] };
-  try {
-    await writeFile(join(root, "registry.sii"), source);
-    const malformed: unknown[] = [
-      ...["false", "true", 0, 1, null, {}].map((overlay) => ({ ...layer, overlay })),
-      { ...layer, unexpected: true },
-      { ...layer, root: 1 },
-      { ...layer, packId: 1 },
-      { ...layer, registries: "registry.sii" },
-      { ...layer, registries: [1] },
-      { ...layer, registries: [] },
-      null,
-      [],
-    ];
-    for (const [index, invalid] of malformed.entries()) {
-      const input = join(root, `invalid-${index}.json`),
-        output = join(root, `invalid-output-${index}.json`);
-      await writeFile(input, JSON.stringify({ layers: [layer, invalid] }));
-      await expect(execFileAsync(process.execPath, [script, input, output])).rejects.toMatchObject({
-        code: 1,
-        stdout: "",
-        stderr: `${JSON.stringify({ event: "catalog_preparation_failed" })}\n`,
-      });
-      await expect(readFile(output)).rejects.toMatchObject({ code: "ENOENT" });
-      const unreadableFirst = { ...layer, root: join(root, "nonexistent-source") };
-      await expect(
-        parseRegistries([unreadableFirst, invalid] as Parameters<typeof parseRegistries>[0]),
-      ).rejects.toThrow("invalid_layer");
-    }
-    const expected = hash(
-      JSON.stringify({
-        layers: [{ packId: "base", overlay: false, registries: ["registry.sii"] }],
-        filesInExpansionOrder: [{ packId: "base", file: "registry.sii", sha256: hash(source) }],
-      }),
-    );
-    for (const [index, valid] of [
-      layer,
-      { ...layer, overlay: false },
-      { ...layer, overlay: true },
-    ].entries()) {
-      const input = join(root, `valid-${index}.json`),
-        output = join(root, `valid-output-${index}.json`);
-      await writeFile(input, JSON.stringify({ layers: [valid] }));
-      const result = await execFileAsync(process.execPath, [script, input, output]);
-      expect(JSON.parse(result.stdout)).toMatchObject({ files: 1, units: 1 });
-      const parsed = JSON.parse(await readFile(output, "utf8"));
-      if (index < 2) expect(parsed.sourceManifestSha256).toBe(expected);
-      else expect(parsed.sourceManifestSha256).not.toBe(expected);
-    }
-    const input = join(root, "override.json"),
-      output = join(root, "override-output.json");
-    await writeFile(
-      input,
-      JSON.stringify({ layers: [layer, { ...layer, packId: "dlc", overlay: true }] }),
-    );
-    await execFileAsync(process.execPath, [script, input, output]);
-    expect(JSON.parse(await readFile(output, "utf8")).units[0].overlays).toHaveLength(1);
-  } finally {
-    await rm(root, { recursive: true });
-  }
+test("code validation keeps opaque bytes but refuses blanks, whitespace, controls and overflow", () => {
+  for (const value of ["_x__x", ".a.b", "Ünï-çødé", "a".repeat(128), "é".repeat(64)])
+    expect(validCode(value)).toBe(true);
+  for (const value of [
+    "",
+    "a b",
+    " a",
+    "a\t",
+    "a\u0000",
+    "a\u001f",
+    "a\u007f",
+    "a".repeat(129),
+    "é".repeat(65),
+    "\ud800",
+    1,
+    null,
+  ])
+    expect(validCode(value)).toBe(false);
+});
+
+test("the cursor key must be 32 hex bytes", () => {
+  const config: CatalogConfig = { cursorKey: "1".repeat(64) };
+  expect(() => validateCatalogConfig(config)).not.toThrow();
+  for (const cursorKey of ["1".repeat(63), "G".repeat(64), ""])
+    expect(() => validateCatalogConfig({ cursorKey })).toThrow("INVALID_CATALOG_CONFIG");
+});
+
+test("signed cursors and import tokens bind their exact context and reject tampering", () => {
+  const codec = cursorCodec("1".repeat(64));
+  const binding = { list: "cities", game: "ets2", includeHidden: false };
+  const token = codec.write(binding, "after-row");
+  expect(codec.read({ game: "ets2", includeHidden: false, list: "cities" }, token)).toBe(
+    "after-row",
+  );
+  expect(() => codec.read({ ...binding, game: "ats" }, token)).toThrow("INVALID_CURSOR");
+  expect(() => cursorCodec("2".repeat(64)).read(binding, token)).toThrow("INVALID_CURSOR");
+  const [data, mac] = token.split(".") as [string, string];
+  const flipped = `${mac[0] === "A" ? "B" : "A"}${mac.slice(1)}`;
+  for (const invalid of [`${data}.${flipped}`, data, `${data}.${mac}.extra`, "", "x".repeat(2049)])
+    expect(() => codec.read(binding, invalid)).toThrow("INVALID_CURSOR");
+  const forged = Buffer.from(JSON.stringify({ binding: "x", after: "y", extra: 1 })).toString(
+    "base64url",
+  );
+  expect(() => codec.read(binding, `${forged}.${mac}`)).toThrow("INVALID_CURSOR");
 });
