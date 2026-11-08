@@ -2208,20 +2208,20 @@
         ]
       }
     },
-    "/api/v1/catalogs/revisions": {
+    "/api/v1/catalogs/summary": {
       "get": {
-        "operationId": "listCatalogRevisions",
+        "operationId": "getCatalogSummary",
         "tags": [
           "catalogs"
         ],
-        "summary": "listCatalogRevisions",
+        "summary": "getCatalogSummary",
         "security": [
           {
             "sessionCookie": []
           }
         ],
         "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
+        "x-owner-card": "VTC-084",
         "x-capability": "company.read",
         "x-guards": [],
         "responses": {
@@ -2230,7 +2230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListCatalogRevision"
+                  "$ref": "#/components/schemas/EnvelopeCatalogSummary"
                 }
               }
             }
@@ -2240,6 +2240,68 @@
           }
         },
         "parameters": [
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/catalogs/{list}": {
+      "get": {
+        "operationId": "listCatalogItems",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "listCatalogItems",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-084",
+        "x-capability": "company.read",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogItemList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
+              ]
+            }
+          },
           {
             "$ref": "#/components/parameters/Limit"
           },
@@ -2257,118 +2319,80 @@
                 "ats"
               ]
             }
-          }
-        ]
-      }
-    },
-    "/api/v1/catalogs/entities": {
-      "get": {
-        "operationId": "listCatalogEntities",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "listCatalogEntities",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "company.read",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListCatalogEntity"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "revisionId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 64
-            }
-          },
-          {
-            "name": "locale",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "en",
-                "ru"
-              ]
-            }
-          },
-          {
-            "name": "regionId",
-            "in": "query",
-            "required": false,
-            "description": "Canonical region in this published revision. Filters before pagination; foreign or absent regions return no matches. Bound into the signed cursor.",
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
           },
           {
             "name": "search",
             "in": "query",
-            "required": false,
             "schema": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
             }
+          },
+          {
+            "name": "includeHidden",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "dlc",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "base"
+                },
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ],
+              "description": "`base` selects rows with no DLC. Not available on the dlcs list."
+            }
+          },
+          {
+            "name": "regionId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "description": "Cities list only."
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ],
+              "default": "en"
+            }
           }
         ]
       }
     },
-    "/api/v1/catalogs/entities/{entityId}": {
+    "/api/v1/catalogs/{list}/{id}": {
       "get": {
-        "operationId": "getCatalogEntity",
+        "operationId": "getCatalogItem",
         "tags": [
           "catalogs"
         ],
-        "summary": "getCatalogEntity",
+        "summary": "getCatalogItem",
         "security": [
           {
             "sessionCookie": []
           }
         ],
         "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
+        "x-owner-card": "VTC-084",
         "x-capability": "company.read",
         "x-guards": [],
         "responses": {
@@ -2377,7 +2401,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogEntity"
+                  "$ref": "#/components/schemas/EnvelopeCatalogItem"
                 }
               }
             }
@@ -2388,7 +2412,22 @@
         },
         "parameters": [
           {
-            "name": "entityId",
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
+              ]
+            }
+          },
+          {
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
@@ -2398,70 +2437,27 @@
             }
           },
           {
-            "name": "revisionId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
             "name": "locale",
             "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "enum": [
                 "en",
                 "ru"
-              ]
+              ],
+              "default": "en"
             }
           }
         ]
       }
     },
-    "/api/v1/admin/catalog-import-policy": {
-      "get": {
-        "operationId": "getCatalogImportPolicy",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "getCatalogImportPolicy",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeUploadPolicy"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/api/v1/admin/catalog-import-artifacts": {
+    "/api/v1/admin/catalogs/{list}": {
       "post": {
-        "operationId": "uploadCatalogArtifact",
+        "operationId": "createCatalogItem",
         "tags": [
           "catalogs"
         ],
-        "summary": "uploadCatalogArtifact",
+        "summary": "createCatalogItem",
         "security": [
           {
             "sessionCookie": [],
@@ -2469,19 +2465,20 @@
           }
         ],
         "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
+        "x-owner-card": "VTC-084",
         "x-capability": "qualifications.manage",
         "x-guards": [
-          "configured_catalog_artifact_limits",
-          "private_reviewed_artifact"
+          "exact_origin_session_csrf",
+          "game_code_unique_byte_exact",
+          "same_game_parent"
         ],
         "responses": {
-          "202": {
+          "201": {
             "description": "Committed result; see semantic preconditions.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogArtifact"
+                  "$ref": "#/components/schemas/EnvelopeCatalogItem"
                 }
               }
             }
@@ -2492,7 +2489,181 @@
         },
         "parameters": [
           {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
+              ]
+            }
+          },
+          {
             "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CatalogDlcInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogRegionInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogCityInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogCargoInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogTrailerInput"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/catalogs/{list}/{id}": {
+      "patch": {
+        "operationId": "updateCatalogItem",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "updateCatalogItem",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-084",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "game_code_unique_byte_exact",
+          "same_game_parent"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogItemPatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/catalogs/{list}/import-previews": {
+      "post": {
+        "operationId": "previewCatalogImport",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "previewCatalogImport",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-084",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "bounded_single_file",
+          "no_database_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogImportPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "list",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2504,61 +2675,17 @@
               }
             }
           }
-        }
-      }
-    },
-    "/api/v1/admin/catalog-import-artifacts/{artifactId}": {
-      "get": {
-        "operationId": "getCatalogArtifact",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "getCatalogArtifact",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogArtifact"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
         },
-        "parameters": [
-          {
-            "name": "artifactId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        ]
+        "description": "Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error."
       }
     },
-    "/api/v1/admin/catalog-imports": {
+    "/api/v1/admin/catalogs/{list}/imports": {
       "post": {
-        "operationId": "importCatalog",
+        "operationId": "applyCatalogImport",
         "tags": [
           "catalogs"
         ],
-        "summary": "importCatalog",
+        "summary": "applyCatalogImport",
         "security": [
           {
             "sessionCookie": [],
@@ -2566,115 +2693,14 @@
           }
         ],
         "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
+        "x-owner-card": "VTC-084",
         "x-capability": "qualifications.manage",
         "x-guards": [
-          "reviewed_artifact",
-          "source_and_coverage_validation"
-        ],
-        "responses": {
-          "202": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeOperation"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CatalogImportInput"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}": {
-      "get": {
-        "operationId": "getCatalogRevision",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "getCatalogRevision",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogRevision"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "revisionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}/review": {
-      "get": {
-        "operationId": "getCatalogReview",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "getCatalogReview",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "safe_review_metadata_only",
-          "current_candidate_etag"
+          "exact_origin_session_csrf",
+          "dry_run_token_for_same_bytes_and_actor",
+          "all_or_nothing",
+          "never_deletes",
+          "one_audit_entry"
         ],
         "responses": {
           "200": {
@@ -2682,63 +2708,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogReview"
-                }
-              }
-            },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "revisionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}/diff": {
-      "get": {
-        "operationId": "listCatalogChanges",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "listCatalogChanges",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "pinned_review_version",
-          "safe_review_metadata_only"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListCatalogEntityChange"
+                  "$ref": "#/components/schemas/EnvelopeCatalogImportResult"
                 }
               }
             }
@@ -2749,302 +2719,46 @@
         },
         "parameters": [
           {
-            "name": "revisionId",
+            "name": "list",
             "in": "path",
             "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "reviewVersion",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          },
-          {
-            "name": "changeKind",
-            "in": "query",
-            "required": false,
             "schema": {
               "type": "string",
               "enum": [
-                "added",
-                "changed",
-                "retired"
+                "dlcs",
+                "regions",
+                "cities",
+                "cargoes",
+                "trailers"
               ]
             }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}/coverage": {
-      "get": {
-        "operationId": "listCatalogCoverage",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "listCatalogCoverage",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "pinned_review_version",
-          "all_official_packs_including_non_contributing",
-          "safe_review_metadata_only"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListCatalogCoveragePack"
-                }
-              }
-            }
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
           {
-            "name": "revisionId",
-            "in": "path",
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
             "required": true,
             "schema": {
               "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "reviewVersion",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}/mapping-issues": {
-      "get": {
-        "operationId": "listCatalogMappingIssues",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "listCatalogMappingIssues",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "pinned_review_version",
-          "safe_review_metadata_only"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListCatalogMappingIssue"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "revisionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Limit"
-          },
-          {
-            "$ref": "#/components/parameters/Cursor"
-          },
-          {
-            "name": "reviewVersion",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          }
-        ]
-      }
-    },
-    "/api/v1/admin/catalog-revisions/{revisionId}/publication": {
-      "post": {
-        "operationId": "publishCatalog",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "publishCatalog",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "validated_immutable_revision",
-          "expected_publication_pointer",
-          "reviewed_coverage_labels_provenance",
-          "preserve_history"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCatalogRevision"
-                }
-              }
+              "minLength": 3,
+              "maxLength": 2050
             },
-            "headers": {
-              "ETag": {
-                "schema": {
-                  "type": "string"
-                },
-                "description": "Strong authoritative aggregate version, for the next command."
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "revisionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
+            "description": "Quoted dry-run token returned by previewCatalogImport."
           }
         ],
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/PublicationInput"
+                "$ref": "#/components/schemas/UploadInput"
               }
             }
-          }
-        }
-      }
-    },
-    "/api/v1/admin/catalog-mappings": {
-      "post": {
-        "operationId": "addCatalogMapping",
-        "tags": [
-          "catalogs"
-        ],
-        "summary": "addCatalogMapping",
-        "security": [
-          {
-            "sessionCookie": [],
-            "csrfHeader": []
-          }
-        ],
-        "x-module": "catalogs",
-        "x-owner-card": "VTC-019",
-        "x-capability": "qualifications.manage",
-        "x-guards": [
-          "draft_revision_only",
-          "exact_source_scope",
-          "no_label_only_guess"
-        ],
-        "responses": {
-          "201": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeCommandResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
           }
         },
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CatalogMappingInput"
-              }
-            }
-          }
-        }
+        "description": "Revalidates the same file and applies it in one transaction. Upserts by (game, code); an empty optional cell keeps the stored value, so import cannot clear a value."
       }
     },
     "/api/v1/me/telemetry-tokens": {
@@ -3780,7 +3494,7 @@
         "x-guards": [
           "owner_from_session",
           "ready_owned_screenshots",
-          "catalog_game_kind_revision_match",
+          "catalog_game_kind_match",
           "no_trip_date",
           "pending_human_review",
           "current_active_membership",
@@ -3874,7 +3588,7 @@
         "x-guards": [
           "owner_only",
           "pending_or_rejected_only",
-          "catalog_game_kind_revision_match",
+          "catalog_game_kind_match",
           "same_canonical_trip",
           "immutable_revision_history",
           "current_active_membership",
@@ -7497,54 +7211,6 @@
         ]
       }
     },
-    "/api/v1/operations/{operationId}": {
-      "get": {
-        "operationId": "getOperation",
-        "tags": [
-          "platform"
-        ],
-        "summary": "getOperation",
-        "security": [
-          {
-            "sessionCookie": []
-          }
-        ],
-        "x-module": "platform",
-        "x-owner-card": "VTC-021",
-        "x-capability": "session",
-        "x-guards": [
-          "creator_and_current_operation_capability",
-          "safe_failure_code_only"
-        ],
-        "responses": {
-          "200": {
-            "description": "Committed result; see semantic preconditions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnvelopeOperation"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "operationId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        ]
-      }
-    },
     "/api/v1/me/email-change-confirmations": {
       "post": {
         "operationId": "confirmProposedEmailChange",
@@ -8183,7 +7849,7 @@
           "owner_only",
           "no_staff_impersonation",
           "ready_owned_evidence_generation",
-          "catalog_game_kind_published_pin",
+          "catalog_game_kind_match",
           "unresolved_requires_review",
           "same_owner_game_telemetry_target_current_version",
           "no_actual_times_or_credit",
@@ -8371,7 +8037,7 @@
           "owner_only",
           "no_staff_impersonation",
           "ready_owned_evidence_generation",
-          "catalog_game_kind_published_pin",
+          "catalog_game_kind_match",
           "unresolved_requires_review",
           "same_owner_game_telemetry_target_current_version",
           "no_actual_times_or_credit",
@@ -8707,7 +8373,7 @@
           "owner_only",
           "no_staff_impersonation",
           "ready_owned_evidence_generation",
-          "catalog_game_kind_published_pin",
+          "catalog_game_kind_match",
           "unresolved_requires_review",
           "same_owner_game_telemetry_target_current_version",
           "no_actual_times_or_credit",
@@ -9550,55 +9216,6 @@
         },
         "required": [
           "status"
-        ],
-        "additionalProperties": false
-      },
-      "Operation": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "processing",
-              "completed",
-              "failed"
-            ]
-          },
-          "resultId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "failureCode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "resultId",
-          "failureCode"
         ],
         "additionalProperties": false
       },
@@ -10880,7 +10497,7 @@
           "englishFallback": {
             "type": "boolean"
           },
-          "retired": {
+          "hidden": {
             "type": "boolean"
           }
         },
@@ -10890,690 +10507,7 @@
           "requestedLocale",
           "renderedLocale",
           "englishFallback",
-          "retired"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogEntity": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "revisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "city",
-              "region",
-              "cargo",
-              "trailer_type",
-              "trailer_body_type",
-              "trailer_chain_type",
-              "adr_category"
-            ]
-          },
-          "mapNamespace": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "display": {
-            "$ref": "#/components/schemas/CatalogLabel"
-          },
-          "relatedEntityIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "revisionId",
-          "game",
-          "kind",
-          "mapNamespace",
-          "display",
-          "relatedEntityIds"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogRevision": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "publicationVersion": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "validated",
-              "published",
-              "rejected"
-            ]
-          },
-          "coverageComplete": {
-            "type": "boolean"
-          },
-          "englishLabelsComplete": {
-            "type": "boolean"
-          },
-          "sourceReviewComplete": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          }
-        },
-        "required": [
-          "id",
-          "version",
-          "publicationVersion",
-          "game",
-          "state",
-          "coverageComplete",
-          "englishLabelsComplete",
-          "sourceReviewComplete",
-          "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogProvenance": {
-        "type": "object",
-        "properties": {
-          "referenceId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "publicSourceUrl": {
-            "type": "string",
-            "format": "uri"
-          },
-          "attribution": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "permittedUseBasis": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "observedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-          }
-        },
-        "required": [
-          "referenceId",
-          "publicSourceUrl",
-          "attribution",
-          "permittedUseBasis",
-          "observedAt"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogReview": {
-        "type": "object",
-        "properties": {
-          "revisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "comparisonRevisionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "gameBuild": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "releaseInventoryAsOf": {
-            "type": "string",
-            "format": "date"
-          },
-          "addedEntities": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "changedEntities": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "retiredEntities": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "expectedPacks": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "validatedPacks": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "missingPacks": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "failedPacks": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "nonContributingPacks": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "mappingIssues": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "sourceReviewState": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "approved",
-              "rejected"
-            ]
-          },
-          "provenance": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogProvenance"
-            }
-          }
-        },
-        "required": [
-          "revisionId",
-          "version",
-          "comparisonRevisionId",
-          "gameBuild",
-          "releaseInventoryAsOf",
-          "addedEntities",
-          "changedEntities",
-          "retiredEntities",
-          "expectedPacks",
-          "validatedPacks",
-          "missingPacks",
-          "failedPacks",
-          "nonContributingPacks",
-          "mappingIssues",
-          "sourceReviewState",
-          "provenance"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogFieldChange": {
-        "type": "object",
-        "properties": {
-          "field": {
-            "type": "string",
-            "enum": [
-              "label_en",
-              "label_ru",
-              "region_id",
-              "cargo_unit_mass_kg",
-              "adr_category_id",
-              "trailer_body_type_id",
-              "trailer_chain_type_id",
-              "retired",
-              "source_mapping"
-            ]
-          },
-          "before": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2048
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "after": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 2048
-                  },
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "field",
-          "before",
-          "after"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogEntityChange": {
-        "type": "object",
-        "properties": {
-          "entityId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "city",
-              "region",
-              "cargo",
-              "trailer_type",
-              "trailer_body_type",
-              "trailer_chain_type",
-              "adr_category"
-            ]
-          },
-          "changeKind": {
-            "type": "string",
-            "enum": [
-              "added",
-              "changed",
-              "retired"
-            ]
-          },
-          "fields": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogFieldChange"
-            }
-          },
-          "reasonCodes": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
-          }
-        },
-        "required": [
-          "entityId",
-          "kind",
-          "changeKind",
-          "fields",
-          "reasonCodes"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogCoveragePack": {
-        "type": "object",
-        "properties": {
-          "packId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "title": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 256
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "validated",
-              "missing",
-              "failed",
-              "non_contributing"
-            ]
-          },
-          "contributionKinds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "city",
-                "region",
-                "cargo",
-                "trailer_type",
-                "trailer_body_type",
-                "trailer_chain_type",
-                "adr_category"
-              ]
-            }
-          },
-          "provenance": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogProvenance"
-            }
-          },
-          "reasonCodes": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
-          }
-        },
-        "required": [
-          "packId",
-          "title",
-          "state",
-          "contributionKinds",
-          "provenance",
-          "reasonCodes"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogMappingIssue": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "provider": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "mapNamespace": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "sourceId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 128
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "sourceLocale": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 32
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reasonCode": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "candidateEntityIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "provider",
-          "mapNamespace",
-          "sourceId",
-          "sourceLocale",
-          "reasonCode",
-          "candidateEntityIds"
-        ],
-        "additionalProperties": false
-      },
-      "PublicationInput": {
-        "type": "object",
-        "properties": {
-          "expectedPublicationVersion": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          }
-        },
-        "required": [
-          "expectedPublicationVersion",
-          "reason"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogImportInput": {
-        "type": "object",
-        "properties": {
-          "artifactId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          }
-        },
-        "required": [
-          "artifactId",
-          "sha256",
-          "game"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogArtifact": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "processing",
-              "ready",
-              "rejected"
-            ]
-          },
-          "sha256": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$"
-          },
-          "byteLength": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          }
-        },
-        "required": [
-          "id",
-          "state",
-          "sha256",
-          "byteLength"
-        ],
-        "additionalProperties": false
-      },
-      "CatalogMappingInput": {
-        "type": "object",
-        "properties": {
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "provider": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "game": {
-            "type": "string",
-            "enum": [
-              "ets2",
-              "ats"
-            ]
-          },
-          "mapNamespace": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "sourceId": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "entityId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          }
-        },
-        "required": [
-          "catalogRevisionId",
-          "provider",
-          "game",
-          "mapNamespace",
-          "sourceId",
-          "entityId",
-          "reason"
+          "hidden"
         ],
         "additionalProperties": false
       },
@@ -11807,11 +10741,6 @@
               "ats"
             ]
           },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
           "originCityId": {
             "type": "string",
             "format": "uuid",
@@ -11879,7 +10808,6 @@
         },
         "required": [
           "game",
-          "catalogRevisionId",
           "originCityId",
           "destinationCityId",
           "cargoId",
@@ -12112,18 +11040,6 @@
               }
             ]
           },
-          "catalogRevisionId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "eventId": {
             "anyOf": [
               {
@@ -12187,7 +11103,6 @@
           "qualificationAssignmentId",
           "levelId",
           "ruleVersionId",
-          "catalogRevisionId",
           "eventId",
           "attendanceRevisionId",
           "attributionAt",
@@ -12628,11 +11543,6 @@
             "format": "uuid",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
           "originCityId": {
             "type": "string",
             "format": "uuid",
@@ -12737,11 +11647,6 @@
             "format": "uuid",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
           "originCityId": {
             "type": "string",
             "format": "uuid",
@@ -12768,7 +11673,6 @@
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           }
         },
-        "required": [],
         "additionalProperties": false,
         "minProperties": 1
       },
@@ -13210,20 +12114,26 @@
               "type": {
                 "const": "allowed_adr_categories"
               },
-              "entityIds": {
+              "classes": {
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "format": "uuid",
-                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
                 },
-                "maxItems": 1000,
+                "maxItems": 6,
                 "uniqueItems": true
               }
             },
             "required": [
               "type",
-              "entityIds"
+              "classes"
             ],
             "additionalProperties": false
           }
@@ -15506,311 +14416,11 @@
         ],
         "additionalProperties": false
       },
-      "ListCatalogRevision": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogRevision"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListCatalogRevision": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListCatalogRevision"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListCatalogEntity": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogEntity"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListCatalogEntity": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListCatalogEntity"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeCatalogEntity": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CatalogEntity"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
       "EnvelopeUploadPolicy": {
         "type": "object",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/UploadPolicy"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeCatalogArtifact": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CatalogArtifact"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeOperation": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/Operation"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeCatalogRevision": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CatalogRevision"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeCatalogReview": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CatalogReview"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListCatalogEntityChange": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogEntityChange"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListCatalogEntityChange": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListCatalogEntityChange"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListCatalogCoveragePack": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogCoveragePack"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListCatalogCoveragePack": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListCatalogCoveragePack"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "ListCatalogMappingIssue": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CatalogMappingIssue"
-            }
-          },
-          "nextCursor": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2048
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "items",
-          "nextCursor"
-        ],
-        "additionalProperties": false
-      },
-      "EnvelopeListCatalogMappingIssue": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/ListCatalogMappingIssue"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -17131,11 +15741,6 @@
               "ats"
             ]
           },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
           "originCityId": {
             "type": "string",
             "format": "uuid",
@@ -17203,7 +15808,6 @@
         },
         "required": [
           "game",
-          "catalogRevisionId",
           "originCityId",
           "destinationCityId",
           "cargoId",
@@ -17225,17 +15829,11 @@
             "type": "string",
             "format": "uuid",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           }
         },
         "required": [
           "status",
-          "entityId",
-          "catalogRevisionId"
+          "entityId"
         ],
         "additionalProperties": false
       },
@@ -17303,7 +15901,7 @@
             "$ref": "#/components/schemas/ManualUnresolvedSelection"
           }
         ],
-        "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin."
+        "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates the resolved entity's game and kind, and rejects a newly chosen hidden entity."
       },
       "ManualSubmissionFields": {
         "type": "object",
@@ -18089,22 +16687,10 @@
             "type": "string",
             "format": "uuid",
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "catalogRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          },
-          "factRevisionId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
           }
         },
         "required": [
-          "entityId",
-          "catalogRevisionId",
-          "factRevisionId"
+          "entityId"
         ],
         "additionalProperties": false
       },
@@ -18327,7 +16913,7 @@
               },
               "trailerTypeIds": {
                 "type": "array",
-                "maxItems": 32,
+                "maxItems": 1,
                 "items": {
                   "anyOf": [
                     {
@@ -18355,12 +16941,18 @@
                       "unknown"
                     ]
                   },
-                  "entityId": {
+                  "adrClass": {
                     "anyOf": [
                       {
                         "type": "string",
-                        "format": "uuid",
-                        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        "enum": [
+                          "1",
+                          "2",
+                          "3",
+                          "4",
+                          "6",
+                          "8"
+                        ]
                       },
                       {
                         "type": "null"
@@ -18370,7 +16962,7 @@
                 },
                 "required": [
                   "status",
-                  "entityId"
+                  "adrClass"
                 ],
                 "additionalProperties": false
               }
@@ -19013,9 +17605,24 @@
           "entityIds": {
             "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "6",
+                    "8"
+                  ]
+                }
+              ]
             },
             "maxItems": 10
           }
@@ -19030,7 +17637,7 @@
           "entityIds"
         ],
         "additionalProperties": false,
-        "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 catalog entities that broke a trailer or ADR rule. Unknown values are null, never zero."
+        "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero."
       },
       "QualificationCheck": {
         "type": "object",
@@ -19156,6 +17763,956 @@
         ],
         "additionalProperties": false,
         "description": "Present only in listTrips responses for scope=review. Review-queue state of the canonical trip: hold flag, stored review reasons, queue time and the current manual revision number (null without a manual report)."
+      },
+      "CatalogItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "display": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steamAppId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "region": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "adrClass": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "code",
+          "nameEn",
+          "nameRu",
+          "hidden",
+          "display",
+          "dlcId",
+          "dlc"
+        ],
+        "additionalProperties": false,
+        "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type."
+      },
+      "CatalogItemList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogItem"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogSummary": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "lists": {
+            "type": "object",
+            "properties": {
+              "dlcs": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
+              "regions": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
+              "cities": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
+              "cargoes": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
+              "trailers": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "dlcs",
+              "regions",
+              "cities",
+              "cargoes",
+              "trailers"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "game",
+          "lists"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogDlcInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steamAppId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogRegionInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogCityInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogCargoInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "adrClass": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogTrailerInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogItemPatch": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steamAppId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "regionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "adrClass": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hidden": {
+            "type": "boolean"
+          }
+        },
+        "minProperties": 1,
+        "additionalProperties": false,
+        "description": "Partial edit of one row. game is immutable. A field that does not exist on the list is rejected. Hide and restore are `{hidden}`."
+      },
+      "CatalogImportIssue": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "field",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogImportLine": {
+        "type": "object",
+        "properties": {
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+                "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "error",
+              "changed"
+            ]
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogImportIssue"
+            },
+            "maxItems": 16
+          },
+          "changedFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "line",
+          "code",
+          "status",
+          "issues",
+          "changedFields"
+        ],
+        "additionalProperties": false,
+        "description": "line is the physical CSV line (header is line 1) or the 1-based JSON array index."
+      },
+      "CatalogImportPreview": {
+        "type": "object",
+        "properties": {
+          "fileSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "added": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "changed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogImportLine"
+            },
+            "maxItems": 500
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fileSha256",
+          "token",
+          "rows",
+          "added",
+          "changed",
+          "unchanged",
+          "errors",
+          "lines",
+          "truncated"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogImportResult": {
+        "type": "object",
+        "properties": {
+          "importId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "added": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "changed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          }
+        },
+        "required": [
+          "importId",
+          "rows",
+          "added",
+          "changed",
+          "unchanged"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogItem": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogItem"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogItemList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogItemList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogSummary": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogSummary"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogImportPreview": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogImportPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogImportResult": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogImportResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {

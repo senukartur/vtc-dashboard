@@ -85,7 +85,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/catalog-import-artifacts": {
+    "/api/v1/admin/catalogs/{list}": {
         parameters: {
             query?: never;
             header?: never;
@@ -94,49 +94,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** uploadCatalogArtifact */
-        post: operations["uploadCatalogArtifact"];
+        /** createCatalogItem */
+        post: operations["createCatalogItem"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/catalog-import-artifacts/{artifactId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getCatalogArtifact */
-        get: operations["getCatalogArtifact"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-import-policy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getCatalogImportPolicy */
-        get: operations["getCatalogImportPolicy"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-imports": {
+    "/api/v1/admin/catalogs/{list}/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -145,15 +111,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** importCatalog */
-        post: operations["importCatalog"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** updateCatalogItem */
+        patch: operations["updateCatalogItem"];
         trace?: never;
     };
-    "/api/v1/admin/catalog-mappings": {
+    "/api/v1/admin/catalogs/{list}/import-previews": {
         parameters: {
             query?: never;
             header?: never;
@@ -162,83 +128,18 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** addCatalogMapping */
-        post: operations["addCatalogMapping"];
+        /**
+         * previewCatalogImport
+         * @description Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error.
+         */
+        post: operations["previewCatalogImport"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/admin/catalog-revisions/{revisionId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getCatalogRevision */
-        get: operations["getCatalogRevision"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-revisions/{revisionId}/coverage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** listCatalogCoverage */
-        get: operations["listCatalogCoverage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-revisions/{revisionId}/diff": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** listCatalogChanges */
-        get: operations["listCatalogChanges"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-revisions/{revisionId}/mapping-issues": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** listCatalogMappingIssues */
-        get: operations["listCatalogMappingIssues"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-revisions/{revisionId}/publication": {
+    "/api/v1/admin/catalogs/{list}/imports": {
         parameters: {
             query?: never;
             header?: never;
@@ -247,25 +148,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** publishCatalog */
-        post: operations["publishCatalog"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/catalog-revisions/{revisionId}/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getCatalogReview */
-        get: operations["getCatalogReview"];
-        put?: never;
-        post?: never;
+        /**
+         * applyCatalogImport
+         * @description Revalidates the same file and applies it in one transaction. Upserts by (game, code); an empty optional cell keeps the stored value, so import cannot clear a value.
+         */
+        post: operations["applyCatalogImport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -974,15 +861,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalogs/entities": {
+    "/api/v1/catalogs/{list}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** listCatalogEntities */
-        get: operations["listCatalogEntities"];
+        /** listCatalogItems */
+        get: operations["listCatalogItems"];
         put?: never;
         post?: never;
         delete?: never;
@@ -991,15 +878,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalogs/entities/{entityId}": {
+    "/api/v1/catalogs/{list}/{id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** getCatalogEntity */
-        get: operations["getCatalogEntity"];
+        /** getCatalogItem */
+        get: operations["getCatalogItem"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1008,15 +895,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalogs/revisions": {
+    "/api/v1/catalogs/summary": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** listCatalogRevisions */
-        get: operations["listCatalogRevisions"];
+        /** getCatalogSummary */
+        get: operations["getCatalogSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1929,23 +1816,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/operations/{operationId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** getOperation */
-        get: operations["getOperation"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/public/applications": {
         parameters: {
             query?: never;
@@ -2608,137 +2478,157 @@ export interface components {
             /** Format: uuid */
             subjectId: string;
         };
-        CatalogArtifact: {
-            byteLength: number;
+        CatalogCargoInput: {
+            adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            dlcId?: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            nameEn: string;
+            nameRu?: string | null;
+        };
+        CatalogCityInput: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            dlcId?: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            nameEn: string;
+            nameRu?: string | null;
+            regionId?: string | null;
+        };
+        CatalogDlcInput: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            nameEn: string;
+            nameRu?: string | null;
+            steamAppId?: number | null;
+        };
+        CatalogImportIssue: {
+            field: string;
+            reason: string;
+        };
+        /** @description line is the physical CSV line (header is line 1) or the 1-based JSON array index. */
+        CatalogImportLine: {
+            changedFields: string[];
+            code: string | null;
+            issues: components["schemas"]["CatalogImportIssue"][];
+            line: number;
+            /** @enum {string} */
+            status: "error" | "changed";
+        };
+        CatalogImportPreview: {
+            added: number;
+            changed: number;
+            errors: number;
+            fileSha256: string;
+            lines: components["schemas"]["CatalogImportLine"][];
+            rows: number;
+            token: string | null;
+            truncated: boolean;
+            unchanged: number;
+        };
+        CatalogImportResult: {
+            added: number;
+            changed: number;
             /** Format: uuid */
-            id: string;
-            sha256: string;
-            /** @enum {string} */
-            state: "processing" | "ready" | "rejected";
+            importId: string;
+            rows: number;
+            unchanged: number;
         };
-        CatalogCoveragePack: {
-            contributionKinds: ("city" | "region" | "cargo" | "trailer_type" | "trailer_body_type" | "trailer_chain_type" | "adr_category")[];
-            packId: string;
-            provenance: components["schemas"]["CatalogProvenance"][];
-            reasonCodes: string[];
-            /** @enum {string} */
-            state: "validated" | "missing" | "failed" | "non_contributing";
-            title: string;
-        };
-        CatalogEntity: {
+        /** @description One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type. */
+        CatalogItem: {
+            adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
             display: components["schemas"]["CatalogLabel"];
+            dlc: components["schemas"]["CatalogLabel"] | null;
+            dlcId: string | null;
             /** @enum {string} */
             game: "ets2" | "ats";
+            hidden: boolean;
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            kind: "city" | "region" | "cargo" | "trailer_type" | "trailer_body_type" | "trailer_chain_type" | "adr_category";
-            mapNamespace: string;
-            relatedEntityIds: string[];
-            /** Format: uuid */
-            revisionId: string;
+            nameEn: string;
+            nameRu: string | null;
+            region?: components["schemas"]["CatalogLabel"] | null;
+            regionId?: string | null;
+            steamAppId?: number | null;
         };
-        CatalogEntityChange: {
-            /** @enum {string} */
-            changeKind: "added" | "changed" | "retired";
-            /** Format: uuid */
-            entityId: string;
-            fields: components["schemas"]["CatalogFieldChange"][];
-            /** @enum {string} */
-            kind: "city" | "region" | "cargo" | "trailer_type" | "trailer_body_type" | "trailer_chain_type" | "adr_category";
-            reasonCodes: string[];
+        CatalogItemList: {
+            items: components["schemas"]["CatalogItem"][];
+            nextCursor: string | null;
+            total: number;
         };
-        CatalogFieldChange: {
-            after: (string | boolean | number | string[]) | null;
-            before: (string | boolean | number | string[]) | null;
-            /** @enum {string} */
-            field: "label_en" | "label_ru" | "region_id" | "cargo_unit_mass_kg" | "adr_category_id" | "trailer_body_type_id" | "trailer_chain_type_id" | "retired" | "source_mapping";
-        };
-        CatalogImportInput: {
-            /** Format: uuid */
-            artifactId: string;
-            /** @enum {string} */
-            game: "ets2" | "ats";
-            sha256: string;
+        /** @description Partial edit of one row. game is immutable. A field that does not exist on the list is rejected. Hide and restore are `{hidden}`. */
+        CatalogItemPatch: {
+            adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code?: string;
+            dlcId?: string | null;
+            hidden?: boolean;
+            nameEn?: string;
+            nameRu?: string | null;
+            regionId?: string | null;
+            steamAppId?: number | null;
         };
         CatalogLabel: {
             englishFallback: boolean;
             /** Format: uuid */
             entityId: string;
+            hidden: boolean;
             label: string;
             /** @enum {string} */
             renderedLocale: "en" | "ru";
             /** @enum {string} */
             requestedLocale: "en" | "ru";
-            retired: boolean;
         };
-        CatalogMappingInput: {
-            /** Format: uuid */
-            catalogRevisionId: string;
-            /** Format: uuid */
-            entityId: string;
+        CatalogRegionInput: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            dlcId?: string | null;
             /** @enum {string} */
             game: "ets2" | "ats";
-            mapNamespace: string;
-            provider: string;
-            reason: string;
-            sourceId: string;
+            nameEn: string;
+            nameRu?: string | null;
         };
-        CatalogMappingIssue: {
-            candidateEntityIds: string[];
-            /** Format: uuid */
-            id: string;
-            mapNamespace: string | null;
-            provider: string;
-            reasonCode: string;
-            sourceId: string | null;
-            sourceLocale: string | null;
-        };
-        CatalogProvenance: {
-            attribution: string;
-            /** Format: date-time */
-            observedAt: string;
-            permittedUseBasis: string;
-            /** Format: uri */
-            publicSourceUrl: string;
-            /** Format: uuid */
-            referenceId: string;
-        };
-        CatalogReview: {
-            addedEntities: number;
-            changedEntities: number;
-            comparisonRevisionId: string | null;
-            expectedPacks: number;
-            failedPacks: number;
-            gameBuild: string;
-            mappingIssues: number;
-            missingPacks: number;
-            nonContributingPacks: number;
-            provenance: components["schemas"]["CatalogProvenance"][];
-            /** Format: date */
-            releaseInventoryAsOf: string;
-            retiredEntities: number;
-            /** Format: uuid */
-            revisionId: string;
-            /** @enum {string} */
-            sourceReviewState: "pending" | "approved" | "rejected";
-            validatedPacks: number;
-            version: number;
-        };
-        CatalogRevision: {
-            coverageComplete: boolean;
-            /** Format: date-time */
-            createdAt: string;
-            englishLabelsComplete: boolean;
+        CatalogSummary: {
             /** @enum {string} */
             game: "ets2" | "ats";
-            /** Format: uuid */
-            id: string;
-            publicationVersion: number;
-            sourceReviewComplete: boolean;
+            lists: {
+                cargoes: {
+                    hidden: number;
+                    visible: number;
+                };
+                cities: {
+                    hidden: number;
+                    visible: number;
+                };
+                dlcs: {
+                    hidden: number;
+                    visible: number;
+                };
+                regions: {
+                    hidden: number;
+                    visible: number;
+                };
+                trailers: {
+                    hidden: number;
+                    visible: number;
+                };
+            };
+        };
+        CatalogTrailerInput: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            dlcId?: string | null;
             /** @enum {string} */
-            state: "draft" | "validated" | "published" | "rejected";
-            version: number;
+            game: "ets2" | "ats";
+            nameEn: string;
+            nameRu?: string | null;
         };
         Challenge: {
             /** Format: date-time */
@@ -2850,11 +2740,7 @@ export interface components {
         };
         EffectiveCatalogPin: {
             /** Format: uuid */
-            catalogRevisionId: string;
-            /** Format: uuid */
             entityId: string;
-            /** Format: uuid */
-            factRevisionId: string;
         };
         EffectiveTripFacts: {
             actualCompletedAt: string | null;
@@ -2898,20 +2784,24 @@ export interface components {
             data: components["schemas"]["Assignment"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeCatalogArtifact: {
-            data: components["schemas"]["CatalogArtifact"];
+        EnvelopeCatalogImportPreview: {
+            data: components["schemas"]["CatalogImportPreview"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeCatalogEntity: {
-            data: components["schemas"]["CatalogEntity"];
+        EnvelopeCatalogImportResult: {
+            data: components["schemas"]["CatalogImportResult"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeCatalogReview: {
-            data: components["schemas"]["CatalogReview"];
+        EnvelopeCatalogItem: {
+            data: components["schemas"]["CatalogItem"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeCatalogRevision: {
-            data: components["schemas"]["CatalogRevision"];
+        EnvelopeCatalogItemList: {
+            data: components["schemas"]["CatalogItemList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeCatalogSummary: {
+            data: components["schemas"]["CatalogSummary"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeChallenge: {
@@ -2996,26 +2886,6 @@ export interface components {
         };
         EnvelopeListAuditEntry: {
             data: components["schemas"]["ListAuditEntry"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListCatalogCoveragePack: {
-            data: components["schemas"]["ListCatalogCoveragePack"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListCatalogEntity: {
-            data: components["schemas"]["ListCatalogEntity"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListCatalogEntityChange: {
-            data: components["schemas"]["ListCatalogEntityChange"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListCatalogMappingIssue: {
-            data: components["schemas"]["ListCatalogMappingIssue"];
-            meta: components["schemas"]["Meta"];
-        };
-        EnvelopeListCatalogRevision: {
-            data: components["schemas"]["ListCatalogRevision"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeListEventPublic: {
@@ -3138,10 +3008,6 @@ export interface components {
             data: components["schemas"]["NotificationPreferences"];
             meta: components["schemas"]["Meta"];
         };
-        EnvelopeOperation: {
-            data: components["schemas"]["Operation"];
-            meta: components["schemas"]["Meta"];
-        };
         EnvelopeOptionalEvent: {
             data: components["schemas"]["OptionalEvent"];
             meta: components["schemas"]["Meta"];
@@ -3249,7 +3115,6 @@ export interface components {
             attributionAt: string | null;
             /** @enum {string} */
             attributionBasis: "actual_start" | "manual_confirmation" | "staff_resolution" | "unknown";
-            catalogRevisionId: string | null;
             eventId: string | null;
             /** Format: uuid */
             factRevisionId: string;
@@ -3429,26 +3294,6 @@ export interface components {
             items: components["schemas"]["AuditEntry"][];
             nextCursor: string | null;
         };
-        ListCatalogCoveragePack: {
-            items: components["schemas"]["CatalogCoveragePack"][];
-            nextCursor: string | null;
-        };
-        ListCatalogEntity: {
-            items: components["schemas"]["CatalogEntity"][];
-            nextCursor: string | null;
-        };
-        ListCatalogEntityChange: {
-            items: components["schemas"]["CatalogEntityChange"][];
-            nextCursor: string | null;
-        };
-        ListCatalogMappingIssue: {
-            items: components["schemas"]["CatalogMappingIssue"][];
-            nextCursor: string | null;
-        };
-        ListCatalogRevision: {
-            items: components["schemas"]["CatalogRevision"][];
-            nextCursor: string | null;
-        };
         ListEventPublic: {
             items: components["schemas"]["EventPublic"][];
             nextCursor: string | null;
@@ -3558,7 +3403,7 @@ export interface components {
             updatedAt: string;
             version: number;
         };
-        /** @description Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin. */
+        /** @description Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates the resolved entity's game and kind, and rejects a newly chosen hidden entity. */
         ManualCatalogSelection: components["schemas"]["ManualResolvedSelection"] | components["schemas"]["ManualUnresolvedSelection"];
         /** @description Immutable author request and retained status history; baseRevisionId is null for a telemetry-only accepted trip. Does not represent a VTC-029 proposal, staff application or recalculation. Current accepted result remains effective. */
         ManualCorrectionRequest: {
@@ -3623,8 +3468,6 @@ export interface components {
             /** Format: uuid */
             cargoId: string;
             cargoMassKg: string;
-            /** Format: uuid */
-            catalogRevisionId: string;
             comment: string | null;
             /** Format: uuid */
             destinationCityId: string;
@@ -3689,8 +3532,6 @@ export interface components {
             /** Format: uuid */
             cargoId: string;
             cargoMassKg: string;
-            /** Format: uuid */
-            catalogRevisionId: string;
             comment?: string | null;
             /** Format: uuid */
             destinationCityId: string;
@@ -3704,8 +3545,6 @@ export interface components {
             trailerTypeId: string;
         };
         ManualResolvedSelection: {
-            /** Format: uuid */
-            catalogRevisionId: string;
             /** Format: uuid */
             entityId: string;
             /** @constant */
@@ -3842,14 +3681,6 @@ export interface components {
             tripRejected: boolean;
             tripStarted: boolean;
         };
-        Operation: {
-            failureCode: string | null;
-            /** Format: uuid */
-            id: string;
-            resultId: string | null;
-            /** @enum {string} */
-            state: "processing" | "completed" | "failed";
-        };
         OptionalEvent: components["schemas"]["EventPublic"] | null;
         OwnTripStatusSummary: {
             activeTrips: number;
@@ -3959,10 +3790,6 @@ export interface components {
             /** Format: uuid */
             reviewerId: string;
         };
-        PublicationInput: {
-            expectedPublicationVersion: number;
-            reason: string;
-        };
         QualificationActionActor: {
             /** Format: uuid */
             id: string;
@@ -4029,7 +3856,7 @@ export interface components {
             rules: components["schemas"]["Rule"][];
             sample: {
                 adr: {
-                    entityId: string | null;
+                    adrClass: ("1" | "2" | "3" | "4" | "6" | "8") | null;
                     /** @enum {string} */
                     status: "known" | "non_hazardous" | "unknown";
                 };
@@ -4038,10 +3865,10 @@ export interface components {
                 trailerTypeIds: (string | null)[];
             };
         };
-        /** @description One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 catalog entities that broke a trailer or ADR rule. Unknown values are null, never zero. */
+        /** @description One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero. */
         QualificationRuleCheck: {
             bypassedByEvent: boolean;
-            entityIds: string[];
+            entityIds: (string | ("1" | "2" | "3" | "4" | "6" | "8"))[];
             limitMassKg: components["schemas"]["Decimal"] | null;
             observedMassKg: components["schemas"]["Decimal"] | null;
             /** @enum {string} */
@@ -4130,8 +3957,6 @@ export interface components {
             cargoId?: string;
             cargoMassKg?: string;
             /** Format: uuid */
-            catalogRevisionId?: string;
-            /** Format: uuid */
             destinationCityId?: string;
             /** Format: uuid */
             originCityId?: string;
@@ -4149,8 +3974,6 @@ export interface components {
             /** Format: uuid */
             cargoId?: string;
             cargoMassKg?: string;
-            /** Format: uuid */
-            catalogRevisionId?: string;
             /**
              * Format: uuid
              * @description Optional exact pending author correction request; omitted and null are equivalent. Requires an actual supported correction field.
@@ -4214,7 +4037,7 @@ export interface components {
             /** @constant */
             type: "allowed_trailer_types";
         } | {
-            entityIds: string[];
+            classes: ("1" | "2" | "3" | "4" | "6" | "8")[];
             /** @constant */
             type: "allowed_adr_categories";
         };
@@ -4590,116 +4413,20 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    uploadCatalogArtifact: {
+    createCatalogItem: {
         parameters: {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["UploadInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogArtifact"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getCatalogArtifact: {
-        parameters: {
-            query?: never;
-            header?: never;
             path: {
-                artifactId: string;
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogArtifact"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getCatalogImportPolicy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeUploadPolicy"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    importCatalog: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CatalogImportInput"];
-            };
-        };
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeOperation"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    addCatalogMapping: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CatalogMappingInput"];
+                "application/json": components["schemas"]["CatalogDlcInput"] | components["schemas"]["CatalogRegionInput"] | components["schemas"]["CatalogCityInput"] | components["schemas"]["CatalogCargoInput"] | components["schemas"]["CatalogTrailerInput"];
             };
         };
         responses: {
@@ -4709,171 +4436,95 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeCommandResult"];
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    getCatalogRevision: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                revisionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogRevision"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listCatalogCoverage: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-                reviewVersion: number;
-            };
-            header?: never;
-            path: {
-                revisionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListCatalogCoveragePack"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listCatalogChanges: {
-        parameters: {
-            query: {
-                changeKind?: "added" | "changed" | "retired";
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-                reviewVersion: number;
-            };
-            header?: never;
-            path: {
-                revisionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListCatalogEntityChange"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    listCatalogMappingIssues: {
-        parameters: {
-            query: {
-                cursor?: components["parameters"]["Cursor"];
-                limit?: components["parameters"]["Limit"];
-                reviewVersion: number;
-            };
-            header?: never;
-            path: {
-                revisionId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeListCatalogMappingIssue"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    publishCatalog: {
+    updateCatalogItem: {
         parameters: {
             query?: never;
             header: {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
             };
             path: {
-                revisionId: string;
+                id: string;
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PublicationInput"];
+                "application/json": components["schemas"]["CatalogItemPatch"];
             };
         };
         responses: {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogRevision"];
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    getCatalogReview: {
+    previewCatalogImport: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                revisionId: string;
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["UploadInput"];
+            };
+        };
         responses: {
             /** @description Committed result; see semantic preconditions. */
             200: {
                 headers: {
-                    /** @description Strong authoritative aggregate version, for the next command. */
-                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogReview"];
+                    "application/json": components["schemas"]["EnvelopeCatalogImportPreview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    applyCatalogImport: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Quoted dry-run token returned by previewCatalogImport. */
+                "If-Match": string;
+            };
+            path: {
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["UploadInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogImportResult"];
                 };
             };
             default: components["responses"]["Error"];
@@ -6133,20 +5784,22 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    listCatalogEntities: {
+    listCatalogItems: {
         parameters: {
             query: {
                 cursor?: components["parameters"]["Cursor"];
-                kind: string;
+                dlc?: "base" | string;
+                game: "ets2" | "ats";
+                includeHidden?: boolean;
                 limit?: components["parameters"]["Limit"];
-                locale: "en" | "ru";
-                /** @description Canonical region in this published revision. Filters before pagination; foreign or absent regions return no matches. Bound into the signed cursor. */
+                locale?: "en" | "ru";
                 regionId?: string;
-                revisionId: string;
                 search?: string;
             };
             header?: never;
-            path?: never;
+            path: {
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -6157,21 +5810,21 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListCatalogEntity"];
+                    "application/json": components["schemas"]["EnvelopeCatalogItemList"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    getCatalogEntity: {
+    getCatalogItem: {
         parameters: {
-            query: {
-                locale: "en" | "ru";
-                revisionId: string;
+            query?: {
+                locale?: "en" | "ru";
             };
             header?: never;
             path: {
-                entityId: string;
+                id: string;
+                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -6183,18 +5836,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeCatalogEntity"];
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
                 };
             };
             default: components["responses"]["Error"];
         };
     };
-    listCatalogRevisions: {
+    getCatalogSummary: {
         parameters: {
             query: {
-                cursor?: components["parameters"]["Cursor"];
                 game: "ets2" | "ats";
-                limit?: components["parameters"]["Limit"];
             };
             header?: never;
             path?: never;
@@ -6208,7 +5859,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListCatalogRevision"];
+                    "application/json": components["schemas"]["EnvelopeCatalogSummary"];
                 };
             };
             default: components["responses"]["Error"];
@@ -7775,29 +7426,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeCommandResult"];
-                };
-            };
-            default: components["responses"]["Error"];
-        };
-    };
-    getOperation: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                operationId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Committed result; see semantic preconditions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvelopeOperation"];
                 };
             };
             default: components["responses"]["Error"];

@@ -1064,398 +1064,6 @@
       }
     },
     {
-      "id": "listCatalogRevisions:success",
-      "operationId": "listCatalogRevisions",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "version": 1,
-              "publicationVersion": 1,
-              "game": "ets2",
-              "state": "draft",
-              "coverageComplete": false,
-              "englishLabelsComplete": false,
-              "sourceReviewComplete": false,
-              "createdAt": "2026-10-17T12:00:00.000Z"
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogRevisions:empty",
-      "operationId": "listCatalogRevisions",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogEntities:success",
-      "operationId": "listCatalogEntities",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "revisionId": "41000000-0000-4000-8000-000000000001",
-              "game": "ets2",
-              "kind": "city",
-              "mapNamespace": "synthetic-example",
-              "display": {
-                "entityId": "41000000-0000-4000-8000-000000000001",
-                "label": "synthetic-example",
-                "requestedLocale": "en",
-                "renderedLocale": "en",
-                "englishFallback": false,
-                "retired": false
-              },
-              "relatedEntityIds": []
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogEntities:empty",
-      "operationId": "listCatalogEntities",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getCatalogEntity:success",
-      "operationId": "getCatalogEntity",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "revisionId": "41000000-0000-4000-8000-000000000001",
-          "game": "ets2",
-          "kind": "city",
-          "mapNamespace": "synthetic-example",
-          "display": {
-            "entityId": "41000000-0000-4000-8000-000000000001",
-            "label": "synthetic-example",
-            "requestedLocale": "en",
-            "renderedLocale": "en",
-            "englishFallback": false,
-            "retired": false
-          },
-          "relatedEntityIds": []
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getCatalogImportPolicy:success",
-      "operationId": "getCatalogImportPolicy",
-      "status": 200,
-      "response": {
-        "data": {
-          "enabled": false,
-          "maxFileBytes": null,
-          "maxFilesPerReport": null,
-          "allowedMimeTypes": [],
-          "policyRevision": 1
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "uploadCatalogArtifact:success",
-      "operationId": "uploadCatalogArtifact",
-      "status": 202,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "state": "processing",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "byteLength": 1
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "file": "synthetic-example"
-      }
-    },
-    {
-      "id": "getCatalogArtifact:success",
-      "operationId": "getCatalogArtifact",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "state": "processing",
-          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-          "byteLength": 1
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "importCatalog:success",
-      "operationId": "importCatalog",
-      "status": 202,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "state": "processing",
-          "resultId": null,
-          "failureCode": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "artifactId": "41000000-0000-4000-8000-000000000001",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "game": "ets2"
-      }
-    },
-    {
-      "id": "getCatalogRevision:success",
-      "operationId": "getCatalogRevision",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
-          "publicationVersion": 1,
-          "game": "ets2",
-          "state": "draft",
-          "coverageComplete": false,
-          "englishLabelsComplete": false,
-          "sourceReviewComplete": false,
-          "createdAt": "2026-10-17T12:00:00.000Z"
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getCatalogReview:success",
-      "operationId": "getCatalogReview",
-      "status": 200,
-      "response": {
-        "data": {
-          "revisionId": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
-          "comparisonRevisionId": null,
-          "gameBuild": "synthetic-example",
-          "releaseInventoryAsOf": "2026-10-01",
-          "addedEntities": 1,
-          "changedEntities": 1,
-          "retiredEntities": 1,
-          "expectedPacks": 1,
-          "validatedPacks": 1,
-          "missingPacks": 1,
-          "failedPacks": 1,
-          "nonContributingPacks": 1,
-          "mappingIssues": 1,
-          "sourceReviewState": "pending",
-          "provenance": []
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogChanges:success",
-      "operationId": "listCatalogChanges",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "entityId": "41000000-0000-4000-8000-000000000001",
-              "kind": "city",
-              "changeKind": "added",
-              "fields": [],
-              "reasonCodes": []
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogChanges:empty",
-      "operationId": "listCatalogChanges",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogCoverage:success",
-      "operationId": "listCatalogCoverage",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "packId": "synthetic-example",
-              "title": "synthetic-example",
-              "state": "validated",
-              "contributionKinds": [],
-              "provenance": [],
-              "reasonCodes": []
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogCoverage:empty",
-      "operationId": "listCatalogCoverage",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogMappingIssues:success",
-      "operationId": "listCatalogMappingIssues",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [
-            {
-              "id": "41000000-0000-4000-8000-000000000001",
-              "provider": "synthetic-example",
-              "mapNamespace": null,
-              "sourceId": null,
-              "sourceLocale": null,
-              "reasonCode": "synthetic-example",
-              "candidateEntityIds": []
-            }
-          ],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "listCatalogMappingIssues:empty",
-      "operationId": "listCatalogMappingIssues",
-      "status": 200,
-      "response": {
-        "data": {
-          "items": [],
-          "nextCursor": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "publishCatalog:success",
-      "operationId": "publishCatalog",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
-          "publicationVersion": 1,
-          "game": "ets2",
-          "state": "draft",
-          "coverageComplete": false,
-          "englishLabelsComplete": false,
-          "sourceReviewComplete": false,
-          "createdAt": "2026-10-17T12:00:00.000Z"
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "expectedPublicationVersion": 1,
-        "reason": "synthetic-example"
-      }
-    },
-    {
-      "id": "addCatalogMapping:success",
-      "operationId": "addCatalogMapping",
-      "status": 201,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      },
-      "request": {
-        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
-        "provider": "synthetic-example",
-        "game": "ets2",
-        "mapNamespace": "synthetic-example",
-        "sourceId": "synthetic-example",
-        "entityId": "41000000-0000-4000-8000-000000000001",
-        "reason": "synthetic-example"
-      }
-    },
-    {
       "id": "listTelemetryTokens:success",
       "operationId": "listTelemetryTokens",
       "status": 200,
@@ -1786,7 +1394,6 @@
       },
       "request": {
         "game": "ets2",
-        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
         "originCityId": "41000000-0000-4000-8000-000000000011",
         "destinationCityId": "41000000-0000-4000-8000-000000000012",
         "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -1839,7 +1446,6 @@
       },
       "request": {
         "game": "ets2",
-        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
         "originCityId": "41000000-0000-4000-8000-000000000011",
         "destinationCityId": "41000000-0000-4000-8000-000000000012",
         "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -1894,7 +1500,6 @@
             "qualificationAssignmentId": null,
             "levelId": null,
             "ruleVersionId": null,
-            "catalogRevisionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -1958,7 +1563,6 @@
               "submittedAt": "2026-10-17T12:00:00.000Z",
               "fields": {
                 "game": "ets2",
-                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
                 "originCityId": "41000000-0000-4000-8000-000000000011",
                 "destinationCityId": "41000000-0000-4000-8000-000000000012",
                 "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -1986,7 +1590,6 @@
             "qualificationAssignmentId": "41000000-0000-4000-8000-000000000021",
             "levelId": "41000000-0000-4000-8000-000000000022",
             "ruleVersionId": "41000000-0000-4000-8000-000000000023",
-            "catalogRevisionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-17T12:00:00.000Z",
@@ -2042,7 +1645,6 @@
               "submittedAt": "2026-10-17T12:00:00.000Z",
               "fields": {
                 "game": "ets2",
-                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
                 "originCityId": "41000000-0000-4000-8000-000000000011",
                 "destinationCityId": "41000000-0000-4000-8000-000000000012",
                 "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -2089,7 +1691,6 @@
           "submittedAt": "2026-10-17T12:00:00.000Z",
           "fields": {
             "game": "ets2",
-            "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
             "originCityId": "41000000-0000-4000-8000-000000000011",
             "destinationCityId": "41000000-0000-4000-8000-000000000012",
             "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -2207,7 +1808,6 @@
             "qualificationAssignmentId": null,
             "levelId": null,
             "ruleVersionId": null,
-            "catalogRevisionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -2257,7 +1857,6 @@
             "qualificationAssignmentId": "41000000-0000-4000-8000-000000000021",
             "levelId": "41000000-0000-4000-8000-000000000022",
             "ruleVersionId": "41000000-0000-4000-8000-000000000023",
-            "catalogRevisionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": "2026-10-17T12:00:00.000Z",
@@ -2334,7 +1933,6 @@
             "qualificationAssignmentId": null,
             "levelId": null,
             "ruleVersionId": null,
-            "catalogRevisionId": null,
             "eventId": null,
             "attendanceRevisionId": null,
             "attributionAt": null,
@@ -2576,7 +2174,9 @@
             },
             {
               "type": "allowed_adr_categories",
-              "entityIds": []
+              "classes": [
+                "3"
+              ]
             }
           ],
           "requiredTrips": null,
@@ -3700,22 +3300,6 @@
       }
     },
     {
-      "id": "getOperation:success",
-      "operationId": "getOperation",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "state": "processing",
-          "resultId": null,
-          "failureCode": null
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
       "id": "listTrips:error-403",
       "operationId": "listTrips",
       "status": 403,
@@ -3947,7 +3531,6 @@
             "submittedAt": "2026-10-17T12:00:00.000Z",
             "fields": {
               "game": "ets2",
-              "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
               "originCityId": "41000000-0000-4000-8000-000000000011",
               "destinationCityId": "41000000-0000-4000-8000-000000000012",
               "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -3987,7 +3570,6 @@
                 "qualificationAssignmentId": null,
                 "levelId": null,
                 "ruleVersionId": null,
-                "catalogRevisionId": null,
                 "eventId": null,
                 "attendanceRevisionId": null,
                 "attributionAt": null,
@@ -3998,32 +3580,6 @@
           ],
           "pendingProposalId": null,
           "reviewReasonCodes": []
-        },
-        "meta": {
-          "requestId": "synthetic-request-001"
-        }
-      }
-    },
-    {
-      "id": "getCatalogEntity:english-fallback",
-      "operationId": "getCatalogEntity",
-      "status": 200,
-      "response": {
-        "data": {
-          "id": "41000000-0000-4000-8000-000000000001",
-          "revisionId": "41000000-0000-4000-8000-000000000001",
-          "game": "ets2",
-          "kind": "city",
-          "mapNamespace": "synthetic-example",
-          "display": {
-            "entityId": "41000000-0000-4000-8000-000000000001",
-            "label": "Fixture City",
-            "requestedLocale": "ru",
-            "renderedLocale": "en",
-            "englishFallback": true,
-            "retired": false
-          },
-          "relatedEntityIds": []
         },
         "meta": {
           "requestId": "synthetic-request-001"
@@ -4335,13 +3891,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -4353,8 +3907,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -4375,13 +3928,11 @@
           "game": "ets2",
           "origin": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000001"
           },
           "destination": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000002"
           },
           "cargo": {
             "status": "unresolved",
@@ -4393,8 +3944,7 @@
           "cargoMassKg": "0",
           "trailerType": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000004"
           },
           "actualDistanceM": "12500.5",
           "evidenceIds": [
@@ -4425,13 +3975,11 @@
                   "game": "ets2",
                   "origin": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000001",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000001"
                   },
                   "destination": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000002",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000002"
                   },
                   "cargo": {
                     "status": "unresolved",
@@ -4443,8 +3991,7 @@
                   "cargoMassKg": "0",
                   "trailerType": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000004",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000004"
                   },
                   "actualDistanceM": "12500.5",
                   "evidenceIds": [
@@ -4498,13 +4045,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -4516,8 +4061,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -4538,13 +4082,11 @@
           "game": "ets2",
           "origin": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000001"
           },
           "destination": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000002"
           },
           "cargo": {
             "status": "unresolved",
@@ -4556,8 +4098,7 @@
           "cargoMassKg": "0",
           "trailerType": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000004"
           },
           "actualDistanceM": "12500.5",
           "evidenceIds": [
@@ -4592,13 +4133,11 @@
                   "game": "ets2",
                   "origin": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000001",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000001"
                   },
                   "destination": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000002",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000002"
                   },
                   "cargo": {
                     "status": "unresolved",
@@ -4610,8 +4149,7 @@
                   "cargoMassKg": "0",
                   "trailerType": {
                     "status": "resolved",
-                    "entityId": "51000000-0000-4000-8000-000000000004",
-                    "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                    "entityId": "51000000-0000-4000-8000-000000000004"
                   },
                   "actualDistanceM": "12500.5",
                   "evidenceIds": [
@@ -4665,13 +4203,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -4683,8 +4219,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -4718,13 +4253,11 @@
                 "game": "ets2",
                 "origin": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000001",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000001"
                 },
                 "destination": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000002",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000002"
                 },
                 "cargo": {
                   "status": "unresolved",
@@ -4736,8 +4269,7 @@
                 "cargoMassKg": "0",
                 "trailerType": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000004",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000004"
                 },
                 "actualDistanceM": "12500.5",
                 "evidenceIds": [
@@ -4789,13 +4321,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -4807,8 +4337,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -4829,13 +4358,11 @@
           "game": "ets2",
           "origin": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000001"
           },
           "destination": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000002"
           },
           "cargo": {
             "status": "unresolved",
@@ -4847,8 +4374,7 @@
           "cargoMassKg": "0",
           "trailerType": {
             "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004",
-            "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+            "entityId": "51000000-0000-4000-8000-000000000004"
           },
           "actualDistanceM": "12500.5",
           "evidenceIds": [
@@ -4875,13 +4401,11 @@
             "game": "ets2",
             "origin": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000001",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000001"
             },
             "destination": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000002",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000002"
             },
             "cargo": {
               "status": "unresolved",
@@ -4893,8 +4417,7 @@
             "cargoMassKg": "0",
             "trailerType": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000004",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000004"
             },
             "actualDistanceM": "12500.5",
             "evidenceIds": [
@@ -4997,13 +4520,11 @@
                 "game": "ets2",
                 "origin": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000001",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000001"
                 },
                 "destination": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000002",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000002"
                 },
                 "cargo": {
                   "status": "unresolved",
@@ -5015,8 +4536,7 @@
                 "cargoMassKg": "0",
                 "trailerType": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000004",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000004"
                 },
                 "actualDistanceM": "12500.5",
                 "evidenceIds": [
@@ -5032,7 +4552,6 @@
               "submittedAt": "2026-10-17T12:00:00.000Z",
               "fields": {
                 "game": "ets2",
-                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
                 "originCityId": "41000000-0000-4000-8000-000000000011",
                 "destinationCityId": "41000000-0000-4000-8000-000000000012",
                 "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -5069,13 +4588,11 @@
             "game": "ets2",
             "origin": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000001",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000001"
             },
             "destination": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000002",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000002"
             },
             "cargo": {
               "status": "unresolved",
@@ -5087,8 +4604,7 @@
             "cargoMassKg": "0",
             "trailerType": {
               "status": "resolved",
-              "entityId": "51000000-0000-4000-8000-000000000004",
-              "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+              "entityId": "51000000-0000-4000-8000-000000000004"
             },
             "actualDistanceM": "12500.5",
             "evidenceIds": [
@@ -5142,7 +4658,6 @@
       },
       "request": {
         "game": "ets2",
-        "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
         "originCityId": "41000000-0000-4000-8000-000000000011",
         "destinationCityId": "41000000-0000-4000-8000-000000000012",
         "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -5191,13 +4706,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -5209,8 +4722,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -5562,13 +5074,11 @@
                 "game": "ets2",
                 "origin": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000001",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000001"
                 },
                 "destination": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000002",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000002"
                 },
                 "cargo": {
                   "status": "unresolved",
@@ -5580,8 +5090,7 @@
                 "cargoMassKg": "0",
                 "trailerType": {
                   "status": "resolved",
-                  "entityId": "51000000-0000-4000-8000-000000000004",
-                  "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                  "entityId": "51000000-0000-4000-8000-000000000004"
                 },
                 "actualDistanceM": "12500.5",
                 "evidenceIds": [
@@ -5597,7 +5106,6 @@
               "submittedAt": "2026-10-17T12:00:00.000Z",
               "fields": {
                 "game": "ets2",
-                "catalogRevisionId": "41000000-0000-4000-8000-000000000015",
                 "originCityId": "41000000-0000-4000-8000-000000000011",
                 "destinationCityId": "41000000-0000-4000-8000-000000000012",
                 "cargoId": "41000000-0000-4000-8000-000000000013",
@@ -5639,13 +5147,11 @@
               "game": "ets2",
               "origin": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000001",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000001"
               },
               "destination": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000002",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000002"
               },
               "cargo": {
                 "status": "unresolved",
@@ -5657,8 +5163,7 @@
               "cargoMassKg": "0",
               "trailerType": {
                 "status": "resolved",
-                "entityId": "51000000-0000-4000-8000-000000000004",
-                "catalogRevisionId": "51000000-0000-4000-8000-000000000005"
+                "entityId": "51000000-0000-4000-8000-000000000004"
               },
               "actualDistanceM": "12500.5",
               "evidenceIds": [
@@ -6160,6 +5665,259 @@
         },
         "meta": {
           "requestId": "synthetic-request-038"
+        }
+      }
+    },
+    {
+      "id": "getCatalogSummary:success",
+      "operationId": "getCatalogSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "lists": {
+            "dlcs": {
+              "visible": 1,
+              "hidden": 0
+            },
+            "regions": {
+              "visible": 1,
+              "hidden": 0
+            },
+            "cities": {
+              "visible": 1,
+              "hidden": 0
+            },
+            "cargoes": {
+              "visible": 1,
+              "hidden": 0
+            },
+            "trailers": {
+              "visible": 1,
+              "hidden": 0
+            }
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:success",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "game": "ets2",
+              "code": "synthetic_city",
+              "nameEn": "Synthetic City",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "41000000-0000-4000-8000-000000000001",
+                "label": "Synthetic City",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "regionId": null,
+              "region": null
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:empty",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "total": 0
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "getCatalogItem:english-fallback",
+      "operationId": "getCatalogItem",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "code": "synthetic_city",
+          "nameEn": "Synthetic City",
+          "nameRu": null,
+          "hidden": false,
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000001",
+            "label": "Synthetic City",
+            "requestedLocale": "ru",
+            "renderedLocale": "en",
+            "englishFallback": true,
+            "hidden": false
+          },
+          "dlcId": null,
+          "dlc": null,
+          "regionId": null,
+          "region": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "createCatalogItem:success",
+      "operationId": "createCatalogItem",
+      "status": 201,
+      "request": {
+        "game": "ets2",
+        "code": "synthetic_city",
+        "nameEn": "Synthetic City",
+        "nameRu": null,
+        "regionId": null,
+        "dlcId": null
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "code": "synthetic_city",
+          "nameEn": "Synthetic City",
+          "nameRu": null,
+          "hidden": false,
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000001",
+            "label": "Synthetic City",
+            "requestedLocale": "en",
+            "renderedLocale": "en",
+            "englishFallback": false,
+            "hidden": false
+          },
+          "dlcId": null,
+          "dlc": null,
+          "regionId": null,
+          "region": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "updateCatalogItem:hide",
+      "operationId": "updateCatalogItem",
+      "status": 200,
+      "request": {
+        "hidden": true
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "game": "ets2",
+          "code": "synthetic_city",
+          "nameEn": "Synthetic City",
+          "nameRu": null,
+          "hidden": true,
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000001",
+            "label": "Synthetic City",
+            "requestedLocale": "en",
+            "renderedLocale": "en",
+            "englishFallback": false,
+            "hidden": true
+          },
+          "dlcId": null,
+          "dlc": null,
+          "regionId": null,
+          "region": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "previewCatalogImport:with-errors",
+      "operationId": "previewCatalogImport",
+      "status": 200,
+      "request": {
+        "file": "synthetic-example.csv"
+      },
+      "response": {
+        "data": {
+          "fileSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "token": null,
+          "rows": 2,
+          "added": 0,
+          "changed": 1,
+          "unchanged": 0,
+          "errors": 1,
+          "lines": [
+            {
+              "line": 2,
+              "code": "synthetic_city",
+              "status": "changed",
+              "issues": [],
+              "changedFields": [
+                "name_en"
+              ]
+            },
+            {
+              "line": 3,
+              "code": "synthetic_bad",
+              "status": "error",
+              "issues": [
+                {
+                  "field": "region_code",
+                  "reason": "unknown_reference"
+                }
+              ],
+              "changedFields": []
+            }
+          ],
+          "truncated": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "applyCatalogImport:success",
+      "operationId": "applyCatalogImport",
+      "status": 200,
+      "request": {
+        "file": "synthetic-example.csv"
+      },
+      "response": {
+        "data": {
+          "importId": "41000000-0000-4000-8000-000000000001",
+          "rows": 2,
+          "added": 1,
+          "changed": 1,
+          "unchanged": 0
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
         }
       }
     }

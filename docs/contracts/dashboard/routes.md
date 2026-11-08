@@ -47,20 +47,13 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/invitations/{invitationId}` | `getInvitation` | `applications.manage` | VTC-015 |
 | `POST /api/v1/admin/invitations/{invitationId}/copy-link` | `copyInvitation` | `applications.manage` | VTC-015 |
 | `POST /api/v1/admin/invitations/{invitationId}/reissue` | `reissueInvitation` | `applications.manage` | VTC-015 |
-| `GET /api/v1/catalogs/revisions` | `listCatalogRevisions` | `company.read` | VTC-019 |
-| `GET /api/v1/catalogs/entities` | `listCatalogEntities` | `company.read` | VTC-019 |
-| `GET /api/v1/catalogs/entities/{entityId}` | `getCatalogEntity` | `company.read` | VTC-019 |
-| `GET /api/v1/admin/catalog-import-policy` | `getCatalogImportPolicy` | `qualifications.manage` | VTC-019 |
-| `POST /api/v1/admin/catalog-import-artifacts` | `uploadCatalogArtifact` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-import-artifacts/{artifactId}` | `getCatalogArtifact` | `qualifications.manage` | VTC-019 |
-| `POST /api/v1/admin/catalog-imports` | `importCatalog` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-revisions/{revisionId}` | `getCatalogRevision` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-revisions/{revisionId}/review` | `getCatalogReview` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-revisions/{revisionId}/diff` | `listCatalogChanges` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-revisions/{revisionId}/coverage` | `listCatalogCoverage` | `qualifications.manage` | VTC-019 |
-| `GET /api/v1/admin/catalog-revisions/{revisionId}/mapping-issues` | `listCatalogMappingIssues` | `qualifications.manage` | VTC-019 |
-| `POST /api/v1/admin/catalog-revisions/{revisionId}/publication` | `publishCatalog` | `qualifications.manage` | VTC-019 |
-| `POST /api/v1/admin/catalog-mappings` | `addCatalogMapping` | `qualifications.manage` | VTC-019 |
+| `GET /api/v1/catalogs/summary` | `getCatalogSummary` | `company.read` | VTC-084 |
+| `GET /api/v1/catalogs/{list}` | `listCatalogItems` | `company.read` | VTC-084 |
+| `GET /api/v1/catalogs/{list}/{id}` | `getCatalogItem` | `company.read` | VTC-084 |
+| `POST /api/v1/admin/catalogs/{list}` | `createCatalogItem` | `qualifications.manage` | VTC-084 |
+| `PATCH /api/v1/admin/catalogs/{list}/{id}` | `updateCatalogItem` | `qualifications.manage` | VTC-084 |
+| `POST /api/v1/admin/catalogs/{list}/import-previews` | `previewCatalogImport` | `qualifications.manage` | VTC-084 |
+| `POST /api/v1/admin/catalogs/{list}/imports` | `applyCatalogImport` | `qualifications.manage` | VTC-084 |
 | `GET /api/v1/me/telemetry-tokens` | `listTelemetryTokens` | `trips.submit_own` | VTC-023 |
 | `POST /api/v1/me/telemetry-tokens` | `issueTelemetryToken` | `trips.submit_own` | VTC-023 |
 | `DELETE /api/v1/me/telemetry-tokens/{tokenId}` | `revokeTelemetryToken` | `trips.submit_own` | VTC-023 |
@@ -148,7 +141,6 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `GET /api/v1/admin/audit` | `listAudit` | `members.manage` | VTC-038 |
 | `GET /api/v1/admin/members/{memberId}/qualification-action-history` | `listQualificationActionHistory` | `qualifications.manage` | VTC-031 |
 | `GET /api/v1/admin/qualification-levels/{levelId}/rule-versions` | `listQualificationRuleHistory` | `qualifications.manage` | VTC-031 |
-| `GET /api/v1/operations/{operationId}` | `getOperation` | `session` | VTC-021 |
 | `GET /api/v1/mail-deliveries/{deliveryId}` | `getMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `POST /api/v1/mail-deliveries/{deliveryId}/resends` | `resendMailDelivery` | `session` (owner or applications.manage) | VTC-014 |
 | `GET /api/v1/admin/source-capabilities` | `getSourceCapabilities` | `connections.manage` | VTC-038 |
