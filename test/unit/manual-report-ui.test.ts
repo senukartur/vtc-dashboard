@@ -87,7 +87,7 @@ describe("manual report requirements", () => {
     ] as const;
     const broken: Record<(typeof keys)[number], unknown> = {
       origin: unresolved(""),
-      destination: { status: "resolved", entityId: "x", catalogRevisionId: revisionId },
+      destination: { status: "resolved", entityId: "x" },
       cargo: undefined,
       trailerType: null,
       cargoMassKg: "-1",
