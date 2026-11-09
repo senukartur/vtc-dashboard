@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSignOut } from "../features/account/sign-out.js";
 import { publicPath } from "../features/landing/content.js";
+import { writeStoredLocale } from "../shared/i18n.js";
 import { NavIcon } from "./nav-icons.js";
 import { accountLinks, primaryRole } from "./navigation-model.js";
 import { useSession } from "./Session.js";
@@ -82,7 +83,11 @@ export function UserMenu({ placement }: { placement: "sidebar" | "topbar" }) {
             <DropdownMenu.Label className="user-menu-heading">{t("language")}</DropdownMenu.Label>
             <DropdownMenu.RadioGroup
               value={locale}
-              onValueChange={(value) => void i18n.changeLanguage(value)}
+              onValueChange={(value) => {
+                const next = value as "ru" | "en";
+                writeStoredLocale(next);
+                void i18n.changeLanguage(next);
+              }}
             >
               {(
                 [

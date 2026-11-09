@@ -448,6 +448,39 @@ test(
 );
 
 test(
+  "switching language in the user menu persists across sign-out and sign-in",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockWorkspace(page);
+    await page.goto("/account/dashboard");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+    await switchLanguage(page, "ru");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    state.logout = 200;
+    state.me = 401;
+    await signOutFromMenu(page);
+    await expect(
+      page.getByRole("heading", { name: "Войдите, чтобы открыть аккаунт" }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    await page.getByRole("main").getByRole("link", { name: "Войти", exact: true }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    state.me = 200;
+    await page.getByLabel("Электронная почта", { exact: true }).fill("member@example.invalid");
+    await page.getByLabel("Пароль", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Войти", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/account\/dashboard$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  },
+);
+
+test(
   "skip link, route focus and navigation dialog restoration still hold",
   browserCase(["@layout"]),
   async ({ page }) => {

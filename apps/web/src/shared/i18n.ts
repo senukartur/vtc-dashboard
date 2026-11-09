@@ -13,8 +13,42 @@ import { core } from "../i18n/core/resources.js";
 import { eventTranslations } from "../features/events/translations.js";
 import { notificationTranslations } from "../features/notifications/translations.js";
 
+export const localeStorageKey = "vtc.locale";
+
+export function readStoredLocale(): "ru" | "en" | null {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const value = window.localStorage.getItem(localeStorageKey);
+    return value === "ru" || value === "en" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredLocale(locale: "ru" | "en"): void {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(localeStorageKey, locale);
+    }
+  } catch {
+    // Storage can be restricted or unavailable (e.g. private mode, quota exceeded)
+  }
+}
+
+export function resolveInitialLocale(): "ru" | "en" {
+  if (typeof window === "undefined") return "ru";
+  if (window.location.pathname === "/en") return "en";
+  if (
+    window.location.pathname.startsWith("/account") ||
+    window.location.pathname.replace(/\/$/, "") === "/login"
+  ) {
+    return readStoredLocale() ?? "ru";
+  }
+  return "ru";
+}
+
 await i18next.use(initReactI18next).init({
-  lng: typeof window !== "undefined" && window.location.pathname === "/en" ? "en" : "ru",
+  lng: resolveInitialLocale(),
   fallbackLng: "en",
   supportedLngs: ["ru", "en"],
   defaultNS: "core",
