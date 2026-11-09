@@ -3,6 +3,7 @@ import { type ReactNode, type RefObject, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, XAxis } from "recharts";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import {
   chartGeometry,
   decimalShift,
@@ -413,6 +414,7 @@ function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
   return (
     <>
       {value?.label ?? t("trips.unknown")}
+      <CatalogNativeName value={value} />
       {value?.englishFallback && (
         <small className="driver-fallback"> · {t("trips.englishName")}</small>
       )}

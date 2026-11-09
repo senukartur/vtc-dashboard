@@ -10499,6 +10499,12 @@
           },
           "hidden": {
             "type": "boolean"
+          },
+          "nameNative": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "The city's name as the game map writes it. Present only on a city that has one and absent on every other label. Display only, never an identity key."
           }
         },
         "required": [
@@ -17803,6 +17809,19 @@
               }
             ]
           },
+          "nameNative": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The city's canonical name. Present only on the cities list."
+          },
           "hidden": {
             "type": "boolean"
           },
@@ -18205,6 +18224,17 @@
               }
             ]
           },
+          "nameNative": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "regionId": {
             "anyOf": [
               {
@@ -18380,6 +18410,17 @@
             "pattern": "\\S"
           },
           "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nameNative": {
             "anyOf": [
               {
                 "type": "string",

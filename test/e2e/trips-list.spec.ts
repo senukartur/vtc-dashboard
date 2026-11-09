@@ -748,3 +748,47 @@ test(
     await writeFile(info.outputPath("toolbar-budget.json"), JSON.stringify(results, null, 2));
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the canonical city name reads as secondary text in the list and panel (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockList(page);
+      const trip = {
+        ...summary(first),
+        origin: { ...label("Крёнбург"), nameNative: "Krönburg" },
+        destination: { ...label("Fictional Ridge"), nameNative: "fictional ridge" },
+        cargo: label("Fictional machinery"),
+      };
+      const both = {
+        ...summary(second),
+        origin: { ...label("Крёнбург"), nameNative: "Krönburg" },
+        destination: { ...label("Лёдерно"), nameNative: "Lüdernau" },
+      };
+      await page.route("**/api/v1/trips?*", (route) => route.fulfill({ json: list([trip, both]) }));
+      await page.goto("/account/trips");
+      await catalogLanguage(page, locale);
+      const link = rowLink(page, first);
+      await expect(link).toContainText("Крёнбург · Krönburg");
+      await expect(link).not.toContainText("fictional ridge");
+      await expect(link.locator(".catalog-native")).toHaveCSS("display", "inline");
+      // Both names of a route stay in one flowing line, which may wrap but never overflows.
+      const pair = rowLink(page, second);
+      await expect(pair).toContainText("Крёнбург · Krönburg → Лёдерно · Lüdernau");
+      await expect(pair.locator(".catalog-native")).toHaveCount(2);
+      for (const name of await pair.locator(".catalog-native").all())
+        await expect(name).toHaveCSS("display", "inline");
+      await noOverflow(page);
+      await capture(page, info, `trips-native-${locale}`);
+      if (info.project.name === "desktop-chromium") {
+        await page.route(`**/api/v1/trips/${first}`, (route) =>
+          route.fulfill({ json: envelope(trip), headers: { ETag: '"v1"' } }),
+        );
+        await link.click();
+        const opened = page.getByRole("region", { name: /^Крёнбург/ });
+        await expect(opened).toContainText("Крёнбург · Krönburg");
+        await expect(opened.locator(".catalog-native").first()).toHaveCSS("display", "inline");
+      }
+    },
+  );

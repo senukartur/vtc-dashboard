@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import {
   entities,
@@ -1216,3 +1216,55 @@ test(
     );
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `${locale} the canonical city name reads as secondary text in the queue and decision panel`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const mock = await mockReview(page, { locale });
+      const native = { nameNative: "Krönburg" };
+      const queued = mock.states.over.summary,
+        full = mock.states.over.review.trip.summary;
+      if (!queued.origin || !full.origin) throw new Error("FIXTURE_ORIGIN_MISSING");
+      queued.origin = { ...queued.origin, ...native };
+      full.origin = { ...full.origin, ...native };
+      const label = locale === "ru" ? "Вымышленный Северопортск" : "Fictional Northport";
+      await page.route(
+        (url) => url.pathname === `/api/v1/catalogs/cities/${entities.north}`,
+        (route) => {
+          const base = catalogItem(entities.north, label, locale);
+          return route.fulfill({
+            json: envelope({
+              ...base,
+              nameNative: "Krönburg",
+              display: { ...base.display, ...native },
+            }),
+          });
+        },
+      );
+      await page.goto("/account/review");
+      await catalogLanguage(page, locale);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(text[locale].title);
+      await expect(rowOf(page, reviewIds.over)).toContainText("· Krönburg");
+      await expect(rowOf(page, reviewIds.over).locator(".catalog-native")).toHaveCSS(
+        "display",
+        "inline",
+      );
+      await expect(rowOf(page, reviewIds.own)).not.toContainText("Krönburg");
+      await noOverflow(page);
+      await capture(page, info, `review-native-${locale}`);
+      await openTrip(page, info, reviewIds.over);
+      await settled(page);
+      const heading = panel(page).getByRole("heading", { level: 2 });
+      await expect(heading).toContainText("· Krönburg");
+      await expect(heading.locator(".catalog-native")).toHaveCSS("display", "inline");
+      const entity = panel(page)
+        .locator(".review-entity")
+        .filter({ hasText: "· Krönburg" })
+        .first();
+      await expect(entity).toContainText(`${label} · Krönburg`);
+      await expect(entity.locator(".catalog-native")).toHaveCSS("display", "inline");
+      await noOverflow(page);
+    },
+  );

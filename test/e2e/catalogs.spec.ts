@@ -360,7 +360,7 @@ test(
     let dialog = page.getByRole("dialog");
     await expect(dialog.getByText(c.fileNote, { exact: false })).toBeVisible();
     await expect(dialog.locator("code").first()).toHaveText(
-      "game, code, name_en, name_ru, region_code, dlc_code",
+      "game, code, name_en, name_ru, region_code, dlc_code, name_native",
     );
     const file = (body = "game,code\n") => ({
       name: "fixture-import.csv",
@@ -532,7 +532,11 @@ async function serveCities(page: Page, rows: ReturnType<typeof catalogItem>[]) {
       }
       reads.push(url);
       const search = url.searchParams.get("search")?.toLowerCase() ?? "",
-        matches = rows.filter((row) => row.display.label.toLowerCase().includes(search)),
+        matches = rows.filter(
+          (row) =>
+            row.display.label.toLowerCase().includes(search) ||
+            row.nameNative?.toLowerCase().includes(search),
+        ),
         cursor = Number(url.searchParams.get("cursor") ?? 0),
         next = cursor + 25;
       return route.fulfill({
@@ -963,3 +967,146 @@ test(
     await expect(origin).toHaveAttribute("aria-expanded", "false");
   },
 );
+
+const kronburgId = "63000000-0000-4000-8000-000000000041";
+/** A fictional city whose canonical name is not its displayed translation. */
+function kronburg(locale: "en" | "ru") {
+  const label = locale === "ru" ? "Крёнбург" : "Crownburg",
+    base = catalogItem(kronburgId, label, locale, {
+      code: "kronburg",
+      nameEn: "Crownburg",
+      nameRu: "Крёнбург",
+      nameNative: "Krönburg",
+    });
+  return {
+    ...base,
+    display: {
+      ...base.display,
+      renderedLocale: locale,
+      englishFallback: false,
+      nameNative: "Krönburg",
+    },
+  };
+}
+const kronburgLabel = (locale: "en" | "ru") => (locale === "ru" ? "Крёнбург" : "Crownburg");
+async function openRowForm(page: Page, locale: "en" | "ru", text: string, name: string) {
+  const c = catalogTranslations[locale];
+  if (phone(page)) {
+    await page
+      .getByRole("button", { name: c.actions.replace("{{name}}", name), exact: true })
+      .click();
+    await page.getByRole("dialog").getByRole("button", { name: c.edit, exact: true }).click();
+  } else await rowOf(page, text).getByRole("button", { name: c.edit, exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `${locale} staff add, edit and clear a canonical city name, shown in the list at every width`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      const writes: Record<string, unknown>[] = [];
+      await mockCatalogs(page, true, {
+        rows: {
+          ets2: {
+            ...defaultRows(locale),
+            cities: [
+              kronburg(locale),
+              catalogItem(entityId, "Fictional plain city", locale, { code: "plain_city" }),
+            ],
+          },
+        },
+        writes: ({ method, path, body }) => {
+          if (!path.startsWith("/admin/catalogs/cities")) return null;
+          writes.push(JSON.parse(String(body)));
+          return { status: method === "POST" ? 201 : 200, json: envelope(kronburg(locale)) };
+        },
+      });
+      await open(page, locale);
+      await expect(rowOf(page, "kronburg").getByText("Krönburg")).toBeVisible();
+      await expect(page.getByTestId(phone(page) ? "catalog-table" : "catalog-cards")).toBeHidden();
+      await capture(page, info, `native-${locale}-list`);
+
+      const form = page.getByRole("dialog"),
+        field = form.getByLabel(c.fieldNameNative, { exact: true }),
+        save = form.getByRole("button", { name: c.save, exact: true });
+      await openRowForm(page, locale, "kronburg", kronburgLabel(locale));
+      await expect(field).toHaveValue("Krönburg");
+      await expect(form.getByText(c.nameNativeHint, { exact: true })).toBeVisible();
+      await field.fill("  Krönburg-Mitte  ");
+      await capture(page, info, `native-${locale}-form`);
+      await save.click();
+      await expect(form).toHaveCount(0);
+      expect(writes.at(-1)).toMatchObject({ nameNative: "Krönburg-Mitte" });
+
+      await openRowForm(page, locale, "kronburg", kronburgLabel(locale));
+      await field.fill("   ");
+      await save.click();
+      await expect(form).toHaveCount(0);
+      expect(writes.at(-1)).toMatchObject({ nameNative: null });
+
+      await page.getByRole("button", { name: c.addCities, exact: true }).first().click();
+      await form.getByLabel(c.fieldCode, { exact: true }).fill("fixture_new");
+      await form.getByLabel(c.fieldNameEn, { exact: true }).fill("Fictional new");
+      await field.fill("Nöwburg");
+      await save.click();
+      await expect(form).toHaveCount(0);
+      expect(writes.at(-1)).toMatchObject({ code: "fixture_new", nameNative: "Nöwburg" });
+
+      await tab(page, c.tabCargoes).click();
+      await page.getByRole("button", { name: c.addCargoes, exact: true }).first().click();
+      await expect(form.getByLabel(c.fieldNameNative, { exact: true })).toHaveCount(0);
+    },
+  );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `${locale} the city autocomplete shows the canonical name without a fallback mark`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const [originLabel, , cargoLabel] = fieldLabels[locale];
+      await mockTrips(page);
+      await serveCities(page, [
+        kronburg(locale),
+        catalogItem(entityId, "Fictional plain city", locale, { code: "plain_city" }),
+      ]);
+      await openReport(page, locale);
+      const origin = page.getByRole("combobox", { name: originLabel, exact: true });
+      await origin.click();
+      const listbox = page.getByRole("listbox", { name: originLabel, exact: true }),
+        option = listbox.getByRole("option").filter({ hasText: "kronburg" }),
+        plain = listbox.getByRole("option").filter({ hasText: "plain_city" });
+      await expect(option.locator(".catalog-option-name")).toHaveText("Krönburg");
+      await expect(option.locator(".catalog-chip")).toHaveCount(0);
+      await expect(option.locator("code")).toHaveText("kronburg");
+      const [name, code] = await Promise.all([
+        option.locator(".catalog-option-name").boundingBox(),
+        option.locator("code").boundingBox(),
+      ]);
+      expect(code?.x ?? 0).toBeGreaterThan(name?.x ?? 0);
+      await expect(plain.locator(".catalog-chip")).toHaveCount(locale === "ru" ? 1 : 0);
+      await capture(page, info, `native-${locale}-options`);
+
+      await chooseCatalogRow(page, originLabel, "Krönburg");
+      await expect(origin).toHaveAttribute("title", "Krönburg");
+      await expect(
+        page
+          .locator(".manual-catalog-field")
+          .filter({ has: origin })
+          .locator(".catalog-adornments .catalog-chip"),
+      ).toHaveCount(0);
+      await capture(page, info, `native-${locale}-chosen`);
+
+      // Cargo has no canonical name: its label and fallback mark stay as they were.
+      const cargo = page.getByRole("combobox", { name: cargoLabel, exact: true });
+      await chooseCatalogRow(page, cargoLabel, "Fictional cargo");
+      await expect(cargo).toHaveValue("Fictional cargo");
+      await expect(
+        page
+          .locator(".manual-catalog-field")
+          .filter({ has: cargo })
+          .getByText("EN", { exact: true }),
+      ).toHaveCount(locale === "ru" ? 1 : 0);
+    },
+  );

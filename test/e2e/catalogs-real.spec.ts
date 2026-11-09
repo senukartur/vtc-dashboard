@@ -91,3 +91,45 @@ test(
     }
   },
 );
+
+test(
+  "a real city is found by canonical, English and Russian names and code, with or without accents",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(90000);
+    const c = catalogTranslations.en;
+    const unique = randomUUID().slice(0, 8),
+      code = `native_${unique}`;
+    const staff = await staffContext();
+    try {
+      await resetAccountLimits();
+      await context.addCookies((await staff.storageState()).cookies);
+      await page.goto("/account/catalogs?game=ats&tab=cities");
+      await catalogLanguage(page);
+      await page.getByRole("button", { name: c.addCities, exact: true }).first().click();
+      const form = page.getByRole("dialog");
+      await form.getByLabel(c.fieldCode, { exact: true }).fill(code);
+      await form.getByLabel(c.fieldNameEn, { exact: true }).fill(`Crownburg ${unique}`);
+      await form.getByLabel(c.fieldNameRu, { exact: true }).fill(`Крёнбург ${unique}`);
+      await form.getByLabel(c.fieldNameNative, { exact: true }).fill(`Krönburg ${unique}`);
+      await form.getByRole("button", { name: c.save, exact: true }).click();
+      await expect(form).toHaveCount(0);
+      for (const locale of ["en", "ru"] as const) {
+        await catalogLanguage(page, locale);
+        for (const term of [
+          `Krönburg ${unique}`,
+          `Kronburg ${unique}`,
+          `KRÖNBURG ${unique}`,
+          `Crownburg ${unique}`,
+          `Кренбург ${unique}`,
+          code,
+        ]) {
+          await page.goto(`/account/catalogs?game=ats&tab=cities&q=${encodeURIComponent(term)}`);
+          await expect(page.getByText(code, { exact: true }).first()).toBeVisible();
+        }
+      }
+    } finally {
+      await staff.dispose();
+    }
+  },
+);

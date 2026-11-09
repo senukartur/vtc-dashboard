@@ -1,4 +1,9 @@
-import { CATALOG_IMPORT_MAX_ROWS, type CatalogList, importColumns } from "./config.js";
+import {
+  CATALOG_IMPORT_MAX_ROWS,
+  type CatalogList,
+  importColumns,
+  optionalImportColumns,
+} from "./config.js";
 
 export interface ImportRow {
   line: number;
@@ -97,7 +102,11 @@ export function parseCsv(text: string): { line: number; cells: string[] }[] {
   return records;
 }
 
-function fromCsv(text: string, columns: readonly string[]): ImportRow[] {
+function fromCsv(
+  text: string,
+  columns: readonly string[],
+  optional: readonly string[],
+): ImportRow[] {
   const records = parseCsv(text);
   const header = records[0];
   if (!header) throw new CatalogFileError("empty");
@@ -105,7 +114,8 @@ function fromCsv(text: string, columns: readonly string[]): ImportRow[] {
   if (new Set(names).size !== names.length || names.some((n) => !columns.includes(n)))
     throw new CatalogFileError("unknown_column");
   for (const column of columns)
-    if (!names.includes(column)) throw new CatalogFileError("missing_column");
+    if (!names.includes(column) && !optional.includes(column))
+      throw new CatalogFileError("missing_column");
   return records.slice(1).map((record) => {
     const fileIssues: ImportRow["fileIssues"] = [];
     if (record.cells.length !== names.length)
@@ -149,7 +159,8 @@ export function readImportFile(list: CatalogList, bytes: Buffer): ImportRow[] {
   if (bytes.length === 0) throw new CatalogFileError("empty");
   const text = decode(bytes);
   const columns = importColumns[list];
-  const rows = /^\s*\[/.test(text) ? fromJson(text, columns) : fromCsv(text, columns);
+  const optional = optionalImportColumns[list] ?? [];
+  const rows = /^\s*\[/.test(text) ? fromJson(text, columns) : fromCsv(text, columns, optional);
   if (rows.length > CATALOG_IMPORT_MAX_ROWS) throw new CatalogFileError("too_many_rows");
   return rows;
 }

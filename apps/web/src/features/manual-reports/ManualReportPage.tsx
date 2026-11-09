@@ -2,6 +2,7 @@ import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { cityNameText } from "../../shared/catalog-selectors/native-name.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
@@ -415,8 +416,9 @@ function ManualEditor({
                       )
                       .map((trip) => (
                         <option key={trip.id} value={trip.id}>
-                          {trip.origin?.label ?? t("unknown")} →{" "}
-                          {trip.destination?.label ?? t("unknown")} · {trip.id} · v{trip.version}
+                          {cityNameText(trip.origin, t("unknown"))} →{" "}
+                          {cityNameText(trip.destination, t("unknown"))} · {trip.id} · v
+                          {trip.version}
                         </option>
                       ))}
                   </select>

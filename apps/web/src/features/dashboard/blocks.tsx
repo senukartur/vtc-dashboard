@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
 import { Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventFailureView, KeepFocusButton } from "../events/components.js";
@@ -108,7 +109,9 @@ export function RecentTripsWidget({
                 <div className="dashboard-trip-text">
                   <Link to={`/account/trips/${row.id}`} className="dashboard-trip-route">
                     <span>
-                      {row.origin} → {row.destination}
+                      {row.origin}
+                      <CatalogNativeName value={trip.origin} /> → {row.destination}
+                      <CatalogNativeName value={trip.destination} />
                       {row.fallback && (
                         <small className="dashboard-fallback"> · {t("catalogs:fallback")}</small>
                       )}

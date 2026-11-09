@@ -7,6 +7,7 @@ import {
   chooseCatalogRow,
   entityId,
   envelope,
+  list,
 } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { completeForm, evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
@@ -658,3 +659,37 @@ test(
     }
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `report target options show a differing canonical city name (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockTrips(page);
+      const trip = example("getTrip:success").data;
+      const label = (text: string, nameNative?: string) => ({
+        entityId,
+        label: text,
+        requestedLocale: locale,
+        renderedLocale: locale,
+        englishFallback: false,
+        hidden: false,
+        ...(nameNative ? { nameNative } : {}),
+      });
+      Object.assign(trip, {
+        decision: "pending_review",
+        sourceKinds: ["ets2telemetry"],
+        origin: label("Крёнбург", "Krönburg"),
+        destination: label("Krönburg", "Krönburg"),
+      });
+      await page.route("**/api/v1/trips?*", (route) => route.fulfill({ json: list([trip]) }));
+      await page.goto("/account/reports/new");
+      await catalogLanguage(page, locale);
+      const option = page.locator("#manual-target option").filter({ hasText: "Krönburg" });
+      await expect(option).toHaveCount(1);
+      await expect(option).toContainText("Крёнбург · Krönburg → Krönburg");
+      await expect(option).not.toContainText("Krönburg · Krönburg");
+      await noOverflow(page);
+      await capture(page, info, `report-native-${locale}`);
+    },
+  );

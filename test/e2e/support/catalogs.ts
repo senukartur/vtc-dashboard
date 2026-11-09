@@ -191,7 +191,8 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
           (includeHidden || !r.hidden) &&
           (!search ||
             r.code.toLowerCase().includes(search) ||
-            r.display.label.toLowerCase().includes(search)),
+            r.display.label.toLowerCase().includes(search) ||
+            r.nameNative?.toLowerCase().includes(search)),
       );
       return json(catalogList(visible));
     }

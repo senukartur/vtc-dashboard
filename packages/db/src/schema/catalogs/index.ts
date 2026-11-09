@@ -74,6 +74,8 @@ export const catalogCities = mysqlTable(
     code: code("code").notNull(),
     nameEn: name("name_en").notNull(),
     nameRu: name("name_ru"),
+    /** The city's name as the game map writes it; display only, never an identity key. */
+    nameNative: name("name_native"),
     regionId: idColumn("region_id"),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
@@ -85,6 +87,10 @@ export const catalogCities = mysqlTable(
     check(
       "catalog_city_name_ru_nonempty",
       sql`${t.nameRu} IS NULL OR char_length(${t.nameRu}) > 0`,
+    ),
+    check(
+      "catalog_city_name_native_nonempty",
+      sql`${t.nameNative} IS NULL OR char_length(${t.nameNative}) > 0`,
     ),
     foreignKey({
       name: "catalog_city_region_fk",

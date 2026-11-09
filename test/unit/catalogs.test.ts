@@ -14,7 +14,7 @@ import {
   readImportFile,
 } from "../../apps/api/src/modules/catalogs/import-file.ts";
 
-const header = importColumns.cities.join(",");
+const header = importColumns.cities.filter((column) => column !== "name_native").join(",");
 const csv = (...lines: string[]) => Buffer.from(lines.join("\r\n"));
 const reason = (fn: () => unknown) => {
   try {
@@ -97,6 +97,26 @@ test("an import file rejects invalid UTF-8, empty input and every wrong header s
   ).toMatchObject({ code: "a", game: "ats" });
   const short = readImportFile("cities", csv(header, "ets2,a"))[0];
   expect(short?.fileIssues).toEqual([{ field: "file", reason: "column_count" }]);
+});
+
+test("name_native is an optional city column read from a seventh cell", () => {
+  expect(reason(() => readImportFile("cities", csv(header, "ets2,a,n,,,")))).toBe("no error");
+  const rows = readImportFile(
+    "cities",
+    csv(`${header},name_native`, "ets2,kronburg,Crownburg,Крёнбург,,,Krönburg"),
+  );
+  expect(rows[0]?.values).toMatchObject({ name_en: "Crownburg", name_native: "Krönburg" });
+  expect(rows[0]?.fileIssues).toEqual([]);
+  // Only the city list knows the column; everywhere else it stays an unknown one.
+  expect(
+    reason(() => readImportFile("trailers", csv("game,code,name_en,name_ru,dlc_code,name_native"))),
+  ).toBe("unknown_column");
+  expect(
+    readImportFile(
+      "cargoes",
+      Buffer.from(JSON.stringify([{ game: "ets2", code: "a", name_en: "n", name_native: "x" }])),
+    )[0]?.fileIssues,
+  ).toEqual([{ field: "name_native", reason: "unknown_field" }]);
 });
 
 test("JSON rows read like CSV rows, with array positions as line numbers", () => {

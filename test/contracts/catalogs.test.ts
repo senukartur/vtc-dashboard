@@ -44,6 +44,33 @@ test("catalog items carry label fallback and reject the retired revision model",
   expect(validate("EffectiveCatalogPin")({ entityId: id, catalogRevisionId: id })).toBe(false);
 });
 
+test("the canonical city name is optional on labels and items and rejects a blank value", () => {
+  const validLabel = validate("CatalogLabel"),
+    validItem = validate("CatalogItem");
+  expect(validLabel({ ...label, nameNative: "Krönburg" })).toBe(true);
+  expect(validLabel(label)).toBe(true);
+  expect(validLabel({ ...label, nameNative: "" })).toBe(false);
+  expect(validLabel({ ...label, nameNative: "x".repeat(257) })).toBe(false);
+  expect(validLabel({ ...label, nameNative: null })).toBe(false);
+  expect(validItem({ ...item, nameNative: "Krönburg" })).toBe(true);
+  expect(validItem({ ...item, nameNative: null })).toBe(true);
+  expect(validItem(item)).toBe(true);
+  expect(validItem({ ...item, nameNative: "" })).toBe(false);
+  expect(validItem({ ...item, nameNative: "x".repeat(257) })).toBe(false);
+  expect(validItem({ ...item, display: { ...label, nameNative: "" } })).toBe(false);
+});
+
+test("the canonical name is a nullable write field for cities only", () => {
+  const base = { game: "ets2", code: "kronburg", nameEn: "Crownburg" };
+  expect(validate("CatalogCityInput")({ ...base, nameNative: "Krönburg" })).toBe(true);
+  expect(validate("CatalogCityInput")({ ...base, nameNative: null })).toBe(true);
+  expect(validate("CatalogCityInput")({ ...base, nameNative: "x".repeat(257) })).toBe(false);
+  expect(validate("CatalogCargoInput")({ ...base, nameNative: "Krönburg" })).toBe(false);
+  expect(validate("CatalogTrailerInput")({ ...base, nameNative: "Krönburg" })).toBe(false);
+  expect(validate("CatalogItemPatch")({ nameNative: null })).toBe(true);
+  expect(validate("CatalogItemPatch")({ nameNative: "Krönburg" })).toBe(true);
+});
+
 test("create inputs follow each list and treat code as bounded opaque text", () => {
   const base = { game: "ets2", code: "_x__x", nameEn: "Fictional" };
   expect(validate("CatalogDlcInput")({ ...base, steamAppId: 4294967295 })).toBe(true);

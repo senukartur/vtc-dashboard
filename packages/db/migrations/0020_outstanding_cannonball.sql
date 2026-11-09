@@ -1,0 +1,2 @@
+ALTER TABLE `catalog_cities` ADD `name_native` varchar(256);--> statement-breakpoint
+ALTER TABLE `catalog_cities` ADD CONSTRAINT `catalog_city_name_native_nonempty` CHECK (`catalog_cities`.`name_native` IS NULL OR char_length(`catalog_cities`.`name_native`) > 0);

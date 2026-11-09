@@ -1,5 +1,6 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
+  recentTrips,
   makeRecentTripsFixture,
   nextUpcomingEvent,
   overviewNow,
@@ -748,3 +749,26 @@ test(
     }
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the latest trips show a differing canonical city name (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await open(page, (state) => {
+        const trips = recentTrips(locale),
+          first = trips[0];
+        if (first?.origin) first.origin = { ...first.origin, nameNative: "Krönburg" };
+        if (first?.destination)
+          first.destination = { ...first.destination, nameNative: first.destination.label };
+        state.companyTrips = makeRecentTripsFixture(trips);
+      });
+      await inLocale(page, locale);
+      const link = tripLink(page, recentTrips(locale)[0]?.id ?? "");
+      await expect(link).toContainText("· Krönburg →");
+      await expect(link.locator("small")).toHaveCount(1);
+      await expect(link.locator(".catalog-native")).toHaveCSS("display", "inline");
+      await noOverflow(page);
+      await capture(page, info, `dashboard-native-${locale}`);
+    },
+  );

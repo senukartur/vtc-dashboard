@@ -446,6 +446,230 @@ test("a retry after the import token expires returns the stored summary", async 
   expect(await auditCount("catalog.imported")).toBe(1);
 });
 
+const nativeHeader = `${cityHeader},name_native`;
+const nativeRow = (code: string, native: string, name = "Crownburg") =>
+  `ets2,${code},${name},,,,${native}`;
+const native = (code: string) =>
+  unit.run(async (tx) => {
+    const [row] = await unit
+      .client(tx)
+      .select({ nameNative: catalogCities.nameNative })
+      .from(catalogCities)
+      .where(eq(catalogCities.code, Buffer.from(code)));
+    return row?.nameNative;
+  });
+const kronburg = () =>
+  catalogs.create(director, "cities", newId(), {
+    game: "ets2",
+    code: "kronburg",
+    nameEn: "Crownburg",
+    nameRu: "Крёнбург",
+    nameNative: "Krönburg",
+  });
+
+test("the migration adds a nullable accent-insensitive name_native column for cities only", async () => {
+  const [columns] = await control.query<RowDataPacket[]>(
+    "SELECT TABLE_NAME t, IS_NULLABLE n, COLLATION_NAME c, CHARACTER_MAXIMUM_LENGTH l FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND COLUMN_NAME='name_native'",
+  );
+  expect(columns.map((column) => ({ ...column, l: Number(column.l) }))).toEqual([
+    { t: "catalog_cities", n: "YES", c: "utf8mb4_0900_ai_ci", l: 256 },
+  ]);
+  await kronburg();
+  await expect(
+    control.query("UPDATE catalog_cities SET name_native='' WHERE code=?", [
+      Buffer.from("kronburg"),
+    ]),
+  ).rejects.toMatchObject({ code: "ER_CHECK_CONSTRAINT_VIOLATED" });
+});
+
+test("staff create, edit and clear the canonical name, and blanks store as no value", async () => {
+  const created = await kronburg();
+  expect(created).toMatchObject({ nameNative: "Krönburg" });
+  expect(created.display).toMatchObject({ label: "Crownburg", nameNative: "Krönburg" });
+  const trimmed = await catalogs.patch(director, "cities", created.id, newId(), {
+    nameNative: "  Krönburg-Mitte  ",
+  });
+  expect(trimmed.nameNative).toBe("Krönburg-Mitte");
+  expect(await native("kronburg")).toBe("Krönburg-Mitte");
+  const cleared = await catalogs.patch(director, "cities", created.id, newId(), {
+    nameNative: null,
+  });
+  expect(cleared.nameNative).toBeNull();
+  expect(cleared.display).not.toHaveProperty("nameNative");
+  await catalogs.patch(director, "cities", created.id, newId(), { nameNative: "Krönburg" });
+  const blank = await catalogs.patch(director, "cities", created.id, newId(), {
+    nameNative: " \t ",
+  });
+  expect(blank.nameNative).toBeNull();
+  expect(await native("kronburg")).toBeNull();
+  const none = await catalogs.create(director, "cities", newId(), {
+    game: "ets2",
+    code: "plain_city",
+    nameEn: "Plain city",
+    nameNative: "   ",
+  });
+  expect(none.nameNative).toBeNull();
+  expect(await native("plain_city")).toBeNull();
+});
+
+test("import sets the canonical name and an empty or blank cell keeps it, in CSV and JSON", async () => {
+  await kronburg();
+  const apply = async (file: Buffer) => {
+    const preview = await catalogs.previewImport(director, "cities", file);
+    await catalogs.applyImport(director, "cities", file, newId(), preview.token as string);
+    return preview;
+  };
+  const setCsv = await apply(csv(nativeHeader, nativeRow("kronburg", "Krönburg Neu")));
+  expect(setCsv).toMatchObject({ changed: 1, added: 0 });
+  expect(setCsv.lines[0]?.changedFields).toEqual(["name_native"]);
+  expect(await native("kronburg")).toBe("Krönburg Neu");
+
+  await apply(csv(nativeHeader, nativeRow("kronburg", "")));
+  await apply(csv(nativeHeader, nativeRow("kronburg", "   ")));
+  // A file without the column keeps it too.
+  await apply(csv(cityHeader, cityRow("kronburg", "Crownburg")));
+  expect(await native("kronburg")).toBe("Krönburg Neu");
+
+  const json = (value: string | null) =>
+    Buffer.from(
+      JSON.stringify([
+        { game: "ets2", code: "kronburg", name_en: "Crownburg", name_native: value },
+      ]),
+    );
+  await apply(json("Krönburg Stadt"));
+  expect(await native("kronburg")).toBe("Krönburg Stadt");
+  await apply(json(""));
+  await apply(json(null));
+  expect(await native("kronburg")).toBe("Krönburg Stadt");
+  const unchanged = await catalogs.previewImport(
+    director,
+    "cities",
+    csv(nativeHeader, nativeRow("kronburg", "  Krönburg Stadt  ")),
+  );
+  expect(unchanged).toMatchObject({ changed: 0, unchanged: 1 });
+
+  const added = await apply(csv(nativeHeader, nativeRow("new_city", "Nöwburg", "Newburg")));
+  expect(added).toMatchObject({ added: 1 });
+  expect(await native("new_city")).toBe("Nöwburg");
+  const noName = await apply(csv(nativeHeader, nativeRow("no_native", "", "Plainburg")));
+  expect(noName).toMatchObject({ added: 1 });
+  expect(await native("no_native")).toBeNull();
+
+  const tooLong = await catalogs.previewImport(
+    director,
+    "cities",
+    csv(nativeHeader, nativeRow("kronburg", "x".repeat(257))),
+  );
+  expect(tooLong.token).toBeNull();
+  expect(tooLong.lines).toEqual([
+    expect.objectContaining({ issues: [{ field: "name_native", reason: "too_long" }] }),
+  ]);
+});
+
+test("search finds a city by canonical, English and Russian names and code in both locales", async () => {
+  await kronburg();
+  // No name or code of this row contains the folded spelling, so only the collation can match.
+  await catalogs.create(director, "cities", newId(), {
+    game: "ets2",
+    code: "fixture_two",
+    nameEn: "Luderno",
+    nameRu: "Людерно",
+    nameNative: "Lüdernau",
+  });
+  await city("other_city");
+  const found = async (search: string, locale: "en" | "ru") =>
+    (await catalogs.list(director, "cities", { game: "ets2", search, locale })).items.map(
+      (item) => item.code,
+    );
+  for (const locale of ["en", "ru"] as const) {
+    for (const term of [
+      "Krönburg",
+      "kronburg",
+      "KRÖNBURG",
+      "krönburg",
+      "Kronburg",
+      "Crownburg",
+      "crown",
+      "Крёнбург",
+      "Кренбург",
+    ])
+      expect(await found(term, locale)).toEqual(["kronburg"]);
+    for (const term of ["Lüdernau", "ludernau", "LUDERNAU", "LÜDERNAU", "dernau"])
+      expect(await found(term, locale)).toEqual(["fixture_two"]);
+    expect(await found("fixture_two", locale)).toEqual(["fixture_two"]);
+    expect(await found("Fictional absent", locale)).toEqual([]);
+  }
+  // Wildcards stay literal in the new predicate as well.
+  expect(await found("Kr_nburg", "en")).toEqual([]);
+  expect(await found("Kr%burg", "en")).toEqual([]);
+});
+
+test("the canonical name stays on cities: other lists and labels are unchanged and ignore it", async () => {
+  const city = await kronburg();
+  const cargo = await catalogs.create(director, "cargoes", newId(), {
+    game: "ets2",
+    code: "fixture_cargo",
+    nameEn: "Fictional cargo",
+  });
+  const trailer = await catalogs.create(director, "trailers", newId(), {
+    game: "ets2",
+    code: "fixture_box",
+    nameEn: "Fictional box",
+  });
+  const region = await catalogs.create(director, "regions", newId(), {
+    game: "ets2",
+    code: "fixture_region",
+    nameEn: "Fictional region",
+  });
+  for (const row of [cargo, trailer, region]) {
+    expect(row).not.toHaveProperty("nameNative");
+    expect(row.display).not.toHaveProperty("nameNative");
+  }
+  expect(
+    (await catalogs.list(director, "regions", { game: "ets2", search: "Krönburg" })).total,
+  ).toBe(0);
+  await expect(
+    catalogs.patch(director, "cargoes", cargo.id, newId(), { nameNative: "X" }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  const labels = await unit.run((tx) =>
+    catalogs.labelsInTransaction(
+      tx,
+      [
+        { kind: "city", id: city.id },
+        { kind: "cargo", id: cargo.id },
+        { kind: "trailer", id: trailer.id },
+      ],
+      "ru",
+    ),
+  );
+  expect(labels.get(city.id)).toMatchObject({ label: "Крёнбург", nameNative: "Krönburg" });
+  expect(labels.get(cargo.id)).not.toHaveProperty("nameNative");
+  expect(labels.get(trailer.id)).not.toHaveProperty("nameNative");
+  const plain = await catalogs.create(director, "cities", newId(), {
+    game: "ets2",
+    code: "plain_city",
+    nameEn: "Plain city",
+  });
+  const plainLabels = await unit.run((tx) =>
+    catalogs.labelsInTransaction(tx, [{ kind: "city", id: plain.id }], "en"),
+  );
+  expect(plainLabels.get(plain.id)).not.toHaveProperty("nameNative");
+});
+
+test("telemetry resolution uses only game and code, never the canonical name", async () => {
+  const created = await kronburg();
+  await expect(
+    unit.run((tx) =>
+      catalogs.resolveInTransaction(tx, { game: "ets2", kind: "city", code: "Krönburg" }),
+    ),
+  ).resolves.toMatchObject({ status: "unknown", reasonCode: "unknown_source_id" });
+  await expect(
+    unit.run((tx) =>
+      catalogs.resolveInTransaction(tx, { game: "ets2", kind: "city", code: "kronburg" }),
+    ),
+  ).resolves.toMatchObject({ status: "resolved", id: created.id });
+});
+
 test("HTTP enforces read permission, staff writes, CSRF and import size", async () => {
   const app = await createApp({ identity, catalogs, checkReadiness: async () => true });
   try {

@@ -2495,6 +2495,7 @@ export interface components {
             /** @enum {string} */
             game: "ets2" | "ats";
             nameEn: string;
+            nameNative?: string | null;
             nameRu?: string | null;
             regionId?: string | null;
         };
@@ -2553,6 +2554,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             nameEn: string;
+            /** @description The city's canonical name. Present only on the cities list. */
+            nameNative?: string | null;
             nameRu: string | null;
             region?: components["schemas"]["CatalogLabel"] | null;
             regionId?: string | null;
@@ -2571,6 +2574,7 @@ export interface components {
             dlcId?: string | null;
             hidden?: boolean;
             nameEn?: string;
+            nameNative?: string | null;
             nameRu?: string | null;
             regionId?: string | null;
             steamAppId?: number | null;
@@ -2581,6 +2585,8 @@ export interface components {
             entityId: string;
             hidden: boolean;
             label: string;
+            /** @description The city's name as the game map writes it. Present only on a city that has one and absent on every other label. Display only, never an identity key. */
+            nameNative?: string;
             /** @enum {string} */
             renderedLocale: "en" | "ru";
             /** @enum {string} */

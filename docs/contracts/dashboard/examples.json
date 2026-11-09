@@ -5729,10 +5729,32 @@
               "dlc": null,
               "regionId": null,
               "region": null
+            },
+            {
+              "id": "41000000-0000-4000-8000-000000000002",
+              "game": "ets2",
+              "code": "synthetic_kronburg",
+              "nameEn": "Crownburg",
+              "nameRu": "Крёнбург",
+              "nameNative": "Krönburg",
+              "hidden": false,
+              "display": {
+                "entityId": "41000000-0000-4000-8000-000000000002",
+                "label": "Crownburg",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false,
+                "nameNative": "Krönburg"
+              },
+              "dlcId": null,
+              "dlc": null,
+              "regionId": null,
+              "region": null
             }
           ],
           "nextCursor": null,
-          "total": 1
+          "total": 2
         },
         "meta": {
           "requestId": "synthetic-request-001"
