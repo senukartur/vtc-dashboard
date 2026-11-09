@@ -37,6 +37,14 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"]) {
       return route.fulfill({ json: { data: eventFixture(), meta } });
     if (path === "/api/v1/me/email-change")
       return route.fulfill({ json: { data: { pending: null }, meta } });
+    if (path === "/api/v1/me/preferences") {
+      const body = route.request().postDataJSON() as { locale?: "ru" | "en" } | null;
+      if (body?.locale) self.data.preferences.locale = body.locale;
+      return route.fulfill({
+        json: { data: self.data.preferences, meta },
+        headers: { ETag: '"v2"' },
+      });
+    }
     if (path === "/api/v1/auth/logout")
       return route.fulfill(
         state.logout === 200 ? { json: { data: { id: fixtureId, version: 2 }, meta } } : error(503),
@@ -444,6 +452,33 @@ test(
       .click();
     await signIn();
     await expect(page).toHaveURL(/\/account\/trips\?scope=company$/);
+  },
+);
+
+test(
+  "switching language in the user menu persists across sign-out and sign-in",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockWorkspace(page);
+    await page.goto("/account/dashboard");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+    await switchLanguage(page, "ru");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    state.logout = 200;
+    state.me = 401;
+    await signOutFromMenu(page);
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    state.me = 200;
+    await page.getByLabel("Электронная почта", { exact: true }).fill("member@example.invalid");
+    await page.getByLabel("Пароль", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Войти", exact: true }).click();
+
+    await expect(page).toHaveURL(/\/account\/dashboard$/);
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   },
 );
 

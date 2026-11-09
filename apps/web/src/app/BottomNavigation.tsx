@@ -146,13 +146,12 @@ export function BottomNavigation({ onMobileNavigate }: { onMobileNavigate: Mobil
                   <p id={languageId} className="nav-group-title">
                     {t("language")}
                   </p>
-                  {/* Per-session switch; the saved preference stays on the Account page. */}
                   <SegmentedControl
                     aria-labelledby={languageId}
                     size="sm"
                     value={locale}
                     options={languages}
-                    onValueChange={(value) => void i18n.changeLanguage(value)}
+                    onValueChange={(value) => void session.updateLocale(value as "ru" | "en")}
                   />
                 </div>
                 <div className="more-links">

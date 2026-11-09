@@ -10,10 +10,16 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { AccountFailure, readSelf, type DTO } from "../features/account/transport.js";
+import {
+  AccountFailure,
+  attemptFor,
+  command,
+  readSelf,
+  type DTO,
+} from "../features/account/transport.js";
 import { Button, Card } from "../shared/ui/primitives.js";
 import { clearPrivateQueries } from "./session-cache.js";
-import i18n from "../shared/i18n.js";
+import i18n, { writeStoredLocale } from "../shared/i18n.js";
 
 type Session = {
   state: "checking" | "authenticated" | "anonymous" | "unavailable";
@@ -24,6 +30,7 @@ type Session = {
   confirmSessionLoss: (signal: AbortSignal) => Promise<void>;
   end: () => void;
   changed: () => void;
+  updateLocale: (locale: "ru" | "en") => Promise<void>;
 };
 const SessionContext = createContext<Session | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -108,8 +115,37 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const self = !ended && !query.isError ? (query.data?.data.data ?? null) : null;
   const preferredLocale = self?.preferences.locale;
   useEffect(() => {
-    if (preferredLocale) void i18n.changeLanguage(preferredLocale);
+    if (preferredLocale) {
+      writeStoredLocale(preferredLocale);
+      void i18n.changeLanguage(preferredLocale);
+    }
   }, [preferredLocale]);
+  const updateLocale = useCallback(
+    async (locale: "ru" | "en") => {
+      writeStoredLocale(locale);
+      void i18n.changeLanguage(locale);
+      const currentSelf = !ended && !query.isError ? (query.data?.data.data ?? null) : null;
+      const currentEtag = currentSelf ? (query.data?.etag ?? null) : null;
+      if (currentSelf && currentEtag && currentSelf.preferences.locale !== locale) {
+        try {
+          const attempt = attemptFor(
+            "preferences",
+            { locale, displayTimezone: currentSelf.preferences.displayTimezone },
+            currentEtag,
+            null,
+          );
+          const controller = new AbortController();
+          const timer = window.setTimeout(() => controller.abort(), 10000);
+          await command(attempt, controller.signal);
+          window.clearTimeout(timer);
+          await query.refetch({ cancelRefetch: false });
+        } catch {
+          // Failure to update backend preference leaves client state intact
+        }
+      }
+    },
+    [ended, query],
+  );
   const state =
     ended || unauthorized
       ? "anonymous"
@@ -152,6 +188,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           setEnded(false);
           clear();
         },
+        updateLocale,
       }}
     >
       {children}

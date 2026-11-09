@@ -82,7 +82,7 @@ export function UserMenu({ placement }: { placement: "sidebar" | "topbar" }) {
             <DropdownMenu.Label className="user-menu-heading">{t("language")}</DropdownMenu.Label>
             <DropdownMenu.RadioGroup
               value={locale}
-              onValueChange={(value) => void i18n.changeLanguage(value)}
+              onValueChange={(value) => void session.updateLocale(value as "ru" | "en")}
             >
               {(
                 [

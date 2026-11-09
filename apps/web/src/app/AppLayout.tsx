@@ -67,8 +67,8 @@ export function AppLayout({
       <select
         value={i18n.resolvedLanguage}
         onChange={(event) => {
-          const locale = event.target.value;
-          void i18n.changeLanguage(locale);
+          const locale = event.target.value as "ru" | "en";
+          void session.updateLocale(locale);
           if (["/", "/en"].includes(location.pathname))
             navigate(
               {

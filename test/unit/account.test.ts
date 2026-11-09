@@ -20,6 +20,12 @@ import {
   timezoneValid,
   visibleAccountSections,
 } from "../../apps/web/src/features/account/settings.ts";
+import {
+  localeStorageKey,
+  readStoredLocale,
+  writeStoredLocale,
+  resolveInitialLocale,
+} from "../../apps/web/src/shared/i18n.ts";
 import { accountTranslations } from "../../apps/web/src/features/account/translations.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 const meta = { requestId: "synthetic-request" };
@@ -361,4 +367,34 @@ test("display timezone validation and suggestions keep the existing technical bo
   expect(new Set(options).size).toBe(options.length);
   expect(options).toEqual([...options].sort());
   expect(timezoneOptions("").includes("")).toBe(false);
+});
+test("language preference persistence in client storage and initial resolution", () => {
+  const store = new Map<string, string>();
+  vi.stubGlobal("window", {
+    localStorage: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    },
+    location: { pathname: "/login" },
+  });
+  expect(localeStorageKey).toBe("vtc.locale");
+  expect(readStoredLocale()).toBe(null);
+  expect(resolveInitialLocale()).toBe("ru");
+
+  writeStoredLocale("en");
+  expect(readStoredLocale()).toBe("en");
+  expect(resolveInitialLocale()).toBe("en");
+
+  writeStoredLocale("ru");
+  expect(readStoredLocale()).toBe("ru");
+  expect(resolveInitialLocale()).toBe("ru");
+
+  // Pathname /en takes precedence on landing
+  window.location.pathname = "/en";
+  expect(resolveInitialLocale()).toBe("en");
+
+  // Pathname / defaults to ru on landing
+  window.location.pathname = "/";
+  expect(resolveInitialLocale()).toBe("ru");
 });

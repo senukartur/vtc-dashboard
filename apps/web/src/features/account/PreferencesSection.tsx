@@ -158,7 +158,7 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
                 if (locale === saved.locale) {
                   // Choosing the saved language only applies it to this interface.
                   setStatus(null);
-                  void i18n.changeLanguage(locale);
+                  void session.updateLocale(locale);
                 } else void save("language", { locale, displayTimezone: saved.displayTimezone });
               }}
             />
