@@ -397,4 +397,14 @@ test("language preference persistence in client storage and initial resolution",
   // Pathname / defaults to ru on landing
   window.location.pathname = "/";
   expect(resolveInitialLocale()).toBe("ru");
+
+  // Account workspace routes resolve from stored locale
+  window.location.pathname = "/account/dashboard";
+  expect(resolveInitialLocale()).toBe("ru");
+  writeStoredLocale("en");
+  expect(resolveInitialLocale()).toBe("en");
+
+  // Public status route defaults to ru regardless of stored locale
+  window.location.pathname = "/status";
+  expect(resolveInitialLocale()).toBe("ru");
 });

@@ -38,8 +38,13 @@ export function writeStoredLocale(locale: "ru" | "en"): void {
 export function resolveInitialLocale(): "ru" | "en" {
   if (typeof window === "undefined") return "ru";
   if (window.location.pathname === "/en") return "en";
-  if (window.location.pathname === "/") return "ru";
-  return readStoredLocale() ?? "ru";
+  if (
+    window.location.pathname.startsWith("/account") ||
+    window.location.pathname.replace(/\/$/, "") === "/login"
+  ) {
+    return readStoredLocale() ?? "ru";
+  }
+  return "ru";
 }
 
 await i18next.use(initReactI18next).init({
@@ -78,12 +83,6 @@ await i18next.use(initReactI18next).init({
       drivers: driverTranslations.ru,
     },
   },
-});
-
-i18next.on("languageChanged", (lng) => {
-  if (lng === "ru" || lng === "en") {
-    writeStoredLocale(lng);
-  }
 });
 
 export default i18next;

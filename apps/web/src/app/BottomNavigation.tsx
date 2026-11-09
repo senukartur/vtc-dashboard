@@ -12,6 +12,7 @@ import {
   DialogTrigger,
 } from "../shared/ui/dialog.js";
 import { SegmentedControl } from "../shared/ui/segmented-control.js";
+import { writeStoredLocale } from "../shared/i18n.js";
 import { MemberNavLinks } from "./MemberNavigation.js";
 import { isPlainSelfClick, type MobileNavigate } from "./Navigation.js";
 import { NavIcon } from "./nav-icons.js";
@@ -151,7 +152,11 @@ export function BottomNavigation({ onMobileNavigate }: { onMobileNavigate: Mobil
                     size="sm"
                     value={locale}
                     options={languages}
-                    onValueChange={(value) => void session.updateLocale(value as "ru" | "en")}
+                    onValueChange={(value) => {
+                      const next = value as "ru" | "en";
+                      writeStoredLocale(next);
+                      void i18n.changeLanguage(next);
+                    }}
                   />
                 </div>
                 <div className="more-links">

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { Button, FieldError, Input } from "../../shared/ui/primitives.js";
+import { writeStoredLocale } from "../../shared/i18n.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { timezoneOptions, timezoneValid } from "./settings.js";
@@ -131,7 +132,10 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
       setReview(false);
       await session.refresh();
       // A timezone save leaves a session-only interface language alone.
-      if (row === "language") await i18n.changeLanguage(preferences.locale);
+      if (row === "language") {
+        writeStoredLocale(preferences.locale);
+        await i18n.changeLanguage(preferences.locale);
+      }
       setStatus({ row, state: "saved" });
     } else {
       setStatus(null);
@@ -158,7 +162,8 @@ export function PreferencesSection({ self, etag }: { self: DTO["Self"]; etag: st
                 if (locale === saved.locale) {
                   // Choosing the saved language only applies it to this interface.
                   setStatus(null);
-                  void session.updateLocale(locale);
+                  writeStoredLocale(locale);
+                  void i18n.changeLanguage(locale);
                 } else void save("language", { locale, displayTimezone: saved.displayTimezone });
               }}
             />

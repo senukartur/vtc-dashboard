@@ -37,14 +37,6 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"]) {
       return route.fulfill({ json: { data: eventFixture(), meta } });
     if (path === "/api/v1/me/email-change")
       return route.fulfill({ json: { data: { pending: null }, meta } });
-    if (path === "/api/v1/me/preferences") {
-      const body = route.request().postDataJSON() as { locale?: "ru" | "en" } | null;
-      if (body?.locale) self.data.preferences.locale = body.locale;
-      return route.fulfill({
-        json: { data: self.data.preferences, meta },
-        headers: { ETag: '"v2"' },
-      });
-    }
     if (path === "/api/v1/auth/logout")
       return route.fulfill(
         state.logout === 200 ? { json: { data: { id: fixtureId, version: 2 }, meta } } : error(503),
@@ -469,6 +461,12 @@ test(
     state.logout = 200;
     state.me = 401;
     await signOutFromMenu(page);
+    await expect(
+      page.getByRole("heading", { name: "Войдите, чтобы открыть аккаунт" }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    await page.getByRole("link", { name: "Войти", exact: true }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
 
