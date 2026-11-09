@@ -1163,10 +1163,15 @@ const sectionNames = {
 const sectionPaths = ["profile", "security", "connections", "preferences"] as const;
 async function settingsWorkspace(
   page: Page,
-  options: { verified?: boolean; capabilities?: string[]; telemetry?: boolean } = {},
+  options: {
+    verified?: boolean;
+    capabilities?: string[];
+    telemetry?: boolean;
+    locale?: "en" | "ru";
+  } = {},
 ) {
   await mocks(page);
-  const self = accountFixture();
+  const self = accountFixture(options.locale ?? "en");
   self.data.emailVerified = options.verified ?? false;
   if (options.capabilities) self.data.capabilities = options.capabilities;
   const state = {

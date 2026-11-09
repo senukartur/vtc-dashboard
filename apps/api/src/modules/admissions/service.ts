@@ -430,7 +430,7 @@ export function createAdmissions(
       });
       if (!allowed) throw identityError(429);
     },
-    async submit(scope: string, key: string, raw: ApplicationInput, locale: "en" | "ru" = "en") {
+    async submit(scope: string, key: string, raw: ApplicationInput, locale: "en" | "ru" = "ru") {
       const input = validateApplication(raw);
       if (!["en", "ru"].includes(locale)) throw identityError(422);
       return run(async (tx) => {

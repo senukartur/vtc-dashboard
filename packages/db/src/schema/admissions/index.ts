@@ -30,7 +30,7 @@ export const applications = mysqlTable(
       .default("submitted"),
     submittedAt: utcColumn("submitted_at").notNull(),
     nickname: varchar("nickname", { length: 128 }).notNull(),
-    locale: mysqlEnum("locale", ["en", "ru"]).notNull().default("en"),
+    locale: mysqlEnum("locale", ["en", "ru"]).notNull().default("ru"),
     email: email("email").notNull(),
     emailKey: email("email_key").notNull(),
     openEmail: email("open_email"),

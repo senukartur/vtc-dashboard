@@ -135,7 +135,7 @@ export async function registerAdmissionsRoutes(
               await publicScope(request),
               key(request),
               request.body,
-              /^ru(?:\b|-)/i.test(request.headers["accept-language"] ?? "") ? "ru" : "en",
+              /^en(?:\b|-)/i.test(request.headers["accept-language"] ?? "") ? "en" : "ru",
             ),
             request,
           ),
