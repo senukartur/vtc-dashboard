@@ -18,10 +18,12 @@ test(
   async ({ page }, info) => {
     await mockTrips(page);
     let calls = 0;
-    const keys: string[] = [];
+    const keys: string[] = [],
+      bodies: { fields: Record<string, unknown> }[] = [];
     await page.route("**/api/v1/manual-reports", async (route) => {
       calls++;
       keys.push(route.request().headers()["idempotency-key"] as string);
+      bodies.push(route.request().postDataJSON());
       if (calls <= 2) return route.abort("failed");
       return route.fulfill({ status: 201, json: example("submitManualReport:success") });
     });
@@ -56,6 +58,13 @@ test(
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect.poll(() => calls).toBe(2);
     expect(keys[0]).toBe(keys[1]);
+    // The language round trip changed labels only: the payload still carries canonical IDs.
+    expect(bodies[0]?.fields).toMatchObject({
+      origin: { status: "resolved", entityId },
+      destination: { status: "resolved", entityId },
+      cargo: { status: "resolved", entityId: cargoId },
+      trailerType: { status: "resolved", entityId: trailerId },
+    });
     await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByLabel("Comment (optional)", { exact: true }).fill("Changed synthetic report");
     await page.getByRole("button", { name: "Submit for review", exact: true }).click();

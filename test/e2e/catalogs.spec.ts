@@ -657,6 +657,21 @@ for (const locale of ["en", "ru"] as const)
       expect(clearBox?.height ?? 0).toBeGreaterThanOrEqual(min);
       expect(clearBox?.width ?? 0).toBeGreaterThanOrEqual(min);
       await capture(page, info, `combobox-${locale}-chosen`);
+      if (locale === "ru") {
+        const chip = page
+          .locator(".manual-catalog-field")
+          .filter({
+            has: page.getByRole("combobox", { name: fieldLabels[locale][0], exact: true }),
+          })
+          .getByText("EN", { exact: true });
+        await expect(chip).toHaveAttribute("title", c.fallback);
+        // Hovering proves the chip takes the pointer; clicking it still opens the input.
+        await chip.hover();
+        await chip.click();
+        await expect(origin).toBeFocused();
+        await expect(origin).toHaveAttribute("aria-expanded", "true");
+        await origin.press("Escape");
+      }
     },
   );
 
@@ -698,6 +713,13 @@ test(
     await origin.press("Enter");
     await expect(origin).toHaveValue("Fictional row 30");
     await expect(origin).toHaveAttribute("aria-expanded", "false");
+
+    // The same row also pages with the mouse and keeps its place in the list.
+    await origin.click();
+    await list.getByRole("option", { name: "Load more", exact: true }).click();
+    await expect(list.getByRole("option", { name: /^Fictional row 26/ })).toBeVisible();
+    await expect(activeOption(page)).toContainText("Fictional row 26");
+    expect(params().at(-1)).toEqual({ search: undefined, cursor: "25" });
   },
 );
 
@@ -725,6 +747,7 @@ test(
     await page.keyboard.press("ArrowDown");
     await expect(origin).toHaveAttribute("aria-expanded", "true");
     await expect(activeOption(page)).toContainText("Fictional row 01");
+    await expect(activeOption(page)).toHaveCSS("outline-style", "solid");
     await expect(origin).toHaveAttribute(
       "aria-activedescendant",
       (await activeOption(page).getAttribute("id")) ?? "",
@@ -763,13 +786,26 @@ test(
     await expect(origin).toHaveValue("Fictional row 02");
     await expect(origin).toHaveAttribute("aria-expanded", "false");
     expect(submissions).toBe(0);
+
+    // On a settled empty search the not-listed row is active, so Enter chooses it.
+    await origin.fill("no such row");
+    await expect(activeOption(page)).toHaveAccessibleName(extra);
+    await page.keyboard.press("Enter");
+    await expect(origin).toHaveValue("Not listed / unresolved");
+    await expect(
+      page
+        .getByRole("group", { name: "Origin city", exact: true })
+        .getByLabel("Diagnostic label", { exact: true }),
+    ).toHaveValue("no such row");
+    expect(submissions).toBe(0);
   },
 );
 
 test(
   "a stale row cannot be chosen during the debounce",
   browserCase(["@functional"]),
-  async ({ page }) => {
+  async ({ page }, info) => {
+    await page.clock.install();
     await mockTrips(page);
     await serveCities(page, fictionalRows(2));
     await openReport(page);
@@ -778,27 +814,43 @@ test(
     await origin.click();
     await expect(list.getByRole("option", { name: /Fictional row 01/ })).toBeVisible();
 
-    // Hold the searched read so the unsettled window cannot end during the assertions.
-    let release = () => {};
+    // Hold the searched read too, so the loading window that follows is also deterministic.
+    let release = () => {},
+      searched = false;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     await page.route(
       (url) => url.pathname === "/api/v1/catalogs/cities" && url.searchParams.has("search"),
       async (route) => {
+        searched = true;
         await gate;
         return route.fallback();
       },
     );
+    const noRowCanBeChosen = async () => {
+      await expect(list.getByRole("option", { name: /Fictional row/ })).toHaveCount(0);
+      await expect(page.getByRole("status")).toHaveText("Loading catalog…");
+      // The not-listed row stays reachable while searching, but no row is active for Enter.
+      await expect(list.getByRole("option", { name: /^Not listed/ })).toBeVisible();
+      await expect(activeOption(page)).toHaveCount(0);
+      await origin.press("Enter");
+      await expect(origin).toHaveValue("row 02");
+      await expect(origin).toHaveAttribute("aria-expanded", "true");
+    };
+
+    // Frozen timers hold the debounce open: the previous rows are gone and no read has started.
+    await page.clock.pauseAt(Date.now() + 1000);
     await origin.fill("row 02");
-    await expect(list.getByRole("option", { name: /Fictional row/ })).toHaveCount(0);
-    await expect(page.getByRole("status")).toHaveText("Loading catalog…");
-    // The not-listed row stays reachable while searching, but no row is active for Enter.
-    await expect(list.getByRole("option", { name: /^Not listed/ })).toBeVisible();
-    await expect(activeOption(page)).toHaveCount(0);
-    await origin.press("Enter");
-    await expect(origin).toHaveValue("row 02");
-    await expect(origin).toHaveAttribute("aria-expanded", "true");
+    await noRowCanBeChosen();
+    expect(searched).toBe(false);
+
+    // Past the debounce the search is sent, and rows stay unavailable until it answers.
+    await page.clock.runFor(250);
+    await page.clock.resume();
+    await expect.poll(() => searched).toBe(true);
+    await noRowCanBeChosen();
+    await capture(page, info, "combobox-loading");
     release();
     await expect(list.getByRole("option", { name: /Fictional row 02/ })).toBeVisible();
     await origin.press("Enter");
@@ -818,6 +870,16 @@ test(
     await chooseCatalogRow(page, "Origin city", "Fictional row 01");
     await expect(clear).toBeVisible();
     await clear.click();
+    await expect(origin).toHaveValue("");
+    await expect(origin).toBeFocused();
+    await expect(clear).toHaveCount(0);
+
+    // The same action from the keyboard: Tab lands on Clear and Enter activates it.
+    await chooseCatalogRow(page, "Origin city", "Fictional row 02");
+    await origin.focus();
+    await page.keyboard.press("Tab");
+    await expect(clear).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(origin).toHaveValue("");
     await expect(origin).toBeFocused();
     await expect(clear).toHaveCount(0);

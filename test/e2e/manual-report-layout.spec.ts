@@ -397,7 +397,7 @@ for (const status of [404, 503] as const)
 
 test(
   "R7 a list read failure offers Refresh; a game with no rows shows a note",
-  browserCase(["@functional"]),
+  browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockTrips(page);
     let failing = true,
@@ -439,12 +439,13 @@ test(
     ).toBeVisible();
     await expect(field.getByRole("alert")).toHaveCount(0);
     await expect(listbox.getByRole("option", { name: /^Not listed/ })).toBeVisible();
+    await capture(page, info, "manual-report-catalog-empty");
   },
 );
 
 test(
   "R7 choosing Not listed reveals prefilled fields and a catalog row or clear removes them",
-  browserCase(["@functional"]),
+  browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockTrips(page);
     await page.goto("/account/reports/new");
@@ -472,6 +473,34 @@ test(
     await notListed.click();
     await expect(label).toHaveValue("Fictional corrected label");
 
+    // Opening selects the displayed text, so the next keystroke replaces it.
+    await cargo.click();
+    await expect
+      .poll(() =>
+        cargo.evaluate((element) => {
+          const input = element as HTMLInputElement;
+          return [input.selectionStart, input.selectionEnd];
+        }),
+      )
+      .toEqual([0, "Not listed / unresolved".length]);
+    await cargo.press("Escape");
+
+    // Text appended to the displayed row label is not typed text and never reaches the label.
+    await page.route(
+      (url) =>
+        url.pathname === "/api/v1/catalogs/cargoes" &&
+        !!url.searchParams.get("search")?.startsWith("Not listed"),
+      (route) => route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
+    );
+    await cargo.press("End");
+    await page.keyboard.type("x");
+    await expect(listbox.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName(
+      /^Not listed/,
+    );
+    await page.keyboard.press("Enter");
+    await expect(cargo).toHaveValue("Not listed / unresolved");
+    await expect(label).toHaveValue("Fictional corrected label");
+
     await chooseCatalogRow(page, "Cargo", "Fictional cargo");
     await expect(group).toHaveCount(0);
 
@@ -486,7 +515,7 @@ test(
 
 test(
   "R7 a hidden saved selection stays visible with its mark and note",
-  browserCase(["@functional"]),
+  browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockTrips(page);
     const draft = example("getMyManualDraft:success").data;
