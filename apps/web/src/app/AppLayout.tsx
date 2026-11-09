@@ -7,6 +7,7 @@ import { BottomNavigation } from "./BottomNavigation.js";
 import { type MobileNavigate, Navigation } from "./Navigation.js";
 import { Breadcrumb, MemberSidebar } from "./MemberNavigation.js";
 import { sidebarStorageKey } from "./navigation-model.js";
+import { writeStoredLocale } from "../shared/i18n.js";
 import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
 import { NearestEvent } from "../features/events/components.js";
@@ -67,7 +68,13 @@ export function AppLayout({
       <select
         value={i18n.resolvedLanguage}
         onChange={(event) => {
-          const locale = event.target.value;
+          const locale = event.target.value as "ru" | "en";
+          if (
+            location.pathname.startsWith("/account") ||
+            location.pathname.replace(/\/$/, "") === "/login"
+          ) {
+            writeStoredLocale(locale);
+          }
           void i18n.changeLanguage(locale);
           if (["/", "/en"].includes(location.pathname))
             navigate(
