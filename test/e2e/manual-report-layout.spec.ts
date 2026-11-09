@@ -1,7 +1,13 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
-import { catalogLanguage, envelope } from "./support/catalogs.ts";
+import {
+  catalogItem,
+  catalogLanguage,
+  chooseCatalogRow,
+  entityId,
+  envelope,
+} from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { completeForm, evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
@@ -75,8 +81,7 @@ async function brokenWords(root: Locator) {
     const broken: string[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-      if (node.parentElement?.closest(".trip-evidence small, .catalog-selection small, dd, option"))
-        continue;
+      if (node.parentElement?.closest(".trip-evidence small, dd")) continue;
       // A hyphen is a normal break opportunity ("staff-confirmed"); letters around it are not.
       for (const match of (node.textContent ?? "").matchAll(/[^\s-]+/g)) {
         const range = document.createRange();
@@ -114,7 +119,7 @@ for (const locale of ["en", "ru"] as const)
       await expect(aside.getByRole("heading", { level: 2 })).toHaveText(s.next);
       await expect(aside.getByRole("listitem")).toHaveCount(4);
       const [origin, destination, cargo] = await Promise.all(
-        s.groups.slice(0, 3).map((name) => box(page.getByRole("group", { name, exact: true }))),
+        s.groups.slice(0, 3).map((name) => box(page.getByRole("combobox", { name, exact: true }))),
       );
       const formBox = await box(form),
         asideBox = await box(aside),
@@ -161,8 +166,12 @@ test(
     }
     expect(width).toBeGreaterThanOrEqual(520);
     expect(width).toBeLessThanOrEqual(540);
-    const origin = await box(page.getByRole("group", { name: "Город отправления", exact: true })),
-      destination = await box(page.getByRole("group", { name: "Город назначения", exact: true }));
+    const origin = await box(
+        page.getByRole("combobox", { name: "Город отправления", exact: true }),
+      ),
+      destination = await box(
+        page.getByRole("combobox", { name: "Город назначения", exact: true }),
+      );
     expect(Math.abs(destination.y - origin.y)).toBeLessThanOrEqual(1);
     expect(await brokenWords(page.locator(".manual-report"))).toEqual([]);
     await capture(page, info, "manual-report-ru-narrow-two-column");
@@ -179,10 +188,10 @@ test(
     await settled(page);
     const expected = [
       "manual-game",
-      "group:Origin city",
-      "group:Destination city",
-      "group:Cargo",
-      "group:Trailer type",
+      "field:Origin city",
+      "field:Destination city",
+      "field:Cargo",
+      "field:Trailer type",
       "cargoMassKg",
       "actualDistanceM",
       "report-event",
@@ -204,7 +213,9 @@ test(
           (element) =>
             element instanceof HTMLFieldSetElement
               ? `group:${element.querySelector(":scope > legend")?.textContent ?? ""}`
-              : element.id || (element.textContent ?? "").trim(),
+              : element instanceof HTMLInputElement && element.getAttribute("role") === "combobox"
+                ? `field:${element.labels?.[0]?.textContent ?? ""}`
+                : element.id || (element.textContent ?? "").trim(),
         ),
       );
     expect(order.filter((key) => expected.includes(key))).toEqual(expected);
@@ -314,6 +325,14 @@ test(
     }
     for (const row of await root.locator(".trip-check").all())
       expect((await box(row)).height).toBeGreaterThanOrEqual(coarse ? 40 : 30);
+    // Open list rows use the same pointer-appropriate target.
+    await page.getByRole("combobox", { name: "Origin city", exact: true }).click();
+    const options = page
+      .getByRole("listbox", { name: "Origin city", exact: true })
+      .getByRole("option");
+    await expect(options.last()).toBeVisible();
+    for (const option of await options.all())
+      expect((await box(option)).height).toBeGreaterThanOrEqual(coarse ? 40 : 30);
   },
 );
 
@@ -378,7 +397,7 @@ for (const status of [404, 503] as const)
 
 test(
   "R7 a list read failure offers Refresh; a game with no rows shows a note",
-  browserCase(["@functional"]),
+  browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockTrips(page);
     let failing = true,
@@ -394,20 +413,174 @@ test(
     );
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const origin = page.getByRole("group", { name: "Origin city", exact: true });
-    await expect(origin.getByRole("alert")).toContainText("could not be read");
+    const origin = page.getByRole("combobox", { name: "Origin city", exact: true }),
+      field = page.locator(".manual-catalog-field").filter({ has: origin }),
+      listbox = page.getByRole("listbox", { name: "Origin city", exact: true });
+    // No list read happens until the field is opened.
+    expect(reads).toBe(0);
+    await origin.click();
+    await expect(field.getByRole("alert")).toContainText("could not be read");
     await capture(page, info, "manual-report-catalog-error");
+    await expect(listbox.getByRole("option", { name: "Refresh", exact: true })).toBeVisible();
     const before = reads;
     failing = false;
-    await origin.getByRole("button", { name: "Refresh", exact: true }).click();
+    await listbox.getByRole("option", { name: "Refresh", exact: true }).click();
     await expect.poll(() => reads).toBeGreaterThan(before);
-    await expect(origin.getByRole("alert")).toHaveCount(0);
+    await expect(field.getByRole("alert")).toHaveCount(0);
+    await expect(listbox.getByRole("option", { name: /^Fictional city/ })).toBeVisible();
     await page.route("**/api/v1/catalogs/cities?*", (route) =>
       route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
     );
+    await origin.press("Escape");
     await page.locator("#manual-game").selectOption("ats");
-    await expect(origin.getByText("No rows match these filters.", { exact: true })).toBeVisible();
-    await expect(origin.getByRole("alert")).toHaveCount(0);
+    await origin.click();
+    await expect(
+      field.getByRole("paragraph").filter({ hasText: "No rows match these filters." }),
+    ).toBeVisible();
+    await expect(field.getByRole("alert")).toHaveCount(0);
+    await expect(listbox.getByRole("option", { name: /^Not listed/ })).toBeVisible();
+    await capture(page, info, "manual-report-catalog-empty");
+  },
+);
+
+test(
+  "R7 choosing Not listed reveals prefilled fields and a catalog row or clear removes them",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    await mockTrips(page);
+    await page.goto("/account/reports/new");
+    await catalogLanguage(page);
+    await settled(page);
+    const cargo = page.getByRole("combobox", { name: "Cargo", exact: true }),
+      listbox = page.getByRole("listbox", { name: "Cargo", exact: true }),
+      group = page.getByRole("group", { name: "Cargo", exact: true }),
+      label = group.getByLabel("Diagnostic label", { exact: true }),
+      notListed = listbox.getByRole("option", { name: /^Not listed/ });
+    await expect(group).toHaveCount(0);
+
+    await cargo.fill("Fictional unknown cargo");
+    await notListed.click();
+    await expect(cargo).toHaveValue("Not listed / unresolved");
+    await expect(cargo).toHaveAttribute("aria-expanded", "false");
+    await expect(label).toHaveValue("Fictional unknown cargo");
+    await expect(group.getByLabel("Mapping reason", { exact: true })).toHaveValue("not_listed");
+    await expect(group.getByLabel("Context (optional)", { exact: true })).toHaveValue("");
+    await capture(page, info, "manual-report-not-listed");
+
+    // Re-choosing the row without new text keeps the entered label.
+    await label.fill("Fictional corrected label");
+    await cargo.click();
+    await notListed.click();
+    await expect(label).toHaveValue("Fictional corrected label");
+
+    // Opening selects the displayed text, so the next keystroke replaces it.
+    await cargo.click();
+    await expect
+      .poll(() =>
+        cargo.evaluate((element) => {
+          const input = element as HTMLInputElement;
+          return [input.selectionStart, input.selectionEnd];
+        }),
+      )
+      .toEqual([0, "Not listed / unresolved".length]);
+    await cargo.press("Escape");
+
+    // Text appended to the displayed row label is not typed text and never reaches the label.
+    await page.route(
+      (url) =>
+        url.pathname === "/api/v1/catalogs/cargoes" &&
+        !!url.searchParams.get("search")?.startsWith("Not listed"),
+      (route) => route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
+    );
+    await cargo.press("End");
+    await page.keyboard.type("x");
+    await expect(listbox.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName(
+      /^Not listed/,
+    );
+    await page.keyboard.press("Enter");
+    await expect(cargo).toHaveValue("Not listed / unresolved");
+    await expect(label).toHaveValue("Fictional corrected label");
+
+    // Backspace leaves a prefix of the row label, which is not typed text either.
+    await cargo.press("End");
+    await page.keyboard.press("Backspace");
+    await expect(cargo).toHaveValue("Not listed / unresolve");
+    await expect(listbox.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName(
+      /^Not listed/,
+    );
+    await page.keyboard.press("Enter");
+    await expect(cargo).toHaveValue("Not listed / unresolved");
+    await expect(label).toHaveValue("Fictional corrected label");
+
+    await chooseCatalogRow(page, "Cargo", "Fictional cargo");
+    await expect(group).toHaveCount(0);
+
+    await cargo.fill("Another unknown cargo");
+    await notListed.click();
+    await expect(label).toHaveValue("Another unknown cargo");
+    await page.getByRole("button", { name: "Clear selection: Cargo", exact: true }).click();
+    await expect(group).toHaveCount(0);
+    await expect(cargo).toHaveValue("");
+  },
+);
+
+test(
+  "R7 a hidden saved selection stays visible with its mark and note",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    await mockTrips(page);
+    const draft = example("getMyManualDraft:success").data;
+    draft.id = id;
+    draft.submittedReportId = null;
+    draft.fields.origin = { status: "resolved", entityId };
+    await page.route(`**/api/v1/me/manual-drafts/${id}`, (route) =>
+      route.fulfill({ json: envelope(draft), headers: { ETag: '"v1"' } }),
+    );
+    const base = catalogItem(entityId, "Fictional hidden city");
+    await page.route(
+      (url) => url.pathname === `/api/v1/catalogs/cities/${entityId}`,
+      (route) =>
+        route.fulfill({
+          json: envelope({ ...base, hidden: true, display: { ...base.display, hidden: true } }),
+        }),
+    );
+    await page.goto(`/account/reports/drafts/${id}`);
+    await catalogLanguage(page);
+    const origin = page.getByRole("combobox", { name: "Origin city", exact: true }),
+      field = page.locator(".manual-catalog-field").filter({ has: origin });
+    await expect(origin).toHaveValue("Fictional hidden city");
+    await expect(field.getByText("hidden", { exact: true })).toBeVisible();
+    await expect(field.getByText(/Kept for reading/)).toBeVisible();
+    await expect(origin).toHaveAttribute("data-historical", "true");
+    await expect(origin).toHaveAccessibleDescription(/hidden.*Kept for reading/);
+    await capture(page, info, "manual-report-hidden-selection");
+  },
+);
+
+test(
+  "R7 the last catalog list opens clear of the phone bar",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }, info) => {
+    await mockTrips(page);
+    await page.goto("/account/reports/new");
+    await catalogLanguage(page);
+    await settled(page);
+    const trailer = page.getByRole("combobox", { name: "Trailer type", exact: true }),
+      listbox = page.getByRole("listbox", { name: "Trailer type", exact: true });
+    // Park the field just above the phone bar so the opened list would otherwise run under it.
+    await trailer.evaluate((element) =>
+      window.scrollTo(0, element.getBoundingClientRect().top + scrollY - innerHeight + 130),
+    );
+    await trailer.click();
+    await expect(listbox.getByRole("option").last()).toBeVisible();
+    await expect
+      .poll(async () => {
+        const bar = await box(page.locator(".bottom-nav")),
+          list = await box(listbox);
+        return list.y + list.height <= bar.y + 1;
+      })
+      .toBe(true);
+    await capture(page, info, "manual-report-list-above-phone-bar");
   },
 );
 

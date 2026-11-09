@@ -1,0 +1,164 @@
+/* Shared catalog autocomplete. Built from shared tokens and imported by the selector itself so every
+   lazy route that renders it gets these rules. The popup scrolls inside itself, keeping the sticky
+   extra row and the active option in view. */
+.catalog-selector {
+  min-width: 0;
+}
+.catalog-combobox {
+  position: relative;
+  min-width: 0;
+}
+.catalog-input {
+  padding-right: 26px;
+  text-overflow: ellipsis;
+}
+.catalog-input[data-clear="true"] {
+  padding-right: calc(26px + var(--target-min));
+}
+.catalog-input[data-chips="1"] {
+  padding-right: calc(26px + var(--target-min) + 46px);
+}
+.catalog-input[data-chips="2"] {
+  padding-right: calc(26px + var(--target-min) + 92px);
+}
+.catalog-input[data-historical="true"] {
+  border-color: var(--pending);
+}
+.catalog-adornments {
+  position: absolute;
+  top: 0;
+  right: 6px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.catalog-clear {
+  display: grid;
+  place-items: center;
+  width: var(--target-min);
+  height: var(--target-min);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.catalog-clear:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+.catalog-chevron {
+  flex: none;
+  color: var(--muted);
+}
+/* Only the marked chip takes the pointer, so its title shows; it forwards clicks to the input. */
+.catalog-adornments .catalog-chip[title] {
+  cursor: default;
+  pointer-events: auto;
+}
+.catalog-chip {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--radius-badge);
+  background: var(--surface-active);
+  color: var(--secondary);
+  font-size: var(--font-badge);
+  font-weight: 600;
+  line-height: 1.45;
+}
+.catalog-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 20;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+.catalog-popup-note {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}
+.catalog-popup-error {
+  color: var(--destructive);
+}
+.catalog-options {
+  max-height: 236px;
+  padding: 4px 4px 0;
+  overflow-y: auto;
+  /* The sticky extra row must not cover the active option. */
+  scroll-padding-bottom: calc(var(--target-min) + 4px);
+}
+.catalog-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--target-min);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  color: var(--foreground);
+  font-size: var(--font-body);
+  cursor: pointer;
+}
+.catalog-option:hover {
+  background: var(--surface-hover);
+}
+/* The inset outline keeps the keyboard position visible beyond colour and survives forced colours. */
+.catalog-option[aria-selected="true"] {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+  background: var(--surface-active);
+}
+.catalog-option-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.catalog-option code {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-badge);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.catalog-option-more .catalog-option-name,
+.catalog-option-refresh .catalog-option-name {
+  color: var(--focus);
+  font-weight: 500;
+}
+.catalog-option[aria-disabled="true"] {
+  cursor: default;
+}
+.catalog-option-extra {
+  position: sticky;
+  bottom: 0;
+  margin: 4px -4px 0;
+  padding-inline: 12px;
+  border-top: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--secondary);
+}
+.catalog-option-extra:hover {
+  background: var(--surface-hover);
+}
+.catalog-option-extra[aria-selected="true"] {
+  background: var(--surface-active);
+}
+.catalog-note {
+  margin: 0;
+  color: var(--pending);
+  font-size: var(--font-small);
+  line-height: 1.5;
+}

@@ -3,7 +3,7 @@ import type { Page, Request, Response } from "@playwright/test";
 import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 import {
@@ -182,26 +182,23 @@ async function fill(
     completed = false,
     stopUpload = () => {};
   try {
-    await page
-      .getByRole("combobox", { name: "Origin city", exact: true })
-      .selectOption(fixture.ids.fixture_north as string);
+    await chooseCatalogRow(page, "Origin city", "Fictional fixture_north", "fixture_north");
     step = "destination";
-    await page
-      .getByRole("combobox", { name: "Destination city", exact: true })
-      .selectOption(fixture.ids.fixture_south as string);
+    await chooseCatalogRow(page, "Destination city", "Fictional fixture_south", "fixture_south");
     step = "trailer";
-    await page
-      .getByRole("combobox", { name: "Trailer type", exact: true })
-      .selectOption(fixture.ids.fixture_box as string);
+    await chooseCatalogRow(page, "Trailer type", "Fictional fixture_box", "fixture_box");
     step = "cargo";
     if (unresolved) {
-      const cargo = page.getByRole("group", { name: "Cargo", exact: true });
-      await cargo.getByRole("checkbox").check();
-      await cargo.getByLabel("Diagnostic label", { exact: true }).fill("Fictional unmapped cargo");
-    } else
+      await page.getByRole("combobox", { name: "Cargo", exact: true }).click();
       await page
-        .getByRole("combobox", { name: "Cargo", exact: true })
-        .selectOption(fixture.ids.fixture_crates as string);
+        .getByRole("listbox", { name: "Cargo", exact: true })
+        .getByRole("option", { name: /^Not listed/ })
+        .click();
+      await page
+        .getByRole("group", { name: "Cargo", exact: true })
+        .getByLabel("Diagnostic label", { exact: true })
+        .fill("Fictional unmapped cargo");
+    } else await chooseCatalogRow(page, "Cargo", "Fictional fixture_crates", "fixture_crates");
     step = "mass";
     await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("18000");
     step = "distance";
@@ -209,17 +206,17 @@ async function fill(
     step = "selection";
     // Selecting an option starts a separate current-entity read. Settle this
     // setup before measuring upload, including reads queued by the shared lane.
-    const selections: [string, string | undefined][] = [
-      ["Origin city", fixture.ids.fixture_north],
-      ["Destination city", fixture.ids.fixture_south],
-      ["Trailer type", fixture.ids.fixture_box],
+    const selections: [string, string][] = [
+      ["Origin city", "Fictional fixture_north"],
+      ["Destination city", "Fictional fixture_south"],
+      ["Trailer type", "Fictional fixture_box"],
     ];
-    if (!unresolved) selections.push(["Cargo", fixture.ids.fixture_crates]);
-    for (const [label, value] of selections) {
-      const select = page.getByRole("combobox", { name: label, exact: true });
-      await expect(select).toHaveValue(value as string);
-      const field = select.locator("..");
-      await expect(field.locator(".catalog-selection p")).toHaveText("Selected row");
+    if (!unresolved) selections.push(["Cargo", "Fictional fixture_crates"]);
+    for (const [label, rowName] of selections) {
+      const combobox = page.getByRole("combobox", { name: label, exact: true }),
+        field = page.locator(".catalog-selector").filter({ has: combobox });
+      await expect(combobox).toHaveValue(rowName);
+      await expect(combobox).not.toHaveAttribute("aria-busy", "true");
       await expect(field.getByText("Loading catalog…", { exact: true })).toHaveCount(0);
       await expect(
         field.getByText("This row could not be read. Its ID is kept.", {
@@ -509,9 +506,7 @@ test(
       phase = "STAFF_RESOLUTION";
       await corrections(staffPage);
       await staffPage.getByText("Propose supported resolution", { exact: true }).click();
-      await staffPage
-        .getByRole("combobox", { name: "Cargo", exact: true })
-        .selectOption(fixture.ids.fixture_crates as string);
+      await chooseCatalogRow(staffPage, "Cargo", "Fictional fixture_crates", "fixture_crates");
       await staffPage
         .locator("#resolution-reason")
         .fill("Fictional cargo confirmed from screenshot");

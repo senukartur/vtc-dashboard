@@ -25,30 +25,34 @@ export function ManualCatalogField({
     id = useId(),
     unresolved = value?.status === "unresolved";
   return (
-    <fieldset className="stack manual-catalog-field">
-      <legend>{t(name)}</legend>
-      <label className="trip-check">
-        <input
-          type="checkbox"
-          checked={unresolved}
-          onChange={(e) =>
+    <div className="stack manual-catalog-field">
+      <CatalogSelector
+        label={t(name)}
+        game={game}
+        kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer" : "city"}
+        value={value?.status === "resolved" ? value.entityId : null}
+        onChange={(v) => onChange(v ? { status: "resolved", entityId: v } : undefined)}
+        extraRow={{
+          label: t("unresolved"),
+          active: unresolved,
+          // Re-choosing the row keeps an entered diagnostic label unless new text was typed.
+          onChoose: (typed) =>
             onChange(
-              e.target.checked
-                ? {
+              unresolved
+                ? { ...value, label: typed || value.label }
+                : {
                     status: "unresolved",
-                    label: "",
+                    label: typed,
                     reasonCode: "not_listed",
                     locale: i18n.resolvedLanguage === "en" ? "en" : "ru",
                     context: null,
-                  }
-                : undefined,
-            )
-          }
-        />
-        {t("unresolved")}
-      </label>
-      {unresolved ? (
-        <>
+                  },
+            ),
+        }}
+      />
+      {unresolved && (
+        // biome-ignore lint/a11y/useSemanticElements: a nested fieldset legend would add a second visible field title.
+        <div className="stack manual-catalog-unresolved" role="group" aria-label={t(name)}>
           <Label htmlFor={`${id}-label`}>{t("unresolvedLabel")}</Label>
           <Input
             id={`${id}-label`}
@@ -81,17 +85,9 @@ export function ManualCatalogField({
             maxLength={512}
             onChange={(e) => onChange({ ...value, context: e.target.value || null })}
           />
-        </>
-      ) : (
-        <CatalogSelector
-          label={t(name)}
-          game={game}
-          kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer" : "city"}
-          value={value?.status === "resolved" ? value.entityId : null}
-          onChange={(v) => onChange(v ? { status: "resolved", entityId: v } : undefined)}
-        />
+        </div>
       )}
-    </fieldset>
+    </div>
   );
 }
 /**

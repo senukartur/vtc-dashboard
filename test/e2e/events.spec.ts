@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -363,6 +363,16 @@ test(
     state.readGate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    const prescribedCargoId = "e0350000-0000-4000-8000-000000000002";
+    await page.route(
+      (url) => url.pathname === `/api/v1/catalogs/cargoes/${prescribedCargoId}`,
+      (route) =>
+        route.fulfill({
+          json: envelope(
+            catalogItem(prescribedCargoId, "Fictional prescribed", "en", { game: "ats" }),
+          ),
+        }),
+    );
     try {
       await page.goto("/events");
       await catalogLanguage(page);
@@ -372,7 +382,7 @@ test(
       release();
       state.readGate = null;
     }
-    state.prescribedCargoId = "e0350000-0000-4000-8000-000000000002";
+    state.prescribedCargoId = prescribedCargoId;
     state.prescribedMassKg = "21000.000000000000000001";
     state.prescribedTrailerTypeId = "e0350000-0000-4000-8000-000000000003";
     await page.goto(`/account/events/${eventId}`);
@@ -381,9 +391,21 @@ test(
       save = dialog.getByRole("button", { name: "Save changes", exact: true });
     expect(state.requests.some((r) => r.includes("/catalogs/"))).toBe(false);
     await dialog.getByRole("button", { name: "Choose catalog selections", exact: true }).click();
+    // A row from another game stays readable and asks for a new choice.
+    const cargoField = dialog.getByRole("combobox", { name: "Prescribed cargo", exact: true });
+    await expect(cargoField).toHaveValue("Fictional prescribed");
+    await expect(dialog.getByText(/Hidden or from another game/)).toBeVisible();
+    await expect(cargoField).toHaveAttribute("data-historical", "true");
+    // Lists are read only once opened; Escape inside the open list must not close the dialog.
+    await cargoField.click();
     await expect(
       dialog.getByRole("alert").filter({ hasText: "Catalog data could not be read" }).first(),
     ).toBeVisible();
+    await expect(dialog.getByRole("option", { name: /^Not listed/ })).toHaveCount(0);
+    await cargoField.press("Escape");
+    await expect(cargoField).toHaveAttribute("aria-expanded", "false");
+    await expect(dialog).toBeVisible();
+    await expect(cargoField).toHaveValue("Fictional prescribed");
     state.failNext = 599;
     await save.click();
     await expect(dialog.getByRole("alert").filter({ hasText: "result is unknown" })).toBeVisible();
@@ -402,6 +424,8 @@ test(
     await expect(dialog.getByRole("status")).toHaveText("Changes saved.");
     await dialog.getByLabel("Game", { exact: true }).selectOption("ats");
     await expect(dialog.getByText("Changes saved.", { exact: true })).toHaveCount(0);
+    // The event editor clears its catalog selections when the game changes.
+    await expect(cargoField).toHaveValue("");
     expect(state.keys[2]).not.toBe(state.keys[1]);
     expect(state.commands[2]?.body).toMatchObject({
       prescribedCargoId: state.prescribedCargoId,

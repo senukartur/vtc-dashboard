@@ -1,4 +1,11 @@
-import { catalogItem, catalogLanguage, catalogList, envelope, list } from "./support/catalogs.ts";
+import {
+  catalogItem,
+  catalogLanguage,
+  catalogList,
+  chooseCatalogRow,
+  envelope,
+  list,
+} from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { levels, mockQualifications, ruleId } from "./support/qualifications.ts";
 
@@ -116,12 +123,20 @@ for (const locale of ["en", "ru"] as const) {
       await adrTwo.uncheck();
       await expect(adrTwo).not.toBeChecked();
       await adrTwo.check();
-      await trailer
-        .getByRole("combobox", { name: trailerLabel, exact: true })
-        .selectOption(trailerId(27));
+      const trailerField = trailer.getByRole("combobox", { name: trailerLabel, exact: true });
+      await trailerField.click();
+      // Only the report fields offer the not-listed row.
+      await expect(
+        trailer.getByRole("listbox", { name: trailerLabel, exact: true }).getByRole("option"),
+      ).toHaveCount(1);
+      await expect(trailer.getByRole("option", { name: /Not listed|Нет в каталоге/ })).toHaveCount(
+        0,
+      );
+      await chooseCatalogRow(trailer, trailerLabel, "Fictional trailer 27");
       await trailer.getByRole("button", { name: add, exact: true }).click();
       await expect(trailer.locator("li").filter({ hasText: "Fictional trailer 27" })).toBeVisible();
       await expect(trailer.locator("li")).toHaveCount(2);
+      await expect(trailerField).toHaveValue("");
       const sample = editor
         .locator("fieldset")
         .filter({
@@ -131,15 +146,14 @@ for (const locale of ["en", "ru"] as const) {
         })
         .last();
       const sampleLabel = locale === "en" ? "Sample trailer type" : "Тип прицепа в примере";
-      await sample
-        .getByRole("combobox", { name: sampleLabel, exact: true })
-        .selectOption(trailerId(27));
+      await chooseCatalogRow(sample, sampleLabel, "Fictional trailer 27");
       await sample.getByRole("button", { name: add, exact: true }).click();
       await expect(sample.locator("li")).toHaveCount(1);
       await expect(sample.getByRole("button", { name: /1\. Fictional trailer 27/ })).toBeVisible();
-      await sample
-        .getByRole("combobox", { name: sampleLabel, exact: true })
-        .selectOption(trailerId(27));
+      await expect(sample.getByRole("combobox", { name: sampleLabel, exact: true })).toHaveValue(
+        "",
+      );
+      await chooseCatalogRow(sample, sampleLabel, "Fictional trailer 27");
       await expect(sample.getByRole("button", { name: add, exact: true })).toBeDisabled();
       await editor.locator('[id^="reason-"]').fill("Fictional labelled draft");
       const firstPreview = page.waitForResponse(

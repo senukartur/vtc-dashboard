@@ -1,6 +1,6 @@
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
-import { catalogLanguage, entityId, envelope } from "./support/catalogs.ts";
+import { catalogLanguage, catalogList, entityId, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import {
   cargoId,
@@ -18,10 +18,12 @@ test(
   async ({ page }, info) => {
     await mockTrips(page);
     let calls = 0;
-    const keys: string[] = [];
+    const keys: string[] = [],
+      bodies: { fields: Record<string, unknown> }[] = [];
     await page.route("**/api/v1/manual-reports", async (route) => {
       calls++;
       keys.push(route.request().headers()["idempotency-key"] as string);
+      bodies.push(route.request().postDataJSON());
       if (calls <= 2) return route.abort("failed");
       return route.fulfill({ status: 201, json: example("submitManualReport:success") });
     });
@@ -37,7 +39,11 @@ test(
           : ["Город отправления", "Город назначения", "Груз", "Тип прицепа"];
       for (const [index, label] of labels.entries())
         await expect(page.getByRole("combobox", { name: label, exact: true })).toHaveValue(
-          index === 2 ? cargoId : index === 3 ? trailerId : entityId,
+          index === 2
+            ? "Fictional cargo"
+            : index === 3
+              ? "Fictional trailer_type"
+              : "Fictional city",
         );
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -52,12 +58,75 @@ test(
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect.poll(() => calls).toBe(2);
     expect(keys[0]).toBe(keys[1]);
+    // The language round trip changed labels only: the payload still carries canonical IDs.
+    expect(bodies[0]?.fields).toMatchObject({
+      origin: { status: "resolved", entityId },
+      destination: { status: "resolved", entityId },
+      cargo: { status: "resolved", entityId: cargoId },
+      trailerType: { status: "resolved", entityId: trailerId },
+    });
     await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByLabel("Comment (optional)", { exact: true }).fill("Changed synthetic report");
     await page.getByRole("button", { name: "Submit for review", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect.poll(() => calls).toBe(3);
     expect(keys[2]).not.toBe(keys[1]);
+  },
+);
+test(
+  "a not-listed value chosen from an empty search submits the unchanged payload",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    let body: unknown;
+    await page.route("**/api/v1/manual-reports", (route) => {
+      body = route.request().postDataJSON();
+      return route.fulfill({ status: 201, json: example("submitManualReport:success") });
+    });
+    await page.goto("/account/reports/new");
+    await catalogLanguage(page);
+    await completeForm(page);
+    await page.route(
+      (url) => url.pathname === "/api/v1/catalogs/cargoes" && url.searchParams.has("search"),
+      (route) => route.fulfill({ json: catalogList([]) }),
+    );
+    const cargo = page.getByRole("combobox", { name: "Cargo", exact: true });
+    await cargo.fill("Fictional unmapped cargo");
+    await expect(
+      page.getByRole("paragraph").filter({ hasText: "No rows match these filters." }),
+    ).toBeVisible();
+    await page
+      .getByRole("listbox", { name: "Cargo", exact: true })
+      .getByRole("option", { name: /^Not listed/ })
+      .click();
+    await expect(
+      page
+        .getByRole("group", { name: "Cargo", exact: true })
+        .getByLabel("Diagnostic label", { exact: true }),
+    ).toHaveValue("Fictional unmapped cargo");
+    await page.getByRole("button", { name: "Submit for review", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
+    await expect.poll(() => body).toBeDefined();
+    expect(body).toEqual({
+      fields: {
+        game: "ets2",
+        origin: { status: "resolved", entityId },
+        destination: { status: "resolved", entityId },
+        cargo: {
+          status: "unresolved",
+          label: "Fictional unmapped cargo",
+          reasonCode: "not_listed",
+          locale: "en",
+          context: null,
+        },
+        trailerType: { status: "resolved", entityId: trailerId },
+        cargoMassKg: "1000",
+        actualDistanceM: "0",
+        evidenceIds: [evidenceId],
+        comment: null,
+      },
+      targetTrip: null,
+    });
   },
 );
 test(

@@ -1,6 +1,5 @@
 /* Game catalogs: five editable lists. Page rules are scoped to .catalog-page and built from shared
-   tokens; .catalog-selection also styles the shared CatalogSelector elsewhere, and the dialog rules
-   are portaled outside the page. */
+   tokens; the dialog rules are portaled outside the page. */
 .catalog-page {
   display: flex;
   flex-direction: column;
@@ -89,8 +88,7 @@
   line-height: 1.5;
 }
 .catalog-page p,
-.catalog-page code,
-.catalog-selection a {
+.catalog-page code {
   overflow-wrap: anywhere;
 }
 .catalog-page select {
@@ -286,15 +284,6 @@
 }
 .catalog-dialog .catalog-applied strong {
   color: var(--accepted);
-}
-.catalog-selection {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  border-left: 2px solid var(--selection-border);
-  padding-left: 8px;
-  font-size: var(--font-small);
 }
 @media (max-width: 759.98px) {
   .catalog-page .catalog-actions {

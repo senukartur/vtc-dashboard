@@ -1,6 +1,7 @@
 import { inertNotifications } from "./notifications.ts";
 import { switchLanguage } from "./locale.ts";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { expect } from "./fixtures.ts";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 
@@ -27,6 +28,27 @@ export const catalogList = (
 export async function catalogLanguage(page: Page, locale: "ru" | "en" = "en") {
   await switchLanguage(page, locale);
 }
+/**
+ * Chooses a row in a catalog autocomplete through its search, since real specs share a database
+ * that can exceed one page. Waits until the detail read has confirmed the choice.
+ */
+export async function chooseCatalogRow(
+  scope: Page | Locator,
+  label: string,
+  rowName: string,
+  search = rowName,
+) {
+  const field = scope.getByRole("combobox", { name: label, exact: true });
+  await field.fill(search);
+  await scope
+    .getByRole("listbox", { name: label, exact: true })
+    .getByRole("option", { name: new RegExp(`^${escapeRegExp(rowName)}(\\s|$)`) })
+    .click();
+  await expect(field).toHaveValue(rowName);
+  await expect(field).toHaveAttribute("aria-expanded", "false");
+  await expect(field).not.toHaveAttribute("aria-busy", "true");
+}
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** A list row with its display label, in the shape the read routes return. */
 export function catalogItem(
   id: string,
