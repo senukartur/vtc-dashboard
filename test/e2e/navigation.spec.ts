@@ -466,7 +466,7 @@ test(
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
 
-    await page.getByRole("link", { name: "Войти", exact: true }).click();
+    await page.getByRole("main").getByRole("link", { name: "Войти", exact: true }).click();
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
 
