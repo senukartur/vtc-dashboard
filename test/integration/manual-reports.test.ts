@@ -23,6 +23,7 @@ import {
   TransactionCommitOutcomeUnknownError,
   type UnitOfWork,
 } from "@vtc/db";
+import { catalogCities } from "@vtc/db/catalogs-schema";
 import { membership } from "@vtc/db/identity-schema";
 import {
   eq,
@@ -66,11 +67,10 @@ import {
 } from "../../apps/api/src/platform/blob-storage/filesystem.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
-import { createFactRepository as oldFacts } from "../fixtures/manual-v1-facts.ts";
 import {
   guardedSettings,
   hasCode,
@@ -259,19 +259,7 @@ beforeAll(async () => {
   otherCookie = b.cookie;
   reviewer = (await setupPhase("reviewer_credentials", () => member(["dispatcher"]))).actor;
   trainee = (await setupPhase("trainee_credentials", () => member(["trainee"]))).actor;
-  catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 1024 * 1024,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-  );
+  catalogs = createCatalogs(unit, catalogConfig(), { identity });
   tripService = createTrips(
     unit,
     { cursorKey: randomBytes(32).toString("hex") },
@@ -400,9 +388,9 @@ test("partial owner drafts create no trip; submission is atomic/idempotent with 
   const [fact] = await unit.run((tx) => unit.client(tx).select().from(tripFacts));
   expect(fact).toMatchObject({
     adapterVersion: 2,
-    catalogRevisionId: null,
-    originEntityId: null,
-    originCatalogRevisionId: null,
+    originCityId: null,
+    cargoId: null,
+    adrClass: null,
   });
   await expect(
     manual.submitDraft(owner, draft.id, submissionKey, saved.version, {
@@ -685,26 +673,6 @@ test("HTTP enforces CSRF/Origin, closed bodies, ETags, multipart limits and priv
         })
       ).statusCode,
     ).toBe(413);
-    const catalogToken = csrfProtection(identityConfig).issue({}, staff).token;
-    const catalogResponse = await app.inject({
-      method: "POST",
-      url: "/api/v1/admin/catalog-import-artifacts",
-      headers: {
-        cookie: staffCookie,
-        origin: identityConfig.origin,
-        "x-csrf-token": catalogToken,
-        "idempotency-key": newId(),
-        "content-type": `multipart/form-data; boundary=${boundary}`,
-      },
-      payload: body([
-        part(
-          "file",
-          Buffer.from(JSON.stringify(artifact("ets2", [entity("manual-http")]))),
-          "application/json",
-        ),
-      ]),
-    });
-    expect(catalogResponse.statusCode).toBe(202);
   } finally {
     await app.close();
   }
@@ -1029,391 +997,103 @@ test("equal-time revision keysets retain every immutable revision exactly once",
   expect(history.find((row) => row.id === next.currentRevision.id)).toEqual(next.currentRevision);
 });
 
-test("published resolved pins remain legacy-compatible and invalid null/cross-pin writes fail closed under MySQL constraints", async () => {
-  const a = artifact("ets2", [
-    entity("manual-north"),
-    entity("manual-south"),
-    entity("manual-load", { kind: "cargo" }),
-    entity("manual-box", { kind: "trailer_type" }),
-  ]);
-  const uploaded = await catalogs.upload(staff, newId(), Buffer.from(JSON.stringify(a))),
-    op = await catalogs.import(staff, newId(), {
-      artifactId: uploaded.id,
-      sha256: uploaded.sha256,
-      game: "ets2",
-    });
-  await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-  const revisionId = (await catalogs.operation(staff, op.id)).resultId as string,
-    r = await catalogs.detail(staff, revisionId);
-  await catalogs.publish(staff, revisionId, newId(), r.version, {
-    expectedPublicationVersion: r.publicationVersion,
-    reason: "Fictional manual pin review",
+test("resolved selections take same-game list rows, hidden rows stay only when unchanged and the legacy route stays readable", async () => {
+  const rows = await seedCatalog(unit, "ets2", {
+    cities: [
+      { code: "manual-north", nameEn: "Fictional manual north" },
+      { code: "manual-south", nameEn: "Fictional manual south" },
+      { code: "manual-hidden-city", hidden: true },
+    ],
+    cargoes: [{ code: "manual-gas", adrClass: "2" }],
+    trailers: ["manual-box"],
   });
-  const cities = await catalogs.entities(staff, { revisionId, kind: "city", locale: "en" }),
-    cargo = await catalogs.entities(staff, { revisionId, kind: "cargo", locale: "en" }),
-    trailer = await catalogs.entities(staff, { revisionId, kind: "trailer_type", locale: "en" }),
+  const atsRows = await seedCatalog(unit, "ats", { cities: ["manual-ats-city"] });
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
+  const north = rows.id("manual-north"),
+    south = rows.id("manual-south"),
+    cargo = rows.id("manual-gas"),
+    trailer = rows.id("manual-box"),
+    hidden = rows.id("manual-hidden-city"),
     image = await upload();
-  const legacy: S["ManualResolvedInput"] = {
-    game: "ets2",
-    catalogRevisionId: revisionId,
-    originCityId: cities.items.find((city) => city.display.label === "Fictional manual-north")
-      ?.id as string,
-    destinationCityId: cities.items.find((city) => city.display.label === "Fictional manual-south")
-      ?.id as string,
-    cargoId: cargo.items[0]?.id as string,
-    trailerTypeId: trailer.items[0]?.id as string,
+  const listed: S["ManualSubmissionFields"] = {
+    ...fields(image.id),
+    origin: resolved(north),
+    destination: resolved(south),
+    cargo: resolved(cargo),
+    trailerType: resolved(trailer),
     cargoMassKg: "1000",
     actualDistanceM: "100",
+  };
+  for (const invalid of [
+    { ...listed, origin: resolved(atsRows.id("manual-ats-city")) },
+    { ...listed, origin: resolved(cargo) },
+    { ...listed, origin: resolved(newId()) },
+    { ...listed, cargo: resolved(north) },
+    { ...listed, trailerType: resolved(cargo) },
+  ])
+    await expect(manual.submitReport(owner, newId(), { fields: invalid })).rejects.toMatchObject({
+      statusCode: 422,
+    });
+  await expect(
+    manual.submitReport(owner, newId(), { fields: { ...listed, origin: resolved(hidden) } }),
+  ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_SELECTION_HIDDEN" });
+
+  const report = await manual.submitReport(owner, newId(), { fields: listed });
+  const [fact] = await unit.run((tx) =>
+    unit.client(tx).select().from(tripFacts).where(eq(tripFacts.canonicalTripId, report.tripId)),
+  );
+  if (!fact) throw Error("SYNTHETIC_FACT_REQUIRED");
+  expect(fact).toMatchObject({
+    originCityId: north,
+    destinationCityId: south,
+    cargoId: cargo,
+    adrClass: "2",
+    trailerCount: 1,
+  });
+  const trailers = await unit.run((tx) =>
+    unit.client(tx).select().from(tripFactTrailers).where(eq(tripFactTrailers.tripFactId, fact.id)),
+  );
+  expect(trailers.map((row) => [row.position, row.trailerId])).toEqual([[0, trailer]]);
+
+  // A later hide leaves unchanged selections valid; a new hidden choice is refused.
+  await unit.run((tx) =>
+    unit.client(tx).update(catalogCities).set({ hidden: true }).where(eq(catalogCities.id, north)),
+  );
+  const kept = await manual.reviseReport(owner, report.id, newId(), report.version, {
+    fields: { ...listed, actualDistanceM: "150" },
+    expectedTripVersion: report.tripVersion,
+  });
+  expect(kept.currentRevision.number).toBe(2);
+  await expect(
+    manual.reviseReport(owner, report.id, newId(), kept.version, {
+      fields: { ...listed, origin: resolved(hidden), actualDistanceM: "175" },
+      expectedTripVersion: kept.tripVersion,
+    }),
+  ).rejects.toMatchObject({ publicCode: "CATALOG_SELECTION_HIDDEN" });
+
+  // The legacy route keeps its ids; validation is the same.
+  await unit.run((tx) =>
+    unit.client(tx).update(catalogCities).set({ hidden: false }).where(eq(catalogCities.id, north)),
+  );
+  const legacyInput: S["ManualResolvedInput"] = {
+    game: "ets2",
+    originCityId: north,
+    destinationCityId: south,
+    cargoId: cargo,
+    trailerTypeId: trailer,
+    cargoMassKg: "2000",
+    actualDistanceM: "200",
     evidenceIds: [image.id],
   };
   const legacyKey = newId(),
-    result = await manual.legacySubmit(owner, legacyKey, legacy);
-  expect(result.manualRevision).toHaveProperty("fields.originCityId", legacy.originCityId);
-  const [fact] = await unit.run((tx) => unit.client(tx).select().from(tripFacts));
-  if (!fact) throw Error("SYNTHETIC_FACT_REQUIRED");
-  expect(fact.adapterVersion).toBe(1);
-  const old = oldFacts(unit);
-  expect((await unit.run((tx) => old.read(tx, [fact.id]))).get(fact.id)?.tripId).toBe(
-    result.summary.id,
+    legacy = await manual.legacySubmit(owner, legacyKey, legacyInput);
+  expect(legacy.manualRevision).toHaveProperty("fields.originCityId", north);
+  expect((await manual.legacySubmit(owner, legacyKey, legacyInput)).summary).toEqual(
+    legacy.summary,
   );
-  const oldFactId = newId(),
-    oldMessageId = newId(),
-    oldUnknownMessageId = newId(),
-    oldUnknownFactId = newId();
-  await unit.run(async (tx) => {
-    const [message] = await unit
-      .client(tx)
-      .select()
-      .from(sourceMessages)
-      .where(eq(sourceMessages.id, fact.messageId as string));
-    if (!message) throw Error("SYNTHETIC_MESSAGE_REQUIRED");
-    await unit
-      .client(tx)
-      .insert(sourceMessages)
-      .values({ ...message, id: oldMessageId, eventKey: Buffer.from(newId()), revision: "99" });
-    await old.insert(
-      tx,
-      result.summary.id,
-      {
-        ...(fact.evidence as NormalizedTripEvidence),
-        sourceRecordId: oldMessageId,
-        factRevisionId: oldFactId,
-      },
-      1,
-    );
-  });
-  await unit.run(async (tx) => {
-    const [message] = await unit
-      .client(tx)
-      .select()
-      .from(sourceMessages)
-      .where(eq(sourceMessages.id, fact.messageId as string));
-    if (!message) throw Error("SYNTHETIC_MESSAGE_REQUIRED");
-    await unit
-      .client(tx)
-      .insert(sourceMessages)
-      .values({
-        ...message,
-        id: oldUnknownMessageId,
-        eventKey: Buffer.from(newId()),
-        revision: "100",
-      });
-    const unknown = {
-      status: "unknown" as const,
-      reasonCode: "synthetic_unknown",
-      sourceRecordId: oldUnknownMessageId,
-    };
-    await old.insert(
-      tx,
-      result.summary.id,
-      {
-        ...(fact.evidence as NormalizedTripEvidence),
-        sourceRecordId: oldUnknownMessageId,
-        factRevisionId: oldUnknownFactId,
-        catalogRevisionId: null,
-        origin: unknown,
-        destination: unknown,
-        cargo: unknown,
-        adrCategory: unknown,
-        trailers: { complete: true, items: [unknown] },
-      },
-      1,
-    );
-  });
-  expect(
-    (await unit.run((tx) => old.read(tx, [oldUnknownFactId]))).get(oldUnknownFactId)?.evidence
-      .trailers.items[0]?.status,
-  ).toBe("unknown");
-  const [oldTrailer] = await unit.run((tx) =>
-    unit
-      .client(tx)
-      .select()
-      .from(tripFactTrailers)
-      .where(eq(tripFactTrailers.tripFactId, oldUnknownFactId)),
-  );
-  expect(oldTrailer).toMatchObject({
-    sourceAdapterVersion: 1,
-    legacyCatalogRevisionId: null,
-    catalogRevisionId: null,
-  });
-  const [oldRow] = await unit.run((tx) =>
-    unit.client(tx).select().from(tripFacts).where(eq(tripFacts.id, oldFactId)),
-  );
-  expect(oldRow).toMatchObject({
-    adapterVersion: 1,
-    originCatalogRevisionId: null,
-    destinationCatalogRevisionId: null,
-    cargoCatalogRevisionId: null,
-    adrCatalogRevisionId: null,
-  });
-  expect(
-    (await unit.run((tx) => old.read(tx, [oldFactId]))).get(oldFactId)?.evidence.origin.status,
-  ).toBe("known");
-  // Raw old-writer shape after forward migration: omit all new pin columns.
-  await control.execute(
-    "UPDATE trip_facts SET origin_catalog_revision_id=NULL,destination_catalog_revision_id=NULL,cargo_catalog_revision_id=NULL,adr_catalog_revision_id=NULL WHERE id=?",
-    [Buffer.from(fact.id)],
-  );
-  expect((await tripService.detail(owner, result.summary.id)).view).toBe("private");
   await expect(
-    control.execute("UPDATE trip_facts SET catalog_revision_id=NULL WHERE id=?", [
-      Buffer.from(fact.id),
-    ]),
-  ).rejects.toSatisfy(hasCode("ER_CHECK_CONSTRAINT_VIOLATED"));
-  await expect(
-    control.execute("UPDATE trip_facts SET origin_catalog_revision_id=? WHERE id=?", [
-      Buffer.from(newId()),
-      Buffer.from(fact.id),
-    ]),
-  ).rejects.toBeDefined();
-  await expect(
-    control.execute("UPDATE trip_facts SET cargo_entity_id=? WHERE id=?", [
-      Buffer.from(legacy.originCityId),
-      Buffer.from(fact.id),
-    ]),
-  ).rejects.toSatisfy(hasCode("ER_NO_REFERENCED_ROW_2"));
-  const report = (await manual.listReports(owner)).items[0] as S["ManualReport"];
-  for (const invalid of [
-    {
-      ...fields(image.id),
-      game: "ats" as const,
-      origin: {
-        status: "resolved" as const,
-        entityId: legacy.originCityId,
-        catalogRevisionId: revisionId,
-      },
-    },
-    {
-      ...fields(image.id),
-      cargo: {
-        status: "resolved" as const,
-        entityId: legacy.originCityId,
-        catalogRevisionId: revisionId,
-      },
-    },
-    {
-      ...fields(image.id),
-      origin: {
-        status: "resolved" as const,
-        entityId: legacy.originCityId,
-        catalogRevisionId: newId(),
-      },
-    },
-    { ...fields(image.id), cargoMassKg: "1".repeat(39) },
-    { ...fields(image.id), actualDistanceM: "0.1234567890123456789" },
-  ])
-    await expect(
-      Promise.resolve().then(() => manual.submitReport(owner, newId(), { fields: invalid })),
-    ).rejects.toMatchObject({ statusCode: 422 });
-  const nextArtifact = artifact("ets2", [
-    entity("manual-north", { retired: true }),
-    entity("manual-south"),
-    entity("manual-load", { kind: "cargo" }),
-    entity("manual-box", { kind: "trailer_type" }),
-  ]);
-  const uploadedNext = await catalogs.upload(
-      staff,
-      newId(),
-      Buffer.from(JSON.stringify(nextArtifact)),
-    ),
-    opNext = await catalogs.import(staff, newId(), {
-      artifactId: uploadedNext.id,
-      sha256: uploadedNext.sha256,
-      game: "ets2",
-    });
-  await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-  const secondRevision = (await catalogs.operation(staff, opNext.id)).resultId as string,
-    secondDetail = await catalogs.detail(staff, secondRevision);
-  await catalogs.publish(staff, secondRevision, newId(), secondDetail.version, {
-    expectedPublicationVersion: secondDetail.publicationVersion,
-    reason: "Fictional mixed pin review",
-  });
-  const secondCargo = (
-    await catalogs.entities(staff, { revisionId: secondRevision, kind: "cargo", locale: "en" })
-  ).items[0];
-  if (!secondCargo) throw Error("SYNTHETIC_CARGO_REQUIRED");
-  expect(
-    (await catalogs.entity(staff, legacy.originCityId, secondRevision, "en")).display.retired,
-  ).toBe(true);
-  await expect(
-    manual.submitReport(owner, newId(), {
-      fields: {
-        ...fields(image.id),
-        origin: {
-          status: "resolved",
-          entityId: legacy.originCityId,
-          catalogRevisionId: secondRevision,
-        },
-      },
-    }),
+    manual.legacySubmit(owner, newId(), { ...legacyInput, originCityId: cargo }),
   ).rejects.toMatchObject({ statusCode: 422 });
-  const nextTrailer = await unit.run((tx) =>
-    catalogs.pinnedInTransaction(tx, secondRevision, legacy.trailerTypeId),
-  );
-  if (!nextTrailer) throw Error("SYNTHETIC_TRAILER_REQUIRED");
-  await expect(
-    control.execute(
-      "UPDATE trip_fact_trailers SET catalog_revision_id=?,catalog_fact_id=? WHERE trip_fact_id=? AND position=0",
-      [Buffer.from(secondRevision), Buffer.from(nextTrailer.id), Buffer.from(fact.id)],
-    ),
-  ).rejects.toSatisfy(hasCode("ER_NO_REFERENCED_ROW_2"));
-  await expect(
-    control.execute("UPDATE trip_fact_trailers SET source_adapter_version=2 WHERE trip_fact_id=?", [
-      Buffer.from(fact.id),
-    ]),
-  ).rejects.toSatisfy(hasCode("ER_NO_REFERENCED_ROW_2"));
-  await expect(
-    control.execute(
-      "UPDATE trip_fact_trailers SET source_adapter_version=NULL WHERE trip_fact_id=?",
-      [Buffer.from(fact.id)],
-    ),
-  ).rejects.toSatisfy(hasCode("ER_BAD_NULL_ERROR"));
-  await expect(
-    control.execute(
-      "UPDATE trip_fact_trailers SET legacy_catalog_revision_id=NULL WHERE trip_fact_id=?",
-      [Buffer.from(fact.id)],
-    ),
-  ).rejects.toSatisfy(hasCode("ER_NON_DEFAULT_VALUE_FOR_GENERATED_COLUMN"));
-  const mixed: S["ManualSubmissionFields"] = {
-    ...fields(image.id),
-    origin: { status: "resolved", entityId: legacy.originCityId, catalogRevisionId: revisionId },
-    cargo: { status: "resolved", entityId: secondCargo.id, catalogRevisionId: secondRevision },
-    trailerType: {
-      status: "resolved",
-      entityId: legacy.trailerTypeId,
-      catalogRevisionId: secondRevision,
-    },
-  };
-  // The chronological-order assertion below requires distinct submitted timestamps.
-  instant += 1;
-  const next = await manual.reviseReport(owner, report.id, newId(), report.version, {
-    fields: mixed,
-    expectedTripVersion: report.tripVersion,
-  });
-  expect(next.currentRevision.submittedAt > report.currentRevision.submittedAt).toBe(true);
-  expect((await manual.legacySubmit(owner, legacyKey, legacy)).summary).toEqual(result.summary);
-  const [current] = await unit.run((tx) =>
-    unit.client(tx).select().from(trips).where(eq(trips.id, next.tripId)),
-  );
-  const [mixedRow] = await unit.run((tx) =>
-    unit
-      .client(tx)
-      .select()
-      .from(tripFacts)
-      .where(eq(tripFacts.id, current?.currentFactId ?? "")),
-  );
-  expect(mixedRow).toMatchObject({
-    adapterVersion: 2,
-    catalogRevisionId: null,
-    originCatalogRevisionId: revisionId,
-    cargoCatalogRevisionId: secondRevision,
-  });
-  if (!current?.currentFactId) throw Error("SYNTHETIC_CURRENT_FACT_REQUIRED");
-  const [mixedTrailer] = await unit.run((tx) =>
-    unit
-      .client(tx)
-      .select()
-      .from(tripFactTrailers)
-      .where(eq(tripFactTrailers.tripFactId, current.currentFactId as string)),
-  );
-  expect(mixedTrailer).toMatchObject({
-    sourceAdapterVersion: 2,
-    legacyCatalogRevisionId: null,
-    catalogRevisionId: secondRevision,
-  });
-  await expect(
-    control.execute("UPDATE trip_fact_trailers SET source_adapter_version=1 WHERE trip_fact_id=?", [
-      Buffer.from(current.currentFactId),
-    ]),
-  ).rejects.toSatisfy(hasCode("ER_NO_REFERENCED_ROW_2"));
-  await expect(
-    control.execute("UPDATE trip_facts SET catalog_revision_id=? WHERE id=?", [
-      Buffer.from(revisionId),
-      Buffer.from(current.currentFactId),
-    ]),
-  ).rejects.toSatisfy(hasCode("ER_CHECK_CONSTRAINT_VIOLATED"));
-  await expect(unit.run((tx) => old.read(tx, [current.currentFactId as string]))).rejects.toThrow(
-    "UNSUPPORTED_SOURCE_FACT_VERSION",
-  );
-  // Exercise the actual transitive contribution reader without installing adjudication/credit.
-  const qualification = createQualifications(
-    unit,
-    { cursorKey: randomBytes(32).toString("hex") },
-    { identity, trips: tripService, catalogs },
-    now,
-  );
-  const context = await unit.run(async (tx) => {
-    await identity.qualificationContextInTransaction(tx, [owner.userId]);
-    const [context] = await tripService.contributions.contexts(tx, [
-      {
-        tripId: current.id,
-        expectedTripVersion: current.version,
-        version: 1,
-        factId: current.currentFactId as string,
-      },
-    ]);
-    if (!context) throw Error("SYNTHETIC_CONTRIBUTION_CONTEXT_REQUIRED");
-    return context;
-  });
-  expect(context.evidence).toMatchObject({
-    provider: "manual",
-    catalogRevisionId: null,
-    origin: { status: "known", value: { catalogRevisionId: revisionId } },
-    cargo: { status: "known", value: { catalogRevisionId: secondRevision } },
-    start: { utc: null, basis: "unknown", verifiedActual: false },
-    end: { utc: null, basis: "unknown", verifiedActual: false },
-  });
-  expect(context.evidence.trailers.items[0]).toMatchObject({
-    status: "known",
-    value: { catalogRevisionId: secondRevision },
-  });
-  expect(
-    await unit.run((tx) => qualification.lookupInTransaction(tx, context.evidence)),
-  ).toMatchObject({
-    status: "unresolved",
-    attributionBasis: "manual_confirmation",
-    attributionAt: null,
-  });
-  const confirmedAt = now().toISOString();
-  expect(
-    await unit.run((tx) => qualification.lookupInTransaction(tx, context.evidence, confirmedAt)),
-  ).toMatchObject({
-    status: "unresolved",
-    attributionBasis: "manual_confirmation",
-    attributionAt: confirmedAt,
-  });
-  const [credits] = await control.query<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM trip_contributions",
-  );
-  expect(Number(credits[0]?.n)).toBe(0);
-  expect(context.trip.decision).toBe("pending_review");
-  const history = await manual.revisions(owner, report.id);
-  expect(history).toMatchObject({
-    items: [
-      { id: next.currentRevision.id, representation: "extended" },
-      { id: report.currentRevision.id },
-    ],
-  });
 });
 
 test("built listening HTTP protects chunked uploads, actual limits, socket abort recovery and binary reads", async () => {
@@ -2455,15 +2135,7 @@ test("draft-only composition pauses both manual deletion kinds without consuming
     undefined,
     undefined,
     false,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 1024 * 1024,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
+    { cursorKey: randomBytes(32).toString("hex") },
     { cursorKey: randomBytes(32).toString("hex") },
     undefined,
     draftOnlyConfig,
@@ -2634,15 +2306,7 @@ it("unavailable due manual storage reports failure while real local mail complet
       },
       undefined,
       false,
-      {
-        production: false,
-        synthetic: true,
-        cursorKey: catalogKey,
-        maxFileBytes: 1048576,
-        artifactTtlMs: 86400000,
-        policyRevision: 1,
-        evidence: [],
-      },
+      { cursorKey: catalogKey },
       { cursorKey: tripKey },
       undefined,
       config,
@@ -2697,11 +2361,7 @@ it("unavailable due manual storage reports failure while real local mail complet
       MAIL_ENCRYPTION_KEY: mailKey,
       MAIL_SENDER: "synthetic@example.invalid",
       CATALOGS_ENABLED: "true",
-      CATALOGS_SYNTHETIC: "true",
       CATALOGS_CURSOR_KEY: catalogKey,
-      CATALOGS_MAX_FILE_BYTES: "1048576",
-      CATALOGS_ARTIFACT_TTL_MS: "86400000",
-      CATALOGS_POLICY_REVISION: "1",
       TRIPS_ENABLED: "true",
       TRIPS_CURSOR_KEY: tripKey,
       MANUAL_REPORTS_ENABLED: "true",

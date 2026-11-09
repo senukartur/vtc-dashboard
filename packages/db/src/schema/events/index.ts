@@ -15,7 +15,7 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { decimalColumn, idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
-import { catalogFacts } from "../catalogs/index.js";
+import { catalogCargoes, catalogCities, catalogTrailers } from "../catalogs/index.js";
 import { membership } from "../identity/index.js";
 
 export { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
@@ -108,6 +108,10 @@ export const eventRevisions = mysqlTable(
     startsAt: utcColumn("starts_at").notNull(),
     endsAt: utcColumn("ends_at"),
     visibility: mysqlEnum("visibility", ["public", "members"]).notNull(),
+    originCityId: idColumn("origin_city_id"),
+    destinationCityId: idColumn("destination_city_id"),
+    prescribedCargoId: idColumn("prescribed_cargo_id"),
+    prescribedTrailerId: idColumn("prescribed_trailer_id"),
     prescribedMassKg: decimalColumn("prescribed_mass_kg"),
     privateReason: varchar("private_reason", { length: 2048 }),
   },
@@ -120,36 +124,27 @@ export const eventRevisions = mysqlTable(
       "event_time_order",
       sql`${t.meetingAt}<=${t.startsAt} AND (${t.endsAt} IS NULL OR ${t.endsAt}>=${t.startsAt})`,
     ),
-    check("event_mass_nonnegative", sql`${t.prescribedMassKg} IS NULL OR ${t.prescribedMassKg}>=0`),
-  ],
-);
-export const eventCatalogPins = mysqlTable(
-  "event_catalog_pins",
-  {
-    revisionId: idColumn("revision_id").notNull(),
-    field: mysqlEnum("field", ["origin", "destination", "cargo", "trailer"]).notNull(),
-    factId: idColumn("fact_id").notNull(),
-    entityId: idColumn("entity_id").notNull(),
-    catalogRevisionId: idColumn("catalog_revision_id").notNull(),
-    label: json("label")
-      .$type<{
-        entityId: string;
-        label: string;
-        requestedLocale: "en" | "ru";
-        renderedLocale: "en" | "ru";
-        englishFallback: boolean;
-        retired: boolean;
-      }>()
-      .notNull(),
-  },
-  (t) => [
-    primaryKey({ columns: [t.revisionId, t.field] }),
-    fk("event_pin_revision_fk", t.revisionId, eventRevisions.id),
     foreignKey({
-      name: "event_pin_catalog_fk",
-      columns: [t.factId, t.catalogRevisionId, t.entityId],
-      foreignColumns: [catalogFacts.id, catalogFacts.revisionId, catalogFacts.entityId],
+      name: "event_revision_origin_fk",
+      columns: [t.originCityId, t.game],
+      foreignColumns: [catalogCities.id, catalogCities.game],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "event_revision_destination_fk",
+      columns: [t.destinationCityId, t.game],
+      foreignColumns: [catalogCities.id, catalogCities.game],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "event_revision_cargo_fk",
+      columns: [t.prescribedCargoId, t.game],
+      foreignColumns: [catalogCargoes.id, catalogCargoes.game],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "event_revision_trailer_fk",
+      columns: [t.prescribedTrailerId, t.game],
+      foreignColumns: [catalogTrailers.id, catalogTrailers.game],
+    }).onDelete("restrict"),
+    check("event_mass_nonnegative", sql`${t.prescribedMassKg} IS NULL OR ${t.prescribedMassKg}>=0`),
   ],
 );
 export const eventResponses = mysqlTable(

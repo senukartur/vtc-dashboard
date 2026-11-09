@@ -690,34 +690,31 @@ class WindowTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '^NOTIFICATIONS_GRANTS_INVALID$'):
                 n.grant_privileges(o, rights)
 
-    def test_combined_jobs_catalog_cleanup_has_precise_owning_writes_and_protected_columns(self):
+    def test_combined_grants_give_jobs_no_catalog_writes(self):
         manifest = json.loads(pathlib.Path(__file__).with_name('notifications-acceptance-grants.json').read_text())
         jobs, runtime = manifest['jobs'], manifest['runtime']
-        self.assertEqual(jobs['catalog_commands'], ['DELETE', 'SELECT'])
-        self.assertEqual(jobs['catalog_operations'], ['SELECT', 'UPDATE(state,failure_code)'])
-        self.assertEqual(jobs['catalog_artifacts'], ['SELECT', 'UPDATE(content,payload_expires_at)'])
-        self.assertEqual(jobs['catalog_revisions'], ['SELECT', 'UPDATE(state,pruned)'])
-        for table in ['catalog_relations', 'catalog_mappings', 'catalog_aliases', 'catalog_facts', 'catalog_changes', 'catalog_coverage', 'catalog_mapping_issues']:
-            self.assertEqual(jobs[table], ['DELETE', 'SELECT'])
-        self.assertNotIn('catalog_publications', jobs)
-        for table in ['catalog_facts', 'catalog_revisions', 'catalog_publications']:
+        for table in ['catalog_cities', 'catalog_cargoes', 'catalog_trailers']:
+            self.assertEqual(jobs[table], ['SELECT'])
             self.assertEqual(runtime[table], ['SELECT'])
+        for table in ['catalog_dlcs', 'catalog_regions', 'catalog_facts', 'event_catalog_pins']:
+            self.assertNotIn(table, jobs)
+            self.assertNotIn(table, runtime)
         self.assertEqual(runtime['notification_acceptance'], ['SELECT', 'UPDATE(refs)'])
         self.assertEqual(jobs['notification_acceptance'], ['SELECT'])
 
     def test_worker_failure_capture_retains_primary_closed_context_and_discards_private_fields(self):
         records = [dict(event='jobs_failed', category='operation_failed', diagnostic={
-            'category': 'database', 'step': 'jobs_catalog_cleanup', 'nativeErrno': 1142,
-            'sqlOperation': 'delete', 'sqlTables': ['catalog_commands', 'private_table'],
-            'deniedTable': 'catalog_commands', 'lockingMode': 'none', 'sql': 'private_body',
+            'category': 'database', 'step': 'jobs_manual_cleanup', 'nativeErrno': 1142,
+            'sqlOperation': 'delete', 'sqlTables': ['manual_evidence', 'private_table'],
+            'deniedTable': 'manual_evidence', 'lockingMode': 'none', 'sql': 'private_body',
             'params': ['private_password'], 'schema': 'private_schema', 'account': 'private_account'}),
             dict(event='jobs_failed', category='close_failed', diagnostic={'category': 'operation', 'step': 'jobs_close'})]
-        captured = n.worker_failure(('\n'.join(json.dumps(row) for row in records)).encode(), ['catalog_commands'])
-        self.assertEqual(captured['step'], 'jobs_catalog_cleanup')
-        self.assertEqual(captured['sqlTables'], ['catalog_commands'])
+        captured = n.worker_failure(('\n'.join(json.dumps(row) for row in records)).encode(), ['manual_evidence'])
+        self.assertEqual(captured['step'], 'jobs_manual_cleanup')
+        self.assertEqual(captured['sqlTables'], ['manual_evidence'])
         self.assertEqual(captured['nativeErrno'], 1142)
         self.assertNotIn('private_', json.dumps(captured))
-        self.assertIsNone(n.worker_failure(b'{"event":"jobs_failed","category":"operation_failed"}', ['catalog_commands']))
+        self.assertIsNone(n.worker_failure(b'{"event":"jobs_failed","category":"operation_failed"}', ['manual_evidence']))
 
     def test_proxy_only_inherits_the_existing_minimal_bind_capability(self):
         template = json.loads(pathlib.Path(__file__).with_name('notifications.acceptance.compose.yaml').read_text())

@@ -66,7 +66,7 @@ interface Ports {
     | "memberSummariesInTransaction"
   >;
   trips: Pick<Trips, "contributions">;
-  catalogs?: Pick<Catalogs, "qualificationReferencesInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction">;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export function createQualifications(
@@ -737,22 +737,26 @@ export function createQualifications(
             if (latest && effectiveAt <= latest.effectiveAt) throw identityError(409);
             for (const rule of rules) {
               if (rule.type === "max_mass") exact(rule.maxKg as string);
-              if ("entityIds" in rule) {
-                if (
-                  !ports.catalogs ||
-                  !Array.isArray(rule.entityIds) ||
-                  rule.entityIds.length > 1000
-                )
+              if (rule.type === "allowed_trailer_types") {
+                const ids = (rule as { entityIds?: unknown }).entityIds;
+                if (!ports.catalogs || !Array.isArray(ids) || ids.length > 1000)
                   throw identityError(422);
-                if (
-                  !(await ports.catalogs.qualificationReferencesInTransaction(
-                    tx,
-                    selected.game,
-                    rule.type === "allowed_trailer_types" ? "trailer_type" : "adr_category",
-                    rule.entityIds as string[],
-                  ))
-                )
-                  throw identityError(422);
+                const found = await ports.catalogs.selectionsInTransaction(
+                  tx,
+                  (ids as string[]).map((id) => ({ kind: "trailer" as const, id })),
+                );
+                const kept = new Set(
+                  ((latest?.rules ?? []) as { type: string; entityIds?: string[] }[]).flatMap(
+                    (previous) =>
+                      previous.type === "allowed_trailer_types" ? (previous.entityIds ?? []) : [],
+                  ),
+                );
+                for (const id of ids as string[]) {
+                  const row = found.get(id);
+                  if (!row || row.game !== selected.game) throw identityError(422);
+                  if (row.hidden && !kept.has(id))
+                    throw identityError(422, "CATALOG_SELECTION_HIDDEN");
+                }
               }
             }
             await c(tx).insert(qualificationRules).values({

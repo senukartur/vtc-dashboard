@@ -11,11 +11,6 @@ export const SYNTHETIC_IDS = {
   TRAILER_HEAVY: "00000000-0000-4000-8000-000000000002",
   TRAILER_DISALLOWED: "00000000-0000-4000-8000-000000000099",
 
-  ADR_EXPLOSIVES_CLASS_1: "00000000-0000-4000-8000-000000000101",
-  ADR_GASES_CLASS_2: "00000000-0000-4000-8000-000000000102",
-  ADR_FLAMMABLE_CLASS_3: "00000000-0000-4000-8000-000000000103",
-  ADR_DISALLOWED_RADIOACTIVE: "00000000-0000-4000-8000-000000000199",
-
   CARGO_STANDARD: "00000000-0000-4000-8000-000000000201",
   CARGO_PRESCRIBED: "00000000-0000-4000-8000-000000000202",
   CARGO_MISMATCHED: "00000000-0000-4000-8000-000000000299",
@@ -39,7 +34,7 @@ export const traineeRules: readonly Rule[] = [
   } satisfies AllowedTrailerTypesRule,
   {
     type: "allowed_adr_categories",
-    entityIds: [], // Trainee is not certified for any hazardous cargo
+    classes: [], // Trainee is not certified for any hazardous cargo
   } satisfies AllowedAdrCategoriesRule,
 ];
 
@@ -54,7 +49,7 @@ export const driverLevel3Rules: readonly Rule[] = [
   } satisfies AllowedTrailerTypesRule,
   {
     type: "allowed_adr_categories",
-    entityIds: [SYNTHETIC_IDS.ADR_GASES_CLASS_2, SYNTHETIC_IDS.ADR_FLAMMABLE_CLASS_3],
+    classes: ["2", "3"],
   } satisfies AllowedAdrCategoriesRule,
 ];
 
@@ -69,10 +64,6 @@ export const driverLevel1Rules: readonly Rule[] = [
   } satisfies AllowedTrailerTypesRule,
   {
     type: "allowed_adr_categories",
-    entityIds: [
-      SYNTHETIC_IDS.ADR_EXPLOSIVES_CLASS_1,
-      SYNTHETIC_IDS.ADR_GASES_CLASS_2,
-      SYNTHETIC_IDS.ADR_FLAMMABLE_CLASS_3,
-    ],
+    classes: ["1", "2", "3"],
   } satisfies AllowedAdrCategoriesRule,
 ];

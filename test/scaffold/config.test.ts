@@ -24,11 +24,7 @@ test("notifications remain off by default and require the complete workflow plus
     QUALIFICATIONS_ENABLED: "true",
     QUALIFICATIONS_CURSOR_KEY: "2".repeat(64),
     CATALOGS_ENABLED: "true",
-    CATALOGS_SYNTHETIC: "true",
     CATALOGS_CURSOR_KEY: "3".repeat(64),
-    CATALOGS_MAX_FILE_BYTES: "1048576",
-    CATALOGS_ARTIFACT_TTL_MS: "86400000",
-    CATALOGS_POLICY_REVISION: "1",
     MANUAL_REPORTS_ENABLED: "true",
     MANUAL_REPORTS_KEY: "4".repeat(64),
     MANUAL_MAX_FILES_PER_REPORT: "5",
@@ -56,9 +52,8 @@ test("notifications remain off by default and require the complete workflow plus
     assert.throws(() => readConfig({ ...input, ...changes }));
 });
 
-test("catalog trust reads the same records from a private file or inline base64, never both", async () => {
-  const path = new URL("../../deploy/development/stage-catalog-evidence.json", import.meta.url);
-  const bytes = await readFile(path);
+test("catalog configuration is only a switch and a cursor key, separate from every retired setting", () => {
+  assert.equal(readConfig(fixture).catalogs, undefined);
   const input = {
     ...fixture,
     NODE_ENV: "production",
@@ -66,29 +61,26 @@ test("catalog trust reads the same records from a private file or inline base64,
     IDENTITY_SECRET: "nonfunctional-synthetic-identity-secret-42",
     IDENTITY_ORIGIN: "https://stage.example.invalid",
     CATALOGS_ENABLED: "true",
-    CATALOGS_SYNTHETIC: "false",
     CATALOGS_CURSOR_KEY: "3".repeat(64),
-    CATALOGS_MAX_FILE_BYTES: "1048576",
-    CATALOGS_ARTIFACT_TTL_MS: "86400000",
-    CATALOGS_POLICY_REVISION: "1",
   };
-  const fromFile = readConfig({ ...input, CATALOGS_EVIDENCE_FILE: fileURLToPath(path) });
-  const encoded = bytes.toString("base64");
-  const inline = readConfig({ ...input, CATALOGS_EVIDENCE_BASE64: encoded });
-  assert.equal(inline.catalogs?.evidence.length, 2);
-  assert.deepEqual(inline.catalogs?.evidence, fromFile.catalogs?.evidence);
-  assert.deepEqual(readConfig(input).catalogs?.evidence, []);
+  assert.deepEqual(readConfig(input).catalogs, { cursorKey: "3".repeat(64) });
+  // Former trust settings are ignored rather than read: an old environment still starts.
+  assert.deepEqual(
+    readConfig({
+      ...input,
+      CATALOGS_SYNTHETIC: "true",
+      CATALOGS_EVIDENCE_FILE: "/nonexistent/former-evidence.json",
+      CATALOGS_MAX_FILE_BYTES: "1",
+    }).catalogs,
+    { cursorKey: "3".repeat(64) },
+  );
   for (const changes of [
-    // Each half is valid alone, so only the exclusivity check refuses this.
-    { CATALOGS_EVIDENCE_BASE64: encoded, CATALOGS_EVIDENCE_FILE: fileURLToPath(path) },
-    // Valid JSON just over the 1 MiB trust bound once decoded.
-    { CATALOGS_EVIDENCE_BASE64: Buffer.from(`[${" ".repeat(1024 * 1024)}]`).toString("base64") },
-    { CATALOGS_EVIDENCE_BASE64: `${encoded}!` },
-    { CATALOGS_EVIDENCE_BASE64: encoded.slice(0, -1) },
-    { CATALOGS_EVIDENCE_BASE64: "" },
-    { CATALOGS_EVIDENCE_BASE64: Buffer.from("not json").toString("base64") },
+    { CATALOGS_ENABLED: "yes" },
+    { CATALOGS_CURSOR_KEY: "" },
+    { CATALOGS_CURSOR_KEY: "short" },
+    { CATALOGS_CURSOR_KEY: "G".repeat(64) },
   ])
-    assert.throws(() => readConfig({ ...input, ...changes }), /CATALOGS_EVIDENCE_BASE64/);
+    assert.throws(() => readConfig({ ...input, ...changes }));
 });
 
 test("telemetry activation requires all prerequisites, separate key and uint32-safe validated limits", () => {

@@ -18,12 +18,9 @@
     "trip_facts": ["SELECT", "INSERT"],
     "trip_fact_trailers": ["SELECT", "INSERT"],
     "trip_history": ["SELECT", "INSERT"],
-    "catalog_revisions": ["SELECT"],
-    "catalog_entities": ["SELECT"],
-    "catalog_facts": ["SELECT"],
-    "catalog_relations": ["SELECT"],
-    "catalog_publications": ["SELECT"],
-    "catalog_mappings": ["SELECT"],
+    "catalog_cities": ["SELECT"],
+    "catalog_cargoes": ["SELECT"],
+    "catalog_trailers": ["SELECT"],
     "manual_blob_generations": ["SELECT", "INSERT", "UPDATE(lease_until,updated_at)"]
   },
   "jobs": {

@@ -199,7 +199,6 @@ try {
       undefined,
       [
         "mail.deliver",
-        "catalog.import",
         "manual.evidence-delete",
         "manual.generation-delete",
         "reconciliation.search",

@@ -19,7 +19,7 @@ const label = (text: string, englishFallback = false) => ({
   requestedLocale: englishFallback ? "ru" : "en",
   renderedLocale: "en",
   englishFallback,
-  retired: false,
+  hidden: false,
 });
 const owner = accountFixture("en").data.member;
 const longCyrillicOrigin =

@@ -11,7 +11,8 @@ import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { tripEventAssociations } from "@vtc/db/trip-decisions-schema";
-import { eq, tripContributions, trips } from "@vtc/db/trips-schema";
+import { catalogCargoes } from "@vtc/db/catalogs-schema";
+import { eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -52,9 +53,9 @@ import {
 } from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { catalogEvents, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -75,12 +76,7 @@ let control: Connection,
   events: Events,
   reconciliation: Reconciliation,
   service: TripDecisions;
-let owner: Actor,
-  dispatcher: Actor,
-  deputy: Actor,
-  director: Actor,
-  directorCookie: string,
-  revisionId: string;
+let owner: Actor, dispatcher: Actor, deputy: Actor, director: Actor, directorCookie: string;
 let instant = Date.parse("2026-10-10T12:00:00.000Z");
 const now = () => new Date(instant),
   iso = () => now().toISOString(),
@@ -131,55 +127,18 @@ beforeAll(async () => {
   owner = await member();
   dispatcher = await member(["dispatcher"]);
   deputy = await member(["deputy_director"]);
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: key(),
-      maxFileBytes: 1048576,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-    now,
-  );
-  const entities = [
-    entity("fixture_north"),
-    entity("fixture_south"),
-    entity("fixture_crates", { kind: "cargo" }),
-    entity("fixture_trailer", { kind: "trailer_type" }),
-    // Over-limit fixtures: a second trailer type and cargo with allowed or blocked ADR classes.
-    entity("fixture_flatbed", { kind: "trailer_type" }),
-    entity("fixture_adr_allowed", { kind: "adr_category" }),
-    entity("fixture_adr_blocked", { kind: "adr_category" }),
-    entity("fixture_gas", { kind: "cargo", adrCategoryKey: "fixture_adr_allowed" }),
-    entity("fixture_hazard", { kind: "cargo", adrCategoryKey: "fixture_adr_blocked" }),
-  ].map((e) => ({
-    ...e,
-    mapNamespace: "official",
-    mappings: [{ provider: "ets2telemetry", sourceId: e.key }],
-  }));
-  const a = artifact("ets2", entities),
-    uploaded = await catalogs.upload(director, newId(), Buffer.from(JSON.stringify(a))),
-    operation = await catalogs.import(director, newId(), {
-      artifactId: uploaded.id,
-      sha256: uploaded.sha256,
-      game: "ets2",
-    });
-  await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-  const completed = await catalogs.operation(director, operation.id);
-  expect(completed.state).toBe("completed");
-  revisionId = completed.resultId as string;
-  const r = await catalogs.detail(director, revisionId);
-  await catalogs.publish(director, revisionId, newId(), r.version, {
-    expectedPublicationVersion: r.publicationVersion,
-    reason: "Fictional reviewed catalog",
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const seeded = await seedCatalog(unit, "ets2", {
+    cities: ["fixture_north", "fixture_south"],
+    cargoes: [
+      "fixture_crates",
+      // Over-limit fixtures: a cargo with an allowed and one with a blocked ADR class.
+      { code: "fixture_gas", adrClass: "2" },
+      { code: "fixture_hazard", adrClass: "3" },
+    ],
+    trailers: ["fixture_box", "fixture_flatbed"],
   });
-  for (const kind of ["city", "cargo", "trailer_type", "adr_category"])
-    for (const row of (await catalogs.entities(director, { revisionId, kind, locale: "en" })).items)
-      ids.set(row.display.label.replace("Fictional ", ""), row.id);
+  for (const [code, id] of seeded.ids) ids.set(code, id);
   tripsService = createTrips(
     unit,
     { cursorKey: key() },
@@ -301,7 +260,7 @@ async function report(
   target = manual,
   load: {
     cargoMassKg?: string;
-    cargo?: string;
+    cargo?: string | S["ManualCatalogSelection"];
     trailerType?: string;
     origin?: S["ManualCatalogSelection"];
     eventId?: string;
@@ -330,15 +289,14 @@ async function report(
   const pin = (name: string) => ({
     status: "resolved" as const,
     entityId: ids.get(name) as string,
-    catalogRevisionId: revisionId,
   });
   return target.submitReport(who, newId(), {
     fields: {
       game: "ets2",
       origin: load.origin ?? pin("fixture_north"),
       destination: pin("fixture_south"),
-      cargo: pin(load.cargo ?? "fixture_crates"),
-      trailerType: pin(load.trailerType ?? "fixture_trailer"),
+      cargo: typeof load.cargo === "object" ? load.cargo : pin(load.cargo ?? "fixture_crates"),
+      trailerType: pin(load.trailerType ?? "fixture_box"),
       cargoMassKg: load.cargoMassKg ?? "18000",
       actualDistanceM: "123400",
       evidenceIds: [id],
@@ -430,11 +388,15 @@ test("sufficient telemetry accepts once; exact replay leaves decision/outbox/con
   );
   expect(Number(events[0]?.n)).toBe(1);
 });
-test("open stays unassessed; missing history/build/recording/completion/distance routes review; known violation rejects", async () => {
+test("open stays unassessed; a missing game build no longer gates resolution; missing history/recording/completion/distance routes review; known violation rejects", async () => {
   const open = await receive(payload("started"));
   expect((await state(open.tripId))?.decision).toBe("unassessed");
+  const unbuilt = payload();
+  unbuilt.snapshot.context.gameBuild = { available: false, reason: "not-observed" };
+  unbuilt.snapshot.context.mapId = { available: false, reason: "not-observed" };
+  expect((await state((await receive(unbuilt)).tripId))?.decision).toBe("accepted");
   const missing = payload();
-  missing.snapshot.context.gameBuild = { available: false, reason: "not-observed" };
+  missing.snapshot.trailers.complete = false;
   const r = await receive(missing);
   expect((await state(r.tripId))?.decision).toBe("pending_review");
   expect(await credit(r.tripId)).toBeUndefined();
@@ -618,7 +580,6 @@ test("derived corrections reject foreign evidence and invalid catalog kinds with
       reason: "Fictional catalog kind refusal",
       evidenceIds: [],
       cargoId: ids.get("fixture_north") as string,
-      catalogRevisionId: revisionId,
     }),
   ).rejects.toMatchObject({ statusCode: 422 });
   expect(await credit(a.tripId)).toEqual(before);
@@ -1352,7 +1313,7 @@ test("event proposal references remain immutable and an old RR caller sees curre
       destinationCityId: null,
       prescribedCargoId: ids.get("fixture_crates") as string,
       prescribedMassKg: "21000",
-      prescribedTrailerTypeId: ids.get("fixture_trailer") as string,
+      prescribedTrailerTypeId: ids.get("fixture_box") as string,
     };
     const event = await events.create(director, newId(), eventInput),
       eventId = event.data.event.id,
@@ -1431,7 +1392,7 @@ test("event proposal references remain immutable and an old RR caller sees curre
     expect(result.value.current.confirmedEvent).toMatchObject({
       prescribedCargoId: ids.get("fixture_crates"),
       prescribedMassKg: "22000",
-      prescribedTrailerTypeId: ids.get("fixture_trailer"),
+      prescribedTrailerTypeId: ids.get("fixture_box"),
     });
     expect(result.value.current.attendanceRevisionId).not.toBe(
       detail.data.eventAssociation?.attendanceRevisionId,
@@ -1506,7 +1467,7 @@ test("Events support changes while decisions are disabled are durably caught up 
       destinationCityId: null,
       prescribedCargoId: ids.get("fixture_crates") as string,
       prescribedMassKg: "21000",
-      prescribedTrailerTypeId: ids.get("fixture_trailer") as string,
+      prescribedTrailerTypeId: ids.get("fixture_box") as string,
     };
     const created = await events.create(director, newId(), eventInput),
       eventId = created.data.event.id,
@@ -1760,15 +1721,7 @@ function composedModules() {
     undefined,
     undefined,
     false,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: key(),
-      maxFileBytes: 1048576,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
+    { cursorKey: key() },
     { cursorKey: key() },
     undefined,
     { key: key(), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
@@ -3189,7 +3142,7 @@ test("restrictive historical rules list every exceeded limit and block overrides
       [
         { type: "max_mass", maxKg: "20000" },
         { type: "allowed_trailer_types", entityIds: [ids.get("fixture_flatbed") as string] },
-        { type: "allowed_adr_categories", entityIds: [ids.get("fixture_adr_allowed") as string] },
+        { type: "allowed_adr_categories", classes: ["2"] },
       ],
       "Fictional restrictive rule window",
     );
@@ -3206,18 +3159,8 @@ test("restrictive historical rules list every exceeded limit and block overrides
       ]),
     ).toEqual([
       ["max_mass", "fail", "rule_mass_exceeded", []],
-      [
-        "allowed_trailer_types",
-        "fail",
-        "rule_trailer_type_disallowed",
-        [ids.get("fixture_trailer")],
-      ],
-      [
-        "allowed_adr_categories",
-        "fail",
-        "rule_adr_category_disallowed",
-        [ids.get("fixture_adr_blocked")],
-      ],
+      ["allowed_trailer_types", "fail", "rule_trailer_type_disallowed", [ids.get("fixture_box")]],
+      ["allowed_adr_categories", "fail", "rule_adr_category_disallowed", ["3"]],
     ]);
     expect((await overLimitDecide(all.tripId, true)).data.reasonCodes).toEqual([
       "rule_adr_category_disallowed",
@@ -3225,14 +3168,30 @@ test("restrictive historical rules list every exceeded limit and block overrides
       "rule_trailer_type_disallowed",
       "accepted_over_limits",
     ]);
-    // Cargo without a catalog ADR class leaves the ADR rule unknown beside the mass breach.
-    const unknown = await report(who, manual, {
+    // A listed non-hazardous cargo passes the ADR rule beside the mass breach.
+    const nonHazardous = await report(who, manual, {
       cargoMassKg: "21000",
       trailerType: "fixture_flatbed",
     });
+    expect((await service.review(dispatcher, nonHazardous.tripId)).data.acceptance).toEqual({
+      mode: "over_limits",
+      blockedReasonCodes: [],
+    });
+    // An unlisted cargo leaves the ADR class unknown and blocks the override.
+    const unknown = await report(who, manual, {
+      cargoMassKg: "21000",
+      trailerType: "fixture_flatbed",
+      cargo: {
+        status: "unresolved",
+        label: "Fictional unlisted cargo",
+        reasonCode: "not_listed",
+        locale: "en",
+        context: null,
+      },
+    });
     expect((await service.review(dispatcher, unknown.tripId)).data.acceptance).toEqual({
       mode: "unavailable",
-      blockedReasonCodes: ["rule_adr_category_unknown"],
+      blockedReasonCodes: ["cargo_unknown", "rule_adr_category_unknown"],
     });
     await expect(overLimitDecide(unknown.tripId, true)).rejects.toMatchObject({ statusCode: 409 });
     const eventInput: S["EventInput"] = {
@@ -3400,5 +3359,111 @@ test("concurrent over-limit decisions, member directory reads and reviewer histo
       acceptedOverLimits: true,
       reviewer: { id: dispatcher.userId },
     });
+  }
+});
+
+const publishFor = async (rules: S["Rule"][], reason: string) => {
+  const levelId = structuralLevels.ets2[0];
+  const level = (await qualifications.levels(director, "ets2")).items.find((v) => v.id === levelId);
+  if (!level) throw Error("SYNTHETIC_LEVEL_MISSING");
+  await qualifications.publish(director, levelId, newId(), level.version, {
+    rules,
+    requiredTrips: 1,
+    requiredDistanceM: "100",
+    reason,
+  });
+};
+const coupled = (first: string, second: string) => {
+  const p = payload();
+  p.snapshot.trailers.items = [
+    {
+      index: 0,
+      id: { available: true, value: "fixture_unrelated_id" },
+      bodyType: { available: true, value: first },
+      chainType: { available: true, value: "fixture_single" },
+    },
+    {
+      index: 1,
+      id: { available: true, value: "fixture_unrelated_id_2" },
+      bodyType: { available: true, value: second },
+      chainType: { available: true, value: "fixture_single" },
+    },
+  ];
+  return p;
+};
+const trailerRule = async (tripId: string) => {
+  const check = (await service.review(dispatcher, tripId)).data.qualificationCheck;
+  return check.rules.find((r) => r.ruleType === "allowed_trailer_types");
+};
+
+test("a coupling and a manual report are checked by the first body type only", async () => {
+  instant = Date.parse("2029-08-01T12:00:00.000Z");
+  try {
+    await publishFor(
+      [{ type: "allowed_trailer_types", entityIds: [ids.get("fixture_flatbed") as string] }],
+      "Fictional coupling rule",
+    );
+    // Trips must start after the rule publication to fall under it.
+    instant += 3600000;
+    const who = await member();
+    const disallowed = await receive(coupled("fixture_box", "fixture_flatbed"), who);
+    expect(await trailerRule(disallowed.tripId)).toMatchObject({
+      outcome: "fail",
+      reasonCode: "rule_trailer_type_disallowed",
+      entityIds: [ids.get("fixture_box")],
+    });
+    const allowed = await receive(coupled("fixture_flatbed", "fixture_box"), who);
+    expect(await trailerRule(allowed.tripId)).toMatchObject({
+      outcome: "pass",
+    });
+    const manualAllowed = await report(who, manual, { trailerType: "fixture_flatbed" });
+    expect(await trailerRule(manualAllowed.tripId)).toMatchObject({ outcome: "pass" });
+    const manualDenied = await report(who, manual, { trailerType: "fixture_box" });
+    expect(await trailerRule(manualDenied.tripId)).toMatchObject({
+      outcome: "fail",
+      reasonCode: "rule_trailer_type_disallowed",
+    });
+  } finally {
+    instant = Date.parse("2026-10-21T12:00:00.000Z");
+  }
+});
+
+test("editing a cargo ADR class leaves the stored snapshot and decision unchanged", async () => {
+  const r = await report(owner, manual, { cargo: "fixture_gas" });
+  const decided = await decide(r.tripId);
+  expect(decided.data).toMatchObject({ outcome: "accepted" });
+  const before = await state(r.tripId);
+  const readAdr = () =>
+    unit.run(
+      async (tx) =>
+        (
+          await unit
+            .client(tx)
+            .select({ adrClass: tripFacts.adrClass })
+            .from(tripFacts)
+            .where(eq(tripFacts.canonicalTripId, r.tripId))
+        )[0]?.adrClass,
+    );
+  expect(await readAdr()).toBe("2");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCargoes)
+      .set({ adrClass: "3" })
+      .where(eq(catalogCargoes.id, ids.get("fixture_gas") as string)),
+  );
+  try {
+    expect(await readAdr()).toBe("2");
+    expect(await state(r.tripId)).toEqual(before);
+    const review = await service.review(dispatcher, r.tripId);
+    expect(review.data.qualificationCheck.status).toBe("resolved");
+  } finally {
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(catalogCargoes)
+        .set({ adrClass: "2" })
+        .where(eq(catalogCargoes.id, ids.get("fixture_gas") as string)),
+    );
   }
 });

@@ -245,11 +245,7 @@ test(
     let accepted = false;
     const report = example("getManualReport:success").data,
       view = example("getTrip:extended-manual-revision");
-    const pin = (entityId: string) => ({
-      status: "resolved",
-      entityId,
-      catalogRevisionId: "61000000-0000-4000-8000-000000000020",
-    });
+    const pin = (entityId: string) => ({ status: "resolved", entityId });
     const fields = {
       game: "ets2",
       origin: pin(entityId),

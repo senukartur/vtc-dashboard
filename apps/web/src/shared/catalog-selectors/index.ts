@@ -1,2 +1,2 @@
 export { CatalogSelector } from "./CatalogSelector.js";
-export type { Game, Kind, Selection } from "./contracts.js";
+export type { CatalogList, Game, Kind } from "./contracts.js";

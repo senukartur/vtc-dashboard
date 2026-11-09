@@ -14,7 +14,7 @@ import {
   tripFactTrailers,
 } from "@vtc/db/trips-schema";
 import { decimal } from "../sources/contracts/canonical.js";
-import type { Fact, NormalizedTripEvidence, PinnedEntity } from "../sources/contracts/evidence.js";
+import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 
 export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
@@ -30,18 +30,8 @@ export function createFactRepository(unit: UnitOfWork) {
       adapterVersion: number,
       derived?: { baseFactId: string; resolutionRevisionId: string },
     ) {
-      function pin(value: Fact<PinnedEntity>) {
-        if (value.status === "unknown") return { entityId: null, factId: null, revisionId: null };
-        return {
-          entityId: value.value.entityId,
-          factId: value.value.factRevisionId,
-          revisionId: value.value.catalogRevisionId,
-        };
-      }
-      const origin = pin(f.origin),
-        destination = pin(f.destination),
-        cargo = pin(f.cargo),
-        adr = pin(f.adrCategory);
+      const entity = (value: Fact<TripEntity>) =>
+        value.status === "known" ? value.value.entityId : null;
       const quantity = (value: Fact<string>) => (value.status === "known" ? value.value : null);
       await c(tx)
         .insert(tripFacts)
@@ -54,7 +44,6 @@ export function createFactRepository(unit: UnitOfWork) {
           derivedSourceMessageId: derived ? f.sourceRecordId : null,
           canonicalTripId: tripId,
           adapterVersion,
-          catalogRevisionId: f.catalogRevisionId,
           outcome: f.outcome,
           recording: f.recording,
           startUtc: f.start.utc,
@@ -63,18 +52,10 @@ export function createFactRepository(unit: UnitOfWork) {
           endUtc: f.end.utc,
           endBasis: f.end.basis,
           endVerified: f.end.verifiedActual,
-          originCatalogRevisionId: origin.revisionId,
-          originEntityId: origin.entityId,
-          originFactId: origin.factId,
-          destinationCatalogRevisionId: destination.revisionId,
-          destinationEntityId: destination.entityId,
-          destinationFactId: destination.factId,
-          cargoCatalogRevisionId: cargo.revisionId,
-          cargoEntityId: cargo.entityId,
-          cargoFactId: cargo.factId,
-          adrCatalogRevisionId: adr.revisionId,
-          adrEntityId: adr.entityId,
-          adrFactId: adr.factId,
+          originCityId: entity(f.origin),
+          destinationCityId: entity(f.destination),
+          cargoId: entity(f.cargo),
+          adrClass: f.adrCategory.status === "known" ? f.adrCategory.value : null,
           cargoMassKg: quantity(f.cargoMassKg),
           actualDistanceM: quantity(f.actualDistanceM),
           measuredSegmentM: quantity(f.measuredSegmentM),
@@ -94,19 +75,13 @@ export function createFactRepository(unit: UnitOfWork) {
         await c(tx)
           .insert(tripFactTrailers)
           .values(
-            f.trailers.items.map((item, position) => {
-              const ref = pin(item);
-              return {
-                tripFactId: f.factRevisionId,
-                sourceAdapterVersion: adapterVersion,
-                position,
-                catalogRevisionId: item.status === "known" ? item.value.catalogRevisionId : null,
-                entityId: ref.entityId,
-                catalogFactId: ref.factId,
-                sourceField: item.status === "known" ? item.sourceField : null,
-                unknownReason: item.status === "unknown" ? item.reasonCode : null,
-              };
-            }),
+            f.trailers.items.map((item, position) => ({
+              tripFactId: f.factRevisionId,
+              position,
+              trailerId: entity(item),
+              sourceField: item.status === "known" ? item.sourceField : null,
+              unknownReason: item.status === "unknown" ? item.reasonCode : null,
+            })),
           );
     },
     async read(tx: TxContext, ids: string[], current = false) {
@@ -187,9 +162,9 @@ export function createFactRepository(unit: UnitOfWork) {
             ["cargoMassKg", "cargoMassKg"],
             ["actualStartAt", "startUtc"],
             ["actualCompletedAt", "endUtc"],
-            ["originCityId", "originEntityId"],
-            ["destinationCityId", "destinationEntityId"],
-            ["cargoId", "cargoEntityId"],
+            ["originCityId", "originCityId"],
+            ["destinationCityId", "destinationCityId"],
+            ["cargoId", "cargoId"],
           ] as const) {
             const actual = stored[column],
               expected = changes[key] ?? base[column];
@@ -234,14 +209,10 @@ export function createFactRepository(unit: UnitOfWork) {
             changes.trailerTypeId
               ? actualTrailers.length !== 1 ||
                 !stored.trailersComplete ||
-                actualTrailers[0]?.entityId !== changes.trailerTypeId
+                actualTrailers[0]?.trailerId !== changes.trailerTypeId
               : stored.trailersComplete !== base.trailersComplete ||
-                JSON.stringify(
-                  actualTrailers.map((t) => [t.entityId, t.catalogFactId, t.catalogRevisionId]),
-                ) !==
-                  JSON.stringify(
-                    baseTrailers.map((t) => [t.entityId, t.catalogFactId, t.catalogRevisionId]),
-                  )
+                JSON.stringify(actualTrailers.map((t) => t.trailerId)) !==
+                  JSON.stringify(baseTrailers.map((t) => t.trailerId))
           )
             throw new Error("DERIVED_TRAILER_PROVENANCE_INVALID");
         }
@@ -263,16 +234,8 @@ export function createFactRepository(unit: UnitOfWork) {
             sourceField: meta.sourceField,
           };
         };
-        const pin = (
-          entityId: string | null,
-          factId: string | null,
-          meta: Fact<PinnedEntity>,
-          revisionId: string | null = stored.catalogRevisionId,
-        ): Fact<PinnedEntity> => {
-          if (entityId === null) return unknown(meta);
-          if (!revisionId || !factId) throw new Error("SOURCE_PIN_INCONSISTENT");
-          return known({ entityId, factRevisionId: factId, catalogRevisionId: revisionId }, meta);
-        };
+        const entity = (id: string | null, meta: Fact<TripEntity>): Fact<TripEntity> =>
+          id === null ? unknown(meta) : known({ entityId: id }, meta);
         const quantity = (value: string | null, meta: Fact<string>): Fact<string> =>
           value === null ? unknown(meta) : known(decimal(value), meta);
         const orderedTrailers = trailers.filter((t) => t.tripFactId === stored.id);
@@ -281,22 +244,17 @@ export function createFactRepository(unit: UnitOfWork) {
           orderedTrailers.some((t, index) => t.position !== index)
         )
           throw new Error("SOURCE_TRAILER_HISTORY_INCOMPLETE");
-        const items: Fact<PinnedEntity>[] = orderedTrailers.map((t) => {
-          if (t.entityId === null)
+        const items: Fact<TripEntity>[] = orderedTrailers.map((t) => {
+          if (t.trailerId === null)
             return {
               status: "unknown",
               reasonCode: t.unknownReason ?? "normalized_unknown",
               sourceRecordId: messageId,
             };
-          if (!t.catalogFactId || !t.catalogRevisionId || !t.sourceField)
-            throw new Error("SOURCE_TRAILER_PIN_INCONSISTENT");
+          if (!t.sourceField) throw new Error("SOURCE_TRAILER_REF_INCONSISTENT");
           return {
             status: "known",
-            value: {
-              entityId: t.entityId,
-              factRevisionId: t.catalogFactId,
-              catalogRevisionId: t.catalogRevisionId,
-            },
+            value: { entityId: t.trailerId },
             sourceRecordId: messageId,
             sourceField: t.sourceField,
           };
@@ -309,37 +267,19 @@ export function createFactRepository(unit: UnitOfWork) {
           game: row.game,
           outcome: stored.outcome,
           recording: stored.recording,
-          catalogRevisionId: stored.catalogRevisionId,
           start: {
             utc: stored.startUtc,
             basis: stored.startBasis,
             verifiedActual: stored.startVerified,
           },
           end: { utc: stored.endUtc, basis: stored.endBasis, verifiedActual: stored.endVerified },
-          origin: pin(
-            stored.originEntityId,
-            stored.originFactId,
-            metadata.origin,
-            stored.originCatalogRevisionId ?? stored.catalogRevisionId,
-          ),
-          destination: pin(
-            stored.destinationEntityId,
-            stored.destinationFactId,
-            metadata.destination,
-            stored.destinationCatalogRevisionId ?? stored.catalogRevisionId,
-          ),
-          cargo: pin(
-            stored.cargoEntityId,
-            stored.cargoFactId,
-            metadata.cargo,
-            stored.cargoCatalogRevisionId ?? stored.catalogRevisionId,
-          ),
-          adrCategory: pin(
-            stored.adrEntityId,
-            stored.adrFactId,
-            metadata.adrCategory,
-            stored.adrCatalogRevisionId ?? stored.catalogRevisionId,
-          ),
+          origin: entity(stored.originCityId, metadata.origin),
+          destination: entity(stored.destinationCityId, metadata.destination),
+          cargo: entity(stored.cargoId, metadata.cargo),
+          adrCategory:
+            stored.adrClass === null
+              ? unknown(metadata.adrCategory)
+              : known(stored.adrClass, metadata.adrCategory),
           cargoMassKg: quantity(stored.cargoMassKg, metadata.cargoMassKg),
           actualDistanceM: quantity(stored.actualDistanceM, metadata.actualDistanceM),
           measuredSegmentM: quantity(stored.measuredSegmentM, metadata.measuredSegmentM),
@@ -365,14 +305,8 @@ export function createFactRepository(unit: UnitOfWork) {
 export function effectiveFacts(
   f: NormalizedTripEvidence,
 ): components["schemas"]["EffectiveTripFacts"] {
-  const pin = (value: Fact<PinnedEntity>) =>
-    value.status === "known"
-      ? {
-          entityId: value.value.entityId,
-          catalogRevisionId: value.value.catalogRevisionId,
-          factRevisionId: value.value.factRevisionId,
-        }
-      : null;
+  const pin = (value: Fact<TripEntity>) =>
+    value.status === "known" ? { entityId: value.value.entityId } : null;
   const quantity = (value: Fact<string>) => (value.status === "known" ? value.value : null);
   return {
     factRevisionId: f.factRevisionId,

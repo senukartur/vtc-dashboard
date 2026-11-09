@@ -285,7 +285,7 @@ export function Revision({
         : null;
   const selection = (value: DTO["ManualCatalogSelection"]) =>
     value.status === "resolved"
-      ? `${value.entityId} · ${value.catalogRevisionId}`
+      ? value.entityId
       : [value.label, t(value.reasonCode), value.locale, value.context].filter(Boolean).join(" · ");
   const display = (v: unknown) =>
     v && typeof v === "object" && !Array.isArray(v)

@@ -7,12 +7,9 @@ import {
   structuralLevels,
 } from "../../../apps/api/src/modules/qualifications/initialization.ts";
 import type { Telemetry } from "../../../apps/api/src/modules/sources/contracts/telemetry.ts";
-import { runPass } from "../../../apps/api/src/platform/jobs/runner.ts";
 import { composeIdentity } from "../../../apps/api/src/use-cases/identity-messaging.ts";
-import { artifact, entity } from "../../fixtures/catalogs/synthetic.ts";
 import { guardedSettings } from "../../persistence/support.ts";
 import { telemetryFixture } from "../../support/builders.ts";
-import { completeCatalogImport } from "../../support/catalog-import-fixture.ts";
 import { guardedAllocation } from "../../support/environment.ts";
 import { accountSecret, origin } from "./account.ts";
 import { browserTripConfig } from "./trip-config.ts";
@@ -20,15 +17,9 @@ export async function tripBrowserFixture() {
   const unit = createUnitOfWork(guardedSettings()),
     cfg = browserTripConfig(),
     catalogConfig = {
-      production: false,
-      synthetic: true,
       cursorKey: createHmac("sha256", guardedAllocation().token)
         .update("browser-trip-catalog")
         .digest("hex"),
-      maxFileBytes: 8388608,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
     };
   const composed = composeIdentity(
     unit,
@@ -85,50 +76,26 @@ export async function tripBrowserFixture() {
       trips = composed.trips;
     if (!catalogs || !qualifications || !trips) throw Error("TRIP_BROWSER_COMPOSITION_MISSING");
     const tripStore = trips.storeInTransaction;
-    const source = artifact(
-      "ets2",
-      [
-        entity("fixture_north"),
-        entity("fixture_south"),
-        entity("fixture_crates", { kind: "cargo" }),
-        entity("fixture_trailer", { kind: "trailer_type" }),
-      ].map((e) => ({
-        ...e,
-        mapNamespace: "official",
-        mappings: [{ provider: "ets2telemetry", sourceId: e.key }],
-      })),
-    );
-    const uploaded = await catalogs.upload(
-        staff,
-        randomUUID(),
-        Buffer.from(JSON.stringify(source)),
-      ),
-      operation = await catalogs.import(staff, randomUUID(), {
-        artifactId: uploaded.id,
-        sha256: uploaded.sha256,
-        game: "ets2",
-      });
-    const complete = await completeCatalogImport(
-      operation.id,
-      {
-        read: (id) => catalogs.operation(staff, id),
-        pass: (signal) => runPass(composed.jobsQueue, signal),
-      },
-      {
-        deadlineAt: performance.now() + 25000,
-        observe: (record) => console.log(JSON.stringify(record)),
-      },
-    );
-    const revisionId = complete.resultId;
-    const revision = await catalogs.detail(staff, revisionId);
-    await catalogs.publish(staff, revisionId, randomUUID(), revision.version, {
-      expectedPublicationVersion: revision.publicationVersion,
-      reason: "Synthetic reviewed trip browser catalog",
-    });
+    // Fixture codes match the telemetry examples; the trailer row is the example's body type.
     const ids: Record<string, string> = {};
-    for (const kind of ["city", "cargo", "trailer_type"]) {
-      for (const e of (await catalogs.entities(staff, { revisionId, kind, locale: "en" })).items)
-        ids[e.display.label.replace("Fictional ", "")] = e.id;
+    for (const [list, code] of [
+      ["cities", "fixture_north"],
+      ["cities", "fixture_south"],
+      ["cargoes", "fixture_crates"],
+      ["trailers", "fixture_box"],
+    ] as const) {
+      // Browser specs share one database within a run, so later fixtures reuse these rows.
+      const existing = (
+        await catalogs.list(staff, list, { game: "ets2", search: code, includeHidden: true })
+      ).items.find((v) => v.code === code);
+      const item =
+        existing ??
+        (await catalogs.create(staff, list, randomUUID(), {
+          game: "ets2",
+          code,
+          nameEn: `Fictional ${code}`,
+        }));
+      ids[code] = item.id;
     }
     const level = (await qualifications.levels(staff, "ets2")).items.find(
       (v) => v.id === structuralLevels.ets2[0],
@@ -144,14 +111,13 @@ export async function tripBrowserFixture() {
     const pin = (name: string): components["schemas"]["ManualResolvedSelection"] => ({
       status: "resolved",
       entityId: ids[name] as string,
-      catalogRevisionId: revisionId,
     });
     const fields = {
       game: "ets2" as const,
       origin: pin("fixture_north"),
       destination: pin("fixture_south"),
       cargo: pin("fixture_crates"),
-      trailerType: pin("fixture_trailer"),
+      trailerType: pin("fixture_box"),
       cargoMassKg: "18000",
       actualDistanceM: "123400",
       evidenceIds: [] as string[],
@@ -212,7 +178,6 @@ export async function tripBrowserFixture() {
       password,
       userId,
       fields,
-      revisionId,
       ids,
       telemetry,
       now,

@@ -35,7 +35,7 @@ const routes = [
   "/api/v1/trips?scope=company&limit=5",
   "/api/v1/trips?scope=review&decision=pending_review",
   "/api/v1/qualification-levels?game=ets2",
-  "/api/v1/catalogs/revisions?game=ets2",
+  "/api/v1/catalogs/summary?game=ets2",
   "/api/v1/reconciliation-candidates",
   "/api/v1/admin/members",
   "/api/v1/admin/applications",
@@ -43,7 +43,6 @@ const routes = [
   "/api/v1/admin/company-settings",
   "/api/v1/admin/qualification-members",
   "/api/v1/admin/source-capabilities",
-  "/api/v1/admin/catalog-import-policy",
 ];
 let unit, app;
 try {

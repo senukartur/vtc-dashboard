@@ -77,7 +77,7 @@ Store any valid snapshot even if a lower revision/start has not arrived. Apply a
 | Context | Available `gameBuild`, `sourceLocale`, `mapId`, `dlcIds`; `versions` includes supported native protocol, SDK archive, telemetry API and game-telemetry API availability. A retail build is never derived from the API version |
 | Mode | `gameMode:{mode:single-player|truckersmp|unknown,method:module-scan|process-scan|none,confidence:strong|weak|none,ambiguous:boolean}`; no module paths |
 | Job | Origin/destination each have available city/company source IDs and names; available cargo ID/name, actual mass kg, unit mass kg/count, market, special-job and cargo-loaded flags |
-| Trailer | `trailers:{complete:boolean,items:[{index,id,bodyType,chainType}]}` with availability on identifiers/types; at most 10 active slots. Any mid-trip rule-relevant configuration change, missed configuration or omitted history is reflected in evidence/review, not hidden by the latest snapshot |
+| Trailer | `trailers:{complete:boolean,items:[{index,id,bodyType,chainType}]}` with availability on identifiers/types; at most 10 active slots. Any mid-trip rule-relevant configuration change, missed configuration or omitted history is reflected in evidence/review, not hidden by the latest snapshot The dashboard recognizes a coupling by `items[0].bodyType` and keeps the other fields as provenance. |
 | Distances | `plannedDistance` m, `observedDistance` m, `deliveredDistance` m are separate available metrics |
 | Other outcome facts | Available fuel used L and cargo damage fraction; available expected income/revenue/penalty as exact raw monetary values, not display conversions |
 | Quality | `evidence:{startObserved,endObserved,ruleContextComplete,clockAnomaly,reasons:[bounded codes]}`. Aggregate all relevant completeness causes; no arbitrary raw event/interval detail |
@@ -90,7 +90,7 @@ Game-mode evidence also preserves producer invariants. `unknown` pairs with `met
 
 The native protocol defensively accepts damage up to 1,000; a value above the ordinary fraction range 0–1 is anomalous evidence for review, not a valid 100,000% display or a value to clamp silently. Reason codes are bounded project-defined lowercase identifiers; unrecognized codes require review/compatibility handling and must not be discarded as proof of completeness.
 
-Use exact game/source IDs for server-side catalog normalization. Labels and locale are display/provenance only. Unknown map/build/name-only ambiguities go through the catalog review path. Resolve regions/ADR from the applicable catalog version; do not pretend these fields are supplied by the current job payload. Catalog changes cannot silently change historical rules.
+Use exact game/source IDs for server-side catalog normalization. Labels and locale are display/provenance only. Recognition is by exact `(game, code)` with no build or map gate. Resolve regions/ADR from the matching row; do not pretend these fields are supplied by the current job payload. Catalog changes cannot silently change historical rules.
 
 ### Actual time, distance and qualification
 

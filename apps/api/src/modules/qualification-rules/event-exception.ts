@@ -1,4 +1,4 @@
-import type { Fact, NormalizedTripEvidence, PinnedEntity } from "../sources/contracts/evidence.js";
+import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
 import {
   type EvaluationContext,
   type EventPrescribedLoadMatchResult,
@@ -110,7 +110,7 @@ export function matchEventPrescribedLoad(
       evidence.trailers.complete &&
       evidence.trailers.items.length > 0 &&
       evidence.trailers.items.every(
-        (t: Fact<PinnedEntity>) =>
+        (t: Fact<TripEntity>) =>
           t.status === "known" && t.value.entityId === event.prescribedTrailerTypeId,
       );
   }

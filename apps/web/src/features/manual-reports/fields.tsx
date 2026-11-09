@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { formatUtc } from "../../shared/formatting.js";
@@ -13,13 +13,11 @@ import type { DTO } from "../trips/transport.js";
 export function ManualCatalogField({
   name,
   game,
-  revision,
   value,
   onChange,
 }: {
   name: "origin" | "destination" | "cargo" | "trailerType";
   game: "ets2" | "ats";
-  revision: string;
   value: DTO["ManualCatalogSelection"] | undefined;
   onChange: (value: DTO["ManualCatalogSelection"] | undefined) => void;
 }) {
@@ -88,20 +86,9 @@ export function ManualCatalogField({
         <CatalogSelector
           label={t(name)}
           game={game}
-          revisionId={revision}
-          kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer_type" : "city"}
-          value={
-            value?.status === "resolved"
-              ? { entityId: value.entityId, revisionId: value.catalogRevisionId }
-              : null
-          }
-          onChange={(v) =>
-            onChange(
-              v
-                ? { status: "resolved", entityId: v.entityId, catalogRevisionId: v.revisionId }
-                : undefined,
-            )
-          }
+          kind={name === "cargo" ? "cargo" : name === "trailerType" ? "trailer" : "city"}
+          value={value?.status === "resolved" ? value.entityId : null}
+          onChange={(v) => onChange(v ? { status: "resolved", entityId: v } : undefined)}
         />
       )}
     </fieldset>

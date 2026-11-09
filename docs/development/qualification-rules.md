@@ -101,7 +101,7 @@ Cargo mass and distance values are canonical non-negative decimal strings. The e
 - **Strict schema validation**: Every rule configuration must match its registered schema without extra properties:
   - `max_mass`: `{ type: "max_mass", maxKg: string }`
   - `allowed_trailer_types`: `{ type: "allowed_trailer_types", entityIds: string[] }`
-  - `allowed_adr_categories`: `{ type: "allowed_adr_categories", entityIds: string[] }`
+  - `allowed_adr_categories`: `{ type: "allowed_adr_categories", classes: ("1" | "2" | "3" | "4" | "6" | "8")[] }`. Non-hazardous cargo passes this rule when the trip knows the cargo is not ADR.
 - **Extensible**: New rule evaluators implementing `RuleEvaluator<R>` can be registered into custom or default registries.
 
 ## Event Prescribed Load Exception Precedence (Scenario 14)

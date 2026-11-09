@@ -134,6 +134,13 @@
       "when": 1793732836521,
       "tag": "0018_trip_review_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1793900000000,
+      "tag": "0019_simple_catalogs",
+      "breakpoints": true
     }
   ]
 }

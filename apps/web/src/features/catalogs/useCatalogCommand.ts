@@ -7,7 +7,22 @@ import { csrfEnvelope } from "../admissions/schema.js";
 import { retryDelay } from "../admissions/transport.js";
 import { type CatalogAttempt, catalogAttempt } from "./transport.js";
 
-// Commands retain a key only in this short-lived closure; uploaded bytes never enter query history/storage.
+const statusKinds: Record<number, AccountFailure["kind"]> = {
+  400: "invalid",
+  401: "unauthorized",
+  403: "forbidden",
+  404: "unavailable",
+  409: "conflict",
+  412: "conflict",
+  413: "invalid",
+  415: "invalid",
+  422: "invalid",
+  428: "conflict",
+  429: "limited",
+  503: "unavailable",
+};
+
+/** Commands retain a key only in this short-lived closure; uploaded bytes never enter storage. */
 export function useCatalogCommand() {
   const session = useSession(),
     active = useRef(true),
@@ -15,6 +30,8 @@ export function useCatalogCommand() {
     controller = useRef<AbortController | null>(null);
   const [pending, setPending] = useState(false),
     [failure, setFailure] = useState<AccountFailure | null>(null),
+    [errorCode, setErrorCode] = useState<string | null>(null),
+    [errorDetails, setErrorDetails] = useState<unknown>(null),
     [waitUntil, setWaitUntil] = useState(0),
     [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -34,23 +51,24 @@ export function useCatalogCommand() {
     path: string,
     body: unknown,
     schema: T,
-    etag?: string,
-    fingerprint?: string,
+    options: { method?: "POST" | "PATCH"; etag?: string; fingerprint?: string } = {},
   ): Promise<z.output<T> | undefined> {
     if (controller.current || waitUntil > Date.now()) return;
     const ctl = new AbortController();
     controller.current = ctl;
     setPending(true);
     setFailure(null);
-    const timer = window.setTimeout(() => ctl.abort(), 15000);
+    setErrorCode(null);
+    setErrorDetails(null);
+    const timer = window.setTimeout(() => ctl.abort(), 30000);
     attempt.current = catalogAttempt(
-      fingerprint ?? JSON.stringify([path, body, etag]),
+      options.fingerprint ?? JSON.stringify([path, options.method, body, options.etag]),
       attempt.current,
     );
     try {
       const csrf = await read("/auth/csrf", csrfEnvelope, ctl.signal);
       const response = await fetch(`/api/v1${path}`, {
-        method: "POST",
+        method: options.method ?? "POST",
         credentials: "same-origin",
         cache: "no-store",
         signal: ctl.signal,
@@ -59,26 +77,20 @@ export function useCatalogCommand() {
           "X-CSRF-Token": csrf.data.data.token,
           "Idempotency-Key": attempt.current.key,
           ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-          ...(etag ? { "If-Match": etag } : {}),
+          ...(options.etag ? { "If-Match": options.etag } : {}),
         },
         body: body instanceof FormData ? body : JSON.stringify(body),
       });
-      if (![200, 201, 202].includes(response.status)) {
-        const map: Record<number, AccountFailure["kind"]> = {
-          400: "invalid",
-          401: "unauthorized",
-          403: "forbidden",
-          404: "unavailable",
-          409: "conflict",
-          413: "invalid",
-          415: "invalid",
-          422: "invalid",
-          428: "conflict",
-          429: "limited",
-          503: "unavailable",
-        };
+      if (response.status !== 200 && response.status !== 201) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: { code?: unknown; details?: unknown };
+        } | null;
+        if (active.current && typeof payload?.error?.code === "string") {
+          setErrorCode(payload.error.code);
+          setErrorDetails(payload.error.details ?? null);
+        }
         throw new AccountFailure(
-          map[response.status] ?? "uncertain",
+          statusKinds[response.status] ?? "uncertain",
           retryDelay(response.headers.get("Retry-After")),
         );
       }
@@ -108,10 +120,14 @@ export function useCatalogCommand() {
     run,
     pending,
     failure,
+    errorCode,
+    errorDetails,
     seconds: Math.max(0, Math.ceil((waitUntil - now) / 1000)),
     reset: () => {
       attempt.current = null;
       setFailure(null);
+      setErrorCode(null);
+      setErrorDetails(null);
     },
   };
 }

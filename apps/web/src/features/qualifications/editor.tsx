@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Selection } from "../../shared/catalog-selectors/contracts.js";
+import { type AdrClass, adrClasses } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
-import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
@@ -11,7 +10,6 @@ import {
   LevelContext,
   Recovery,
   RulesView,
-  State,
 } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
 import { countInput, type DTO, exactInput, type Game, utcInput } from "./transport.js";
@@ -51,7 +49,7 @@ export function LevelEditor({
       cargoMassKg: null,
       trailerTypeIds: [],
       trailersComplete: false,
-      adr: { status: "unknown", entityId: null },
+      adr: { status: "unknown", adrClass: null },
     }),
     [sampleMass, setSampleMass] = useState(""),
     [preview, setPreview] = useState<{
@@ -59,11 +57,7 @@ export function LevelEditor({
       result: DTO["QualificationPreview"];
     } | null>(null),
     [success, setSuccess] = useState(false);
-  const catalog = usePublishedRevisions(level.game),
-    revisions = catalog.data?.pages.flatMap((p) => p.data.data.items) ?? [],
-    [revision, setRevision] = useState("");
-  const revisionId = revision || revisions[0]?.id || "",
-    max = exactInput(mass),
+  const max = exactInput(mass),
     requiredTrips = countInput(count),
     requiredDistanceM = distance.trim() ? exactInput(distance) : null,
     effectiveAt = schedule ? utcInput(time) : undefined;
@@ -94,7 +88,6 @@ export function LevelEditor({
       schedule,
       time,
       name,
-      revisionId,
     ]),
     fresh = preview?.fingerprint === fingerprint;
   const input: DTO["RulesInput"] = {
@@ -120,7 +113,14 @@ export function LevelEditor({
   function toggle(type: DTO["Rule"]["type"], enabled: boolean) {
     setRules((old) =>
       enabled
-        ? [...old, type === "max_mass" ? { type, maxKg: mass } : { type, entityIds: [] }]
+        ? [
+            ...old,
+            type === "max_mass"
+              ? { type, maxKg: mass }
+              : type === "allowed_trailer_types"
+                ? { type, entityIds: [] }
+                : { type, classes: [] },
+          ]
         : old.filter((r) => r.type !== type),
     );
     setSuccess(false);
@@ -201,32 +201,6 @@ export function LevelEditor({
             {level.name} → {name}
           </p>
         </Confirm>
-        <State query={catalog} />
-        <Label htmlFor={`catalog-${level.id}`}>{t("catalog")}</Label>
-        <select
-          className="input"
-          id={`catalog-${level.id}`}
-          value={revisionId}
-          onChange={(e) => setRevision(e.target.value)}
-        >
-          <option value="">—</option>
-          {revisions.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.game.toUpperCase()} · {r.id}
-            </option>
-          ))}
-        </select>
-        {catalog.hasNextPage && (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void catalog.fetchNextPage()}
-            disabled={catalog.isFetchingNextPage}
-          >
-            {t("trips:next")}
-          </Button>
-        )}
-        {!revisionId && <p>{t("catalogMissing")}</p>}
         {(["max_mass", "allowed_trailer_types", "allowed_adr_categories"] as const).map((type) => {
           const rule = rules.find((r) => r.type === type);
           return (
@@ -252,11 +226,16 @@ export function LevelEditor({
                       aria-invalid={!massValid}
                     />
                   </>
+                ) : type === "allowed_adr_categories" ? (
+                  <AdrClassAllowlist
+                    classes={"classes" in rule ? rule.classes : []}
+                    onChange={(classes) =>
+                      setRules((old) => old.map((r) => (r.type === type ? { type, classes } : r)))
+                    }
+                  />
                 ) : (
                   <Allowlist
                     game={level.game}
-                    revision={revisionId}
-                    type={type}
                     ids={"entityIds" in rule ? rule.entityIds : []}
                     onChange={(ids) =>
                       setRules((old) =>
@@ -327,12 +306,7 @@ export function LevelEditor({
             aria-invalid={sampleMassValue === undefined}
           />
           <h5>{t("chain")}</h5>
-          <SampleTrailers
-            game={level.game}
-            revision={revisionId}
-            sample={sample}
-            onChange={setSample}
-          />
+          <SampleTrailers game={level.game} sample={sample} onChange={setSample} />
           <Label htmlFor={`adr-status-${level.id}`}>{t("adrStatus")}</Label>
           <select
             className="input"
@@ -341,7 +315,7 @@ export function LevelEditor({
             onChange={(e) =>
               setSample((old) => ({
                 ...old,
-                adr: { status: e.target.value as typeof sample.adr.status, entityId: null },
+                adr: { status: e.target.value as typeof sample.adr.status, adrClass: null },
               }))
             }
           >
@@ -352,19 +326,27 @@ export function LevelEditor({
             ))}
           </select>
           {sample.adr.status === "known" && (
-            <CatalogSelector
-              label={t("sampleAdr")}
-              game={level.game}
-              revisionId={revisionId}
-              kind="adr_category"
-              value={sample.adr.entityId ? { entityId: sample.adr.entityId, revisionId } : null}
-              onChange={(v) =>
-                setSample((old) => ({
-                  ...old,
-                  adr: { status: "known", entityId: v?.entityId ?? null },
-                }))
-              }
-            />
+            <>
+              <Label htmlFor={`adr-class-${level.id}`}>{t("sampleAdr")}</Label>
+              <select
+                className="input"
+                id={`adr-class-${level.id}`}
+                value={sample.adr.adrClass ?? ""}
+                onChange={(e) =>
+                  setSample((old) => ({
+                    ...old,
+                    adr: { status: "known", adrClass: (e.target.value || null) as AdrClass | null },
+                  }))
+                }
+              >
+                <option value="">{t("trips:unknown")}</option>
+                {adrClasses.map((value) => (
+                  <option key={value} value={value}>
+                    {t("catalogs:adrClass", { class: value })}
+                  </option>
+                ))}
+              </select>
+            </>
           )}
         </fieldset>
       </fieldset>
@@ -375,7 +357,7 @@ export function LevelEditor({
         disabled={
           !valid ||
           sampleMassValue === undefined ||
-          (sample.adr.status === "known" && !sample.adr.entityId) ||
+          (sample.adr.status === "known" && !sample.adr.adrClass) ||
           busy ||
           previewCommand.seconds > 0
         }
@@ -456,45 +438,61 @@ export function LevelEditor({
   );
 }
 
+function AdrClassAllowlist({
+  classes,
+  onChange,
+}: {
+  classes: AdrClass[];
+  onChange: (classes: AdrClass[]) => void;
+}) {
+  const { t } = useTranslation("qualifications");
+  return (
+    <div className="qualification-adr-classes">
+      {adrClasses.map((value) => (
+        <label className="qualification-check" key={value}>
+          <input
+            type="checkbox"
+            checked={classes.includes(value)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...classes, value] : classes.filter((c) => c !== value))
+            }
+          />
+          {t("catalogs:adrClass", { class: value })}
+        </label>
+      ))}
+      {!classes.length && <p>{t("emptyAllowlist")}</p>}
+    </div>
+  );
+}
 function Allowlist({
   game,
-  revision,
-  type,
   ids,
   onChange,
 }: {
   game: Game;
-  revision: string;
-  type: "allowed_trailer_types" | "allowed_adr_categories";
   ids: string[];
   onChange: (ids: string[]) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    [selected, setSelected] = useState<Selection | null>(null),
+    [selected, setSelected] = useState<string | null>(null),
     [rowPage, setRowPage] = useState(0);
   return (
     <div className="stack">
       <CatalogSelector
-        label={t(type)}
+        label={t("allowed_trailer_types")}
         game={game}
-        revisionId={revision}
-        kind={type === "allowed_trailer_types" ? "trailer_type" : "adr_category"}
+        kind="trailer"
         value={selected}
         onChange={setSelected}
       />
       <Button
         type="button"
         variant="outline"
-        disabled={
-          !selected ||
-          selected.revisionId !== revision ||
-          ids.length >= 1000 ||
-          ids.includes(selected.entityId)
-        }
+        disabled={!selected || ids.length >= 1000 || ids.includes(selected)}
         onClick={() => {
           if (selected) {
             setRowPage(Math.floor(ids.length / 25));
-            onChange([...ids, selected.entityId]);
+            onChange([...ids, selected]);
             setSelected(null);
           }
         }}
@@ -504,9 +502,7 @@ function Allowlist({
       {!ids.length && <p>{t("emptyAllowlist")}</p>}
       <DraftEntities
         ids={ids}
-        revision={revision}
         game={game}
-        kind={type === "allowed_trailer_types" ? "trailer_type" : "adr_category"}
         page={rowPage}
         onPage={setRowPage}
         onRemove={(index) => onChange(ids.filter((_, i) => i !== index))}
@@ -516,25 +512,22 @@ function Allowlist({
 }
 function SampleTrailers({
   game,
-  revision,
   sample,
   onChange,
 }: {
   game: Game;
-  revision: string;
   sample: DTO["QualificationPreviewInput"]["sample"];
   onChange: (value: DTO["QualificationPreviewInput"]["sample"]) => void;
 }) {
   const { t } = useTranslation("qualifications"),
-    [selected, setSelected] = useState<Selection | null>(null),
+    [selected, setSelected] = useState<string | null>(null),
     [rowPage, setRowPage] = useState(0);
   return (
     <>
       <CatalogSelector
         label={t("sampleTrailer")}
         game={game}
-        revisionId={revision}
-        kind="trailer_type"
+        kind="trailer"
         value={selected}
         onChange={setSelected}
       />
@@ -542,15 +535,13 @@ function SampleTrailers({
         <Button
           type="button"
           variant="outline"
-          disabled={
-            !selected || selected.revisionId !== revision || sample.trailerTypeIds.length >= 32
-          }
+          disabled={!selected || sample.trailerTypeIds.length >= 1}
           onClick={() => {
             if (selected) {
               setRowPage(Math.floor(sample.trailerTypeIds.length / 25));
               onChange({
                 ...sample,
-                trailerTypeIds: [...sample.trailerTypeIds, selected.entityId],
+                trailerTypeIds: [...sample.trailerTypeIds, selected],
               });
               setSelected(null);
             }
@@ -561,7 +552,7 @@ function SampleTrailers({
         <Button
           type="button"
           variant="outline"
-          disabled={sample.trailerTypeIds.length >= 32}
+          disabled={sample.trailerTypeIds.length >= 1}
           onClick={() => {
             setRowPage(Math.floor(sample.trailerTypeIds.length / 25));
             onChange({ ...sample, trailerTypeIds: [...sample.trailerTypeIds, null] });
@@ -573,9 +564,7 @@ function SampleTrailers({
       {!sample.trailerTypeIds.length && <p>{t("noTrailers")}</p>}
       <DraftEntities
         ids={sample.trailerTypeIds}
-        revision={revision}
         game={game}
-        kind="trailer_type"
         page={rowPage}
         onPage={setRowPage}
         onRemove={(index) =>

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { AdrClass } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import {
   type AllowedAdrCategoriesRule,
   type AllowedTrailerTypesRule,
@@ -265,12 +266,12 @@ describe("Qualification Rules Module — VTC-027", () => {
   describe("4. Evaluator: allowed_adr_categories", () => {
     const traineeAdrRule: AllowedAdrCategoriesRule = {
       type: "allowed_adr_categories",
-      entityIds: [], // Trainee has no ADR certifications
+      classes: [], // Trainee has no ADR certifications
     };
 
     const driverLevel3AdrRule: AllowedAdrCategoriesRule = {
       type: "allowed_adr_categories",
-      entityIds: [SYNTHETIC_IDS.ADR_GASES_CLASS_2],
+      classes: ["2"],
     };
 
     test("passes non-ADR cargo for drivers without ADR certifications", () => {
@@ -294,17 +295,17 @@ describe("Qualification Rules Module — VTC-027", () => {
 
     test("passes permitted ADR category", () => {
       const adrGasTrip = createSyntheticTripEvidence({
-        adrCategory: pinnedEntityFact(SYNTHETIC_IDS.ADR_GASES_CLASS_2, "adr_category"),
+        adrCategory: knownFact<AdrClass>("2", "snapshot.adr"),
       });
       const res = evaluateQualificationRules(adrGasTrip, [driverLevel3AdrRule]);
       expect(res.outcome).toBe("pass");
       expect(res.ruleResults[0]?.reasonCode).toBe(REASON_CODES.RULE_PASSED);
-      expect(res.ruleResults[0]?.observed).toBe(SYNTHETIC_IDS.ADR_GASES_CLASS_2);
+      expect(res.ruleResults[0]?.observed).toBe("2");
     });
 
     test("fails disallowed ADR category", () => {
       const adrExplosivesTrip = createSyntheticTripEvidence({
-        adrCategory: pinnedEntityFact(SYNTHETIC_IDS.ADR_EXPLOSIVES_CLASS_1, "adr_category"),
+        adrCategory: knownFact<AdrClass>("1", "snapshot.adr"),
       });
       const res = evaluateQualificationRules(adrExplosivesTrip, [driverLevel3AdrRule]);
       expect(res.outcome).toBe("fail");
@@ -324,27 +325,34 @@ describe("Qualification Rules Module — VTC-027", () => {
       expect(
         validateAllowedAdrCategoriesConfig({
           type: "allowed_adr_categories",
-          entityIds: [SYNTHETIC_IDS.ADR_GASES_CLASS_2],
+          classes: ["2"],
         }),
       ).toBe(true);
+      expect(
+        validateAllowedAdrCategoriesConfig({
+          type: "allowed_adr_categories",
+          classes: [],
+        }),
+      ).toBe(true);
+
+      // Rejects classes that do not exist in the game, old ID lists and extra properties
+      for (const classes of [["5"], ["7"], ["bad-class"], ["2", "2"]])
+        expect(
+          validateAllowedAdrCategoriesConfig({
+            type: "allowed_adr_categories",
+            classes,
+          }),
+        ).toBe(false);
       expect(
         validateAllowedAdrCategoriesConfig({
           type: "allowed_adr_categories",
           entityIds: [],
-        }),
-      ).toBe(true);
-
-      // Rejects non-UUIDs and extra properties
-      expect(
-        validateAllowedAdrCategoriesConfig({
-          type: "allowed_adr_categories",
-          entityIds: ["bad-uuid"],
         }),
       ).toBe(false);
       expect(
         validateAllowedAdrCategoriesConfig({
           type: "allowed_adr_categories",
-          entityIds: [],
+          classes: [],
           otherField: 123,
         }),
       ).toBe(false);
@@ -359,7 +367,7 @@ describe("Qualification Rules Module — VTC-027", () => {
         complete: true,
         items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)], // violates ordinary Trainee standard trailer limit
       },
-      adrCategory: pinnedEntityFact(SYNTHETIC_IDS.ADR_EXPLOSIVES_CLASS_1, "adr_category"), // violates Trainee no-ADR limit
+      adrCategory: knownFact<AdrClass>("1", "snapshot.adr"), // violates Trainee no-ADR limit
     });
 
     const confirmedEventContext: EvaluationContext = createSyntheticEvaluationContext({
@@ -902,7 +910,7 @@ describe("Qualification Rules Module — VTC-027", () => {
           complete: true,
           items: [pinnedEntityFact(SYNTHETIC_IDS.TRAILER_HEAVY)],
         },
-        adrCategory: pinnedEntityFact(SYNTHETIC_IDS.ADR_EXPLOSIVES_CLASS_1, "adr_category"),
+        adrCategory: knownFact<AdrClass>("1", "snapshot.adr"),
       });
       expect(evaluateQualificationRules(heavyTrip, driverLevel3Rules).outcome).toBe("fail");
       expect(evaluateQualificationRules(heavyTrip, driverLevel1Rules).outcome).toBe("pass");

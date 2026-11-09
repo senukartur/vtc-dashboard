@@ -7,7 +7,7 @@ import {
   type RuleEvaluator,
 } from "../contracts.js";
 
-const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const ADR_CLASSES = new Set(["1", "2", "3", "4", "6", "8"]);
 
 /**
  * Validates whether the given value strictly conforms to the AllowedAdrCategoriesRule schema.
@@ -26,11 +26,14 @@ export function validateAllowedAdrCategoriesConfig(
   if (record.type !== "allowed_adr_categories") {
     return false;
   }
-  if (!Array.isArray(record.entityIds)) {
+  if (!Array.isArray(record.classes)) {
     return false;
   }
-  for (const id of record.entityIds) {
-    if (typeof id !== "string" || !UUID_V4_REGEX.test(id)) {
+  if (new Set(record.classes).size !== record.classes.length) {
+    return false;
+  }
+  for (const value of record.classes) {
+    if (typeof value !== "string" || !ADR_CLASSES.has(value)) {
       return false;
     }
   }
@@ -49,15 +52,15 @@ export const allowedAdrCategoriesEvaluator: RuleEvaluator<AllowedAdrCategoriesRu
   ): RuleEvaluationDetail {
     const fact = evidence.adrCategory;
 
-    // 1. Cargo has a resolved pinned ADR category
+    // 1. Cargo has an ADR class recorded on its trip fact
     if (fact.status === "known") {
-      const observed = fact.value.entityId;
-      if (rule.entityIds.includes(observed)) {
+      const observed = fact.value;
+      if (rule.classes.includes(observed)) {
         return {
           ruleType: "allowed_adr_categories",
           outcome: "pass",
           observed,
-          expected: rule.entityIds,
+          expected: rule.classes,
           reasonCode: REASON_CODES.RULE_PASSED,
         };
       }
@@ -65,7 +68,7 @@ export const allowedAdrCategoriesEvaluator: RuleEvaluator<AllowedAdrCategoriesRu
         ruleType: "allowed_adr_categories",
         outcome: "fail",
         observed,
-        expected: rule.entityIds,
+        expected: rule.classes,
         reasonCode: REASON_CODES.RULE_ADR_CATEGORY_DISALLOWED,
       };
     }
@@ -76,7 +79,7 @@ export const allowedAdrCategoriesEvaluator: RuleEvaluator<AllowedAdrCategoriesRu
         ruleType: "allowed_adr_categories",
         outcome: "pass",
         observed: "non_adr",
-        expected: rule.entityIds,
+        expected: rule.classes,
         reasonCode: REASON_CODES.RULE_PASSED,
       };
     }
@@ -86,7 +89,7 @@ export const allowedAdrCategoriesEvaluator: RuleEvaluator<AllowedAdrCategoriesRu
       ruleType: "allowed_adr_categories",
       outcome: "unknown",
       observed: null,
-      expected: rule.entityIds,
+      expected: rule.classes,
       reasonCode: REASON_CODES.RULE_ADR_CATEGORY_UNKNOWN,
       reasonDetails: {
         sourceReasonCode: fact.reasonCode,

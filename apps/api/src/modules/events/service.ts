@@ -16,7 +16,6 @@ import {
   eq,
   eventAttendanceRevisions,
   eventAttendances,
-  eventCatalogPins,
   eventCommands,
   eventResponseRevisions,
   eventResponses,
@@ -116,7 +115,6 @@ type Receipt = typeof eventCommands.$inferSelect.result & {
   responseRevisionId?: string | null;
   attendanceRevisionId?: string | null;
 };
-type Pin = typeof eventCatalogPins.$inferInsert;
 export interface EventsConfig {
   cursorKey: string;
 }
@@ -128,7 +126,7 @@ interface Ports {
     Identity,
     "eventContextInTransaction" | "eventRosterInTransaction" | "memberSummariesInTransaction"
   >;
-  catalogs?: Pick<Catalogs, "eventReferencesInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
   notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
@@ -378,30 +376,50 @@ export function createEvents(
       scanned,
     };
   }
-  async function pins(tx: TxContext, r: S["EventInput"]): Promise<Omit<Pin, "revisionId">[]> {
+  /** A hidden row is only acceptable when the previous revision already references it. */
+  async function validateReferences(tx: TxContext, r: S["EventInput"], previous: Revision | null) {
     const selections = [
-      { field: "origin", kind: "city", id: r.originCityId },
-      { field: "destination", kind: "city", id: r.destinationCityId },
-      { field: "cargo", kind: "cargo", id: r.prescribedCargoId },
-      { field: "trailer", kind: "trailer_type", id: r.prescribedTrailerTypeId },
+      { kind: "city", id: r.originCityId, current: previous?.originCityId },
+      { kind: "city", id: r.destinationCityId, current: previous?.destinationCityId },
+      { kind: "cargo", id: r.prescribedCargoId, current: previous?.prescribedCargoId },
+      { kind: "trailer", id: r.prescribedTrailerTypeId, current: previous?.prescribedTrailerId },
     ].filter(
-      (s): s is { field: string; kind: "city" | "cargo" | "trailer_type"; id: string } =>
-        s.id !== null,
+      (
+        s,
+      ): s is {
+        kind: "city" | "cargo" | "trailer";
+        id: string;
+        current: string | null | undefined;
+      } => s.id !== null,
     );
-    if (!selections.length) return [];
+    if (!selections.length) return;
     if (!ports.catalogs) throw identityError(503);
-    const selected = await ports.catalogs.eventReferencesInTransaction(tx, r.game, selections);
-    if (!selected) throw identityError(422);
-    return selected.map((p) => ({ ...p, field: p.field as Pin["field"] }));
+    const found = await ports.catalogs.selectionsInTransaction(
+      tx,
+      selections.map(({ kind, id }) => ({ kind, id })),
+    );
+    for (const selection of selections) {
+      const row = found.get(selection.id);
+      if (!row || row.game !== r.game || row.kind !== selection.kind) throw identityError(422);
+      if (row.hidden && selection.current !== selection.id)
+        throw identityError(422, "CATALOG_SELECTION_HIDDEN");
+    }
+  }
+  async function routeLabels(tx: TxContext, revisions: readonly Revision[]) {
+    const refs = revisions.flatMap((r) =>
+      [r.originCityId, r.destinationCityId].flatMap((id) =>
+        id ? [{ kind: "city" as const, id }] : [],
+      ),
+    );
+    if (!refs.length || !ports.catalogs) return new Map<string, S["CatalogLabel"]>();
+    return ports.catalogs.labelsInTransaction(tx, refs, "en");
   }
   async function publicDto(
     tx: TxContext,
     r: Revision,
-    knownPins?: (typeof eventCatalogPins.$inferSelect)[],
+    knownLabels?: Map<string, S["CatalogLabel"]>,
   ): Promise<S["EventPublic"]> {
-    const references =
-      knownPins ??
-      (await c(tx).select().from(eventCatalogPins).where(eq(eventCatalogPins.revisionId, r.id)));
+    const labels = knownLabels ?? (await routeLabels(tx, [r]));
     return {
       id: r.eventId,
       version: r.version,
@@ -416,8 +434,8 @@ export function createEvents(
       startsAt: r.startsAt,
       endsAt: r.endsAt,
       status: r.status,
-      origin: references.find((p) => p.field === "origin")?.label ?? null,
-      destination: references.find((p) => p.field === "destination")?.label ?? null,
+      origin: r.originCityId ? (labels.get(r.originCityId) ?? null) : null,
+      destination: r.destinationCityId ? (labels.get(r.destinationCityId) ?? null) : null,
     };
   }
   async function response(
@@ -474,11 +492,6 @@ export function createEvents(
     actor: Actor,
     receipt?: Receipt,
   ): Promise<S["EventMember"]> {
-    const references = await c(tx)
-      .select()
-      .from(eventCatalogPins)
-      .where(eq(eventCatalogPins.revisionId, r.id))
-      .for("share");
     let ownResponse: ResponseRevision | null, ownAttendance: AttendanceRevision | null;
     if (receipt) {
       const [rr] = receipt.responseRevisionId
@@ -504,9 +517,9 @@ export function createEvents(
       visibility: r.visibility,
       myResponse: responseDto(ownResponse),
       myAttendance: ownAttendance?.status ?? "unconfirmed",
-      prescribedCargoId: references.find((p) => p.field === "cargo")?.entityId ?? null,
+      prescribedCargoId: r.prescribedCargoId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
-      prescribedTrailerTypeId: references.find((p) => p.field === "trailer")?.entityId ?? null,
+      prescribedTrailerTypeId: r.prescribedTrailerId,
     };
   }
   function fingerprint(actor: Actor, route: Route, target: string, key: string, value: unknown) {
@@ -649,14 +662,13 @@ export function createEvents(
     category: "created" | "updated" | "cancelled",
     reason: string | null = null,
   ) {
-    const id = newId(),
-      selected =
-        category === "cancelled"
-          ? await c(tx)
-              .select()
-              .from(eventCatalogPins)
-              .where(eq(eventCatalogPins.revisionId, e.currentRevisionId as string))
-          : await pins(tx, value);
+    const id = newId();
+    if (category !== "cancelled")
+      await validateReferences(
+        tx,
+        value,
+        category === "created" ? null : await revision(tx, e.currentRevisionId as string),
+      );
     const version = category === "created" ? 1 : e.version + 1,
       sequence = category === "created" ? 1 : e.changeSequence + 1;
     let notificationMaterial =
@@ -698,12 +710,12 @@ export function createEvents(
         endsAt: value.endsAt,
         visibility: value.visibility,
         prescribedMassKg: value.prescribedMassKg,
+        originCityId: value.originCityId,
+        destinationCityId: value.destinationCityId,
+        prescribedCargoId: value.prescribedCargoId,
+        prescribedTrailerId: value.prescribedTrailerTypeId,
         privateReason: reason,
       });
-    if (selected.length)
-      await c(tx)
-        .insert(eventCatalogPins)
-        .values(selected.map((p) => ({ ...p, revisionId: id })));
     const next = {
       ...e,
       version,
@@ -741,12 +753,7 @@ export function createEvents(
     );
     return { eventId: e.id, revisionId: id, version };
   }
-  async function revisionInput(tx: TxContext, r: Revision): Promise<S["EventInput"]> {
-    const p = await c(tx)
-      .select()
-      .from(eventCatalogPins)
-      .where(eq(eventCatalogPins.revisionId, r.id))
-      .for("share");
+  async function revisionInput(_tx: TxContext, r: Revision): Promise<S["EventInput"]> {
     return {
       title: r.title,
       description: r.description,
@@ -759,10 +766,10 @@ export function createEvents(
       startsAt: r.startsAt,
       endsAt: r.endsAt,
       visibility: r.visibility,
-      originCityId: p.find((v) => v.field === "origin")?.entityId ?? null,
-      destinationCityId: p.find((v) => v.field === "destination")?.entityId ?? null,
-      prescribedCargoId: p.find((v) => v.field === "cargo")?.entityId ?? null,
-      prescribedTrailerTypeId: p.find((v) => v.field === "trailer")?.entityId ?? null,
+      originCityId: r.originCityId,
+      destinationCityId: r.destinationCityId,
+      prescribedCargoId: r.prescribedCargoId,
+      prescribedTrailerTypeId: r.prescribedTrailerId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
     };
   }
@@ -801,11 +808,6 @@ export function createEvents(
     } else a = await attendance(tx, e.id, input.memberId);
     if (a && (a.memberId !== input.memberId || a.eventId !== e.id || a.eventRevisionId !== r.id))
       throw identityError(409);
-    const p = await c(tx)
-      .select()
-      .from(eventCatalogPins)
-      .where(eq(eventCatalogPins.revisionId, r.id))
-      .for("share");
     const latestAttendance = await attendance(tx, e.id, input.memberId);
     const reviewRequired =
       r.id !== e.currentRevisionId || (a !== null && a.id !== latestAttendance?.id);
@@ -816,9 +818,9 @@ export function createEvents(
             eventRevisionId: r.id,
             attendanceRevisionId: a.id,
             attendanceStatus: "confirmed",
-            prescribedCargoId: p.find((v) => v.field === "cargo")?.entityId ?? null,
+            prescribedCargoId: r.prescribedCargoId,
             prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
-            prescribedTrailerTypeId: p.find((v) => v.field === "trailer")?.entityId ?? null,
+            prescribedTrailerTypeId: r.prescribedTrailerId,
           }
         : null;
     return {
@@ -967,10 +969,7 @@ export function createEvents(
           .select()
           .from(eventRevisions)
           .where(inArray(eventRevisions.id, ids));
-        const allPins = await c(tx)
-          .select()
-          .from(eventCatalogPins)
-          .where(inArray(eventCatalogPins.revisionId, ids));
+        const labels = await routeLabels(tx, revisions);
         const byId = new Map(revisions.map((r) => [r.id, r]));
         return {
           ...result,
@@ -978,11 +977,7 @@ export function createEvents(
             result.items.map((e) => {
               const r = byId.get(e.currentRevisionId as string);
               if (!r) throw new Error("EVENT_REVISION_MISSING");
-              return publicDto(
-                tx,
-                r,
-                allPins.filter((p) => p.revisionId === r.id),
-              );
+              return publicDto(tx, r, labels);
             }),
           ),
         };

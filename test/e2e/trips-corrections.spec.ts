@@ -7,11 +7,7 @@ import { cargoId, evidenceId, example, id, mockTrips, trailerId } from "./suppor
 
 const targetA = "47000000-0000-4000-8000-000000000001",
   targetB = "47000000-0000-4000-8000-000000000002";
-const pin = (entityId: string) => ({
-  status: "resolved",
-  entityId,
-  catalogRevisionId: "61000000-0000-4000-8000-000000000020",
-});
+const pin = (entityId: string) => ({ status: "resolved", entityId });
 const fields = () => ({
   game: "ets2",
   origin: pin(entityId),
@@ -344,7 +340,7 @@ test(
           requestedLocale: "ru",
           renderedLocale: flag ? "en" : "ru",
           englishFallback: flag,
-          retired: false,
+          hidden: false,
         };
       return value;
     };

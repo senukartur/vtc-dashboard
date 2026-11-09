@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import type { components } from "@vtc/contracts";
-import { createAudit, idColumn, newId, type UnitOfWork, utcColumn } from "@vtc/db";
+import { createAudit, decimalColumn, idColumn, newId, type UnitOfWork, utcColumn } from "@vtc/db";
 import {
   eventAttendanceRevisions,
   eventAttendances,
   eventCommands,
   eventResponseRevisions,
   eventResponses,
-  eventRevisions,
 } from "@vtc/db/events-schema";
-import { int, mysqlEnum, mysqlTable } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
 import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 
 type S = components["schemas"];
@@ -29,6 +28,31 @@ const historicalEvents = mysqlTable("events", {
   status: mysqlEnum("status", ["scheduled", "cancelled"]).notNull(),
   startsAt: utcColumn("starts_at").notNull(),
   createdAt: utcColumn("created_at").notNull(),
+});
+
+// Same columns as published event_revisions: 0019 adds the four nullable catalog references.
+const historicalEventRevisions = mysqlTable("event_revisions", {
+  id: idColumn("id").primaryKey(),
+  eventId: idColumn("event_id").notNull(),
+  version: int("version", { unsigned: true }).notNull(),
+  sequence: int("sequence", { unsigned: true }).notNull(),
+  actorId: idColumn("actor_id").notNull(),
+  recordedAt: utcColumn("recorded_at").notNull(),
+  category: mysqlEnum("category", ["created", "updated", "cancelled"]).notNull(),
+  status: mysqlEnum("status", ["scheduled", "cancelled"]).notNull(),
+  title: varchar("title", { length: 256 }).notNull(),
+  description: text("description").notNull(),
+  game: mysqlEnum("game", ["ets2", "ats"]).notNull(),
+  server: varchar("server", { length: 256 }).notNull(),
+  organizer: varchar("organizer", { length: 256 }).notNull(),
+  meetingLocation: varchar("meeting_location", { length: 2048 }).notNull(),
+  route: varchar("route", { length: 2048 }).notNull(),
+  meetingAt: utcColumn("meeting_at").notNull(),
+  startsAt: utcColumn("starts_at").notNull(),
+  endsAt: utcColumn("ends_at"),
+  visibility: mysqlEnum("visibility", ["public", "members"]).notNull(),
+  prescribedMassKg: decimalColumn("prescribed_mass_kg"),
+  privateReason: varchar("private_reason", { length: 2048 }),
 });
 
 export async function seedPublishedEventsHistory(
@@ -105,7 +129,7 @@ export async function seedPublishedEventsHistory(
       startsAt: input.startsAt,
       createdAt: time,
     });
-    await c.insert(eventRevisions).values({
+    await c.insert(historicalEventRevisions).values({
       id: definitionId,
       eventId,
       version: 1,
@@ -230,7 +254,13 @@ export async function seedPublishedEventsHistory(
   };
   const readRetained = () =>
     unit.run(async (tx) => ({
-      definitions: await unit.client(tx).select().from(eventRevisions),
+      definitions: (await unit.client(tx).select().from(historicalEventRevisions)).map((row) => ({
+        ...row,
+        originCityId: null,
+        destinationCityId: null,
+        prescribedCargoId: null,
+        prescribedTrailerId: null,
+      })),
       responses: await unit.client(tx).select().from(eventResponseRevisions),
       attendance: await unit.client(tx).select().from(eventAttendanceRevisions),
       nextAfterSequence: { definitions: null, responses: null, attendance: null },

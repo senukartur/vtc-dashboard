@@ -355,7 +355,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
         state.attendanceVersion,
       );
     }
-    if (p === "/catalogs/revisions")
+    if (/^\/catalogs\/(cities|cargoes|trailers)/.test(p))
       return route.fulfill({
         status: 503,
         json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },

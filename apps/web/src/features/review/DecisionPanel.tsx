@@ -6,7 +6,7 @@ import { Button } from "../../shared/ui/primitives.js";
 import { State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
 import { CatalogName, DecisionBadge, GameChip } from "../trips/TripTable.js";
-import { type DTO, revisionFields } from "../trips/transport.js";
+import type { DTO } from "../trips/transport.js";
 import {
   DecisionForm,
   EvidenceList,
@@ -19,15 +19,6 @@ import {
 import { ReviewCorrections } from "./ReviewPanel.js";
 import { historyItems, isOwn, queueType, reviewType } from "./review-model.js";
 import "./review.css";
-
-/** Catalog publication of the reviewed facts, for labels of rule entities. */
-function catalogRevision(review: DTO["Review"]): string | null {
-  if (review.evaluation.catalogRevisionId) return review.evaluation.catalogRevisionId;
-  const revision = review.trip.manualRevision;
-  if (!revision) return null;
-  const trailer = revisionFields(revision).trailerType;
-  return trailer.status === "resolved" ? trailer.catalogRevisionId : null;
-}
 
 /**
  * Decision workspace for one trip: revision diff, evidence, qualification check, history and the
@@ -107,8 +98,7 @@ export function DecisionPanel({
     event.stopPropagation();
     onClose();
   }
-  const revisionId = review ? catalogRevision(review) : null,
-    history = review
+  const history = review
       ? historyItems(revisions.isError ? [] : revisionItems, review.trip.decisions)
       : [],
     // Effective facts can differ from the manual revision (telemetry, an approved staff
@@ -137,22 +127,10 @@ export function DecisionPanel({
       <EvidenceList evidence={review.trip.evidence} />
     ),
     check = review && (
-      <QualificationCheckList
-        check={review.qualificationCheck}
-        game={review.trip.summary.game}
-        revisionId={revisionId}
-      />
+      <QualificationCheckList check={review.qualificationCheck} game={review.trip.summary.game} />
     ),
     log = review && <ReviewHistory items={history} timezone={timezone} />,
-    form = review && (
-      <DecisionForm
-        key={tripId}
-        tripId={tripId}
-        review={review}
-        etag={etag}
-        revisionId={revisionId}
-      />
-    );
+    form = review && <DecisionForm key={tripId} tripId={tripId} review={review} etag={etag} />;
   return (
     <section
       ref={section}

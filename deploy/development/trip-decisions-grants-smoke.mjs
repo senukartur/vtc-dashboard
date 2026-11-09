@@ -35,15 +35,7 @@ const composed = composeIdentity(
   undefined,
   undefined,
   false,
-  {
-    production: false,
-    synthetic: true,
-    cursorKey: key("catalog"),
-    maxFileBytes: 1048576,
-    artifactTtlMs: 86400000,
-    policyRevision: 1,
-    evidence: [],
-  },
+  { cursorKey: key("catalog") },
   { cursorKey: key("trips") },
   undefined,
   { key: key("manual"), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
@@ -85,79 +77,20 @@ try {
       });
     });
     step = "seed_catalog";
-    const entity = (name, kind) => ({
-        key: name,
-        kind,
-        mapNamespace: "synthetic",
-        packId: "base",
-        retired: false,
-        labels: { en: `Fictional ${name}`, ru: null },
-        aliases: [],
-        mappings: [],
-        regionKey: null,
-        cargoUnitMassKg: null,
-        adrCategoryKey: null,
-        trailerBodyTypeKey: null,
-        trailerChainTypeKey: null,
-      }),
-      entities = [
-        entity("origin", "city"),
-        entity("destination", "city"),
-        entity("cargo", "cargo"),
-        entity("trailer", "trailer_type"),
-      ],
-      artifact = {
-        schemaVersion: 1,
-        importerVersion: "vtc-catalogs/1",
-        synthetic: true,
+    const seed = async (list, name) => {
+      const item = await catalogs.create(director, list, newId(), {
         game: "ets2",
-        gameBuild: "synthetic-decision-proof",
-        releaseInventoryAsOf: "2026-10-20",
-        sourceManifestSha256: "a".repeat(64),
-        packs: [
-          {
-            packId: "base",
-            title: "Fictional base",
-            state: "validated",
-            contributionKinds: ["city", "cargo", "trailer_type"],
-            provenance: [],
-            reasonCodes: [],
-          },
-        ],
-        provenance: [],
-        entities,
-        mappingIssues: [],
-      };
-    const uploaded = await catalogs.upload(
-        director,
-        newId(),
-        Buffer.from(JSON.stringify(artifact)),
-      ),
-      op = await catalogs.import(director, newId(), {
-        artifactId: uploaded.id,
-        sha256: uploaded.sha256,
-        game: "ets2",
+        code: `fictional_${name}`,
+        nameEn: `Fictional ${name}`,
       });
-    await runPass(createQueue(unit, [catalogs.handler]), new AbortController().signal);
-    const completed = await catalogs.operation(director, op.id);
-    assert.equal(completed.state, "completed");
-    const revisionId = completed.resultId,
-      r = await catalogs.detail(director, revisionId);
-    await catalogs.publish(director, revisionId, newId(), r.version, {
-      expectedPublicationVersion: r.publicationVersion,
-      reason: "Fictional restricted acceptance dataset",
-    });
-    const pins = new Map();
-    for (const kind of ["city", "cargo", "trailer_type"])
-      for (const row of (await catalogs.entities(director, { revisionId, kind, locale: "en" }))
-        .items) {
-        const p = await unit.run((tx) => catalogs.pinnedInTransaction(tx, revisionId, row.id));
-        pins.set(row.display.label.replace("Fictional ", ""), {
-          entityId: row.id,
-          catalogRevisionId: revisionId,
-          factRevisionId: p.id,
-        });
-      }
+      return { entityId: item.id };
+    };
+    const pins = new Map([
+      ["origin", await seed("cities", "origin")],
+      ["destination", await seed("cities", "destination")],
+      ["cargo", await seed("cargoes", "cargo")],
+      ["trailer", await seed("trailers", "trailer")],
+    ]);
     step = "seed_rules";
     const level = (await qualifications.levels(director, "ets2")).items.find(
       (l) => l.id === structuralLevels.ets2[0],
@@ -236,7 +169,6 @@ try {
           game: "ets2",
           outcome: "delivered",
           recording: "complete",
-          catalogRevisionId: null,
           start: { utc: time, basis: "event", verifiedActual: true },
           end: { utc: time, basis: "event", verifiedActual: true },
           origin: known(pins.get("origin"), "synthetic.origin"),

@@ -11,7 +11,7 @@ import { createManualReports } from "../dist/modules/manual-reports/service.js";
 import { createTrips } from "../dist/modules/trips/service.js";
 import { createQueue } from "../dist/platform/jobs/queue.js";
 import { runPass } from "../dist/platform/jobs/runner.js";
-import { catalogEvents, identityAccessEvents } from "../dist/platform/outbox/events.js";
+import { identityAccessEvents } from "../dist/platform/outbox/events.js";
 
 // This script runs only in the uniquely allocated synthetic rehearsal database.
 assert.equal(process.env.MANUAL_SYNTHETIC_ACK, "synthetic-only");
@@ -44,19 +44,7 @@ const identity = createIdentity(
   { secret: key(), origin: "http://127.0.0.1:4173", production: false },
   { accessEvents: identityAccessEvents(unit) },
 );
-const catalogs = createCatalogs(
-  unit,
-  {
-    production: false,
-    synthetic: true,
-    cursorKey: key(),
-    maxFileBytes: 1024 * 1024,
-    artifactTtlMs: 86400000,
-    policyRevision: 1,
-    evidence: [],
-  },
-  { identity, published: catalogEvents(unit).append },
-);
+const catalogs = createCatalogs(unit, { cursorKey: key() }, { identity });
 let clock = new Date("2020-01-01T00:00:00.000Z"),
   manual;
 const tripsService = createTrips(

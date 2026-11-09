@@ -180,21 +180,21 @@ test("worker diagnostics require exact synthetic run/schema/account/build and ro
 test("closed worker errors never emit configuration or primary/secondary error bodies", () => {
   const result = acceptanceDiagnostic(
     {
-      query: "DELETE FROM catalog_commands WHERE expires_at<=?",
+      query: "DELETE FROM catalog_cities WHERE expires_at<=?",
       params: ["private_value"],
       cause: {
         errno: 1142,
         sqlMessage:
-          "DELETE command denied to user 'private_account'@'private_host' for table 'catalog_commands'",
+          "DELETE command denied to user 'private_account'@'private_host' for table 'catalog_cities'",
       },
       config: { MYSQL_PASSWORD: "private_password" },
       message: "private_primary",
       body: "private_secondary",
     },
-    "jobs_catalog_cleanup",
+    "jobs_mail_cleanup",
   );
-  expect(result.step).toBe("jobs_catalog_cleanup");
-  expect(result.deniedTable).toBe("catalog_commands");
+  expect(result.step).toBe("jobs_mail_cleanup");
+  expect(result.deniedTable).toBe("catalog_cities");
   for (const value of [
     "private_value",
     "private_account",

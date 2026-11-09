@@ -214,7 +214,7 @@ function label(entityId: string, text: string, englishFallback = false): DTO["Ca
     requestedLocale: "ru",
     renderedLocale: englishFallback ? "en" : "ru",
     englishFallback,
-    retired: false,
+    hidden: false,
   };
 }
 

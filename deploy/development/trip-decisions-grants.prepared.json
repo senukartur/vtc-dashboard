@@ -38,9 +38,6 @@
     "qualification_levels": ["SELECT"],
     "qualification_promotions": ["SELECT"],
     "identity_roles": ["SELECT"],
-    "catalog_facts": ["SELECT"],
-    "catalog_entities": ["SELECT"],
-    "catalog_revisions": ["SELECT"],
     "qualification_assignments": ["SELECT", "UPDATE(revision)"],
     "identity_company": ["UPDATE(version)"],
     "identity_memberships": ["UPDATE(version)"],
@@ -48,7 +45,6 @@
     "event_revisions": ["SELECT"],
     "event_attendances": ["SELECT"],
     "event_attendance_revisions": ["SELECT"],
-    "event_catalog_pins": ["SELECT"],
     "manual_correction_requests": ["SELECT"]
   }
 }

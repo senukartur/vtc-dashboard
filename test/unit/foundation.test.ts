@@ -53,7 +53,7 @@ test("each synthetic response validates against the reviewed runtime schemas for
     for (const [name, value] of Object.entries(mocks)) {
       const schema =
         name === "catalog"
-          ? "EnvelopeCatalogEntity"
+          ? "EnvelopeCatalogItem"
           : name === "analytics"
             ? "EnvelopeAnalytics"
             : name === "forbidden"
@@ -81,6 +81,5 @@ test("feature namespaces fall back to English without changing core language or 
   const after = createFoundationMocks("en");
   expect(instance.t("foundation:formTitle")).toBe("Try a local form");
   expect(after.catalog.data.id).toBe(before.catalog.data.id);
-  expect(after.catalog.data.revisionId).toBe(before.catalog.data.revisionId);
   expect(after.analytics.data).toEqual(before.analytics.data);
 });

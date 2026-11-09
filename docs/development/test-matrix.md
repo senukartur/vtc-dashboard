@@ -55,7 +55,7 @@ Stems resolve under [unit](../../test/unit/) / [contracts](../../test/contracts/
 | Account and identity | `account`, `identity`, `succession-limits`, `external-identities` | — | `identity`, `identity-availability`, `identity-email`, `identity-reset`, `external-identities` | `account`, `account-real`, `identity`, `external-identities` |
 | Admissions | `admissions`, `applications-ui` | — | `admissions`, `identity-admission` | `admissions`, `applications-layout` |
 | Members and administration | `administration`, `members-ui` | `administration` | `administration`, `members` | `administration-real`, `members-layout` |
-| Catalogs | `catalog-import-fixture`, `catalog-source`, `catalog-ui`, `catalogs-http`, `catalogs` | `catalogs` | `catalogs` | `catalogs`, `catalogs-real` |
+| Catalogs | `catalog-source`, `catalog-ui`, `catalogs-http`, `catalogs` | `catalogs` | `catalogs` | `catalogs`, `catalogs-real` |
 | Dashboard and analytics | `analytics`, `dashboard`, `dashboard-blocks` | `company-stats` | `analytics`, `public-company-stats` | `dashboard`, `dashboard-blocks` |
 | Drivers | `drivers` | — | — | `drivers` |
 | Events | `event-workspace`, `events-ui`, `events` | `events` | `events` | `events`, `events-layout`, `events-real` |

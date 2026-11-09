@@ -26,7 +26,7 @@ This is a fictional example. Do not add emails, decline reasons, screenshots, ra
 | `trip.decision_changed` / `trip.reconciled` | Acceptance / trips coordinator | Replace the canonical contribution at its new version, recompute affected progress/totals, notify permitted recipients once |
 | `qualification.assigned` / `promotion.review_required` | Qualifications | Update versioned progress period or notify administrators; never automatically demote |
 | `event.changed` / `event.response_changed` / `event.attendance_changed` | Events | Invalidate/reschedule reminder generations, notify signed-up members of approved change categories, evaluate pending exception-related review |
-| `catalog.published` / `qualification.rules_published` | Catalogs / qualifications | Invalidate eligible lookup caches and schedule explicit review; never mutate historical rule/fact snapshots |
+| `qualification.rules_published` | Qualifications | Invalidate eligible lookup caches and schedule explicit review; never mutate historical rule/fact snapshots |
 
 Delivery is at-least-once with `(consumer,eventId)` unique handling and aggregate/contribution version guards. A replay or out-of-order lower revision cannot produce another trip, progress increment, reminder or toast. External mail is not claimed exactly-once: use provider idempotency where available, record delivery ambiguity and bounded retry, and keep one-time generation validity authoritative in the database.
 
@@ -40,9 +40,9 @@ The implemented identity registry contains `member.access_changed` v1: aggregate
 
 VTC-015 registers `application.submitted`, `application.decided`, `invitation.reissued` and `invitation.redeemed`, schema version 1, aggregate `{kind: application, id, version}`, with data containing only `applicationId`. Event/correlation IDs are generated UUIDs; causation is null when no upstream event exists. No email, Steam URL, Discord/introduction, rejection reason, password, token or encrypted payload enters these events. They commit on the same transaction as admission state. Enabled `notifications.v1` consumes submitted/decided through current owning authorization; invitation-only events remain outside that subscription. Identity's existing access event is additionally appended during atomic member creation. Retention does not invent an unconfigured effect.
 
-## Implemented catalog publication event
+## Catalog changes
 
-VTC-019 registers `catalog.published` schema version 1 with aggregate `{kind:"catalog",id:revisionId,version:candidateVersion}` and exactly `data:{catalogRevisionId}`. The publication pointer, immutable candidate transition, audit and event commit on the same transaction. Event/correlation UUIDs are generated; causation is null. No labels, source paths, artifact bytes, permission evidence or staff reasons enter this event. No downstream subscription is installed; events remain retained/unbound until a reviewed consumer owns its effects.
+VTC-084 removed `catalog.published`. Catalog edits apply immediately and emit no outbox event; each row change and import writes one audit entry instead.
 
 ## Implemented source and trip safe events
 

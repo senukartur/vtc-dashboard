@@ -192,7 +192,7 @@ async function fill(
     step = "trailer";
     await page
       .getByRole("combobox", { name: "Trailer type", exact: true })
-      .selectOption(fixture.ids.fixture_trailer as string);
+      .selectOption(fixture.ids.fixture_box as string);
     step = "cargo";
     if (unresolved) {
       const cargo = page.getByRole("group", { name: "Cargo", exact: true });
@@ -212,19 +212,17 @@ async function fill(
     const selections: [string, string | undefined][] = [
       ["Origin city", fixture.ids.fixture_north],
       ["Destination city", fixture.ids.fixture_south],
-      ["Trailer type", fixture.ids.fixture_trailer],
+      ["Trailer type", fixture.ids.fixture_box],
     ];
     if (!unresolved) selections.push(["Cargo", fixture.ids.fixture_crates]);
     for (const [label, value] of selections) {
       const select = page.getByRole("combobox", { name: label, exact: true });
       await expect(select).toHaveValue(value as string);
       const field = select.locator("..");
-      await expect(field.locator(".catalog-selection p")).toHaveText(
-        "Selected canonical entity and revision",
-      );
+      await expect(field.locator(".catalog-selection p")).toHaveText("Selected row");
       await expect(field.getByText("Loading catalog…", { exact: true })).toHaveCount(0);
       await expect(
-        field.getByText("Historical value could not be read. Its IDs are retained.", {
+        field.getByText("This row could not be read. Its ID is kept.", {
           exact: true,
         }),
       ).toHaveCount(0);
@@ -817,7 +815,7 @@ test(
           destinationCityId: null,
           prescribedCargoId: fixture.ids.fixture_crates as string,
           prescribedMassKg: "21000",
-          prescribedTrailerTypeId: fixture.ids.fixture_trailer as string,
+          prescribedTrailerTypeId: fixture.ids.fixture_box as string,
         });
       await write(page.request, "/auth/login", {
         email: fixture.email,

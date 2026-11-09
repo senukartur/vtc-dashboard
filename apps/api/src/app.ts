@@ -120,6 +120,15 @@ export async function createApp(options: AppOptions) {
         "EVIDENCE_TRANSITION",
         "EVIDENCE_EXPIRED",
         "DEPENDENCY_UNAVAILABLE",
+        "CATALOG_ROW_NOT_FOUND",
+        "CATALOG_CODE_CONFLICT",
+        "CATALOG_PARENT_INVALID",
+        "CATALOG_FILE_TOO_LARGE",
+        "CATALOG_FILE_INVALID",
+        "CATALOG_IMPORT_TOKEN_REQUIRED",
+        "CATALOG_IMPORT_TOKEN_INVALID",
+        "CATALOG_IMPORT_INVALID",
+        "CATALOG_SELECTION_HIDDEN",
       ].includes(suppliedCode)
         ? suppliedCode
         : (errorCodes[status] ?? "INTERNAL_ERROR");
@@ -149,6 +158,11 @@ export async function createApp(options: AppOptions) {
           ? {
               details: [{ field: "idempotency-key", code, ownResourceId: httpError.ownResourceId }],
             }
+          : {}),
+        ...(code === "CATALOG_IMPORT_INVALID" &&
+        "details" in httpError &&
+        Array.isArray(httpError.details)
+          ? { details: httpError.details }
           : {}),
       },
       meta: { requestId: request.id },

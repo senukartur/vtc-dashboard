@@ -125,19 +125,14 @@ for (const locale of ["en", "ru"] as const)
         expect(asideBox.x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
         expect(Math.abs(asideBox.y - formBox.y)).toBeLessThanOrEqual(1);
       } else expect(asideBox.y).toBeGreaterThanOrEqual(formBox.y + formBox.height);
-      const game = await box(page.locator("#manual-game")),
-        publication = await box(page.locator("#manual-publication"));
+      const game = await box(page.locator("#manual-game"));
       if (info.project.name === "mobile-chromium") {
-        // One-column forms give game and publication full rows, like every other field.
-        expect(publication.y).toBeGreaterThanOrEqual(game.y + game.height);
-        expect(Math.abs(game.width - publication.width)).toBeLessThanOrEqual(1);
+        // One-column forms give the game a full row, like every other field.
         expect(Math.abs(game.width - origin.width)).toBeLessThanOrEqual(1);
         expect(destination.y).toBeGreaterThanOrEqual(origin.y + origin.height);
         expect(Math.abs(destination.x - origin.x)).toBeLessThanOrEqual(1);
         expect(distance.y).toBeGreaterThan(mass.y);
       } else {
-        expect(Math.abs(publication.y - game.y)).toBeLessThanOrEqual(1);
-        expect(game.width).toBeLessThan(publication.width);
         expect(Math.abs(destination.y - origin.y)).toBeLessThanOrEqual(1);
         expect(destination.x).toBeGreaterThan(origin.x + origin.width);
         expect(cargo.y).toBeGreaterThan(origin.y);
@@ -184,7 +179,6 @@ test(
     await settled(page);
     const expected = [
       "manual-game",
-      "manual-publication",
       "group:Origin city",
       "group:Destination city",
       "group:Cargo",
@@ -215,7 +209,6 @@ test(
       );
     expect(order.filter((key) => expected.includes(key))).toEqual(expected);
     for (const [from, to] of [
-      ["#manual-game", "#manual-publication"],
       ["#cargoMassKg", "#actualDistanceM"],
       ["#actualDistanceM", "#report-event"],
       ["#manual-comment", "#manual-file"],
@@ -384,14 +377,14 @@ for (const status of [404, 503] as const)
   );
 
 test(
-  "R7 catalog publication failure offers Refresh; a game without one shows a note",
+  "R7 a list read failure offers Refresh; a game with no rows shows a note",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     await mockTrips(page);
     let failing = true,
       reads = 0;
     await page.route(
-      (url) => url.pathname === "/api/v1/catalogs/revisions",
+      (url) => /^\/api\/v1\/catalogs\/cities$/.test(url.pathname),
       (route) => {
         reads++;
         return failing
@@ -401,22 +394,20 @@ test(
     );
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const context = page.locator(".manual-report-context");
-    await expect(context.getByRole("alert")).toContainText("service is unavailable");
+    const origin = page.getByRole("group", { name: "Origin city", exact: true });
+    await expect(origin.getByRole("alert")).toContainText("could not be read");
     await capture(page, info, "manual-report-catalog-error");
     const before = reads;
     failing = false;
-    await context.getByRole("button", { name: "Refresh", exact: true }).click();
+    await origin.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect.poll(() => reads).toBeGreaterThan(before);
-    await expect(context.getByRole("alert")).toHaveCount(0);
+    await expect(origin.getByRole("alert")).toHaveCount(0);
+    await page.route("**/api/v1/catalogs/cities?*", (route) =>
+      route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) }),
+    );
     await page.locator("#manual-game").selectOption("ats");
-    await expect(
-      context.getByText(
-        "No catalog is published for this game yet. You can save a draft and return later.",
-        { exact: true },
-      ),
-    ).toBeVisible();
-    await expect(context.getByRole("alert")).toHaveCount(0);
+    await expect(origin.getByText("No rows match these filters.", { exact: true })).toBeVisible();
+    await expect(origin.getByRole("alert")).toHaveCount(0);
   },
 );
 

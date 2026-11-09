@@ -138,55 +138,6 @@
       ],
       "additionalProperties": false
     },
-    "Operation": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "processing",
-            "completed",
-            "failed"
-          ]
-        },
-        "resultId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "failureCode": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "state",
-        "resultId",
-        "failureCode"
-      ],
-      "additionalProperties": false
-    },
     "Csrf": {
       "type": "object",
       "properties": {
@@ -1465,7 +1416,7 @@
         "englishFallback": {
           "type": "boolean"
         },
-        "retired": {
+        "hidden": {
           "type": "boolean"
         }
       },
@@ -1475,690 +1426,7 @@
         "requestedLocale",
         "renderedLocale",
         "englishFallback",
-        "retired"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogEntity": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "revisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "city",
-            "region",
-            "cargo",
-            "trailer_type",
-            "trailer_body_type",
-            "trailer_chain_type",
-            "adr_category"
-          ]
-        },
-        "mapNamespace": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "display": {
-          "$ref": "#/$defs/CatalogLabel"
-        },
-        "relatedEntityIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "revisionId",
-        "game",
-        "kind",
-        "mapNamespace",
-        "display",
-        "relatedEntityIds"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogRevision": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "publicationVersion": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "draft",
-            "validated",
-            "published",
-            "rejected"
-          ]
-        },
-        "coverageComplete": {
-          "type": "boolean"
-        },
-        "englishLabelsComplete": {
-          "type": "boolean"
-        },
-        "sourceReviewComplete": {
-          "type": "boolean"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        }
-      },
-      "required": [
-        "id",
-        "version",
-        "publicationVersion",
-        "game",
-        "state",
-        "coverageComplete",
-        "englishLabelsComplete",
-        "sourceReviewComplete",
-        "createdAt"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogProvenance": {
-      "type": "object",
-      "properties": {
-        "referenceId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "publicSourceUrl": {
-          "type": "string",
-          "format": "uri"
-        },
-        "attribution": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        },
-        "permittedUseBasis": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        },
-        "observedAt": {
-          "type": "string",
-          "format": "date-time",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
-        }
-      },
-      "required": [
-        "referenceId",
-        "publicSourceUrl",
-        "attribution",
-        "permittedUseBasis",
-        "observedAt"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogReview": {
-      "type": "object",
-      "properties": {
-        "revisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "version": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "comparisonRevisionId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "gameBuild": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "releaseInventoryAsOf": {
-          "type": "string",
-          "format": "date"
-        },
-        "addedEntities": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "changedEntities": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "retiredEntities": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "expectedPacks": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "validatedPacks": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "missingPacks": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "failedPacks": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "nonContributingPacks": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "mappingIssues": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "sourceReviewState": {
-          "type": "string",
-          "enum": [
-            "pending",
-            "approved",
-            "rejected"
-          ]
-        },
-        "provenance": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogProvenance"
-          }
-        }
-      },
-      "required": [
-        "revisionId",
-        "version",
-        "comparisonRevisionId",
-        "gameBuild",
-        "releaseInventoryAsOf",
-        "addedEntities",
-        "changedEntities",
-        "retiredEntities",
-        "expectedPacks",
-        "validatedPacks",
-        "missingPacks",
-        "failedPacks",
-        "nonContributingPacks",
-        "mappingIssues",
-        "sourceReviewState",
-        "provenance"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogFieldChange": {
-      "type": "object",
-      "properties": {
-        "field": {
-          "type": "string",
-          "enum": [
-            "label_en",
-            "label_ru",
-            "region_id",
-            "cargo_unit_mass_kg",
-            "adr_category_id",
-            "trailer_body_type_id",
-            "trailer_chain_type_id",
-            "retired",
-            "source_mapping"
-          ]
-        },
-        "before": {
-          "anyOf": [
-            {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 2048
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  }
-                }
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "after": {
-          "anyOf": [
-            {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 2048
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256
-                  }
-                }
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "field",
-        "before",
-        "after"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogEntityChange": {
-      "type": "object",
-      "properties": {
-        "entityId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "city",
-            "region",
-            "cargo",
-            "trailer_type",
-            "trailer_body_type",
-            "trailer_chain_type",
-            "adr_category"
-          ]
-        },
-        "changeKind": {
-          "type": "string",
-          "enum": [
-            "added",
-            "changed",
-            "retired"
-          ]
-        },
-        "fields": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogFieldChange"
-          }
-        },
-        "reasonCodes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        }
-      },
-      "required": [
-        "entityId",
-        "kind",
-        "changeKind",
-        "fields",
-        "reasonCodes"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogCoveragePack": {
-      "type": "object",
-      "properties": {
-        "packId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "title": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "validated",
-            "missing",
-            "failed",
-            "non_contributing"
-          ]
-        },
-        "contributionKinds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "city",
-              "region",
-              "cargo",
-              "trailer_type",
-              "trailer_body_type",
-              "trailer_chain_type",
-              "adr_category"
-            ]
-          }
-        },
-        "provenance": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogProvenance"
-          }
-        },
-        "reasonCodes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        }
-      },
-      "required": [
-        "packId",
-        "title",
-        "state",
-        "contributionKinds",
-        "provenance",
-        "reasonCodes"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogMappingIssue": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "provider": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "mapNamespace": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sourceId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sourceLocale": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 32
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reasonCode": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "candidateEntityIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-          }
-        }
-      },
-      "required": [
-        "id",
-        "provider",
-        "mapNamespace",
-        "sourceId",
-        "sourceLocale",
-        "reasonCode",
-        "candidateEntityIds"
-      ],
-      "additionalProperties": false
-    },
-    "PublicationInput": {
-      "type": "object",
-      "properties": {
-        "expectedPublicationVersion": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        }
-      },
-      "required": [
-        "expectedPublicationVersion",
-        "reason"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogImportInput": {
-      "type": "object",
-      "properties": {
-        "artifactId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        }
-      },
-      "required": [
-        "artifactId",
-        "sha256",
-        "game"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogArtifact": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "state": {
-          "type": "string",
-          "enum": [
-            "processing",
-            "ready",
-            "rejected"
-          ]
-        },
-        "sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "byteLength": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        }
-      },
-      "required": [
-        "id",
-        "state",
-        "sha256",
-        "byteLength"
-      ],
-      "additionalProperties": false
-    },
-    "CatalogMappingInput": {
-      "type": "object",
-      "properties": {
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "provider": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "mapNamespace": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "sourceId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "entityId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2048
-        }
-      },
-      "required": [
-        "catalogRevisionId",
-        "provider",
-        "game",
-        "mapNamespace",
-        "sourceId",
-        "entityId",
-        "reason"
+        "hidden"
       ],
       "additionalProperties": false
     },
@@ -2392,11 +1660,6 @@
             "ats"
           ]
         },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
         "originCityId": {
           "type": "string",
           "format": "uuid",
@@ -2464,7 +1727,6 @@
       },
       "required": [
         "game",
-        "catalogRevisionId",
         "originCityId",
         "destinationCityId",
         "cargoId",
@@ -2697,18 +1959,6 @@
             }
           ]
         },
-        "catalogRevisionId": {
-          "anyOf": [
-            {
-              "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "eventId": {
           "anyOf": [
             {
@@ -2772,7 +2022,6 @@
         "qualificationAssignmentId",
         "levelId",
         "ruleVersionId",
-        "catalogRevisionId",
         "eventId",
         "attendanceRevisionId",
         "attributionAt",
@@ -3213,11 +2462,6 @@
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
         "originCityId": {
           "type": "string",
           "format": "uuid",
@@ -3322,11 +2566,6 @@
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
         "originCityId": {
           "type": "string",
           "format": "uuid",
@@ -3353,7 +2592,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
       },
-      "required": [],
       "additionalProperties": false,
       "minProperties": 1
     },
@@ -3795,20 +3033,26 @@
             "type": {
               "const": "allowed_adr_categories"
             },
-            "entityIds": {
+            "classes": {
               "type": "array",
               "items": {
                 "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
               },
-              "maxItems": 1000,
+              "maxItems": 6,
               "uniqueItems": true
             }
           },
           "required": [
             "type",
-            "entityIds"
+            "classes"
           ],
           "additionalProperties": false
         }
@@ -6091,311 +5335,11 @@
       ],
       "additionalProperties": false
     },
-    "ListCatalogRevision": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogRevision"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListCatalogRevision": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListCatalogRevision"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListCatalogEntity": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogEntity"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListCatalogEntity": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListCatalogEntity"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeCatalogEntity": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/CatalogEntity"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
     "EnvelopeUploadPolicy": {
       "type": "object",
       "properties": {
         "data": {
           "$ref": "#/$defs/UploadPolicy"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeCatalogArtifact": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/CatalogArtifact"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeOperation": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/Operation"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeCatalogRevision": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/CatalogRevision"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeCatalogReview": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/CatalogReview"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListCatalogEntityChange": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogEntityChange"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListCatalogEntityChange": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListCatalogEntityChange"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListCatalogCoveragePack": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogCoveragePack"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListCatalogCoveragePack": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListCatalogCoveragePack"
-        },
-        "meta": {
-          "$ref": "#/$defs/Meta"
-        }
-      },
-      "required": [
-        "data",
-        "meta"
-      ],
-      "additionalProperties": false
-    },
-    "ListCatalogMappingIssue": {
-      "type": "object",
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/CatalogMappingIssue"
-          }
-        },
-        "nextCursor": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 2048
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "items",
-        "nextCursor"
-      ],
-      "additionalProperties": false
-    },
-    "EnvelopeListCatalogMappingIssue": {
-      "type": "object",
-      "properties": {
-        "data": {
-          "$ref": "#/$defs/ListCatalogMappingIssue"
         },
         "meta": {
           "$ref": "#/$defs/Meta"
@@ -7716,11 +6660,6 @@
             "ats"
           ]
         },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
         "originCityId": {
           "type": "string",
           "format": "uuid",
@@ -7788,7 +6727,6 @@
       },
       "required": [
         "game",
-        "catalogRevisionId",
         "originCityId",
         "destinationCityId",
         "cargoId",
@@ -7810,17 +6748,11 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
       },
       "required": [
         "status",
-        "entityId",
-        "catalogRevisionId"
+        "entityId"
       ],
       "additionalProperties": false
     },
@@ -7888,7 +6820,7 @@
           "$ref": "#/$defs/ManualUnresolvedSelection"
         }
       ],
-      "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates resolved game/kind/published pin."
+      "description": "Unresolved diagnostic text is not a canonical identity or name mapping and always requires human review. The server validates the resolved entity's game and kind, and rejects a newly chosen hidden entity."
     },
     "ManualSubmissionFields": {
       "type": "object",
@@ -8674,22 +7606,10 @@
           "type": "string",
           "format": "uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "catalogRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        },
-        "factRevisionId": {
-          "type": "string",
-          "format": "uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
       },
       "required": [
-        "entityId",
-        "catalogRevisionId",
-        "factRevisionId"
+        "entityId"
       ],
       "additionalProperties": false
     },
@@ -8912,7 +7832,7 @@
             },
             "trailerTypeIds": {
               "type": "array",
-              "maxItems": 32,
+              "maxItems": 1,
               "items": {
                 "anyOf": [
                   {
@@ -8940,12 +7860,18 @@
                     "unknown"
                   ]
                 },
-                "entityId": {
+                "adrClass": {
                   "anyOf": [
                     {
                       "type": "string",
-                      "format": "uuid",
-                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      "enum": [
+                        "1",
+                        "2",
+                        "3",
+                        "4",
+                        "6",
+                        "8"
+                      ]
                     },
                     {
                       "type": "null"
@@ -8955,7 +7881,7 @@
               },
               "required": [
                 "status",
-                "entityId"
+                "adrClass"
               ],
               "additionalProperties": false
             }
@@ -9598,9 +8524,24 @@
         "entityIds": {
           "type": "array",
           "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "1",
+                  "2",
+                  "3",
+                  "4",
+                  "6",
+                  "8"
+                ]
+              }
+            ]
           },
           "maxItems": 10
         }
@@ -9615,7 +8556,7 @@
         "entityIds"
       ],
       "additionalProperties": false,
-      "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 catalog entities that broke a trailer or ADR rule. Unknown values are null, never zero."
+      "description": "One historical qualification rule applied to the reviewed fact. Mass values are kilograms (max_mass only); entityIds lists up to 10 trailer catalog IDs or ADR classes that broke the rule. Unknown values are null, never zero."
     },
     "QualificationCheck": {
       "type": "object",
@@ -9741,6 +8682,956 @@
       ],
       "additionalProperties": false,
       "description": "Present only in listTrips responses for scope=review. Review-queue state of the canonical trip: hold flag, stored review reasons, queue time and the current manual revision number (null without a manual report)."
+    },
+    "CatalogItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "display": {
+          "$ref": "#/$defs/CatalogLabel"
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steamAppId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "region": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adrClass": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "3",
+                "4",
+                "6",
+                "8"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "code",
+        "nameEn",
+        "nameRu",
+        "hidden",
+        "display",
+        "dlcId",
+        "dlc"
+      ],
+      "additionalProperties": false,
+      "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type."
+    },
+    "CatalogItemList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogItem"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogSummary": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "lists": {
+          "type": "object",
+          "properties": {
+            "dlcs": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
+            "regions": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
+            "cities": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
+            "cargoes": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
+            "trailers": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "dlcs",
+            "regions",
+            "cities",
+            "cargoes",
+            "trailers"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "game",
+        "lists"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogDlcInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steamAppId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogRegionInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogCityInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogCargoInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adrClass": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "3",
+                "4",
+                "6",
+                "8"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogTrailerInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogItemPatch": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "steamAppId": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "regionId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adrClass": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "1",
+                "2",
+                "3",
+                "4",
+                "6",
+                "8"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "Partial edit of one row. game is immutable. A field that does not exist on the list is rejected. Hide and restore are `{hidden}`."
+    },
+    "CatalogImportIssue": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "field",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogImportLine": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+              "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "error",
+            "changed"
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogImportIssue"
+          },
+          "maxItems": 16
+        },
+        "changedFields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "line",
+        "code",
+        "status",
+        "issues",
+        "changedFields"
+      ],
+      "additionalProperties": false,
+      "description": "line is the physical CSV line (header is line 1) or the 1-based JSON array index."
+    },
+    "CatalogImportPreview": {
+      "type": "object",
+      "properties": {
+        "fileSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "token": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogImportLine"
+          },
+          "maxItems": 500
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fileSha256",
+        "token",
+        "rows",
+        "added",
+        "changed",
+        "unchanged",
+        "errors",
+        "lines",
+        "truncated"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogImportResult": {
+      "type": "object",
+      "properties": {
+        "importId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "changed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "unchanged": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        }
+      },
+      "required": [
+        "importId",
+        "rows",
+        "added",
+        "changed",
+        "unchanged"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogItem": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogItem"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogItemList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogItemList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogSummary": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogSummary"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogImportPreview": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogImportPreview"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogImportResult": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogImportResult"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
     }
   }
 }

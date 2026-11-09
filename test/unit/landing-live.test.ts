@@ -30,7 +30,7 @@ const label = (text: string) => ({
   requestedLocale: "en" as const,
   renderedLocale: "en" as const,
   englishFallback: false,
-  retired: false,
+  hidden: false,
 });
 const convoy = (index: number, overrides: Partial<EventPublic> = {}): EventPublic => ({
   id: `41000000-0000-4000-8000-00000000000${index}`,

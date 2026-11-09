@@ -45,7 +45,7 @@ function place(name: keyof typeof places, locale: FixtureLocale): S["CatalogLabe
     requestedLocale: locale,
     renderedLocale: russian === null ? "en" : "ru",
     englishFallback: locale === "ru" && russian === null,
-    retired: false,
+    hidden: false,
   };
 }
 

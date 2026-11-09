@@ -20,7 +20,8 @@ export const OVER_LIMIT_CODES: ReadonlySet<string> = new Set([
 ]);
 export const ACCEPTED_OVER_LIMITS = "accepted_over_limits";
 const DECIMAL = /^(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/,
-  UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  ADR_CLASS = /^[123468]$/;
 const sorted = (values: readonly string[]) => [...new Set(values)].sort();
 function evaluateRules(
   e: NormalizedTripEvidence,
@@ -158,7 +159,7 @@ function ruleCheck(
     limitMassKg: typeof limit === "string" && DECIMAL.test(limit) ? limit : null,
     entityIds: sorted(
       (Array.isArray(offending) ? offending : []).filter(
-        (id): id is string => typeof id === "string" && UUID.test(id),
+        (id): id is string => typeof id === "string" && (UUID.test(id) || ADR_CLASS.test(id)),
       ),
     ).slice(0, 10),
   };
@@ -236,7 +237,6 @@ export function evaluationSnapshot(
     qualificationAssignmentId: h.status === "resolved" ? h.assignmentId : null,
     levelId: h.status === "resolved" ? h.levelId : null,
     ruleVersionId: h.status === "resolved" ? h.ruleVersionId : null,
-    catalogRevisionId: e.catalogRevisionId,
     eventId: event?.eventId ?? null,
     attendanceRevisionId: event?.attendanceRevisionId ?? null,
     attributionAt: h.attributionAt,

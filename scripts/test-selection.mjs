@@ -274,7 +274,7 @@ const areas = [
   },
   { paths: ["scripts/demo/", "apps/api/src/demo-", "apps/api/src/stage-seed"], tests: ["demo"] },
   {
-    paths: ["deploy/development/stage-features.json", "deploy/development/stage-catalog-"],
+    paths: ["deploy/development/stage-features.json"],
     tests: ["demo", "development-deployment", "notifications-acceptance"],
   },
   {

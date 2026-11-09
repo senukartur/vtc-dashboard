@@ -67,16 +67,6 @@ export interface AdmissionsEvent {
   causationId: string | null;
   data: { applicationId: string };
 }
-export interface CatalogEvent {
-  eventId: string;
-  type: "catalog.published";
-  schemaVersion: 1;
-  aggregate: { kind: "catalog"; id: string; version: number };
-  occurredAt: string;
-  correlationId: string;
-  causationId: string | null;
-  data: { catalogRevisionId: string };
-}
 export interface ReconciliationEvent {
   eventId: string;
   type: "trip.correction_recorded";
@@ -320,38 +310,6 @@ export function tripEvent(value: unknown): TripEvent {
     },
   };
 }
-export function catalogEvent(value: unknown): CatalogEvent {
-  const e = closed(value, [
-      "eventId",
-      "type",
-      "schemaVersion",
-      "aggregate",
-      "occurredAt",
-      "correlationId",
-      "causationId",
-      "data",
-    ]),
-    a = closed(e.aggregate, ["kind", "id", "version"]),
-    d = closed(e.data, ["catalogRevisionId"]);
-  if (
-    e.type !== "catalog.published" ||
-    e.schemaVersion !== 1 ||
-    a.kind !== "catalog" ||
-    a.id !== d.catalogRevisionId ||
-    typeof e.occurredAt !== "string"
-  )
-    throw new Error("UNSUPPORTED_EVENT");
-  return {
-    eventId: applicationId(e.eventId as string),
-    type: "catalog.published",
-    schemaVersion: 1,
-    aggregate: { kind: "catalog", id: applicationId(a.id as string), version: positive(a.version) },
-    occurredAt: utcIso(utcDateTime(e.occurredAt)),
-    correlationId: applicationId(e.correlationId as string),
-    causationId: e.causationId === null ? null : applicationId(e.causationId as string),
-    data: { catalogRevisionId: applicationId(d.catalogRevisionId as string) },
-  };
-}
 export function admissionsEvent(value: unknown): AdmissionsEvent {
   const e = closed(value, [
     "eventId",
@@ -571,7 +529,6 @@ export function companyEvent(value: unknown): CompanyEvent {
 export type DomainEvent =
   | AccessEvent
   | AdmissionsEvent
-  | CatalogEvent
   | ReconciliationEvent
   | TripProposalReviewedEvent
   | TripDecisionEvent
@@ -613,8 +570,6 @@ export function domainEvent(input: unknown): DomainEvent {
     case "invitation.reissued":
     case "invitation.redeemed":
       return admissionsEvent(input);
-    case "catalog.published":
-      return catalogEvent(input);
     case "trip.correction_recorded":
       return reconciliationEvent(input);
     case "trip.proposal_reviewed":
@@ -686,7 +641,6 @@ export function createOutbox(unit: UnitOfWork, options: { notifications?: boolea
         | ReconciliationEvent
         | AccessEvent
         | AdmissionsEvent
-        | CatalogEvent
         | TripEvent
         | ManualEvent
         | QualificationEvent
@@ -704,20 +658,18 @@ export function createOutbox(unit: UnitOfWork, options: { notifications?: boolea
                 ? manualEvent(input)
                 : input.type === "member.access_changed"
                   ? accessEvent(input)
-                  : input.type === "catalog.published"
-                    ? catalogEvent(input)
-                    : [
-                          "source.snapshot_stored",
-                          "trip.lifecycle_changed",
-                          "trip.facts_changed",
-                        ].includes(input.type)
-                      ? tripEvent(input)
-                      : input.type.startsWith("qualification.") ||
-                          input.type === "promotion.review_required"
-                        ? qualificationEvent(input)
-                        : input.type.startsWith("event.")
-                          ? companyEvent(input)
-                          : admissionsEvent(input);
+                  : [
+                        "source.snapshot_stored",
+                        "trip.lifecycle_changed",
+                        "trip.facts_changed",
+                      ].includes(input.type)
+                    ? tripEvent(input)
+                    : input.type.startsWith("qualification.") ||
+                        input.type === "promotion.review_required"
+                      ? qualificationEvent(input)
+                      : input.type.startsWith("event.")
+                        ? companyEvent(input)
+                        : admissionsEvent(input);
       const hash = fingerprint(e);
       // MySQL rolls back the duplicate statement only; lock/read its durable identity.
       // Immutable evidence needs no UPDATE/DELETE privilege.
@@ -758,28 +710,6 @@ export function createOutbox(unit: UnitOfWork, options: { notifications?: boolea
           eventType: opaqueUtf8(e.type, 64),
           recordedAt: saved.recordedAt,
         });
-    },
-  };
-}
-export function catalogEvents(
-  unit: UnitOfWork,
-  outbox: Pick<ReturnType<typeof createOutbox>, "append"> = createOutbox(unit),
-) {
-  return {
-    async append(
-      tx: TxContext,
-      e: { eventId: string; revisionId: string; version: number; occurredAt: string },
-    ) {
-      await outbox.append(tx, {
-        eventId: e.eventId,
-        type: "catalog.published",
-        schemaVersion: 1,
-        aggregate: { kind: "catalog", id: e.revisionId, version: e.version },
-        occurredAt: e.occurredAt,
-        correlationId: e.eventId,
-        causationId: null,
-        data: { catalogRevisionId: e.revisionId },
-      });
     },
   };
 }

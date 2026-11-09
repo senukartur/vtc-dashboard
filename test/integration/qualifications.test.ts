@@ -1,6 +1,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
+import type { components } from "@vtc/contracts";
+import { catalogTrailers } from "@vtc/db/catalogs-schema";
 import { eq, membership, roles } from "@vtc/db/identity-schema";
 import {
   qualificationAssignments,
@@ -43,12 +45,8 @@ import { createFactRepository } from "../../apps/api/src/modules/trips/facts.ts"
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import {
-  catalogEvents,
-  createOutbox,
-  identityAccessEvents,
-} from "../../apps/api/src/platform/outbox/events.ts";
-import { artifact, entity } from "../fixtures/catalogs/synthetic.ts";
+import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
   reset,
@@ -56,7 +54,6 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { telemetryFixture } from "../support/builders.ts";
-import { completeCatalogImport } from "../support/catalog-import-fixture.ts";
 import { deferred } from "../support/concurrency.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
@@ -1747,7 +1744,7 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
         cargoMassKg: "10.000000000000000001",
         trailerTypeIds: [],
         trailersComplete: false,
-        adr: { status: "unknown", entityId: null },
+        adr: { status: "unknown", adrClass: null },
       },
     };
   async function snapshot() {
@@ -1816,16 +1813,16 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
       rules: [
         { type: "max_mass", maxKg: "99999999999999999999.999999999999999999" },
         { type: "allowed_trailer_types", entityIds: ids },
-        { type: "allowed_adr_categories", entityIds: ids },
+        { type: "allowed_adr_categories", classes: ["1", "2", "3", "4", "6", "8"] },
       ],
       sample: {
         cargoMassKg: "99999999999999999999.999999999999999999",
-        trailerTypeIds: ids.slice(0, 32),
+        trailerTypeIds: ids.slice(0, 1),
         trailersComplete: false,
-        adr: { status: "known", entityId: ids[0] },
+        adr: { status: "known", adrClass: "2" },
       },
     };
-    expect(Buffer.byteLength(JSON.stringify(large))).toBeGreaterThan(65536);
+    expect(Buffer.byteLength(JSON.stringify(large))).toBeGreaterThan(32768);
     expect(Buffer.byteLength(JSON.stringify(large))).toBeLessThanOrEqual(131072);
     expect((await app.inject({ method: "POST", url, headers, payload: large })).statusCode).toBe(
       200,
@@ -1890,69 +1887,16 @@ test("preview HTTP admits current staff before parsing, enforces closed CSRF fac
   }
 });
 
-test("maximum supported publication fits its route bound with real published catalog identities and rejects an oversized body", () => {
+test("maximum supported publication fits its route bound with real list rows and rejects an oversized body", () => {
   maximumPublicationWork = maximumPublication();
   return maximumPublicationWork;
 });
 async function maximumPublication() {
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: randomBytes(32).toString("hex"),
-      maxFileBytes: 8388608,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-    now,
-  );
-  const source = artifact("ets2", [
-    ...Array.from({ length: 1000 }, (_, i) =>
-      entity(`qualification_trailer_${i}`, { kind: "trailer_type", aliases: [], mappings: [] }),
-    ),
-    ...Array.from({ length: 1000 }, (_, i) =>
-      entity(`qualification_adr_${i}`, { kind: "adr_category", aliases: [], mappings: [] }),
-    ),
-  ]);
-  const uploaded = await catalogs.upload(director, newId(), Buffer.from(JSON.stringify(source))),
-    operation = await catalogs.import(director, newId(), {
-      artifactId: uploaded.id,
-      sha256: uploaded.sha256,
-      game: "ets2",
-    }),
-    queue = createQueue(unit, [catalogs.handler]);
-  const completed = await completeCatalogImport(
-    operation.id,
-    { read: (id) => catalogs.operation(director, id), pass: (signal) => runPass(queue, signal) },
-    { deadlineAt: performance.now() + 10000 },
-  );
-  const revision = await catalogs.detail(director, completed.resultId);
-  await catalogs.publish(director, revision.id, newId(), revision.version, {
-    expectedPublicationVersion: revision.publicationVersion,
-    reason: "Fictional reviewed maximum qualification catalog",
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const seeded = await seedCatalog(unit, "ets2", {
+    trailers: Array.from({ length: 1000 }, (_, i) => `qualification_trailer_${i}`),
   });
-  async function ids(kind: "trailer_type" | "adr_category") {
-    const values: string[] = [];
-    let cursor: string | undefined;
-    do {
-      const page = await catalogs.entities(director, {
-        revisionId: revision.id,
-        kind,
-        locale: "en",
-        limit: 100,
-        ...(cursor ? { cursor } : {}),
-      });
-      values.push(...page.items.map((row) => row.id));
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
-    expect(values).toHaveLength(1000);
-    return values;
-  }
-  const trailerIds = await ids("trailer_type"),
-    adrIds = await ids("adr_category"),
+  const trailerIds = [...seeded.ids.values()],
     q = createQualifications(unit, config, { identity, trips: tripService, catalogs }, now),
     app = await createApp({ identity, qualifications: q, checkReadiness: async () => true });
   try {
@@ -1972,13 +1916,13 @@ async function maximumPublication() {
       rules: [
         { type: "max_mass", maxKg: maximum },
         { type: "allowed_trailer_types", entityIds: trailerIds },
-        { type: "allowed_adr_categories", entityIds: adrIds },
+        { type: "allowed_adr_categories", classes: ["1", "2", "3", "4", "6", "8"] },
       ],
       requiredTrips: 2147483647,
       requiredDistanceM: maximum,
       reason: "Fictional maximum wire-size fixture".padEnd(2048, "x"),
     };
-    expect(Buffer.byteLength(JSON.stringify(payload))).toBeGreaterThan(65536);
+    expect(Buffer.byteLength(JSON.stringify(payload))).toBeGreaterThan(32768);
     expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThanOrEqual(131072);
     const result = await app.inject({ method: "POST", url, headers, payload });
     expect(result.statusCode).toBe(201);
@@ -2000,3 +1944,47 @@ async function maximumPublication() {
     await app.close();
   }
 }
+
+test("trailer allowlists reject hidden rows on new selections, keep them unchanged and ADR classes stay closed", async () => {
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const rows = await seedCatalog(unit, "ets2", {
+    trailers: ["qualification_kept", { code: "qualification_hidden", hidden: true }],
+  });
+  const q = createQualifications(unit, config, { identity, trips: tripService, catalogs }, now);
+  const levelId = structuralLevels.ets2[3] as string;
+  const publishRules = async (rules: components["schemas"]["Rule"][]) => {
+    const level = (await q.levels(director, "ets2")).items.find((v) => v.id === levelId);
+    if (!level) throw new Error("SYNTHETIC_LEVEL_MISSING");
+    tick();
+    return q.publish(director, levelId, newId(), level.version, {
+      rules,
+      requiredTrips: 1,
+      requiredDistanceM: "1",
+      reason: "Fictional allowlist",
+    });
+  };
+  const kept = rows.id("qualification_kept"),
+    hidden = rows.id("qualification_hidden");
+  await expect(
+    publishRules([{ type: "allowed_trailer_types", entityIds: [hidden] }]),
+  ).rejects.toMatchObject({ statusCode: 422, publicCode: "CATALOG_SELECTION_HIDDEN" });
+  await publishRules([{ type: "allowed_trailer_types", entityIds: [kept] }]);
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogTrailers)
+      .set({ hidden: true })
+      .where(eq(catalogTrailers.id, kept)),
+  );
+  await publishRules([{ type: "allowed_trailer_types", entityIds: [kept] }]);
+  await expect(
+    publishRules([{ type: "allowed_trailer_types", entityIds: [kept, hidden] }]),
+  ).rejects.toMatchObject({ publicCode: "CATALOG_SELECTION_HIDDEN" });
+  await expect(
+    publishRules([{ type: "allowed_trailer_types", entityIds: [newId()] }]),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await expect(
+    publishRules([{ type: "allowed_adr_categories", classes: ["5"] as never }]),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  await publishRules([{ type: "allowed_adr_categories", classes: ["2", "3"] }]);
+});

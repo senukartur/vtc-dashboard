@@ -15,6 +15,7 @@ import type { Connection, RowDataPacket } from "mysql2/promise";
 import { afterAll as after, beforeAll as before, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
+import { catalogConfig } from "../fixtures/catalogs/synthetic.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
@@ -49,7 +50,6 @@ import {
 } from "../../apps/api/src/platform/jobs/queue.ts";
 import {
   type AdmissionsEvent,
-  catalogEvents,
   createOutbox,
   type DomainEvent,
   domainEvent,
@@ -146,20 +146,7 @@ beforeAll(async () => {
     },
     now,
   );
-  const catalogs = createCatalogs(
-    unit,
-    {
-      production: false,
-      synthetic: true,
-      cursorKey: key(),
-      maxFileBytes: 1048576,
-      artifactTtlMs: 86400000,
-      policyRevision: 1,
-      evidence: [],
-    },
-    { identity, published: catalogEvents(unit).append },
-    now,
-  );
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
   const manual = createManualReports(
     unit,
     { key: key(), maxFilesPerReport: 5, policyRevision: 1, orphanGraceMs: 60000 },
@@ -191,7 +178,6 @@ beforeEach(async () => {
     "outbox_routing_scans",
     "outbox_events",
     "event_commands",
-    "event_catalog_pins",
     "event_responses",
     "event_attendances",
     "event_attendance_revisions",
@@ -905,9 +891,9 @@ test("routing stays indexed with substantial routed/mixed history and discovers 
   const outbox = createOutbox(unit, { notifications: true }),
     retained = Array.from({ length: 3000 }, (_, i) => ({
       id: newId(),
-      type: opaqueUtf8(i % 2 ? "application.submitted" : "catalog.published", 64),
+      type: opaqueUtf8(i % 2 ? "application.submitted" : "synthetic.unrouted", 64),
       schemaVersion: 1,
-      aggregateKind: opaqueUtf8(i % 2 ? "application" : "catalog", 32),
+      aggregateKind: opaqueUtf8(i % 2 ? "application" : "synthetic", 32),
       aggregateId: newId(),
       aggregateVersion: 1,
       occurredAt: iso(),

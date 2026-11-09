@@ -2,7 +2,6 @@ import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
-import { usePublishedRevisions } from "../../shared/catalog-selectors/queries.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
@@ -202,17 +201,8 @@ function ManualEditor({
     [target, setTarget] = useState<DTO["ManualTelemetryTarget"] | null>(draft?.targetTrip ?? null),
     [ready, setReady] = useState(false),
     [invalid, setInvalid] = useState(false),
-    [saved, setSaved] = useState(false),
-    [revision, setRevision] = useState("");
-  const game = fields.game ?? "ets2",
-    pub = usePublishedRevisions(game),
-    publications = pub.data?.pages.flatMap((p) => p.data.data.items) ?? [],
-    pin = (
-      [fields.origin, fields.destination, fields.cargo, fields.trailerType].find(
-        (s) => s?.status === "resolved",
-      ) as DTO["ManualResolvedSelection"] | undefined
-    )?.catalogRevisionId,
-    active = revision || pin || publications[0]?.id || "";
+    [saved, setSaved] = useState(false);
+  const game = fields.game ?? "ets2";
   const [cursor, setCursor] = useState<string | null>(null),
     targets = useTripQuery(
       `/trips?scope=mine&game=${game}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
@@ -315,7 +305,6 @@ function ManualEditor({
                       evidenceIds: fields.evidenceIds ?? [],
                       comment: fields.comment ?? null,
                     });
-                    setRevision("");
                     setTarget(null);
                     setCursor(null);
                   }}
@@ -324,36 +313,6 @@ function ManualEditor({
                   <option value="ats">ATS</option>
                 </select>
               </div>
-              <div className="field">
-                <Label htmlFor="manual-publication">{t("catalogRevision")}</Label>
-                <select
-                  className="input"
-                  id="manual-publication"
-                  value={active}
-                  onChange={(e) => setRevision(e.target.value)}
-                >
-                  <option value="">{t("unknown")}</option>
-                  {pin && !publications.some((p) => p.id === pin) && (
-                    <option value={pin}>{pin}</option>
-                  )}
-                  {publications.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.id} · {p.state}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {pub.isError && (
-                <p role="alert" className="manual-report-note">
-                  {t("unavailable")}{" "}
-                  <Button type="button" variant="outline" onClick={() => void pub.refetch()}>
-                    {t("refresh")}
-                  </Button>
-                </p>
-              )}
-              {pub.isSuccess && !publications.length && !pin && (
-                <p className="manual-report-note muted">{t("catalogNone")}</p>
-              )}
             </div>
             <div className="manual-report-section manual-report-fields">
               {(["origin", "destination", "cargo", "trailerType"] as const).map((name) => (
@@ -361,7 +320,6 @@ function ManualEditor({
                   key={name}
                   name={name}
                   game={game}
-                  revision={active}
                   value={fields[name]}
                   onChange={(value) => {
                     if (value) patch({ [name]: value });

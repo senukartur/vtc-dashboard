@@ -112,7 +112,6 @@ test("prepared Events privileges retain immutable history and install no worker 
     "event_revisions",
     "event_response_revisions",
     "event_attendance_revisions",
-    "event_catalog_pins",
     "event_commands",
   ])
     expect(grants.runtime[table]).toEqual(["SELECT", "INSERT"]);

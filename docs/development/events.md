@@ -40,7 +40,7 @@ Creation uses a server-generated UUID. Durable command uniqueness is actor + rou
 
 ## Catalog and integration facades
 
-`Catalogs.eventReferencesInTransaction` validates at most four same-game selections against the current complete published catalog, with exact kind and non-retired fact checks. Events stores immutable fact/entity/catalog-revision foreign-key pins and original safe labels; later publication or translation changes do not rewrite them. Unknown kinds/games/IDs fail 422, and non-null selections without an adapter fail 503. No production catalog coverage or source licensing claim follows from synthetic fixtures.
+`Catalogs.selectionsInTransaction` validates at most four same-game selections against the current lists. An unchanged selection may reference a row that is now hidden; a new selection of a hidden row fails with `CATALOG_SELECTION_HIDDEN`. Labels are read from the current row, so a rename shows in the event. Unknown kinds/games/IDs fail 422, and non-null selections without an adapter fail 503.
 
 The service exports these bounded owning seams:
 
