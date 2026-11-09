@@ -556,7 +556,7 @@ export function createMessaging(
           userId: input.userId,
           recipient: input.email,
           kind: input.purpose,
-          locale: input.locale ?? "en",
+          locale: input.locale ?? "ru",
           code: input.code,
           expiresAt: input.expiresAt,
           ...(input.emailChangeStage ? { stage: input.emailChangeStage } : {}),

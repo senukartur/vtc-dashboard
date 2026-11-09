@@ -17,3 +17,6 @@ VTC-059A appends `0018_trip_review_queue.sql` without rewriting `0017` or earlie
 
 
 VTC-087 appends `0020_outstanding_cannonball.sql` without rewriting `0019` or earlier assets: one additive nullable `catalog_cities.name_native` column and its `catalog_city_name_native_nonempty` check. It is display and search data only and adds no index, data change or grant; old readers ignore it. A failure between the two statements follows the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).
+
+
+VTC-089 appends `0021_careful_speed.sql` without rewriting `0020` or earlier assets: updates the column default of `identity_memberships.locale` and `admissions_applications.locale` from `'en'` to `'ru'`. It alters default column values only with no data loss, index change, or type change; existing rows and readers are unaffected. A failure between the statements follows the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).

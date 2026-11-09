@@ -18,9 +18,9 @@ import { inertNotifications } from "./support/notifications.ts";
 const meta = { requestId: "synthetic-navigation" };
 const error = (status: number) => ({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
 // Synthetic shell fixture: one fictional member whose roles map through the real server capabilities.
-async function mockWorkspace(page: Page, roles: Role[] = ["trainee"]) {
+async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "en" | "ru" = "en") {
   const state = { me: 200, logout: 200 };
-  const self = accountFixture();
+  const self = accountFixture(locale);
   self.data.member.roles = [...roles];
   self.data.capabilities = capabilities(roles);
   await page.route("**/api/v1/**", (route) => {
@@ -448,35 +448,33 @@ test(
 );
 
 test(
-  "switching language in the user menu persists across sign-out and sign-in",
+  "dashboard defaults to Russian and switching language in the user menu persists across sign-out and sign-in",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockWorkspace(page);
+    const state = await mockWorkspace(page, ["trainee"], "ru");
     await page.goto("/account/dashboard");
-    await expect(page.locator("html")).toHaveAttribute("lang", "en");
-
-    await switchLanguage(page, "ru");
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+
+    await switchLanguage(page, "en");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
     state.logout = 200;
     state.me = 401;
     await signOutFromMenu(page);
-    await expect(
-      page.getByRole("heading", { name: "Войдите, чтобы открыть аккаунт" }),
-    ).toBeVisible();
-    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+    await expect(page.getByRole("heading", { name: "Sign in to open your account" })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
-    await page.getByRole("main").getByRole("link", { name: "Войти", exact: true }).click();
+    await page.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/login$/);
-    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
     state.me = 200;
-    await page.getByLabel("Электронная почта", { exact: true }).fill("member@example.invalid");
-    await page.getByLabel("Пароль", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
-    await page.getByRole("button", { name: "Войти", exact: true }).click();
+    await page.getByLabel("Email", { exact: true }).fill("member@example.invalid");
+    await page.getByLabel("Password", { exact: true }).fill("NONFUNCTIONAL_FIXTURE");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
     await expect(page).toHaveURL(/\/account\/dashboard$/);
-    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
   },
 );
 

@@ -76,7 +76,7 @@ export const membership = mysqlTable("identity_memberships", {
   identityEpoch: int("identity_epoch", { unsigned: true }).notNull().default(1),
   credentialEpoch: int("credential_epoch", { unsigned: true }).notNull().default(1),
   emailEpoch: int("email_epoch", { unsigned: true }).notNull().default(1),
-  locale: mysqlEnum("locale", ["en", "ru"]).notNull().default("en"),
+  locale: mysqlEnum("locale", ["en", "ru"]).notNull().default("ru"),
   displayTimezone: varchar("display_timezone", { length: 128 }).notNull().default("UTC"),
 });
 
