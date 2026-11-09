@@ -21,7 +21,7 @@ export function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
   return (
     <>
       {value?.label ?? t("unknown")}
-      <CatalogNativeName value={value} className="trip-fallback" />
+      <CatalogNativeName value={value} />
       {value?.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}

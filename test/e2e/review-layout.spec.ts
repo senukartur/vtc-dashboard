@@ -1247,15 +1247,24 @@ for (const locale of ["en", "ru"] as const)
       await catalogLanguage(page, locale);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(text[locale].title);
       await expect(rowOf(page, reviewIds.over)).toContainText("· Krönburg");
+      await expect(rowOf(page, reviewIds.over).locator(".catalog-native")).toHaveCSS(
+        "display",
+        "inline",
+      );
       await expect(rowOf(page, reviewIds.own)).not.toContainText("Krönburg");
       await noOverflow(page);
       await capture(page, info, `review-native-${locale}`);
       await openTrip(page, info, reviewIds.over);
       await settled(page);
-      await expect(panel(page).getByRole("heading", { level: 2 })).toContainText("· Krönburg");
-      await expect(
-        panel(page).locator(".review-entity").filter({ hasText: "· Krönburg" }).first(),
-      ).toContainText(`${label} · Krönburg`);
+      const heading = panel(page).getByRole("heading", { level: 2 });
+      await expect(heading).toContainText("· Krönburg");
+      await expect(heading.locator(".catalog-native")).toHaveCSS("display", "inline");
+      const entity = panel(page)
+        .locator(".review-entity")
+        .filter({ hasText: "· Krönburg" })
+        .first();
+      await expect(entity).toContainText(`${label} · Krönburg`);
+      await expect(entity.locator(".catalog-native")).toHaveCSS("display", "inline");
       await noOverflow(page);
     },
   );

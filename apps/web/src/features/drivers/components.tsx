@@ -414,7 +414,7 @@ function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
   return (
     <>
       {value?.label ?? t("trips.unknown")}
-      <CatalogNativeName value={value} className="driver-fallback" />
+      <CatalogNativeName value={value} />
       {value?.englishFallback && (
         <small className="driver-fallback"> · {t("trips.englishName")}</small>
       )}

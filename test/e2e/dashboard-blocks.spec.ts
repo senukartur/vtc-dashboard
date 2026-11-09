@@ -767,6 +767,7 @@ for (const locale of ["en", "ru"] as const)
       const link = tripLink(page, recentTrips(locale)[0]?.id ?? "");
       await expect(link).toContainText("· Krönburg →");
       await expect(link.locator("small")).toHaveCount(1);
+      await expect(link.locator(".catalog-native")).toHaveCSS("display", "inline");
       await noOverflow(page);
       await capture(page, info, `dashboard-native-${locale}`);
     },

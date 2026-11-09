@@ -99,7 +99,7 @@ export function EntityLabel({
   return (
     <span className="review-entity">
       {valid ? entity.display.label : query.isPending ? t("loading") : t("unknownEntity")}
-      {valid && <CatalogNativeName value={entity.display} className="trip-fallback" />}
+      {valid && <CatalogNativeName value={entity.display} />}
       {valid && entity.display.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}

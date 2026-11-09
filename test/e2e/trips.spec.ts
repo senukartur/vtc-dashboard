@@ -564,6 +564,7 @@ for (const locale of ["en", "ru"] as const)
       await catalogLanguage(page, locale);
       const summary = page.locator(".trip-row").first();
       await expect(summary).toContainText("Крёнбург · Krönburg → Krönburg");
+      await expect(summary.locator(".catalog-native")).toHaveCSS("display", "inline");
       await expect(summary).not.toContainText("Krönburg · Krönburg");
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))

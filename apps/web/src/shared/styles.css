@@ -158,6 +158,12 @@ small {
   display: block;
   font-size: 0.8rem;
 }
+/* A canonical city name stays in the line of the label it follows. */
+small.catalog-native {
+  display: inline;
+  color: var(--muted);
+  font-weight: 400;
+}
 code {
   overflow-wrap: anywhere;
   font-size: 0.8rem;

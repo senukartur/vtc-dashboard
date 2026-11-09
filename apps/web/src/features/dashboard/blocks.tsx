@@ -110,9 +110,8 @@ export function RecentTripsWidget({
                   <Link to={`/account/trips/${row.id}`} className="dashboard-trip-route">
                     <span>
                       {row.origin}
-                      <CatalogNativeName value={trip.origin} className="dashboard-fallback" /> →{" "}
-                      {row.destination}
-                      <CatalogNativeName value={trip.destination} className="dashboard-fallback" />
+                      <CatalogNativeName value={trip.origin} /> → {row.destination}
+                      <CatalogNativeName value={trip.destination} />
                       {row.fallback && (
                         <small className="dashboard-fallback"> · {t("catalogs:fallback")}</small>
                       )}

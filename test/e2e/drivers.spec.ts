@@ -910,6 +910,7 @@ for (const locale of ["en", "ru"] as const)
       const route = tripsCard(page).locator("a.driver-trip-link").first();
       await expect(route).toContainText("· Krönburg");
       await expect(route.locator("small")).toHaveCount(1);
+      await expect(route.locator(".catalog-native")).toHaveCSS("display", "inline");
       expect(await noOverflow(page)).toBe(true);
       await capture(page, info, `driver-native-${locale}`);
     },

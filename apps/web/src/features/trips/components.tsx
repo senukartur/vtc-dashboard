@@ -176,7 +176,7 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
   const label = (value: DTO["CatalogLabel"] | null) => (
     <>
       {value?.label ?? t("unknown")}
-      <CatalogNativeName value={value} className="trip-fallback" />
+      <CatalogNativeName value={value} />
       {value?.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}
