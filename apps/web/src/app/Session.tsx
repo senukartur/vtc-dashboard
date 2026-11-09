@@ -127,6 +127,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const currentSelf = !ended && !query.isError ? (query.data?.data.data ?? null) : null;
       const currentEtag = currentSelf ? (query.data?.etag ?? null) : null;
       if (currentSelf && currentEtag && currentSelf.preferences.locale !== locale) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 10000);
         try {
           const attempt = attemptFor(
             "preferences",
@@ -134,13 +136,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             currentEtag,
             null,
           );
-          const controller = new AbortController();
-          const timer = window.setTimeout(() => controller.abort(), 10000);
           await command(attempt, controller.signal);
-          window.clearTimeout(timer);
           await query.refetch({ cancelRefetch: false });
         } catch {
           // Failure to update backend preference leaves client state intact
+        } finally {
+          window.clearTimeout(timer);
         }
       }
     },
