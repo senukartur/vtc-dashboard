@@ -10,9 +10,11 @@ Rows with no Russian name show the `EN · no translation` badge; hidden rows sho
 
 ## Selectors
 
-`apps/web/src/shared/catalog-selectors/` exports `CatalogSelector` and the runtime DTOs. A consumer passes game, kind (`city`, `cargo`, `trailer`), an optional region and the selected ID. The selector searches, pages and offers visible same-game rows; a row that is hidden or from another game stays readable as a kept selection, with its label, and leaves the option list. Enter in the search field never submits an enclosing form, and IME composition is respected. Locale changes labels only, never selected IDs.
+`apps/web/src/shared/catalog-selectors/` exports `CatalogSelector` and the runtime DTOs. A consumer passes game, kind (`city`, `cargo`, `trailer`), an optional region and the selected ID. The selector is one ARIA editable combobox with list autocomplete: typing searches through the server after a short debounce, reads only start when the field is opened, and a last row loads the next page inside the list. Rows that are hidden or from another game leave the list; a saved row in that state stays readable with its label, a mark and a note, and a consumer can pass the optional `extraRow` to add a fixed last list row (the four manual report fields use it for "Not listed / unresolved"; other consumers do not show it). A row that is still being fetched or has not settled after a search cannot be chosen. Locale changes labels only, never selected IDs.
 
-Queries use the session's private no-store scope and generated DTO runtime schemas. A failed read shows an alert with Refresh. A selection whose row cannot be read keeps its ID and says so.
+Keyboard contract: arrows open and move (wrapping), Enter chooses the active row and never submits an enclosing form (IME composition is respected), and Escape closes the list and restores the previous value. Tab and clicking outside close and restore, except that fully erased text clears the value. Inside a dialog, Escape closes an open list first; `shared/ui/dialog.tsx` keeps the dialog open until the list is closed.
+
+Queries use the session's private no-store scope and generated DTO runtime schemas. A failed read shows an alert and a Refresh row in the list. A selection whose row cannot be read keeps its ID and says so.
 
 ## Import flow
 
@@ -20,4 +22,4 @@ The dialog offers CSV and JSON templates per list and shows the exact columns, t
 
 ## Evidence and boundaries
 
-Unit tests cover selector compatibility, fallback rules, URL filter parsing, template parity with the server's columns and RU/EN string parity. Browser tests cover RU/EN layout at desktop and phone widths, add/edit/hide/restore, import dry-run/apply, permissions, pending, error and empty states, and selector behavior. Run the pinned Docker launcher from [testing.md](testing.md). Exact outcomes per candidate SHA belong in the pull request.
+Unit tests cover selector compatibility, combobox row order and key movement, fallback rules, URL filter parsing, template parity with the server's columns and RU/EN string parity. Browser tests cover RU/EN layout at desktop and phone widths, add/edit/hide/restore, import dry-run/apply, permissions, pending, error and empty states, and the combobox keyboard, search and paging behavior. Run the pinned Docker launcher from [testing.md](testing.md). Exact outcomes per candidate SHA belong in the pull request.

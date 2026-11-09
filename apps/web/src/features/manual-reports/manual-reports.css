@@ -107,7 +107,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-.manual-report .manual-report-form fieldset.manual-catalog-field,
 .manual-report .manual-report-evidence fieldset {
   min-width: 0;
   margin: 0;
@@ -119,12 +118,9 @@
 .manual-report .manual-event {
   gap: 6px;
 }
-.manual-report .manual-catalog-field > legend {
-  margin-bottom: 2px;
-  padding: 0;
-  color: var(--foreground);
-  font-size: var(--font-small);
-  font-weight: 600;
+.manual-report .manual-catalog-unresolved {
+  gap: 6px;
+  margin-top: 4px;
 }
 .manual-report .manual-report-form .trip-check {
   gap: 8px;
@@ -135,13 +131,6 @@
   font-size: var(--font-small);
 }
 .manual-report .trip-evidence small {
-  overflow-wrap: anywhere;
-  color: var(--muted);
-}
-.manual-report .manual-report-form .catalog-selection p {
-  margin: 0;
-}
-.manual-report .manual-report-form .catalog-selection small {
   overflow-wrap: anywhere;
   color: var(--muted);
 }

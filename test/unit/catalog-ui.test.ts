@@ -15,6 +15,12 @@ import {
 } from "../../apps/web/src/features/catalogs/model.ts";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import {
+  clampActive,
+  comboboxRows,
+  leaveAction,
+  moveActive,
+} from "../../apps/web/src/shared/catalog-selectors/combobox.ts";
+import {
   catalogAttempt,
   importPreviewSchema,
   importResultSchema,
@@ -61,6 +67,69 @@ test("a selector offers visible same-game rows only, and a hidden row stays read
   expect(compatibleSelection(item, "ats", id)).toBe(false);
   expect(compatibleSelection({ ...item, hidden: true }, "ats")).toBe(false);
   expect(listOfKind).toEqual({ city: "cities", cargo: "cargoes", trailer: "trailers" });
+});
+
+const row = (entityId: string, overrides: Partial<CatalogItem> = {}): CatalogItem => ({
+  ...item,
+  id: entityId,
+  ...overrides,
+});
+const rowsOf = (extra = false, hasMore = false, failed = false) =>
+  comboboxRows({
+    items: [row(id), row(regionId)],
+    game: "ats",
+    hasMore,
+    failed,
+    extra,
+  }).map((r) => r.key);
+
+test("combobox rows keep catalog rows first, then load more or refresh, then the extra row", () => {
+  expect(rowsOf()).toEqual([id, regionId]);
+  expect(rowsOf(true, true)).toEqual([id, regionId, "more", "extra"]);
+  // A failed read offers only Refresh, even when the failed page had a next one.
+  expect(rowsOf(true, true, true)).toEqual([id, regionId, "refresh", "extra"]);
+  expect(rowsOf(false, true, true)).toEqual([id, regionId, "refresh"]);
+});
+
+test("combobox rows drop hidden and other-game rows and add no extra row without one", () => {
+  const hidden = row("h", { hidden: true }),
+    otherGame = row("o", { game: "ets2" });
+  expect(
+    comboboxRows({
+      items: [hidden, otherGame, row(id)],
+      game: "ats",
+      hasMore: false,
+      failed: false,
+      extra: false,
+    }).map((r) => r.key),
+  ).toEqual([id]);
+  expect(
+    comboboxRows({ items: [], game: "ats", hasMore: false, failed: false, extra: true }).map(
+      (r) => r.kind,
+    ),
+  ).toEqual(["extra"]);
+  expect(
+    comboboxRows({ items: [], game: "ats", hasMore: false, failed: false, extra: false }),
+  ).toEqual([]);
+});
+
+test("arrow movement wraps and a shrunken list clamps the active row", () => {
+  expect(moveActive(0, 1, 3)).toBe(1);
+  expect(moveActive(2, 1, 3)).toBe(0);
+  expect(moveActive(0, -1, 3)).toBe(2);
+  expect(moveActive(-1, 1, 0)).toBe(-1);
+  expect(clampActive(5, 3)).toBe(2);
+  expect(clampActive(-1, 3)).toBe(0);
+  expect(clampActive(Number.MAX_SAFE_INTEGER, 3)).toBe(2);
+  expect(clampActive(0, 0)).toBe(-1);
+});
+
+test("leaving the field clears only fully erased text", () => {
+  expect(leaveAction("", true)).toBe("clear");
+  expect(leaveAction("   ", true)).toBe("clear");
+  expect(leaveAction("", false)).toBe("restore");
+  expect(leaveAction("abc", true)).toBe("restore");
+  expect(leaveAction(null, true)).toBe("restore");
 });
 
 test("the English fallback badge follows only the display returned by the server", () => {
@@ -245,11 +314,11 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
     "hidden",
     "staffOnly",
     "choose",
-    "search",
-    "selected",
+    "found",
     "historical",
     "historyError",
     "clear",
+    "clearField",
     "more",
   ])
     expect(en).toHaveProperty(key);
