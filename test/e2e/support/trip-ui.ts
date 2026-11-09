@@ -3,7 +3,15 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { pngBytes } from "../../fixtures/manual-images.ts";
-import { catalogItem, catalogList, entityId, envelope, list, mockCatalogs } from "./catalogs.ts";
+import {
+  catalogItem,
+  catalogList,
+  chooseCatalogRow,
+  entityId,
+  envelope,
+  list,
+  mockCatalogs,
+} from "./catalogs.ts";
 import { expect } from "./fixtures.ts";
 
 export const id = "41000000-0000-4000-8000-000000000001",
@@ -91,9 +99,15 @@ export async function mockTrips(page: Page) {
 }
 export async function completeForm(page: Page) {
   for (const name of ["Origin city", "Destination city", "Cargo", "Trailer type"])
-    await page
-      .getByRole("combobox", { name, exact: true })
-      .selectOption(name === "Cargo" ? cargoId : name === "Trailer type" ? trailerId : entityId);
+    await chooseCatalogRow(
+      page,
+      name,
+      name === "Cargo"
+        ? "Fictional cargo"
+        : name === "Trailer type"
+          ? "Fictional trailer_type"
+          : "Fictional city",
+    );
   await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("1000");
   await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("0");
   await page

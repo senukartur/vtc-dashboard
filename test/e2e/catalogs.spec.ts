@@ -1,9 +1,10 @@
-import type { Page, TestInfo } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import {
   catalogItem,
   catalogLanguage,
   catalogList,
+  chooseCatalogRow,
   cargoRowId,
   dlcId,
   defaultRows,
@@ -510,6 +511,60 @@ test(
   },
 );
 
+const fieldLabels = {
+  en: ["Origin city", "Destination city", "Cargo", "Trailer type"],
+  ru: ["Город отправления", "Город назначения", "Груз", "Тип прицепа"],
+} as const;
+/** Serves cities from `rows` with server-side search and 25-row cursor pages, and records reads. */
+async function serveCities(page: Page, rows: ReturnType<typeof catalogItem>[]) {
+  const reads: URL[] = [];
+  await page.route(
+    (url) => /^\/api\/v1\/catalogs\/cities(\/.*)?$/.test(url.pathname),
+    (route) => {
+      const url = new URL(route.request().url()),
+        rowId = url.pathname.split("/")[5];
+      if (rowId) {
+        const found = rows.find((row) => row.id === rowId);
+        return found
+          ? route.fulfill({ json: envelope(found) })
+          : route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
+      }
+      reads.push(url);
+      const search = url.searchParams.get("search")?.toLowerCase() ?? "",
+        matches = rows.filter((row) => row.display.label.toLowerCase().includes(search)),
+        cursor = Number(url.searchParams.get("cursor") ?? 0),
+        next = cursor + 25;
+      return route.fulfill({
+        json: catalogList(
+          matches.slice(cursor, next),
+          next < matches.length ? String(next) : null,
+          matches.length,
+        ),
+      });
+    },
+  );
+  return reads;
+}
+const fictionalRows = (count: number, locale: "en" | "ru" = "en") =>
+  Array.from({ length: count }, (_, index) => {
+    const number = String(index + 1).padStart(2, "0");
+    return catalogItem(
+      `63000000-0000-4000-8000-0000000002${number}`,
+      `Fictional row ${number}`,
+      locale,
+    );
+  });
+async function openReport(page: Page, locale: "en" | "ru" = "en") {
+  await page.goto("/account/reports/new");
+  await catalogLanguage(page, locale);
+  await expect(page.locator("#manual-file")).toBeVisible();
+}
+const originField = (page: Page) =>
+  page.getByRole("combobox", { name: "Origin city", exact: true });
+const originList = (page: Page) => page.getByRole("listbox", { name: "Origin city", exact: true });
+const activeOption = (scope: Page | Locator) =>
+  scope.locator('[role="option"][aria-selected="true"]');
+
 test(
   "a selector offers visible rows only, labels fallback and never submits its enclosing form",
   browserCase(["@functional"]),
@@ -518,16 +573,22 @@ test(
     const hiddenId = "63000000-0000-4000-8000-000000000030";
     const city = (id: string, name: string, overrides = {}) =>
       catalogItem(id, name, "ru", overrides);
-    await page.route("**/api/v1/catalogs/cities?*", (route) =>
-      route.fulfill({
-        json: catalogList([
-          city(entityId, "Fictional visible"),
-          city(hiddenId, "Fictional hidden", {
-            hidden: true,
-            display: { ...city(hiddenId, "Fictional hidden").display, hidden: true },
-          }),
-        ]),
-      }),
+    const visible = city(entityId, "Fictional visible");
+    await page.route(
+      (url) => /^\/api\/v1\/catalogs\/cities(\/.*)?$/.test(url.pathname),
+      (route) => {
+        if (new URL(route.request().url()).pathname.split("/")[5])
+          return route.fulfill({ json: envelope(visible) });
+        return route.fulfill({
+          json: catalogList([
+            visible,
+            city(hiddenId, "Fictional hidden", {
+              hidden: true,
+              display: { ...city(hiddenId, "Fictional hidden").display, hidden: true },
+            }),
+          ]),
+        });
+      },
     );
     let submissions = 0;
     await page.route("**/api/v1/manual-reports", (route) => {
@@ -537,15 +598,241 @@ test(
     await page.goto("/account/reports/new");
     await catalogLanguage(page, "ru");
     const origin = page.getByRole("combobox", { name: "Город отправления", exact: true });
-    await expect(origin.locator("option")).toHaveCount(2);
-    await expect(origin.locator("option").nth(1)).toContainText("Fictional visible");
-    await expect(origin.locator("option").nth(1)).toContainText(catalogTranslations.ru.fallback);
-    await expect(origin.locator(`option[value="${hiddenId}"]`)).toHaveCount(0);
-    const search = page
-      .getByRole("searchbox", { name: `Поиск: Город отправления` })
-      .or(page.getByRole("searchbox", { name: /Город отправления/ }));
-    await search.first().press("Enter");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    await expect(origin).toHaveAttribute("aria-autocomplete", "list");
+    await origin.click();
+    const listbox = page.getByRole("listbox", { name: "Город отправления", exact: true });
+    await expect(listbox).toBeVisible();
+    await expect(origin).toHaveAttribute("aria-controls", (await listbox.getAttribute("id")) ?? "");
+    const option = listbox.getByRole("option", { name: /Fictional visible/ });
+    await expect(option).toContainText("EN");
+    await expect(option).toHaveAccessibleName(new RegExp(catalogTranslations.ru.fallback));
+    await expect(listbox.getByRole("option", { name: /Fictional hidden/ })).toHaveCount(0);
+    await origin.press("Enter");
+    await expect(origin).toHaveValue("Fictional visible");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    await expect(origin).toHaveAccessibleDescription(catalogTranslations.ru.fallback);
+    await origin.press("Enter");
     await page.waitForTimeout(150);
     expect(submissions).toBe(0);
+    await expect(origin).toHaveValue("Fictional visible");
+  },
+);
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the catalog field is one combobox in ${locale} with no separate search, select, checkbox or load-more button`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      await mockTrips(page);
+      await serveCities(page, fictionalRows(30, locale));
+      await openReport(page, locale);
+      await capture(page, info, `combobox-${locale}-closed`);
+      const fields = page.locator(".manual-report-fields");
+      for (const name of fieldLabels[locale])
+        await expect(fields.getByRole("combobox", { name, exact: true })).toHaveCount(1);
+      for (const missing of ["searchbox", "checkbox"] as const)
+        await expect(fields.getByRole(missing)).toHaveCount(0);
+      await expect(fields.locator(".manual-catalog-field select")).toHaveCount(0);
+      await expect(fields.getByRole("button", { name: c.more, exact: true })).toHaveCount(0);
+
+      const origin = fields.getByRole("combobox", { name: fieldLabels[locale][0], exact: true }),
+        listbox = page.getByRole("listbox", { name: fieldLabels[locale][0], exact: true }),
+        coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
+        min = coarse ? 40 : 30;
+      await origin.click();
+      await expect(listbox.getByRole("option")).toHaveCount(27);
+      await capture(page, info, `combobox-${locale}-open`);
+      for (const option of await listbox.getByRole("option").all()) {
+        const box = await option.boundingBox();
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(min);
+      }
+      await chooseCatalogRow(page, fieldLabels[locale][0], "Fictional row 01");
+      const clear = page.getByRole("button", {
+        name: c.clearField.replace("{{label}}", fieldLabels[locale][0]),
+        exact: true,
+      });
+      const clearBox = await clear.boundingBox();
+      expect(clearBox?.height ?? 0).toBeGreaterThanOrEqual(min);
+      expect(clearBox?.width ?? 0).toBeGreaterThanOrEqual(min);
+      await capture(page, info, `combobox-${locale}-chosen`);
+    },
+  );
+
+test(
+  "typing filters through the server search after the debounce and load more reaches every row",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const reads = await serveCities(page, fictionalRows(30));
+    await openReport(page);
+    const origin = originField(page),
+      list = originList(page);
+    const params = () =>
+      reads
+        .map((url) => Object.fromEntries(url.searchParams))
+        .map(({ search, cursor }) => ({ search, cursor }));
+    expect(reads).toEqual([]);
+
+    // One read for the whole typing burst, with the final text.
+    await origin.pressSequentially("row", { delay: 20 });
+    await expect(list.getByRole("option", { name: /^Fictional row 01/ })).toBeVisible();
+    expect(params()).toEqual([{ search: "row", cursor: undefined }]);
+
+    // The last rows are reached from inside the list, with the keyboard only.
+    await origin.press("ArrowUp"); // wraps to the extra row
+    await origin.press("ArrowUp"); // the load-more row
+    await expect(activeOption(page)).toHaveText("Load more");
+    await origin.press("Enter");
+    await expect(list.getByRole("option", { name: /^Fictional row 30/ })).toBeVisible();
+    expect(params()).toEqual([
+      { search: "row", cursor: undefined },
+      { search: "row", cursor: "25" },
+    ]);
+    await expect(activeOption(page)).toContainText("Fictional row 26");
+    await expect(list.getByRole("option", { name: "Load more" })).toHaveCount(0);
+    for (let step = 0; step < 4; step++) await origin.press("ArrowDown");
+    await expect(activeOption(page)).toContainText("Fictional row 30");
+    await expect(activeOption(page)).toBeInViewport({ ratio: 1 });
+    await origin.press("Enter");
+    await expect(origin).toHaveValue("Fictional row 30");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+  },
+);
+
+test(
+  "the combobox follows the keyboard pattern for arrows, Enter, Esc and Tab",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    await serveCities(page, fictionalRows(3));
+    let submissions = 0;
+    await page.route("**/api/v1/manual-reports", (route) => {
+      if (route.request().method() === "POST") submissions++;
+      return route.fallback();
+    });
+    await openReport(page);
+    const origin = originField(page),
+      list = originList(page),
+      extra = /^Not listed/;
+
+    await page.locator("#manual-game").focus();
+    await page.keyboard.press("Tab");
+    await expect(origin).toBeFocused();
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(origin).toHaveAttribute("aria-expanded", "true");
+    await expect(activeOption(page)).toContainText("Fictional row 01");
+    await expect(origin).toHaveAttribute(
+      "aria-activedescendant",
+      (await activeOption(page).getAttribute("id")) ?? "",
+    );
+    await page.keyboard.press("ArrowDown");
+    await expect(activeOption(page)).toContainText("Fictional row 02");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(activeOption(page)).toHaveAccessibleName(extra);
+    await page.keyboard.press("ArrowDown");
+    await expect(activeOption(page)).toContainText("Fictional row 01");
+
+    await page.keyboard.press("Escape");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    await expect(origin).toHaveValue("");
+    await page.keyboard.press("ArrowUp");
+    await expect(origin).toHaveAttribute("aria-expanded", "true");
+    await expect(activeOption(page)).toHaveAccessibleName(extra);
+    await expect(list).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await origin.fill("row 02");
+    await expect(list.getByRole("option", { name: /Fictional row 02/ })).toBeVisible();
+    await expect(activeOption(page)).toContainText("Fictional row 02");
+    await page.keyboard.press("Enter");
+    await expect(origin).toHaveValue("Fictional row 02");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    await expect(origin).toBeFocused();
+
+    // Enter with the list closed stays in the field, Tab leaves and restores a discarded edit.
+    await page.keyboard.press("Enter");
+    expect(submissions).toBe(0);
+    await origin.fill("zzz");
+    await page.keyboard.press("Tab");
+    await expect(origin).not.toBeFocused();
+    await expect(origin).toHaveValue("Fictional row 02");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    expect(submissions).toBe(0);
+  },
+);
+
+test(
+  "a stale row cannot be chosen during the debounce",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    await serveCities(page, fictionalRows(2));
+    await openReport(page);
+    const origin = originField(page),
+      list = originList(page);
+    await origin.click();
+    await expect(list.getByRole("option", { name: /Fictional row 01/ })).toBeVisible();
+
+    // Hold the searched read so the unsettled window cannot end during the assertions.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      (url) => url.pathname === "/api/v1/catalogs/cities" && url.searchParams.has("search"),
+      async (route) => {
+        await gate;
+        return route.fallback();
+      },
+    );
+    await origin.fill("row 02");
+    await expect(list.getByRole("option", { name: /Fictional row/ })).toHaveCount(0);
+    await expect(page.getByRole("status")).toHaveText("Loading catalog…");
+    // The not-listed row stays reachable while searching, but no row is active for Enter.
+    await expect(list.getByRole("option", { name: /^Not listed/ })).toBeVisible();
+    await expect(activeOption(page)).toHaveCount(0);
+    await origin.press("Enter");
+    await expect(origin).toHaveValue("row 02");
+    await expect(origin).toHaveAttribute("aria-expanded", "true");
+    release();
+    await expect(list.getByRole("option", { name: /Fictional row 02/ })).toBeVisible();
+    await origin.press("Enter");
+    await expect(origin).toHaveValue("Fictional row 02");
+  },
+);
+
+test(
+  "clearing and erasing remove the value and return focus to the field",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    await serveCities(page, fictionalRows(2));
+    await openReport(page);
+    const origin = originField(page),
+      clear = page.getByRole("button", { name: "Clear selection: Origin city", exact: true });
+    await chooseCatalogRow(page, "Origin city", "Fictional row 01");
+    await expect(clear).toBeVisible();
+    await clear.click();
+    await expect(origin).toHaveValue("");
+    await expect(origin).toBeFocused();
+    await expect(clear).toHaveCount(0);
+
+    await chooseCatalogRow(page, "Origin city", "Fictional row 02");
+    await origin.fill("");
+    await page.keyboard.press("Tab");
+    await expect(origin).not.toBeFocused();
+    await expect(origin).toHaveValue("");
+    await expect(clear).toHaveCount(0);
+
+    // Erased text with no prior value restores nothing and clears nothing.
+    await origin.fill("   ");
+    await origin.blur();
+    await expect(origin).toHaveValue("");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
   },
 );

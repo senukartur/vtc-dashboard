@@ -11,7 +11,7 @@ import type { components } from "@vtc/contracts";
 import type { RowDataPacket } from "mysql2/promise";
 import { testConnection } from "../persistence/support.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
-import { catalogLanguage } from "./support/catalogs.ts";
+import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
@@ -43,12 +43,8 @@ async function create(
   await page.getByLabel("Start time (UTC)", { exact: true }).fill(start);
   if (fixture) {
     await page.getByRole("button", { name: "Choose catalog selections", exact: true }).click();
-    await page
-      .getByRole("combobox", { name: "Prescribed cargo", exact: true })
-      .selectOption(fixture.ids.fixture_crates as string);
-    await page
-      .getByRole("combobox", { name: "Prescribed trailer type", exact: true })
-      .selectOption(fixture.ids.fixture_box as string);
+    await chooseCatalogRow(page, "Prescribed cargo", "Fictional fixture_crates", "fixture_crates");
+    await chooseCatalogRow(page, "Prescribed trailer type", "Fictional fixture_box", "fixture_box");
     await page.getByLabel("Prescribed mass (kg) · Optional", { exact: true }).fill("21000");
   }
   await page.getByRole("button", { name: "Create event", exact: true }).click();
