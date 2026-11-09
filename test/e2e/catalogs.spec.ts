@@ -1,4 +1,5 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import {
   catalogItem,
@@ -15,7 +16,7 @@ import {
   trailerRowId,
 } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { mockTrips } from "./support/trip-ui.ts";
+import { evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
 const phone = (page: Page) => (page.viewportSize()?.width ?? 1280) < 760;
 const tab = (page: Page, name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) });
@@ -674,6 +675,70 @@ for (const locale of ["en", "ru"] as const)
       }
     },
   );
+
+test(
+  "the EN chip on a form locked by its fieldset neither opens the list nor reads it",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const reads = await serveCities(page, [catalogItem(entityId, "Fictional locked city", "ru")]);
+    const report = example("getManualReport:success").data,
+      view = example("getTrip:extended-manual-revision"),
+      pin = (rowId: string) => ({ status: "resolved", entityId: rowId });
+    report.id = id;
+    report.tripId = id;
+    report.version = 1;
+    report.tripVersion = 1;
+    report.currentRevision = {
+      representation: "extended",
+      id: "45000000-0000-4000-8000-000000000030",
+      reportId: id,
+      number: 1,
+      submittedAt: "2026-10-24T12:00:00.000Z",
+      fields: {
+        game: "ets2",
+        origin: pin(entityId),
+        destination: pin(entityId),
+        cargo: pin(cargoRowId),
+        trailerType: pin(trailerRowId),
+        cargoMassKg: "1000",
+        actualDistanceM: "100",
+        evidenceIds: [evidenceId],
+        eventId: null,
+        comment: "Fictional original",
+      },
+    };
+    view.data.manualRevision = report.currentRevision;
+    view.data.summary.owner = accountFixture("en").data.member;
+    view.data.summary.id = id;
+    view.data.summary.decision = "accepted";
+    view.data.summary.version = 1;
+    view.data.evidence = [];
+    await page.route(`**/api/v1/manual-reports/${id}`, (route) =>
+      route.fulfill({ json: envelope(report), headers: { ETag: '"v1"' } }),
+    );
+    await page.route(`**/api/v1/trips/${id}`, (route) =>
+      route.fulfill({ json: view, headers: { ETag: '"v1"' } }),
+    );
+    await page.goto(`/account/reports/${id}/edit`);
+    await catalogLanguage(page, "ru");
+
+    const name = fieldLabels.ru[0],
+      origin = page.getByRole("combobox", { name, exact: true }),
+      chip = page
+        .locator(".manual-catalog-field")
+        .filter({ has: origin })
+        .getByText("EN", { exact: true });
+    await expect(origin).toHaveValue("Fictional locked city");
+    await expect(origin).toBeDisabled();
+    await chip.click();
+    // Long enough for a list read, had one started, to reach the mock.
+    await page.waitForTimeout(150);
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("listbox", { name, exact: true })).toHaveCount(0);
+    expect(reads).toHaveLength(0);
+  },
+);
 
 test(
   "typing filters through the server search after the debounce and load more reaches every row",

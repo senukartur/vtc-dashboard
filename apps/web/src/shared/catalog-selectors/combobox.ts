@@ -57,10 +57,13 @@ export function searchTerm(draft: string | null) {
     .trimEnd();
 }
 
-/** Text the user typed; a draft still starting with the extra row's own label holds none. */
-export function typedText(draft: string | null, rowLabel?: string) {
+/**
+ * Text the user typed. While the field shows the extra row, a prefix or extension of that row's
+ * label is only an edit of the displayed text; on any other field the same text is real.
+ */
+export function typedText(draft: string | null, row?: { label: string; active: boolean }) {
   const text = (draft ?? "").trim();
-  return rowLabel && text.startsWith(rowLabel) ? "" : text;
+  return row?.active && (row.label.startsWith(text) || text.startsWith(row.label)) ? "" : text;
 }
 
 /** Leaving the field restores the previous value unless the user erased the text entirely. */

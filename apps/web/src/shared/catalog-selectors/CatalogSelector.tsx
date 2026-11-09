@@ -64,7 +64,7 @@ export function CatalogSelector({
     [active, setActive] = useState(0),
     [picked, setPicked] = useState<CatalogItem | null>(null);
   const term = searchTerm(draft);
-  const typed = typedText(draft, extraRow?.label);
+  const typed = typedText(draft, extraRow);
   useEffect(() => {
     const timer = window.setTimeout(() => setEffective(term), 250);
     return () => window.clearTimeout(timer);
@@ -149,7 +149,8 @@ export function CatalogSelector({
     if (draft !== null) return;
     const displayed = shown;
     requestAnimationFrame(() => {
-      if (inputRef.current?.value === displayed) inputRef.current.select();
+      const input = inputRef.current;
+      if (input && document.activeElement === input && input.value === displayed) input.select();
     });
   };
   const clear = () => {
@@ -241,8 +242,9 @@ export function CatalogSelector({
                 title={t("fallback")}
                 onMouseDown={keepFocus}
                 onClick={() => {
+                  // A disabled field refuses focus, even when only its fieldset is disabled.
                   inputRef.current?.focus();
-                  if (!open) openList();
+                  if (!open && document.activeElement === inputRef.current) openList();
                 }}
               >
                 EN

@@ -143,12 +143,24 @@ test("the search term is trimmed and clamped to the route limit", () => {
   expect(searchTerm(`${"x".repeat(127)}🚚`)).toBe("x".repeat(127));
 });
 
-test("a draft still starting with the extra row label holds no typed text", () => {
-  expect(typedText("  Ust  ", "Not listed")).toBe("Ust");
-  expect(typedText("Not listed", "Not listed")).toBe("");
-  expect(typedText("Not listed / x", "Not listed")).toBe("");
+test("an edit of the extra row label the field shows holds no typed text", () => {
+  const shown = { label: "Not listed", active: true };
+  expect(typedText("Not listed", shown)).toBe("");
+  expect(typedText("Not listed / x", shown)).toBe("");
+  // Backspace leaves a prefix of the label.
+  expect(typedText("Not liste", shown)).toBe("");
+  expect(typedText("  Not  ", shown)).toBe("");
+  expect(typedText(null, shown)).toBe("");
+  // Neither a prefix nor an extension is real text.
+  expect(typedText("  Ust  ", shown)).toBe("Ust");
+  expect(typedText("Not listing", shown)).toBe("Not listing");
+});
+
+test("the same text is kept on a field that does not show the extra row", () => {
+  const inactive = { label: "Not listed", active: false };
+  expect(typedText("Not", inactive)).toBe("Not");
+  expect(typedText("Not listed / x", inactive)).toBe("Not listed / x");
   expect(typedText("Ust")).toBe("Ust");
-  expect(typedText(null, "Not listed")).toBe("");
 });
 
 test("the English fallback badge follows only the display returned by the server", () => {

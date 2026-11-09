@@ -501,6 +501,17 @@ test(
     await expect(cargo).toHaveValue("Not listed / unresolved");
     await expect(label).toHaveValue("Fictional corrected label");
 
+    // Backspace leaves a prefix of the row label, which is not typed text either.
+    await cargo.press("End");
+    await page.keyboard.press("Backspace");
+    await expect(cargo).toHaveValue("Not listed / unresolve");
+    await expect(listbox.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName(
+      /^Not listed/,
+    );
+    await page.keyboard.press("Enter");
+    await expect(cargo).toHaveValue("Not listed / unresolved");
+    await expect(label).toHaveValue("Fictional corrected label");
+
     await chooseCatalogRow(page, "Cargo", "Fictional cargo");
     await expect(group).toHaveCount(0);
 
