@@ -7,6 +7,8 @@ import {
   comboboxRows,
   leaveAction,
   moveActive,
+  searchTerm,
+  typedText,
 } from "./combobox.js";
 import {
   type CatalogItem,
@@ -61,7 +63,8 @@ export function CatalogSelector({
     [open, setOpen] = useState(false),
     [active, setActive] = useState(0),
     [picked, setPicked] = useState<CatalogItem | null>(null);
-  const term = (draft ?? "").trim();
+  const term = searchTerm(draft);
+  const typed = typedText(draft, extraRow?.label);
   useEffect(() => {
     const timer = window.setTimeout(() => setEffective(term), 250);
     return () => window.clearTimeout(timer);
@@ -134,9 +137,20 @@ export function CatalogSelector({
       }
     } else if (row.kind === "refresh") void query.refetch();
     else {
-      extraRow?.onChoose(term);
+      extraRow?.onChoose(typed);
       close();
     }
+  };
+  // Selecting the displayed value makes the next keystroke replace it instead of appending. A
+  // frame later, because the browser collapses an existing selection after the mouse release.
+  const openList = (index = 0) => {
+    setOpen(true);
+    setActive(index);
+    if (draft !== null) return;
+    const displayed = shown;
+    requestAnimationFrame(() => {
+      if (inputRef.current?.value === displayed) inputRef.current.select();
+    });
   };
   const clear = () => {
     setPicked(null);
@@ -155,10 +169,8 @@ export function CatalogSelector({
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
-      if (!open) {
-        setOpen(true);
-        setActive(delta === 1 ? 0 : Number.MAX_SAFE_INTEGER);
-      } else if (ready) setActive(moveActive(shownActive, delta, rows.length));
+      if (!open) openList(delta === 1 ? 0 : Number.MAX_SAFE_INTEGER);
+      else if (ready) setActive(moveActive(shownActive, delta, rows.length));
     } else if (event.key === "Enter") {
       event.preventDefault();
       if (activeRow) activate(activeRow, shownActive);
@@ -215,10 +227,7 @@ export function CatalogSelector({
             setActive(0);
           }}
           onClick={() => {
-            if (!open) {
-              setOpen(true);
-              setActive(0);
-            }
+            if (!open) openList();
           }}
           onBlur={leave}
           onKeyDown={onKeyDown}
@@ -226,7 +235,16 @@ export function CatalogSelector({
         <span className="catalog-adornments">
           {fallback && (
             <>
-              <span className="catalog-chip" aria-hidden="true" title={t("fallback")}>
+              <span
+                className="catalog-chip"
+                aria-hidden="true"
+                title={t("fallback")}
+                onMouseDown={keepFocus}
+                onClick={() => {
+                  inputRef.current?.focus();
+                  if (!open) openList();
+                }}
+              >
                 EN
               </span>
               <span id={`${id}-fallback`} className="visually-hidden">
@@ -345,7 +363,7 @@ export function CatalogSelector({
                     {row.kind === "extra" && (
                       <>
                         <span className="catalog-option-name">{extraRow?.label}</span>
-                        {term && <code title={term}>«{term}»</code>}
+                        {typed && <code title={typed}>«{typed}»</code>}
                       </>
                     )}
                   </div>

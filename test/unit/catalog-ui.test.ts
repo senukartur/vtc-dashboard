@@ -19,6 +19,8 @@ import {
   comboboxRows,
   leaveAction,
   moveActive,
+  searchTerm,
+  typedText,
 } from "../../apps/web/src/shared/catalog-selectors/combobox.ts";
 import {
   catalogAttempt,
@@ -130,6 +132,23 @@ test("leaving the field clears only fully erased text", () => {
   expect(leaveAction("", false)).toBe("restore");
   expect(leaveAction("abc", true)).toBe("restore");
   expect(leaveAction(null, true)).toBe("restore");
+});
+
+test("the search term is trimmed and clamped to the route limit", () => {
+  expect(searchTerm(null)).toBe("");
+  expect(searchTerm("  a b  ")).toBe("a b");
+  expect(searchTerm("x".repeat(200))).toHaveLength(128);
+  // Never ends on a space or half of a surrogate pair after clamping.
+  expect(searchTerm(`${"x".repeat(127)} y`)).toBe("x".repeat(127));
+  expect(searchTerm(`${"x".repeat(127)}🚚`)).toBe("x".repeat(127));
+});
+
+test("a draft still starting with the extra row label holds no typed text", () => {
+  expect(typedText("  Ust  ", "Not listed")).toBe("Ust");
+  expect(typedText("Not listed", "Not listed")).toBe("");
+  expect(typedText("Not listed / x", "Not listed")).toBe("");
+  expect(typedText("Ust")).toBe("Ust");
+  expect(typedText(null, "Not listed")).toBe("");
 });
 
 test("the English fallback badge follows only the display returned by the server", () => {
@@ -317,7 +336,6 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
     "found",
     "historical",
     "historyError",
-    "clear",
     "clearField",
     "more",
   ])

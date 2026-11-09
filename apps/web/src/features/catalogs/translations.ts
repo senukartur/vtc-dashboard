@@ -130,7 +130,6 @@ export const catalogTranslations = {
     historical:
       "Hidden or from another game. Kept for reading; choose an active value before saving.",
     historyError: "This row could not be read. Its ID is kept.",
-    clear: "Clear selection",
     clearField: "Clear selection: {{label}}",
     more: "Load more",
     staffOnly: "Editing requires catalog management permission.",
@@ -268,7 +267,6 @@ export const catalogTranslations = {
     historical:
       "Запись скрыта или относится к другой игре. Сохранена для чтения; выберите активное значение перед сохранением.",
     historyError: "Запись не удалось прочитать. Её ID сохранён.",
-    clear: "Очистить выбор",
     clearField: "Очистить выбор: {{label}}",
     more: "Показать ещё",
     staffOnly: "Изменения требуют права управления каталогом.",

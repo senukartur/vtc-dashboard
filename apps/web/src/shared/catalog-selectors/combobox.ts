@@ -45,6 +45,24 @@ export function clampActive(active: number, length: number) {
   return length === 0 ? -1 : Math.min(Math.max(active, 0), length - 1);
 }
 
+/**
+ * The text sent to the search route, which rejects more than 128 characters; a draft started from
+ * a long saved label can exceed that. The debounce compares this same value, so it still settles.
+ */
+export function searchTerm(draft: string | null) {
+  return (draft ?? "")
+    .trim()
+    .slice(0, 128)
+    .replace(/[\uD800-\uDBFF]$/, "")
+    .trimEnd();
+}
+
+/** Text the user typed; a draft still starting with the extra row's own label holds none. */
+export function typedText(draft: string | null, rowLabel?: string) {
+  const text = (draft ?? "").trim();
+  return rowLabel && text.startsWith(rowLabel) ? "" : text;
+}
+
 /** Leaving the field restores the previous value unless the user erased the text entirely. */
 export function leaveAction(draft: string | null, hasValue: boolean): "clear" | "restore" {
   return draft !== null && draft.trim() === "" && hasValue ? "clear" : "restore";

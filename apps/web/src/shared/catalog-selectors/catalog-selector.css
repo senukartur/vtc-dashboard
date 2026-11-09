@@ -55,6 +55,11 @@
   flex: none;
   color: var(--muted);
 }
+/* Only the marked chip takes the pointer, so its title shows; it forwards clicks to the input. */
+.catalog-adornments .catalog-chip[title] {
+  cursor: default;
+  pointer-events: auto;
+}
 .catalog-chip {
   flex: none;
   padding: 0 4px;
@@ -107,7 +112,10 @@
 .catalog-option:hover {
   background: var(--surface-hover);
 }
+/* The inset outline keeps the keyboard position visible beyond colour and survives forced colours. */
 .catalog-option[aria-selected="true"] {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
   background: var(--surface-active);
 }
 .catalog-option-name {
