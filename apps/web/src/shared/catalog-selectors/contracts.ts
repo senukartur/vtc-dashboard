@@ -24,6 +24,7 @@ export const labelSchema: z.ZodType<CatalogDTO["CatalogLabel"]> = z.strictObject
   renderedLocale: locale,
   englishFallback: z.boolean(),
   hidden: z.boolean(),
+  nameNative: text.max(256).exactOptional(),
 });
 export const itemSchema = z.strictObject({
   id: uuid,
@@ -31,6 +32,7 @@ export const itemSchema = z.strictObject({
   code: text.max(128),
   nameEn: text.max(256),
   nameRu: z.string().max(256).nullable(),
+  nameNative: text.max(256).nullable().optional(),
   hidden: z.boolean(),
   display: labelSchema,
   dlcId: uuid.nullable(),

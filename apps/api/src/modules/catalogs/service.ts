@@ -75,6 +75,7 @@ function label(
   nameRu: string | null,
   hidden: boolean,
   locale: Locale,
+  nameNative: string | null = null,
 ): S["CatalogLabel"] {
   const ru = locale === "ru" && nameRu !== null;
   return {
@@ -84,8 +85,14 @@ function label(
     renderedLocale: ru ? "ru" : "en",
     englishFallback: locale === "ru" && !ru,
     hidden,
+    ...(nameNative === null ? {} : { nameNative }),
   };
 }
+/** A trimmed optional name; empty means no value, so a blank can never become a label. */
+const optionalName = (value: unknown) => {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name === "" ? null : name;
+};
 const keyOf = (game: Game, code: Buffer | string) =>
   `${game}\0${typeof code === "string" ? Buffer.from(code).toString("hex") : code.toString("hex")}`;
 const fileError = (error: unknown): never => {
@@ -127,6 +134,7 @@ export function createCatalogs(
       code: t.code,
       nameEn: t.nameEn,
       nameRu: t.nameRu,
+      nameNative: list === "cities" ? catalogCities.nameNative : sql<string | null>`NULL`,
       hidden: t.hidden,
       dlcId: list === "dlcs" ? sql<string | null>`NULL` : t.dlcId,
       regionId: list === "cities" ? catalogCities.regionId : sql<string | null>`NULL`,
@@ -146,6 +154,7 @@ export function createCatalogs(
     code: Buffer;
     nameEn: string;
     nameRu: string | null;
+    nameNative: string | null;
     hidden: boolean;
     dlcId: string | null;
     regionId: string | null;
@@ -191,12 +200,13 @@ export function createCatalogs(
       nameEn: row.nameEn,
       nameRu: row.nameRu,
       hidden: row.hidden,
-      display: label(row.id, row.nameEn, row.nameRu, row.hidden, locale),
+      display: label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
       dlcId: list === "dlcs" ? null : row.dlcId,
       dlc: list === "dlcs" ? null : dlc,
       ...(list === "dlcs" ? { steamAppId: row.steamAppId } : {}),
       ...(list === "cities"
         ? {
+            nameNative: row.nameNative,
             regionId: row.regionId,
             region:
               row.regionId && row.regionEn !== null
@@ -242,6 +252,9 @@ export function createCatalogs(
       ...("code" in input ? { code: requireCode(input.code as string) } : {}),
       ...(list === "dlcs" && "steamAppId" in input ? { steamAppId: input.steamAppId } : {}),
       ...(list !== "dlcs" && "dlcId" in input ? { dlcId: input.dlcId } : {}),
+      ...(list === "cities" && "nameNative" in input
+        ? { nameNative: optionalName(input.nameNative) }
+        : {}),
       ...(list === "cities" && "regionId" in input ? { regionId: input.regionId } : {}),
       ...(list === "cargoes" && "adrClass" in input ? { adrClass: input.adrClass } : {}),
       ...("hidden" in input ? { hidden: input.hidden } : {}),
@@ -269,7 +282,7 @@ export function createCatalogs(
     const allowed: readonly string[] = {
       dlcs: ["code", "nameEn", "nameRu", "steamAppId", "hidden"],
       regions: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
-      cities: ["code", "nameEn", "nameRu", "regionId", "dlcId", "hidden"],
+      cities: ["code", "nameEn", "nameRu", "nameNative", "regionId", "dlcId", "hidden"],
       cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
       trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
     }[list];
@@ -379,6 +392,8 @@ export function createCatalogs(
       else if ([...nameEn].length > 256) issues.push({ field: "name_en", reason: "too_long" });
       const nameRu = v.name_ru ?? "";
       if ([...nameRu].length > 256) issues.push({ field: "name_ru", reason: "too_long" });
+      const nameNative = (v.name_native ?? "").trim();
+      if ([...nameNative].length > 256) issues.push({ field: "name_native", reason: "too_long" });
       let steamAppId: number | undefined;
       if (list === "dlcs" && v.steam_app_id) {
         if (!/^[1-9]\d*$/.test(v.steam_app_id) || Number(v.steam_app_id) > 4294967295)
@@ -437,7 +452,9 @@ export function createCatalogs(
           nameRu: nameRu === "" ? null : nameRu,
           ...(list === "dlcs" ? { steamAppId: steamAppId ?? null } : {}),
           ...(list !== "dlcs" ? { dlcId: dlcId ?? null } : {}),
-          ...(list === "cities" ? { regionId: regionId ?? null } : {}),
+          ...(list === "cities"
+            ? { regionId: regionId ?? null, nameNative: nameNative === "" ? null : nameNative }
+            : {}),
           ...(list === "cargoes" ? { adrClass: adrClass ?? null } : {}),
           hidden: false,
         });
@@ -453,6 +470,7 @@ export function createCatalogs(
       };
       compare("name_en", "nameEn", current.nameEn, nameEn);
       if (nameRu !== "") compare("name_ru", "nameRu", current.nameRu, nameRu);
+      if (nameNative !== "") compare("name_native", "nameNative", current.nameNative, nameNative);
       if (list === "dlcs" && steamAppId !== undefined)
         compare("steam_app_id", "steamAppId", current.steamAppId, steamAppId);
       if (list !== "dlcs" && dlcId !== undefined)
@@ -573,6 +591,9 @@ export function createCatalogs(
             ? or(
                 sql`${t.nameEn} LIKE ${`%${escaped}%`}`,
                 sql`${t.nameRu} LIKE ${`%${escaped}%`}`,
+                list === "cities"
+                  ? sql`${catalogCities.nameNative} LIKE ${`%${escaped}%`}`
+                  : undefined,
                 sql`CONVERT(${t.code} USING utf8mb4) LIKE ${`%${escaped}%`}`,
               )
             : undefined,
@@ -827,17 +848,22 @@ export function createCatalogs(
         const ids = [...new Set(refs.filter((r) => r.kind === kind).map((r) => r.id))];
         if (!ids.length) continue;
         const table = kindTables[kind];
+        const native = kind === "city" ? catalogCities.nameNative : sql<string | null>`NULL`;
         const rows = await c(tx)
           .select({
             id: table.id,
             nameEn: table.nameEn,
             nameRu: table.nameRu,
+            nameNative: native,
             hidden: table.hidden,
           })
           .from(table)
           .where(inArray(table.id, ids));
         for (const row of rows)
-          result.set(row.id, label(row.id, row.nameEn, row.nameRu, row.hidden, locale));
+          result.set(
+            row.id,
+            label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
+          );
       }
       return result;
     },

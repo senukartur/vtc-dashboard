@@ -33,6 +33,7 @@ export function CatalogCards({
             </div>
             <span className="catalog-card-meta">
               <code>{item.code}</code>
+              {list === "cities" && item.nameNative ? ` · ${item.nameNative}` : ""}
               {list !== "dlcs" ? ` · ${item.dlc?.label ?? t("baseGame")}` : ""}
               {list === "cities" && item.region ? ` · ${item.region.label}` : ""}
               {list === "cargoes" ? ` · ${adrText(t, item)}` : ""}

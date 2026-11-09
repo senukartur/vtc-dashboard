@@ -8,6 +8,7 @@ import {
   type Kind,
   listOfKind,
 } from "../../shared/catalog-selectors/contracts.js";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
@@ -98,6 +99,7 @@ export function EntityLabel({
   return (
     <span className="review-entity">
       {valid ? entity.display.label : query.isPending ? t("loading") : t("unknownEntity")}
+      {valid && <CatalogNativeName value={entity.display} className="trip-fallback" />}
       {valid && entity.display.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}

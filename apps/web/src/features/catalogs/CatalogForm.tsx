@@ -84,6 +84,7 @@ export function CatalogForm({
   const [code, setCode] = useState(item?.code ?? ""),
     [nameEn, setNameEn] = useState(item?.nameEn ?? ""),
     [nameRu, setNameRu] = useState(item?.nameRu ?? ""),
+    [nameNative, setNameNative] = useState(item?.nameNative ?? ""),
     [steam, setSteam] = useState(item?.steamAppId?.toString() ?? ""),
     [dlcId, setDlcId] = useState<string | null>(item?.dlcId ?? null),
     [regionId, setRegionId] = useState<string | null>(item?.regionId ?? null),
@@ -105,7 +106,7 @@ export function CatalogForm({
       nameEn,
       nameRu: nameRu === "" ? null : nameRu,
       ...(list === "dlcs" ? { steamAppId: steamNumber } : { dlcId }),
-      ...(list === "cities" ? { regionId } : {}),
+      ...(list === "cities" ? { nameNative: nameNative.trim() || null, regionId } : {}),
       ...(list === "cargoes" ? { adrClass: adrClass === "" ? null : adrClass } : {}),
     };
     const result = item
@@ -171,6 +172,21 @@ export function CatalogForm({
             onChange={(e) => setNameRu(e.target.value)}
           />
         </div>
+        {list === "cities" && (
+          <div className="catalog-field">
+            <Label htmlFor={`${id}-native`}>{t("fieldNameNative")}</Label>
+            <Input
+              id={`${id}-native`}
+              maxLength={256}
+              value={nameNative}
+              aria-describedby={`${id}-native-hint`}
+              onChange={(e) => setNameNative(e.target.value)}
+            />
+            <p id={`${id}-native-hint`} className="field-hint">
+              {t("nameNativeHint")}
+            </p>
+          </div>
+        )}
         {list === "dlcs" && (
           <div className="catalog-field">
             <Label htmlFor={`${id}-steam`}>{t("fieldSteam")}</Label>

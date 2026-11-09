@@ -748,3 +748,35 @@ test(
     await writeFile(info.outputPath("toolbar-budget.json"), JSON.stringify(results, null, 2));
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the canonical city name reads as secondary text in the list and panel (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockList(page);
+      const trip = {
+        ...summary(first),
+        origin: { ...label("Крёнбург"), nameNative: "Krönburg" },
+        destination: { ...label("Fictional Ridge"), nameNative: "fictional ridge" },
+        cargo: label("Fictional machinery"),
+      };
+      await page.route("**/api/v1/trips?*", (route) => route.fulfill({ json: list([trip]) }));
+      await page.goto("/account/trips");
+      await catalogLanguage(page, locale);
+      const link = rowLink(page, first);
+      await expect(link).toContainText("Крёнбург · Krönburg");
+      await expect(link).not.toContainText("fictional ridge");
+      await noOverflow(page);
+      await capture(page, info, `trips-native-${locale}`);
+      if (info.project.name === "desktop-chromium") {
+        await page.route(`**/api/v1/trips/${first}`, (route) =>
+          route.fulfill({ json: envelope(trip), headers: { ETag: '"v1"' } }),
+        );
+        await link.click();
+        await expect(page.getByRole("region", { name: /^Крёнбург/ })).toContainText(
+          "Крёнбург · Krönburg",
+        );
+      }
+    },
+  );

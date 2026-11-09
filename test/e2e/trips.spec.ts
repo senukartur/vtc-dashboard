@@ -538,3 +538,36 @@ test(
     await expect(page.locator("body")).not.toContainText("SYNTHETIC_FILE_READ_FAILURE");
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the trip page shows a differing canonical city name beside the displayed name (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockTrips(page);
+      const detail = example("getTrip:extended-manual-revision"),
+        label = (text: string, nameNative?: string) => ({
+          entityId,
+          label: text,
+          requestedLocale: locale,
+          renderedLocale: locale,
+          englishFallback: false,
+          hidden: false,
+          ...(nameNative ? { nameNative } : {}),
+        });
+      detail.data.summary.origin = label("Крёнбург", "Krönburg");
+      detail.data.summary.destination = label("Krönburg", "Krönburg");
+      await page.route(`**/api/v1/trips/${id}`, (route) =>
+        route.fulfill({ json: detail, headers: { ETag: '"v1"' } }),
+      );
+      await page.goto(`/account/trips/${id}`);
+      await catalogLanguage(page, locale);
+      const summary = page.locator(".trip-row").first();
+      await expect(summary).toContainText("Крёнбург · Krönburg → Krönburg");
+      await expect(summary).not.toContainText("Krönburg · Krönburg");
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+        .toBe(true);
+      await page.screenshot({ path: info.outputPath(`trip-native-${locale}.png`), fullPage: true });
+    },
+  );

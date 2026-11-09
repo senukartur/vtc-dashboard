@@ -39,6 +39,7 @@ export function CatalogTable({
           <tr>
             <th>{t("colName")}</th>
             <th>{t("colNameRu")}</th>
+            {list === "cities" && <th>{t("colNameNative")}</th>}
             <th>{t("colCode")}</th>
             {list !== "dlcs" && <th>{t("colDlc")}</th>}
             {list === "cities" && <th>{t("colRegion")}</th>}
@@ -54,6 +55,7 @@ export function CatalogTable({
                 {item.nameEn} <RowBadges item={item} />
               </td>
               <td>{item.nameRu ?? "—"}</td>
+              {list === "cities" && <td>{item.nameNative ?? "—"}</td>}
               <td>
                 <code>{item.code}</code>
               </td>

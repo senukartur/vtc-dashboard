@@ -141,6 +141,13 @@
       "when": 1793900000000,
       "tag": "0019_simple_catalogs",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1794244551817,
+      "tag": "0020_outstanding_cannonball",
+      "breakpoints": true
     }
   ]
 }

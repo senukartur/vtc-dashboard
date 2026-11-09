@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import {
   Dialog,
@@ -175,6 +176,7 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
   const label = (value: DTO["CatalogLabel"] | null) => (
     <>
       {value?.label ?? t("unknown")}
+      <CatalogNativeName value={value} className="trip-fallback" />
       {value?.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}

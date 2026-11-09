@@ -1,6 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, type To } from "react-router-dom";
+import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Badge, Table } from "../../shared/ui/primitives.js";
 import type { DTO } from "./transport.js";
@@ -20,6 +21,7 @@ export function CatalogName({ value }: { value: DTO["CatalogLabel"] | null }) {
   return (
     <>
       {value?.label ?? t("unknown")}
+      <CatalogNativeName value={value} className="trip-fallback" />
       {value?.englishFallback && (
         <small className="trip-fallback"> · {t("catalogs:fallback")}</small>
       )}

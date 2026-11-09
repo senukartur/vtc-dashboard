@@ -7,6 +7,7 @@ import {
   levelId,
   selfId,
   topId,
+  tripsFixture,
   unknownId,
 } from "./support/drivers-fixtures.ts";
 import { mockDriverRoutes, profileRequests } from "./support/drivers-ui.ts";
@@ -886,3 +887,30 @@ test.describe("Driver profile reporting-timezone window", () => {
     },
   );
 });
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `the canonical city name reads as secondary text on the driver's trips (${locale})`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      await mockDriverRoutes(page);
+      await page.route(
+        (url) => url.pathname === "/api/v1/trips",
+        (route) => {
+          const fixture = tripsFixture(new URL(route.request().url()).searchParams);
+          const first = fixture.data.items[0];
+          if (first?.origin) first.origin = { ...first.origin, nameNative: "Krönburg" };
+          if (first?.destination)
+            first.destination = { ...first.destination, nameNative: first.destination.label };
+          return route.fulfill({ json: fixture });
+        },
+      );
+      await open(page, alphaId);
+      if (locale === "ru") await switchLanguage(page, "ru");
+      const route = tripsCard(page).locator("a.driver-trip-link").first();
+      await expect(route).toContainText("· Krönburg");
+      await expect(route.locator("small")).toHaveCount(1);
+      expect(await noOverflow(page)).toBe(true);
+      await capture(page, info, `driver-native-${locale}`);
+    },
+  );

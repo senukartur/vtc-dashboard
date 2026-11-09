@@ -35,6 +35,16 @@ export function comboboxRows({
   return rows;
 }
 
+/**
+ * The name a selector shows for a row: the canonical city name when the server sends one, which
+ * is why its English-fallback mark does not apply. Search still runs over every name.
+ */
+export function selectorDisplay(item: CatalogItem) {
+  return item.display.nameNative
+    ? { text: item.display.nameNative, englishFallback: false }
+    : { text: item.display.label, englishFallback: item.display.englishFallback };
+}
+
 /** Arrow keys wrap around the list; -1 means there is nothing to move to. */
 export function moveActive(active: number, delta: 1 | -1, length: number) {
   return length === 0 ? -1 : (active + delta + length) % length;

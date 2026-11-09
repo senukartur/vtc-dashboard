@@ -1240,6 +1240,24 @@ test("manual internal adapter uses current canonical selections, evidence port a
   await unit.run((tx) =>
     unit
       .client(tx)
+      .update(catalogCities)
+      .set({ nameNative: "Krönburg" })
+      .where(eq(catalogCities.id, originId)),
+  );
+  const canonical = await manual.detail(owner, result.tripId);
+  if (canonical.view !== "private") throw new Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
+  expect(canonical.summary.origin).toMatchObject({ nameNative: "Krönburg" });
+  expect(canonical.summary.destination).not.toHaveProperty("nameNative");
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCities)
+      .set({ nameNative: null })
+      .where(eq(catalogCities.id, originId)),
+  );
+  await unit.run((tx) =>
+    unit
+      .client(tx)
       .update(membership)
       .set({ locale: "en" })
       .where(eq(membership.userId, owner.userId)),

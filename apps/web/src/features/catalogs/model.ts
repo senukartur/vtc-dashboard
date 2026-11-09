@@ -54,6 +54,7 @@ const importFieldKeys = new Map([
   ["game", "game"],
   ["name_en", "fieldNameEn"],
   ["name_ru", "fieldNameRu"],
+  ["name_native", "fieldNameNative"],
   ["steam_app_id", "fieldSteam"],
   ["adr_class", "fieldAdr"],
   ["dlc_code", "fieldDlc"],
@@ -119,7 +120,7 @@ export function importLinesFromDetails(details: unknown): CatalogDTO["CatalogImp
 export const importColumns: Record<CatalogList, readonly string[]> = {
   dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
-  cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code"],
+  cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
 };

@@ -20,8 +20,13 @@ import {
   leaveAction,
   moveActive,
   searchTerm,
+  selectorDisplay,
   typedText,
 } from "../../apps/web/src/shared/catalog-selectors/combobox.ts";
+import {
+  cityNameText,
+  secondaryCityName,
+} from "../../apps/web/src/shared/catalog-selectors/native-name.ts";
 import {
   catalogAttempt,
   importPreviewSchema,
@@ -113,6 +118,64 @@ test("combobox rows drop hidden and other-game rows and add no extra row without
   expect(
     comboboxRows({ items: [], game: "ats", hasMore: false, failed: false, extra: false }),
   ).toEqual([]);
+});
+
+const native = "Krönburg";
+const translated: CatalogItem["display"] = {
+  ...label,
+  label: "Крёнбург",
+  renderedLocale: "ru",
+  englishFallback: false,
+};
+
+test("the selector shows the canonical city name and no English mark when it has one", () => {
+  expect(selectorDisplay({ ...item, display: { ...translated, nameNative: native } })).toEqual({
+    text: native,
+    englishFallback: false,
+  });
+  // The English mark goes only when the canonical name replaces the fallback label.
+  expect(selectorDisplay({ ...item, display: { ...label, nameNative: native } })).toEqual({
+    text: native,
+    englishFallback: false,
+  });
+  expect(selectorDisplay(item)).toEqual({ text: label.label, englishFallback: true });
+  expect(selectorDisplay({ ...item, display: translated })).toEqual({
+    text: "Крёнбург",
+    englishFallback: false,
+  });
+  // Cargo-shaped rows never carry the name, so they keep their label and fallback mark.
+  const cargo = { ...item, regionId: undefined, region: undefined, adrClass: "3" as const };
+  expect(selectorDisplay(cargo as unknown as CatalogItem)).toEqual({
+    text: label.label,
+    englishFallback: true,
+  });
+});
+
+test("secondary city text appears only when it differs from the displayed name", () => {
+  expect(secondaryCityName({ ...translated, nameNative: native })).toBe(native);
+  expect(secondaryCityName({ ...label, label: native, nameNative: native })).toBeNull();
+  expect(secondaryCityName({ ...label, label: "KRÖNBURG", nameNative: native })).toBeNull();
+  // A precomposed and a decomposed spelling are the same text.
+  expect(
+    secondaryCityName({ ...label, label: "Kro\u0308nburg", nameNative: "Kr\u00f6nburg" }),
+  ).toBeNull();
+  expect(secondaryCityName(label)).toBeNull();
+  expect(secondaryCityName(null)).toBeNull();
+  expect(secondaryCityName(undefined)).toBeNull();
+  expect(cityNameText({ ...translated, nameNative: native }, "?")).toBe(`Крёнбург · ${native}`);
+  expect(cityNameText(translated, "?")).toBe("Крёнбург");
+  expect(cityNameText(null, "Unknown")).toBe("Unknown");
+});
+
+test("the web schemas accept the optional canonical name and bound it", () => {
+  expect(labelSchema.safeParse({ ...label, nameNative: native }).success).toBe(true);
+  expect(labelSchema.safeParse(label).success).toBe(true);
+  expect(labelSchema.safeParse({ ...label, nameNative: "" }).success).toBe(false);
+  expect(labelSchema.safeParse({ ...label, nameNative: "x".repeat(257) }).success).toBe(false);
+  expect(itemSchema.safeParse({ ...item, nameNative: native }).success).toBe(true);
+  expect(itemSchema.safeParse({ ...item, nameNative: null }).success).toBe(true);
+  expect(itemSchema.safeParse(item).success).toBe(true);
+  expect(itemSchema.safeParse({ ...item, nameNative: "" }).success).toBe(false);
 });
 
 test("arrow movement wraps and a shrunken list clamps the active row", () => {

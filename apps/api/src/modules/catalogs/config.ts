@@ -19,13 +19,18 @@ export function validateCatalogConfig(config: CatalogConfig) {
   if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_CATALOG_CONFIG");
 }
 
-/** Import columns per list; a file header must carry exactly this set, in any order. */
+/** Import columns per list; a header carries exactly this set, in any order, minus optional ones. */
 export const importColumns: Readonly<Record<CatalogList, readonly string[]>> = {
   dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
-  cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code"],
+  cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
+};
+
+/** Columns a file header may leave out; an absent column reads as an empty cell. */
+export const optionalImportColumns: Readonly<Partial<Record<CatalogList, readonly string[]>>> = {
+  cities: ["name_native"],
 };
 
 /** A code is opaque telemetry bytes: never trimmed or rewritten, only bounded or rejected. */

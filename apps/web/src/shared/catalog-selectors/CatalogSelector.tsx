@@ -8,6 +8,7 @@ import {
   leaveAction,
   moveActive,
   searchTerm,
+  selectorDisplay,
   typedText,
 } from "./combobox.js";
 import {
@@ -89,7 +90,8 @@ export function CatalogSelector({
     (picked?.id === value && picked?.display.requestedLocale === locale ? picked : undefined);
   const hasValue = !!value || !!extraRow?.active;
   const incompatible = !!current && !compatibleSelection(current, game, regionId);
-  const fallback = !!current?.display.englishFallback && draft === null;
+  const currentDisplay = current ? selectorDisplay(current) : undefined;
+  const fallback = !!currentDisplay?.englishFallback && draft === null;
   const hiddenMark = !!current?.display.hidden && draft === null;
 
   // While the search is unsettled or loading no catalog row exists, so a stale one cannot be taken.
@@ -181,7 +183,7 @@ export function CatalogSelector({
     }
   };
 
-  const shown = draft ?? (extraRow?.active ? extraRow.label : (current?.display.label ?? ""));
+  const shown = draft ?? (extraRow?.active ? extraRow.label : (currentDisplay?.text ?? ""));
   const canClear = hasValue || !!draft;
   const describedBy = [
     fallback && `${id}-fallback`,
@@ -220,7 +222,7 @@ export function CatalogSelector({
           data-clear={canClear || undefined}
           data-chips={Number(fallback) + Number(hiddenMark) || undefined}
           placeholder={t(value && selected.isPending ? "loading" : "choose")}
-          title={draft === null && !extraRow?.active ? current?.display.label : undefined}
+          title={draft === null && !extraRow?.active ? currentDisplay?.text : undefined}
           value={shown}
           onChange={(event) => {
             setDraft(event.target.value);
@@ -336,8 +338,8 @@ export function CatalogSelector({
                     {row.kind === "item" && (
                       <>
                         <span className="catalog-option-name">
-                          {row.item.display.label}
-                          {row.item.display.englishFallback && (
+                          {selectorDisplay(row.item).text}
+                          {selectorDisplay(row.item).englishFallback && (
                             <>
                               {" "}
                               <span
