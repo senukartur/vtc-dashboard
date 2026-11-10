@@ -1,0 +1,4 @@
+interface:
+  display_name: "Parse DLC"
+  short_description: "Build catalog import files for one ETS2/ATS DLC"
+  default_prompt: "Use $parse-dlc to prepare catalog import files for the named DLC."

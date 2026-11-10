@@ -22,6 +22,13 @@ Codex can select these implicitly or use `$react-patterns review this component`
 
 A report form usually needs frontend-patterns, react-patterns and react-testing; layout work may also need frontend-design-direction. A durable-job claim needs backend-patterns and mysql-patterns. Documentation-only changes need document checks, not the React suite or all skills.
 
+## Workflow skills
+
+These are project workflows rather than ECC-derived guidance, and they use the same layout.
+
+- [deliver](../../.agents/skills/deliver/SKILL.md) is started only by the owner. It runs one card from plan to merge.
+- [parse-dlc](../../.agents/skills/parse-dlc/SKILL.md) builds private import files for every catalog list, plus company logos, for one installed ETS2/ATS DLC. It uses its bundled dependency-free script and the local [sk-zk Extractor](https://github.com/sk-zk/Extractor). Its output stays under `.local/`; importing into a host is a separate, owner-approved step.
+
 ## Subagent handoff
 
 For every authorized delegation, the parent includes a **Selected skills** section: names, reasons, instruction version and absolute paths in that assignment's checkout/snapshot or verified instruction bundle. Supply full selected bodies if the child cannot read those paths. Include needed references or answer requests from the same version. Do not assume a child inherits loaded skills, paths or skill tools.
