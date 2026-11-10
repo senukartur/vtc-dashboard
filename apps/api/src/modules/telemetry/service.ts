@@ -496,7 +496,7 @@ export function createTelemetry(
             throw e;
           }
           return {
-            contract: { major: 1, minor: 0 },
+            contract: { major: p.contract.major, minor: p.contract.minor },
             eventId: p.eventId,
             receiptId: saved.sourceRecordId,
             status: saved.duplicate ? ("duplicate" as const) : ("stored" as const),

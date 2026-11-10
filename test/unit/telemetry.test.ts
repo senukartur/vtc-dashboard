@@ -78,7 +78,7 @@ test("frozen event boundary preserves exact values and rejects unsupported versi
   const p = telemetryFixture("completed");
   expect(event(parseJson(Buffer.from(JSON.stringify(p)))).eventId).toBe(p.eventId);
   for (const change of [
-    { contract: { major: 1, minor: 1 } },
+    { contract: { major: 1, minor: 2 } },
     { userId: "forged" },
     { producer: { application: "export", version: "1" } },
   ])
@@ -89,4 +89,19 @@ test("frozen event boundary preserves exact values and rejects unsupported versi
     value: { raw: "18446744073709551616", sdkType: "u64", currency: { status: "unknown" } },
   };
   expect(() => event(amount)).toThrow();
+});
+
+test("event parsing classifies unsupported versions separately from invalid supported shapes", () => {
+  const audited = telemetryFixture("haulmp-audited");
+  expect(event(audited).contract).toEqual({ major: 1, minor: 1 });
+  expect(() => event({ ...audited, contract: { major: 1, minor: 2 } })).toThrow(
+    expect.objectContaining({ statusCode: 422, publicCode: "UNSUPPORTED_CONTRACT" }),
+  );
+  expect(() => event({ ...audited, contract: { major: 1, minor: 0 } })).toThrow(
+    expect.objectContaining({ statusCode: 400, publicCode: "INVALID_PAYLOAD" }),
+  );
+  const legacy = telemetryFixture("completed");
+  expect(() => event({ ...legacy, contract: { major: 1, minor: 1 } })).toThrow(
+    expect.objectContaining({ statusCode: 400, publicCode: "INVALID_PAYLOAD" }),
+  );
 });

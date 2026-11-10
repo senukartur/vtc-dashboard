@@ -14,6 +14,11 @@ export type ReportedTime = {
   basis: "event" | "checkpoint" | "last-known" | "receipt" | "unknown" | "staff-resolution";
   verifiedActual: boolean;
 };
+export type RecordedTelemetry = {
+  jobType: "quick-job" | "freight-market" | "cargo-market" | "world-of-trucks" | "unknown";
+  gameMode: "single-player" | "truckersmp" | "haulmp" | "unknown";
+  hardModeResult: "qualified" | "not-qualified" | "unknown";
+};
 export interface NormalizedTripEvidence {
   sourceRecordId: string;
   factRevisionId: string;
@@ -36,6 +41,7 @@ export interface NormalizedTripEvidence {
   cargoDamageFraction: Fact<string>;
   money: unknown;
   provenance: unknown;
+  recordedTelemetry?: RecordedTelemetry;
   wholeTripDistanceSupported: boolean;
   trailers: { complete: boolean; items: readonly Fact<TripEntity>[] };
   adrCategory: Fact<AdrClass>;

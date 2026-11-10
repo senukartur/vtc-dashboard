@@ -705,9 +705,44 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
   try {
     const { issued, p } = await connect();
     const auth = { Authorization: bearer(issued.token) };
-    expect((await http("/api/telemetry/v1/connection", undefined, { Cookie: cookie })).status).toBe(
-      401,
-    );
+    const unauthenticated = await http("/api/telemetry/v1/connection", undefined, {
+      Cookie: cookie,
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers["vtc-telemetry-event-versions"]).toBeUndefined();
+    const connection = await http("/api/telemetry/v1/connection", undefined, auth);
+    const registered = await service.connection(bearer(issued.token), "127.0.0.1");
+    expect(connection.status).toBe(200);
+    expect(connection.headers["vtc-telemetry-event-versions"]).toBe("1.0, 1.1");
+    expect(connection.headers["cache-control"]).toBe("no-store");
+    expect(connection.body).toEqual({
+      contract: { major: 1, minor: 0 },
+      accountId: owner.userId,
+      companyId: registered.companyId,
+      identityEpoch: registered.identityEpoch,
+      limits: { maxEventBytes: 65536, maxDepth: 16, eventsPerMinute: 60, burst: 10 },
+    });
+    const clientInstallationId = newId();
+    const register = (minor: number) =>
+      http(
+        "/api/telemetry/v1/installations",
+        Buffer.from(
+          JSON.stringify({
+            contract: { major: 1, minor },
+            clientInstallationId,
+          }),
+        ),
+        auth,
+      );
+    const installation = await register(0);
+    expect(installation.status).toBe(200);
+    expect(installation.body).toEqual({
+      contract: { major: 1, minor: 0 },
+      installationId: expect.any(String),
+      bindingId: expect.any(String),
+      identityEpoch: registered.identityEpoch,
+    });
+    expect((await register(1)).status).toBe(422);
     expect((await http("/api/v1/me/telemetry-tokens", undefined, auth)).status).toBe(401);
     for (const bytes of [
       Buffer.from([0xc3, 0x28]),
@@ -742,7 +777,7 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
       (
         await http(
           "/api/telemetry/v1/events",
-          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 1 } })),
+          Buffer.from(JSON.stringify({ ...p, contract: { major: 1, minor: 2 } })),
           auth,
         )
       ).status,
@@ -757,9 +792,23 @@ test("built server uses actual bytes, frozen errors and browser CSRF/Origin guar
       ).status,
     ).toBe(400);
     instant += 10000;
+    p.snapshot.gameMode = {
+      mode: "haulmp",
+      method: "module-scan",
+      confidence: "strong",
+      ambiguous: false,
+    };
     const stored = await http("/api/telemetry/v1/events", Buffer.from(JSON.stringify(p)), auth);
     expect(stored.status).toBe(202);
     expect(stored.headers["cache-control"]).toBe("no-store");
+    expect(stored.body.contract).toEqual({ major: 1, minor: 0 });
+    const replayLegacy = await http(
+      "/api/telemetry/v1/events",
+      Buffer.from(JSON.stringify(p)),
+      auth,
+    );
+    expect(replayLegacy.status).toBe(200);
+    expect(replayLegacy.body).toEqual({ ...stored.body, status: "duplicate" });
     await control.query("DELETE FROM telemetry_limits");
     for (let i = 0; i < 10; i++)
       expect((await http("/api/telemetry/v1/events", Buffer.from("{}"), auth)).status).toBe(400);
@@ -1082,5 +1131,99 @@ test("an auth snapshot opened before peer commit checks current revision and com
       expect(duplicate.status).toBe("duplicate");
       expect(await counts()).toBe(JSON.stringify(after));
     }
+  }
+});
+
+test("versioned HTTP receipts preserve every audited result and reject invalid events without writes", async () => {
+  const { createApp: builtApp } = await import(pathToFileURL(resolve("apps/api/dist/app.js")).href);
+  const { createTelemetry: builtTelemetry } = await import(
+    pathToFileURL(resolve("apps/api/dist/modules/telemetry/service.js")).href
+  );
+  const app = await builtApp({
+    identity,
+    telemetry: builtTelemetry(
+      unit,
+      config,
+      {
+        identity,
+        external: createExternalIdentities(unit, identity),
+        trips: createTrips(unit, tripConfig, { identity }, now),
+      },
+      now,
+    ),
+    checkReadiness: async () => true,
+  });
+  try {
+    const { issued, p } = await connect();
+    const send = (payload: unknown) =>
+      app.inject({
+        method: "POST",
+        url: "/api/telemetry/v1/events",
+        headers: { authorization: bearer(issued.token), "content-type": "application/json" },
+        payload: JSON.stringify(payload),
+      });
+    const before = await counts();
+    for (const [payload, statusCode, code] of [
+      [{ ...p, contract: { major: 1, minor: 2 } }, 422, "UNSUPPORTED_CONTRACT"],
+      [{ ...p, contract: { major: 1, minor: 1 } }, 400, "INVALID_PAYLOAD"],
+      [{ ...p, snapshot: { ...p.snapshot, hardModeResult: "qualified" } }, 400, "INVALID_PAYLOAD"],
+      [
+        {
+          ...p,
+          contract: { major: 1, minor: 1 },
+          snapshot: { ...p.snapshot, hardModeResult: false },
+        },
+        400,
+        "INVALID_PAYLOAD",
+      ],
+    ] as const) {
+      const response = await send(payload);
+      expect(response.statusCode).toBe(statusCode);
+      expect(response.json().error.code).toBe(code);
+    }
+    expect(await counts()).toBe(before);
+    // The receiver admits ten events per burst, including rejected events.
+    instant += 10000;
+    const audited = structuredClone(p);
+    audited.contract.minor = 1;
+    audited.snapshot.job.market = { available: true, value: "freight_market" };
+    audited.snapshot.gameMode = {
+      mode: "haulmp",
+      method: "module-scan",
+      confidence: "strong",
+      ambiguous: false,
+    };
+    for (const result of ["qualified", "not-qualified", "unknown"] as const) {
+      audited.eventId = newId();
+      audited.source.tripId = newId();
+      audited.snapshot.hardModeResult = result;
+      const stored = await send(audited);
+      expect(stored.statusCode).toBe(202);
+      expect(stored.json()).toEqual({
+        contract: { major: 1, minor: 1 },
+        eventId: audited.eventId,
+        receiptId: expect.any(String),
+        status: "stored",
+        firstReceivedAtUtcMs: instant,
+      });
+      const replay = await send(audited);
+      expect(replay.statusCode).toBe(200);
+      expect(replay.json()).toEqual({ ...stored.json(), status: "duplicate" });
+    }
+    const after = JSON.parse(await counts());
+    expect(Number(after.messages) - Number(JSON.parse(before).messages)).toBe(3);
+    expect(Number(after.trips) - Number(JSON.parse(before).trips)).toBe(3);
+    const changed = structuredClone(audited);
+    changed.snapshot.hardModeResult = "not-qualified";
+    const resultConflict = await send(changed);
+    expect(resultConflict.statusCode).toBe(409);
+    expect(resultConflict.json().error.code).toBe("IDENTITY_CONFLICT");
+    changed.eventId = newId();
+    const revisionConflict = await send(changed);
+    expect(revisionConflict.statusCode).toBe(409);
+    expect(revisionConflict.json().error.code).toBe("IDENTITY_CONFLICT");
+    expect(JSON.parse(await counts())).toEqual(after);
+  } finally {
+    await app.close();
   }
 });

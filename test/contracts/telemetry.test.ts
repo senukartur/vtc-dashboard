@@ -26,7 +26,7 @@ for (const name of telemetryExamples)
 test("telemetry structural boundary rejects unsupported versions and supplied ownership/acceptance", () => {
   for (const mutation of [
     { contract: { major: 2, minor: 0 } },
-    { contract: { major: 1, minor: 1 } },
+    { contract: { major: 1, minor: 2 } },
     { userId: "synthetic-owner" },
     { companyId: "synthetic-company" },
     { accepted: true },
@@ -36,6 +36,43 @@ test("telemetry structural boundary rejects unsupported versions and supplied ow
     { type: "trip.accepted" },
   ])
     expect(validate({ ...telemetryFixture("completed"), ...mutation })).toBe(false);
+});
+
+test("telemetry versions close the audit shape and retain mode provenance constraints", () => {
+  const fixture = telemetryFixture("haulmp-audited");
+  const snapshot = fixture.snapshot as Record<string, unknown>;
+  for (const result of ["qualified", "not-qualified", "unknown"]) {
+    snapshot.hardModeResult = result;
+    expect(validate(fixture), ajv.errorsText(validate.errors)).toBe(true);
+  }
+  for (const result of ["not_qualified", true, null, { status: "qualified" }]) {
+    snapshot.hardModeResult = result;
+    expect(validate(fixture)).toBe(false);
+  }
+  delete snapshot.hardModeResult;
+  expect(validate(fixture)).toBe(false);
+  fixture.contract = { major: 1, minor: 0 };
+  expect(validate(fixture), ajv.errorsText(validate.errors)).toBe(true);
+  snapshot.hardModeResult = "unknown";
+  expect(validate(fixture)).toBe(false);
+  delete snapshot.hardModeResult;
+
+  for (const [mode, method, confidence, valid] of [
+    ["haulmp", "module-scan", "strong", true],
+    ["haulmp", "process-scan", "weak", true],
+    ["haulmp", "none", "strong", false],
+    ["haulmp", "process-scan", "none", false],
+    ["truckersmp", "module-scan", "strong", true],
+    ["single-player", "process-scan", "weak", true],
+    ["single-player", "process-scan", "strong", false],
+    ["unknown", "none", "none", true],
+    ["unknown", "none", "weak", false],
+  ] as const) {
+    snapshot.gameMode = { mode, method, confidence, ambiguous: false };
+    expect(validate(fixture)).toBe(valid);
+  }
+  snapshot.extra = "fictional";
+  expect(validate(fixture)).toBe(false);
 });
 
 test("telemetry quantities preserve unavailable and measured zero as different shapes", () => {

@@ -227,12 +227,46 @@ export function TripSummary({ trip, link = true }: { trip: DTO["TripSummary"]; l
     </article>
   );
 }
+export function RecordedTelemetryFields({
+  telemetry,
+}: {
+  telemetry: DTO["EffectiveTripFacts"]["recordedTelemetry"];
+}) {
+  const { t } = useTranslation("trips");
+  return (
+    <>
+      {(
+        [
+          ["recordedJobType", "telemetryJob", telemetry?.jobType],
+          ["recordedGameMode", "telemetryMode", telemetry?.gameMode],
+          ["recordedHardModeResult", "telemetryAudit", telemetry?.hardModeResult],
+        ] as const
+      ).map(([label, category, value]) => (
+        <div key={label}>
+          <dt>{t(label)}</dt>
+          <dd>{t(value && value !== "unknown" ? `${category}_${value}` : "recordedUnknown")}</dd>
+        </div>
+      ))}
+    </>
+  );
+}
 export function EffectiveFacts({ facts }: { facts: DTO["EffectiveTripFacts"] | null | undefined }) {
   const { t, i18n } = useTranslation("trips"),
     session = useSession(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
     timezone = session.self?.preferences.displayTimezone ?? "UTC";
-  if (!facts) return <p>{t("partial")}</p>;
+  const recorded = (
+    <dl className="trip-facts">
+      <RecordedTelemetryFields telemetry={facts?.recordedTelemetry} />
+    </dl>
+  );
+  if (!facts)
+    return (
+      <>
+        <p>{t("partial")}</p>
+        {recorded}
+      </>
+    );
   return (
     <Card className="stack">
       <h2>{t("facts")}</h2>
@@ -246,6 +280,7 @@ export function EffectiveFacts({ facts }: { facts: DTO["EffectiveTripFacts"] | n
           cargoMassDisplay: formatQuantity(facts.cargoMassKg, "t", locale),
         }}
       />
+      {recorded}
       <p>{t("basisTime", { timezone })}</p>
       {(["origin", "destination", "cargo"] as const).map((k) => (
         <div key={k}>

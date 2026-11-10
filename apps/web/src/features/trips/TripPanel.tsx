@@ -11,7 +11,7 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
-import { State } from "./components.js";
+import { RecordedTelemetryFields, State } from "./components.js";
 import { useTripQuery } from "./queries.js";
 import { CatalogName, DecisionBadge, GameChip, sourceNames } from "./TripTable.js";
 import { type DTO, validId } from "./transport.js";
@@ -146,6 +146,9 @@ export function TripPanel({
                     {formatUtc(view.effectiveFacts.actualCompletedAt, locale, timezone)}
                   </Fact>
                 </>
+              )}
+              {view?.view === "private" && (
+                <RecordedTelemetryFields telemetry={view.effectiveFacts?.recordedTelemetry} />
               )}
               <Fact label={t("reportingAt")}>
                 <span>{formatUtc(summary.reportingAt, locale, timezone)}</span>

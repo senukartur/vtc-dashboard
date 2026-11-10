@@ -43,7 +43,7 @@ import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository, effectiveFacts } from "./facts.js";
+import { createFactRepository } from "./facts.js";
 import { createTripGroups } from "./groups.js";
 import { createTripReconciliation } from "./reconciliation.js";
 
@@ -821,7 +821,7 @@ export function createTrips(
         : undefined;
       if (saved && !(await groups.contains(tx, row.id, saved.tripId, true)))
         throw new Error("TRIP_FACT_POINTER_INVALID");
-      return saved ? effectiveFacts(saved.evidence) : null;
+      return saved ? factsRepository.projectEffective(tx, saved.evidence) : null;
     },
     contributions: createContributionRegister(unit),
     // Caller owns binding/token validation and the outer transaction/ACK, not the payload.
@@ -1085,6 +1085,7 @@ export function createTrips(
         const projection = privateRead
           ? (await ports.manualProjection?.(tx, [row.id]))?.get(row.id)
           : undefined;
+        // summaries already checked the selected fact against the locked group membership.
         const savedFact =
           privateRead && row.currentFactId
             ? (await factsRepository.read(tx, [row.currentFactId], true)).get(row.currentFactId)
@@ -1093,7 +1094,9 @@ export function createTrips(
           ? {
               view: "private",
               summary,
-              effectiveFacts: savedFact ? effectiveFacts(savedFact.evidence) : null,
+              effectiveFacts: savedFact
+                ? await factsRepository.projectEffective(tx, savedFact.evidence)
+                : null,
               manualRevision: projection?.manualRevision ?? null,
               evidence: projection?.evidence ?? [],
               decisions: [],
