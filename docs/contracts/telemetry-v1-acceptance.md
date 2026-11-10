@@ -41,7 +41,9 @@
 | TEL-033 | Trip predates membership/qualification history | Keep it visible; never invent historical qualification or use today's level; review attribution before credit | VTC-028/029 |
 | TEL-034 | Journal exposes only latest 10 trailer configurations | Derive complete rule context from full stored evidence or mark incomplete; no false complete claim | VTC-024 |
 | TEL-035 | Upload scope vs restore | Initial local history reaches dashboard; dashboard manual trips and remote history are not restored into the local client in MVP | VTC-024; VTC-110 later |
-| TEL-036 | Known/unknown game-mode evidence | Unknown requires none/none; known requires detection/non-none confidence, single-player only weak; no invented module evidence or identity proof | VTC-023/024 |
+| TEL-036 | Known/unknown game-mode evidence | HaulMP and TruckersMP preserve detection provenance and single-player confidence remains weak. Unknown pairs with none/none. Mode does not alter company assessment | VTC-023/024/095 |
+| TEL-037 | Event version negotiation and closed audit field | The authenticated no-store connection advertises both event versions in a header. v1.0 control bodies stay exact. Legacy HaulMP events have unknown audit. v1.1 accepts all three outcomes and requires the field. Both ACK statuses echo the frozen version. Invalid events leave source state unchanged | VTC-095 / ET-111 |
+| TEL-038 | Recorded facts through company acceptance and private detail | Owner and authorized reviewer see localized market, game mode and audit from the selected effective telemetry source. Other-member summaries omit them. Replays preserve one canonical trip and one contribution where accepted | VTC-095 / VTC-024 |
 
 ## Minimum client/server integration evidence
 
@@ -59,7 +61,7 @@ Discovery specifies the owner-agreed contract and implementation gaps without bu
 
 ## Server implementation allocation (VTC-023)
 
-The opt-in [server implementation](../development/telemetry.md) and its synthetic MySQL/built-server tests provide the server allocation below. This is a scope/evidence map, not a claim that all client/server or hosted scenarios passed; actual commands and candidate SHA belong to the delivery record. The frozen wire contract remains unchanged.
+The opt-in [server implementation](../development/telemetry.md) and its synthetic MySQL/built-server tests provide the server allocation below. This is a scope/evidence map, not a claim that all client/server or hosted scenarios passed; actual commands and candidate SHA belong to the delivery record. The transport keeps the frozen v1.0 control shapes. VTC-095 extends the event contract and adds TEL-037 and TEL-038. Actual desktop/game proof still depends on ET-111 and VTC-024.
 
 | Matrix cases | Server responsibility and remaining owner |
 | --- | --- |

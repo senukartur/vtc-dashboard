@@ -3,18 +3,39 @@ import { createSchemaValidator } from "../../platform/http/schemas.js";
 import { createTripGroups } from "./groups.js";
 import { applicationId, type TxContext, type UnitOfWork } from "@vtc/db";
 import {
+  and,
   asc,
   eq,
+  isNull,
   sql,
   tripResolutions,
   inArray,
   sourceMessages,
+  sourcePayloads,
   sourceTrips,
   tripFacts,
   tripFactTrailers,
 } from "@vtc/db/trips-schema";
 import { decimal } from "../sources/contracts/canonical.js";
-import type { Fact, NormalizedTripEvidence, TripEntity } from "../sources/contracts/evidence.js";
+import type {
+  Fact,
+  NormalizedTripEvidence,
+  RecordedTelemetry,
+  TripEntity,
+} from "../sources/contracts/evidence.js";
+import { telemetryJobType } from "../sources/contracts/telemetry.js";
+
+function legacyGameMode(provenance: unknown): RecordedTelemetry["gameMode"] {
+  const mode = (provenance as { mode?: { mode?: unknown } } | null)?.mode?.mode;
+  switch (mode) {
+    case "single-player":
+    case "truckersmp":
+    case "haulmp":
+      return mode;
+    default:
+      return "unknown";
+  }
+}
 
 export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
@@ -22,7 +43,45 @@ export function createFactRepository(unit: UnitOfWork) {
     validChanges = createSchemaValidator().compile({
       $ref: "urn:vtc:browser:v1#/$defs/ResolutionChanges",
     });
+  async function legacyJobType(tx: TxContext, sourceRecordId: string) {
+    const [row] = await c(tx)
+      .select({ content: sourcePayloads.content })
+      .from(sourcePayloads)
+      .where(
+        and(
+          eq(sourcePayloads.messageId, sourceRecordId),
+          isNull(sourcePayloads.expiredAt),
+          sql`OCTET_LENGTH(${sourcePayloads.content}) <= 65536`,
+        ),
+      )
+      .for("share");
+    if (row?.content) {
+      try {
+        const event = JSON.parse(row.content) as {
+          snapshot?: { job?: { market?: unknown } };
+        } | null;
+        return telemetryJobType(event?.snapshot?.job?.market);
+      } catch {
+        // Unreadable retained content cannot establish a market classification.
+      }
+    }
+    return "unknown";
+  }
+
   return {
+    async projectEffective(tx: TxContext, evidence: NormalizedTripEvidence) {
+      if (evidence.provider !== "ets2telemetry") return effectiveFacts(evidence);
+      const recorded = evidence.recordedTelemetry ?? {
+        jobType: await legacyJobType(tx, evidence.sourceRecordId),
+        gameMode: legacyGameMode(evidence.provenance),
+        hardModeResult: "unknown",
+      };
+      return effectiveFacts(evidence, {
+        jobType: recorded.jobType,
+        gameMode: recorded.gameMode,
+        hardModeResult: recorded.hardModeResult,
+      });
+    },
     async insert(
       tx: TxContext,
       tripId: string,
@@ -293,6 +352,7 @@ export function createFactRepository(unit: UnitOfWork) {
           reasonCodes: stored.reasons,
           money: metadata.money,
           provenance: metadata.provenance,
+          ...(metadata.recordedTelemetry && { recordedTelemetry: metadata.recordedTelemetry }),
         };
         result.set(stored.id, { tripId: stored.canonicalTripId, evidence });
       }
@@ -302,8 +362,9 @@ export function createFactRepository(unit: UnitOfWork) {
 }
 
 /** Explicit normalized private projection; no raw payload, diagnostic text or money. */
-export function effectiveFacts(
+function effectiveFacts(
   f: NormalizedTripEvidence,
+  recordedTelemetry?: RecordedTelemetry,
 ): components["schemas"]["EffectiveTripFacts"] {
   const pin = (value: Fact<TripEntity>) =>
     value.status === "known" ? { entityId: value.value.entityId } : null;
@@ -323,5 +384,6 @@ export function effectiveFacts(
     trailersComplete: f.trailers.complete,
     wholeTripDistanceSupported: f.wholeTripDistanceSupported,
     ruleContextComplete: f.ruleContextComplete,
+    ...(recordedTelemetry && { recordedTelemetry }),
   };
 }

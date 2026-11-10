@@ -8,6 +8,7 @@ import type {
   Game,
   NormalizedTripEvidence,
   Outcome,
+  RecordedTelemetry,
   Recording,
   ReportedTime,
   TripEntity,
@@ -18,7 +19,7 @@ import schema from "./telemetry-v1.schema.json" with { type: "json" };
 type Available<T> = { available: true; value: T } | { available: false; reason: string };
 type Time = { utcMs: number | null; basis: ReportedTime["basis"]; eventSeq: string | null };
 export interface Telemetry {
-  contract: unknown;
+  contract: { major: 1; minor: 0 | 1 };
   producer: unknown;
   createdUtcMs: number;
   eventId: string;
@@ -29,7 +30,13 @@ export interface Telemetry {
   delivery: { mode: "live" | "backfill" };
   type: string;
   snapshot: {
-    gameMode: unknown;
+    gameMode: {
+      mode: RecordedTelemetry["gameMode"];
+      method: "module-scan" | "process-scan" | "none";
+      confidence: "strong" | "weak" | "none";
+      ambiguous: boolean;
+    };
+    hardModeResult?: RecordedTelemetry["hardModeResult"];
     closeReason: string | null;
     checkpointNextEventSeq: string | null;
     outcome: Outcome;
@@ -50,6 +57,7 @@ export interface Telemetry {
       cargoId: Available<string>;
       cargoName: Available<string>;
       cargoMass: Available<number>;
+      market: Available<string>;
     };
     trailers: {
       complete: boolean;
@@ -151,6 +159,30 @@ function parse(value: unknown): Telemetry {
     throw new Error("DUPLICATE_REASON");
   return p;
 }
+export function telemetryJobType(market: unknown): RecordedTelemetry["jobType"] {
+  if (
+    !market ||
+    typeof market !== "object" ||
+    !("available" in market) ||
+    market.available !== true ||
+    !("value" in market)
+  )
+    return "unknown";
+  switch (market.value) {
+    case "quick_job":
+      return "quick-job";
+    case "freight_market":
+      return "freight-market";
+    case "cargo_market":
+      return "cargo-market";
+    case "external_contracts":
+    case "external_market":
+      return "world-of-trucks";
+    default:
+      return "unknown";
+  }
+}
+
 export const telemetryAdapter: TripSourceAdapter = {
   provider: "ets2telemetry",
   version: 1,
@@ -324,6 +356,11 @@ export const telemetryAdapter: TripSourceAdapter = {
           ? unknown("damage_out_of_range")
           : quantity(s.cargoDamage, "snapshot.cargoDamage"),
       money: { expectedIncome: s.expectedIncome, revenue: s.revenue, penalty: s.penalty },
+      recordedTelemetry: {
+        jobType: telemetryJobType(s.job.market),
+        gameMode: s.gameMode.mode,
+        hardModeResult: s.hardModeResult ?? "unknown",
+      },
       provenance: {
         sourceIdentity: {
           eventId: p.eventId,

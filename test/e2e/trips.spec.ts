@@ -572,3 +572,49 @@ for (const locale of ["en", "ru"] as const)
       await page.screenshot({ path: info.outputPath(`trip-native-${locale}.png`), fullPage: true });
     },
   );
+
+test(
+  "private full trip detail localizes recorded audit and each unknown field",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const view = example("getTrip:private-recorded-telemetry");
+    view.data.effectiveFacts.recordedTelemetry = {
+      jobType: "unknown",
+      gameMode: "haulmp",
+      hardModeResult: "not-qualified",
+    };
+    await page.route(`**/api/v1/trips/${id}`, (route) =>
+      route.fulfill({ json: view, headers: { ETag: '"v1"' } }),
+    );
+    await page.goto(`/account/trips/${id}`);
+    for (const [locale, rows] of [
+      [
+        "en",
+        [
+          ["Job type", "Unknown"],
+          ["Game mode", "HaulMP"],
+          ["Hard Mode result", "Not qualified"],
+        ],
+      ],
+      [
+        "ru",
+        [
+          ["Тип заказа", "Неизвестно"],
+          ["Режим игры", "HaulMP"],
+          ["Результат сложного режима", "Не соответствует"],
+        ],
+      ],
+    ] as const) {
+      await catalogLanguage(page, locale);
+      for (const [label, value] of rows) {
+        const term = page.getByText(label, { exact: true });
+        await expect(term).toBeVisible();
+        await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        await page.evaluate(() => window.innerWidth),
+      );
+    }
+  },
+);

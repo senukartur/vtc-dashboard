@@ -101,6 +101,36 @@ test("telemetry preserves separate normalized metrics, zero, exact money, field 
     expect(() => decimal(value)).toThrow("INVALID_NONNEGATIVE_DECIMAL");
   expect(() => decimal("1.1234567890123456789")).toThrow();
 });
+test("telemetry keeps allowlisted job and recorded audit classifications independent of provenance and coverage", async () => {
+  const p = telemetryFixture("haulmp-audited") as unknown as Telemetry;
+  for (const [market, expected] of [
+    ["quick_job", "quick-job"],
+    ["freight_market", "freight-market"],
+    ["cargo_market", "cargo-market"],
+    ["external_contracts", "world-of-trucks"],
+    ["external_market", "world-of-trucks"],
+    ["external-market", "unknown"],
+    ["FREIGHT_MARKET", "unknown"],
+  ] as const) {
+    p.snapshot.job.market = { available: true, value: market };
+    const fact = await telemetryAdapter.normalize(p, context());
+    expect(fact.recordedTelemetry).toEqual({
+      jobType: expected,
+      gameMode: "haulmp",
+      hardModeResult: "qualified",
+    });
+    expect(fact.provenance).toMatchObject({ mode: p.snapshot.gameMode });
+  }
+  p.contract.minor = 0;
+  delete p.snapshot.hardModeResult;
+  p.snapshot.job.market = { available: false, reason: "not-observed" };
+  expect((await telemetryAdapter.normalize(p, context())).recordedTelemetry).toEqual({
+    jobType: "unknown",
+    gameMode: "haulmp",
+    hardModeResult: "unknown",
+  });
+});
+
 test("partial coverage and unsupported time bases never become whole-trip distance or actual occurrence", async () => {
   const p = input("closed-partial"),
     f = await telemetryAdapter.normalize(p, context());

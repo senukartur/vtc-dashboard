@@ -98,14 +98,22 @@ export function parseJson(bytes: Buffer): unknown {
     return fail(400, "INVALID_PAYLOAD");
   }
 }
-export function contract(value: unknown) {
+const eventMinors = [0, 1];
+export const eventVersionAdvertisement = eventMinors.map((minor) => `1.${minor}`).join(", ");
+
+export function contract(value: unknown, supportedMinors: readonly number[] = [0]) {
   const version = value && typeof value === "object" && "contract" in value ? value.contract : null;
   if (!version || typeof version !== "object" || !("major" in version) || !("minor" in version))
     return fail(400, "INVALID_PAYLOAD");
-  if (version.major !== 1 || version.minor !== 0) return fail(422, "UNSUPPORTED_CONTRACT");
+  if (
+    version.major !== 1 ||
+    typeof version.minor !== "number" ||
+    !supportedMinors.includes(version.minor)
+  )
+    return fail(422, "UNSUPPORTED_CONTRACT");
 }
 export function event(value: unknown): Telemetry {
-  contract(value);
+  contract(value, eventMinors);
   try {
     telemetryAdapter.identity(value);
     return value as Telemetry;
