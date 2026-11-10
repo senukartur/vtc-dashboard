@@ -222,7 +222,8 @@ A trip from a real telemetry client stays in review until staff supply the missi
 
 1. After `activation prepare-stage`, `validate`, `apply` and `inspect`, sign in as the director and open catalog administration.
 2. Import each list in order (DLCs, regions, cities, cargo, trailers), each game separately or together. A preview shows every error before anything is written; apply re-checks the same file.
-3. Configure qualification rules from the imported trailer types.
+3. Optionally import companies and then depots (each by code, after cities), and upload company logos from the Companies tab. Each is a separate owner decision and needs the stage profile's grants for the three company tables, which `activation apply` installs. Logos are converted privately first; nothing here is bundled with the app.
+4. Configure qualification rules from the imported trailer types.
 
 To accept a trip, one staff member opens it in review and proposes a resolution: origin, destination, cargo and trailer from the catalog, plus the actual distance when it is unknown. A different staff member approves it.
 
