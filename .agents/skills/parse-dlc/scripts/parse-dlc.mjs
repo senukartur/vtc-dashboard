@@ -458,7 +458,11 @@ const cacheDir = (game) =>
 function privatePath(path, option) {
   let probe = path;
   while (!existsSync(probe) && dirname(probe) !== probe) probe = dirname(probe);
-  const git = (args) => spawnSync("git", ["-C", probe, ...args], { encoding: "utf8" });
+  const git = (args) => {
+    const r = spawnSync("git", ["-C", probe, ...args], { encoding: "utf8" });
+    if (r.error) throw new UsageError(`git is needed to check that ${option} is private`);
+    return r;
+  };
   if (git(["rev-parse", "--is-inside-work-tree"]).stdout.trim() !== "true") return path;
   if (git(["check-ignore", "-q", "--no-index", path]).status === 0) return path;
   throw new UsageError(`${option} ${path} is not ignored by Git; use a folder under .local/`);
