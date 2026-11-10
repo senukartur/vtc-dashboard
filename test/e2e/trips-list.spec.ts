@@ -416,6 +416,8 @@ test(
     const shared = panel(page, colleague);
     await expect(shared.getByText("Decision history is not included in this view.")).toBeVisible();
     await expect(shared).not.toContainText(reason);
+    for (const field of ["Job type", "Game mode", "Hard Mode result"])
+      await expect(shared.getByText(field, { exact: true })).toHaveCount(0);
     await expect(table(page)).toContainText("Fictional Colleague");
     expect(others).toEqual([]);
 
@@ -792,3 +794,49 @@ for (const locale of ["en", "ru"] as const)
       }
     },
   );
+
+test(
+  "private trip panel localizes recorded job type and unavailable audit fields",
+  browserCase(["@layout", "@viewport-desktop"]),
+  async ({ page }) => {
+    await mockList(page);
+    const view = example("getTrip:private-recorded-telemetry");
+    view.data.summary = summary(first);
+    view.data.effectiveFacts.recordedTelemetry = {
+      jobType: "cargo-market",
+      gameMode: "unknown",
+      hardModeResult: "unknown",
+    };
+    await page.route(`**/api/v1/trips/${first}`, (route) =>
+      route.fulfill({ json: view, headers: { ETag: '"v1"' } }),
+    );
+    await page.goto(`/account/trips?trip=${first}`);
+    const detail = panel(page, first);
+    for (const [locale, rows] of [
+      [
+        "en",
+        [
+          ["Job type", "Cargo market"],
+          ["Game mode", "Unknown"],
+          ["Hard Mode result", "Unknown"],
+        ],
+      ],
+      [
+        "ru",
+        [
+          ["Тип заказа", "Рынок грузов для своего прицепа"],
+          ["Режим игры", "Неизвестно"],
+          ["Результат сложного режима", "Неизвестно"],
+        ],
+      ],
+    ] as const) {
+      await catalogLanguage(page, locale);
+      for (const [label, value] of rows) {
+        const term = detail.getByText(label, { exact: true });
+        await expect(term).toBeVisible();
+        await expect(term.locator("xpath=following-sibling::dd")).toHaveText(value);
+      }
+      await noOverflow(page);
+    }
+  },
+);

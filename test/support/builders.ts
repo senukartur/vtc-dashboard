@@ -36,6 +36,7 @@ export const telemetryExamples = [
   "closed-partial",
   "corrected",
   "backfill",
+  "haulmp-audited",
 ] as const;
 export type TelemetryExample = (typeof telemetryExamples)[number];
 // Read canonical committed bytes on every call: callers cannot mutate another test's fixture.

@@ -22,7 +22,7 @@ import {
 import { Badge, Button } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { evidenceContent } from "../manual-reports/fields.js";
-import { Confirm, Failure, Fields } from "../trips/components.js";
+import { Confirm, Failure, Fields, RecordedTelemetryFields } from "../trips/components.js";
 import { useTripCommand } from "../trips/queries.js";
 import { type DTO, TripFailure } from "../trips/transport.js";
 import {
@@ -147,6 +147,9 @@ export function TripFacts({
     return (
       <ReviewSection title={t("tripFacts")}>
         <p className="review-muted">{t("partial")}</p>
+        <dl className="review-facts">
+          <RecordedTelemetryFields telemetry={undefined} />
+        </dl>
       </ReviewSection>
     );
   const pin = (value: DTO["EffectiveCatalogPin"] | null, kind: Kind) =>
@@ -183,6 +186,7 @@ export function TripFacts({
             <dd>{value}</dd>
           </div>
         ))}
+        <RecordedTelemetryFields telemetry={facts.recordedTelemetry} />
       </dl>
       {(!facts.ruleContextComplete ||
         !facts.wholeTripDistanceSupported ||

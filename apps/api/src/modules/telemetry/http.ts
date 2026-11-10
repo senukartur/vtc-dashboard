@@ -3,7 +3,14 @@ import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { csrfProtection } from "../identity/http.js";
 import { type Identity, identityError } from "../identity/service.js";
-import { contract, event, fail, parseJson, TelemetryError } from "./parser.js";
+import {
+  contract,
+  event,
+  eventVersionAdvertisement,
+  fail,
+  parseJson,
+  TelemetryError,
+} from "./parser.js";
 import type { TelemetryService } from "./service.js";
 
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
@@ -134,9 +141,11 @@ export async function registerTelemetryRoutes(
     });
     const auth = (r: FastifyRequest) =>
       typeof r.headers.authorization === "string" ? r.headers.authorization : undefined;
-    frozen.get("/api/telemetry/v1/connection", async (r) =>
-      telemetry.connection(auth(r), r.ip, tickets.get(r)),
-    );
+    frozen.get("/api/telemetry/v1/connection", async (r, reply) => {
+      const result = await telemetry.connection(auth(r), r.ip, tickets.get(r));
+      reply.header("VTC-Telemetry-Event-Versions", eventVersionAdvertisement);
+      return result;
+    });
     frozen.post("/api/telemetry/v1/installations", async (r) => {
       contract(r.body);
       const p = r.body as Record<string, unknown>;

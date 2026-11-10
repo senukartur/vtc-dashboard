@@ -371,13 +371,28 @@ async function resolveDistance(
   };
 }
 
-test("sufficient telemetry accepts once; exact replay leaves decision/outbox/contribution unchanged", async () => {
-  const p = payload(),
-    r = await receive(p),
+test("sufficient HaulMP telemetry accepts once regardless of its recorded audit; exact replay has no second effect", async () => {
+  const p = payload();
+  p.contract.minor = 1;
+  p.snapshot.hardModeResult = "not-qualified";
+  p.snapshot.gameMode = {
+    mode: "haulmp",
+    method: "module-scan",
+    confidence: "strong",
+    ambiguous: false,
+  };
+  p.snapshot.job.market = { available: true, value: "cargo_market" };
+  const r = await receive(p),
     before = await state(r.tripId),
     saved = await credit(r.tripId);
   expect(before?.decision).toBe("accepted");
   expect(saved?.credited).toBe(true);
+  const review = await service.review(dispatcher, r.tripId);
+  expect(review.data.trip.effectiveFacts?.recordedTelemetry).toEqual({
+    jobType: "cargo-market",
+    gameMode: "haulmp",
+    hardModeResult: "not-qualified",
+  });
   const replay = await receive(p);
   expect(replay.duplicate).toBe(true);
   expect(await state(r.tripId)).toEqual(before);
@@ -397,6 +412,14 @@ test("open stays unassessed; a missing game build no longer gates resolution; mi
   expect((await state((await receive(unbuilt)).tripId))?.decision).toBe("accepted");
   const missing = payload();
   missing.snapshot.trailers.complete = false;
+  missing.contract.minor = 1;
+  missing.snapshot.hardModeResult = "qualified";
+  missing.snapshot.gameMode = {
+    mode: "haulmp",
+    method: "process-scan",
+    confidence: "weak",
+    ambiguous: false,
+  };
   const r = await receive(missing);
   expect((await state(r.tripId))?.decision).toBe("pending_review");
   expect(await credit(r.tripId)).toBeUndefined();
@@ -506,16 +529,35 @@ test("two dispatchers decide at most once and permanent receipts reject conflict
   ).rejects.toMatchObject({ statusCode: 409 });
 });
 test("two successive derived corrections change real FK-backed credit and reconstruct after raw expiry", async () => {
-  const p = payload(),
-    r = await receive(p),
+  const p = payload();
+  p.snapshot.gameMode = {
+    mode: "single-player",
+    method: "process-scan",
+    confidence: "weak",
+    ambiguous: false,
+  };
+  p.snapshot.job.market = { available: true, value: "quick_job" };
+  const r = await receive(p),
     original = await state(r.tripId),
     before = await credit(r.tripId);
+  // Legacy rows have their mode provenance but no normalized market. Derived rows inherit that shape.
+  await control.execute(
+    "UPDATE trip_facts SET evidence=JSON_REMOVE(evidence,'$.recordedTelemetry') WHERE message_id=?",
+    [r.sourceRecordId],
+  );
   const a = await resolveDistance(r.tripId, "200000"),
     b = await resolveDistance(r.tripId, "300000");
   expect(a.result.data.basis.factRevisionId).not.toBe(original?.currentFactId);
   expect(b.result.data.basis.factRevisionId).not.toBe(a.result.data.basis.factRevisionId);
   expect((await credit(r.tripId))?.actualDistanceM).toBe("300000.000000000000000000");
   expect((await credit(r.tripId))?.version).toBe((before?.version ?? 0) + 2);
+  const legacy = (jobType: string) => ({
+    factRevisionId: b.result.data.basis.factRevisionId,
+    recordedTelemetry: { jobType, gameMode: "single-player", hardModeResult: "unknown" },
+  });
+  expect((await service.review(dispatcher, r.tripId)).data.trip.effectiveFacts).toMatchObject(
+    legacy("quick-job"),
+  );
   await unit.run(async (tx) => {
     await tripsService.retentionPolicyInTransaction(tx, r.sourceRecordId, {
       reviewedPolicyReference: "synthetic/trip-decisions/v1",
@@ -530,6 +572,9 @@ test("two successive derived corrections change real FK-backed credit and recons
     expect(f?.evidence.sourceRecordId).toBe(r.sourceRecordId);
   });
   expect((await receive(p)).duplicate).toBe(true);
+  expect((await service.review(dispatcher, r.tripId)).data.trip.effectiveFacts).toMatchObject(
+    legacy("unknown"),
+  );
   const other = await receive(),
     left = await state(r.tripId),
     right = await state(other.tripId),
@@ -541,6 +586,12 @@ test("two successive derived corrections change real FK-backed credit and recons
       reason: "Fictional derived lineage merge",
     }),
     current = await reconciliation.get(director, merged.data.id);
+  const alias = await tripsService.detail(owner, other.tripId);
+  expect(alias).toMatchObject({
+    view: "private",
+    summary: { id: r.tripId },
+    effectiveFacts: legacy("unknown"),
+  });
   await reconciliation.reverse(director, merged.data.id, newId(), current.version, {
     primaryVersion: current.data.primaryVersion,
     secondaryVersion: current.data.secondaryVersion,
@@ -668,6 +719,12 @@ test("late telemetry and manual approval in both serialized orders preserve one 
       expect(await credit(r.tripId)).toEqual(before);
       expect((await state(r.tripId))?.currentFactId).toBe(saved?.currentFactId);
       expect((await state(r.tripId))?.correctionPending).toBe(true);
+      const review = await service.review(dispatcher, r.tripId);
+      expect(review.data.trip.summary.sourceKinds).toEqual(
+        expect.arrayContaining(["manual", "ets2telemetry"]),
+      );
+      expect(review.data.trip.effectiveFacts?.provider).toBe("manual");
+      expect(review.data.trip.effectiveFacts).not.toHaveProperty("recordedTelemetry");
       await decide(r.tripId);
       expect((await credit(r.tripId))?.attributionBasis).toBe("actual_start");
     }

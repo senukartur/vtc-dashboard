@@ -732,17 +732,26 @@ test("an explicit coordinator target links another source identity without summi
 test("contradictory obsolete terminal becomes visible review evidence without regressing effective outcome", async () => {
   const p = fixture();
   p.revision = 9;
+  p.snapshot.job.market = { available: true, value: "freight_market" };
   const result = await receive(p),
     lower = fixture("cancelled");
   lower.source = p.source;
   lower.eventId = newId();
   lower.revision = 2;
+  lower.contract.minor = 1;
+  lower.snapshot.hardModeResult = "qualified";
+  lower.snapshot.job.market = { available: true, value: "quick_job" };
   await receive(lower);
   const detail = await service.detail(owner, result.tripId);
   expect(detail.view).toBe("private");
   if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_VIEW_EXPECTED");
   expect(detail.reviewReasonCodes).toContain("terminal_outcome_conflict");
   expect(detail.summary.outcome).toBe("delivered");
+  expect(detail.effectiveFacts?.recordedTelemetry).toEqual({
+    jobType: "freight-market",
+    gameMode: "unknown",
+    hardModeResult: "unknown",
+  });
 });
 test("confirmed projection remains fixed while later evidence records correction pending", async () => {
   const p = fixture(),
@@ -753,6 +762,8 @@ test("confirmed projection remains fixed while later evidence records correction
   );
   p.eventId = newId();
   p.revision = 3;
+  p.contract.minor = 1;
+  p.snapshot.hardModeResult = "not-qualified";
   Object.assign(p.snapshot.observedDistance, { value: 999 });
   p.snapshot.evidence.clockAnomaly = true;
   await receive(p);
@@ -764,6 +775,14 @@ test("confirmed projection remains fixed while later evidence records correction
   expect(current?.reportingAt).toBe(original?.reportingAt);
   expect(current?.decision).toBe("accepted");
   expect(current?.correctionPending).toBe(true);
+  const detail = await service.detail(owner, result.tripId);
+  expect(detail).toMatchObject({
+    view: "private",
+    effectiveFacts: {
+      factRevisionId: original?.currentFactId,
+      recordedTelemetry: { hardModeResult: "unknown" },
+    },
+  });
 });
 test("source/domain/event writes roll back together at either producer boundary", async () => {
   for (const type of ["source.snapshot_stored", "trip.lifecycle_changed"]) {
@@ -832,8 +851,28 @@ test("async owner checks cannot let a caller mutate the captured immutable envel
   expect(JSON.parse(payload?.content ?? "{}").snapshot.observedDistance.value).toBe(123400);
 });
 test("null/before/at expiry, holds and current review gate only raw payload cleanup; identity/facts survive", async () => {
-  const p = fixture(),
-    result = await receive(p);
+  const p = fixture();
+  p.snapshot.job.market = { available: true, value: "external_contracts" };
+  p.snapshot.gameMode = {
+    mode: "truckersmp",
+    method: "module-scan",
+    confidence: "strong",
+    ambiguous: false,
+  };
+  const result = await receive(p);
+  // Simulate a fact saved before normalized telemetry classification existed.
+  await control.execute(
+    "UPDATE trip_facts SET evidence=JSON_REMOVE(evidence,'$.recordedTelemetry') WHERE message_id=?",
+    [result.sourceRecordId],
+  );
+  const legacy = (jobType: string) => ({
+    view: "private",
+    effectiveFacts: {
+      recordedTelemetry: { jobType, gameMode: "truckersmp", hardModeResult: "unknown" },
+    },
+  });
+  expect(await service.detail(owner, result.tripId)).toMatchObject(legacy("world-of-trucks"));
+  expect(await service.detail(staff, result.tripId)).toMatchObject(legacy("world-of-trucks"));
   const expire = () =>
     unit.run((tx) => service.expirePayloadInTransaction(tx, result.sourceRecordId));
   expect(await expire()).toBe(false);
@@ -872,6 +911,7 @@ test("null/before/at expiry, holds and current review gate only raw payload clea
   const [payload] = await unit.run((tx) => unit.client(tx).select().from(sourcePayloads));
   expect(payload?.content).toBeNull();
   expect(payload?.expiredAt).toBe(now().toISOString());
+  expect(await service.detail(owner, result.tripId)).toMatchObject(legacy("unknown"));
   expect((await totals()).facts).toBe(1);
   expect((await totals()).trips).toBe(1);
   const eventContext = await unit.run((tx) =>
@@ -923,7 +963,13 @@ test("a concurrent reopened review hold wins under the canonical lock before ret
   expect(payload?.content).not.toBeNull();
 });
 test("owner, reviewer and company views filter private facts before serialization and expose real absence", async () => {
-  const pending = await receive(fixture());
+  const audited = telemetryFixture("haulmp-audited") as unknown as Telemetry;
+  const pending = await receive(audited);
+  const recordedTelemetry = {
+    jobType: "freight-market",
+    gameMode: "haulmp",
+    hardModeResult: "qualified",
+  };
   await expect(service.detail(other, pending.tripId)).rejects.toMatchObject({ statusCode: 404 });
   expect((await service.detail(owner, pending.tripId)).view).toBe("private");
   expect((await service.detail(staff, pending.tripId)).view).toBe("private");
@@ -956,8 +1002,29 @@ test("owner, reviewer and company views filter private facts before serializatio
     expect(response.headers["cache-control"]).toBe("no-store");
     const json = response.json();
     expect(json.data.view).toBe("summary");
-    for (const field of ["snapshot", "sourceRecordId", "eventId", "money", "reviewReasonCodes"])
+    for (const field of [
+      "effectiveFacts",
+      "recordedTelemetry",
+      "snapshot",
+      "sourceRecordId",
+      "eventId",
+      "money",
+      "reviewReasonCodes",
+    ])
       expect(JSON.stringify(json)).not.toContain(`"${field}"`);
+    const ownerResponse = await app.inject({
+      url: `/api/v1/trips/${pending.tripId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(ownerResponse.statusCode).toBe(200);
+    expect(ownerResponse.json().data.effectiveFacts.recordedTelemetry).toEqual(recordedTelemetry);
+    expect(JSON.stringify(ownerResponse.json())).not.toMatch(
+      /"snapshot"|"sourceRecordId"|"eventId"|"ambiguous"/,
+    );
+    expect(await service.detail(staff, pending.tripId)).toMatchObject({
+      view: "private",
+      effectiveFacts: { recordedTelemetry },
+    });
     expect(
       (
         await app.inject({

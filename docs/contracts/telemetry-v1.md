@@ -1,6 +1,6 @@
-# Telemetry ingestion contract v1.0
+# Telemetry ingestion contract v1.0 and v1.1
 
-**Status:** v1.0 implementation baseline adopted under the owner's conditional agreement authorization of 2026-10-17; final independent review and merge evidence are tracked in [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3). This is not an implemented API. **Source baseline:** [telemetry discovery](../research/telemetry.md). **Card:** [VTC-003](https://trello.com/c/lQrxZ13N).
+**Status:** v1.0 implementation baseline adopted under the owner's conditional agreement authorization of 2026-10-17. See [PR #3](https://github.com/senukartur/vtc-dashboard/pull/3) for the original review. [VTC-095](https://trello.com/c/RfKFS16T) adds HaulMP and event v1.1 for recorded Hard Mode. **Source baseline:** [telemetry discovery](../research/telemetry.md). **Card:** [VTC-003](https://trello.com/c/lQrxZ13N).
 
 This contract bridges the local ETS2Telemetry recorder and this dashboard. Its HTTP version is independent of native Named Pipe protocol v1 and trip-export format v1. The [concept](../CONCEPT.MD) governs qualifications, privacy, manual reports and analytics. The [request schema](telemetry-v1.schema.json), [examples](examples/README.md) and [acceptance matrix](telemetry-v1-acceptance.md) form the versioned baseline.
 
@@ -24,7 +24,7 @@ The server authenticates an active linked member, checks token scope/revocation 
 
 | Route | Request and durable result |
 | --- | --- |
-| `GET /api/telemetry/v1/connection` | Return supported contract versions/limits and authenticated `accountId`, `companyId`, `identityEpoch`; `Cache-Control: no-store`. These are local binding metadata, not client-selectable upload ownership |
+| `GET /api/telemetry/v1/connection` | Return the exact v1.0 body with `contract`, limits and authenticated `accountId`, `companyId`, `identityEpoch`. Successful responses carry `VTC-Telemetry-Event-Versions: 1.0, 1.1` and `Cache-Control: no-store`. Ownership comes from authentication |
 | `POST /api/telemetry/v1/installations` | `{contract:{major:1,minor:0},clientInstallationId:<opaque UUID>}`. Register/reuse an installation for the authenticated owner and epoch, returning `installationId`, `bindingId`, `identityEpoch`. Persist before success; retries return the same registration. A different account uses a distinct registration and cannot adopt old queued work |
 | `POST /api/telemetry/v1/events` | One schema-valid frozen lifecycle snapshot, at most 65,536 UTF-8 bytes. Returns a durable receipt or the error table below |
 
@@ -32,11 +32,11 @@ An owner binding includes the account, company, identity epoch and service origi
 
 ## Request envelope
 
-All keys shown in the schema are required; explicit `null`/availability carries absence. Unknown keys and unsupported minor versions are rejected. Objects below are closed objects. The schema enforces structural shape; the semantic requirements in this document also apply.
+Required keys are defined by the event version. Explicit `null`/availability carries absence where the schema permits it. Unknown keys and unsupported minor versions are rejected. Objects below are closed objects. The schema enforces structural shape; the semantic requirements in this document also apply.
 
 | Field | Meaning |
 | --- | --- |
-| `contract` | Exact `{major:1,minor:0}`; use a new supported minor/schema to add fields |
+| `contract` | `{major:1,minor:0}` or `{major:1,minor:1}` for events |
 | `producer` | `{application:"ets2telemetry",version:<bounded version text>}` |
 | `eventId` | Lowercase UUID-shaped opaque ID, generated once and stored with the frozen event |
 | `revision` | Positive safe integer, strictly increasing per source trip for material snapshots; gaps allowed |
@@ -75,8 +75,9 @@ Store any valid snapshot even if a lower revision/start has not arrived. Apply a
 | Time | `start`, nullable `end`: `{utcMs:number|null,basis:event|checkpoint|last-known|receipt|unknown,eventSeq:string|null}`. Nonnegative UTC epoch ms; preserve provenance. EventSeq required for an event basis. Unknown basis has null UTC/sequence. Preserve raw source-event time if the local row was clamped |
 | Opening | `openedBy:event|checkpoint`, nullable `openedEventSeq`, nullable `checkpointNextEventSeq`, nullable `outcomeEventSeq` |
 | Context | Available `gameBuild`, `sourceLocale`, `mapId`, `dlcIds`; `versions` includes supported native protocol, SDK archive, telemetry API and game-telemetry API availability. A retail build is never derived from the API version |
-| Mode | `gameMode:{mode:single-player|truckersmp|unknown,method:module-scan|process-scan|none,confidence:strong|weak|none,ambiguous:boolean}`; no module paths |
+| Mode | `gameMode:{mode:single-player|truckersmp|haulmp|unknown,method:module-scan|process-scan|none,confidence:strong|weak|none,ambiguous:boolean}`; no module paths |
 | Job | Origin/destination each have available city/company source IDs and names; available cargo ID/name, actual mass kg, unit mass kg/count, market, special-job and cargo-loaded flags |
+| Hard Mode | `snapshot.hardModeResult` is required in v1.1 as exactly `qualified`, `not-qualified` or `unknown`. It is forbidden in v1.0, which projects an unknown audit. |
 | Trailer | `trailers:{complete:boolean,items:[{index,id,bodyType,chainType}]}` with availability on identifiers/types; at most 10 active slots. Any mid-trip rule-relevant configuration change, missed configuration or omitted history is reflected in evidence/review, not hidden by the latest snapshot The dashboard recognizes a coupling by `items[0].bodyType` and keeps the other fields as provenance. |
 | Distances | `plannedDistance` m, `observedDistance` m, `deliveredDistance` m are separate available metrics |
 | Other outcome facts | Available fuel used L and cargo damage fraction; available expected income/revenue/penalty as exact raw monetary values, not display conversions |
@@ -86,7 +87,9 @@ Money is `{raw:<canonical signed/unsigned integer string>,sdkType:"s64"|"u64",cu
 
 Preserve the producer's field-specific integer types: `expectedIncome` is `u64` (0 through 18446744073709551615); `revenue` and `penalty` are `s64` (-9223372036854775808 through 9223372036854775807). Do not reinterpret a positive amount as another SDK type. The schema enforces type/canonical spelling; semantic validation additionally enforces exact numeric range with lossless integer arithmetic. Missing amounts retain availability rather than an invented value.
 
-Game-mode evidence also preserves producer invariants. `unknown` pairs with `method:none` and `confidence:none`; known modes require `module-scan` or `process-scan` with non-none confidence. Single-player confidence is always weak, never strong. A projected TruckersMP module-scan claim must originate from an actual native observation with its required module evidence; module names/paths remain local and are not uploaded. The summary does not turn those heuristics into proof of player identity.
+Game-mode evidence also preserves producer invariants. `unknown` pairs with `method:none` and `confidence:none`; known modes require `module-scan` or `process-scan` with non-none confidence. Single-player confidence is always weak, never strong. A projected TruckersMP or HaulMP module-scan claim must originate from an actual native observation with its required module evidence; module names/paths remain local and are not uploaded. The summary does not turn those heuristics into proof of player identity.
+
+The producer reports its persisted Hard Mode audit. An absent or indeterminate audit maps to `unknown`. A false `isHardMode` flag alone cannot establish a failed audit. Mode, market and audit are recorded facts independent of company qualification, review and credit.
 
 The native protocol defensively accepts damage up to 1,000; a value above the ordinary fraction range 0–1 is anomalous evidence for review, not a valid 100,000% display or a value to clamp silently. Reason codes are bounded project-defined lowercase identifiers; unrecognized codes require review/compatibility handling and must not be discarded as proof of completeness.
 
@@ -112,7 +115,7 @@ Validate auth/binding/version/shape/limits before returning success. In one MySQ
 {"contract":{"major":1,"minor":0},"eventId":"10000000-0000-0000-0000-000000000001","receiptId":"90000000-0000-0000-0000-000000000001","status":"stored","firstReceivedAtUtcMs":1792231200000}
 ```
 
-An exact replay returns the same event/receipt/first-received identities with `status:"duplicate"`. Both responses mean the client may mark that one event delivered after validating the response version, IDs and status. Lost/invalid/truncated responses mean retry, not success. Persist receipt state before queue cleanup. A crash after remote commit but before local receipt commit must yield an exact duplicate on replay.
+Both receipt statuses echo the original event version. An exact replay returns the same version, event, receipt and first-received identities with `status:"duplicate"`. Both responses mean the client may mark that one event delivered after validating the response version, IDs and status. Lost/invalid/truncated responses mean retry, not success. Persist receipt state before queue cleanup. A crash after remote commit but before local receipt commit must yield an exact duplicate on replay.
 
 Required database invariants, using non-null columns and exact comparison:
 
@@ -152,7 +155,9 @@ Backfill and delayed/replayed starts must not generate "driver just started" act
 
 ## Versioning, acceptance and ownership
 
-Only exact v1.0 is specified. Unsupported major/minor versions receive a clear error before any durable ACK. Future versions require supported-version advertisement, schemas/examples and compatibility tests; old stored versions remain readable under their original decoder. No blanket "ignore new fields" policy applies to identity/evidence.
+Installation requests and control responses remain exactly v1.0. Clients use the authenticated connection response header to select the version for newly frozen events. Without a recognized advertisement, freeze v1.0. Unsupported event versions receive 422 `UNSUPPORTED_CONTRACT`. Invalid shapes at supported versions receive 400 `INVALID_PAYLOAD`. Already frozen events keep their original version, bytes and identifiers across upgrades and retries.
+
+Roll out the dashboard receiver before the ET-111 desktop projection. After v1.1 events have been frozen, preserve both decoders during a rollback or hold the exact v1.1 events until a forward fix restores support. Never downgrade an existing frozen event.
 
 VTC-022 owns canonical/source mapping; VTC-023 owns token/registration/inbox/ACK/limits with real MySQL race tests; VTC-024 owns desktop binding, automatic initial enumeration, immutable queue, source projection and real-client verification. VTC-026 owns reviewed reconciliation; VTC-029 owns company decisions; VTC-036 owns permission-filtered notifications. No external implementation or card status is changed by this document.
 
