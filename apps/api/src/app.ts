@@ -253,7 +253,8 @@ export async function createApp(options: AppOptions) {
       index: false,
       setHeaders(response, filePath) {
         const path = relative(webRoot, filePath).replaceAll("\\", "/");
-        if (/^assets\/[^/]+-[\w-]{8,}\.(js|css)$/.test(path))
+        // Fingerprinted bundles and landing media; Range (206) responses keep the same header.
+        if (/^assets\/[^/]+-[\w-]{8,}\.(js|css|mp4|webp)$/.test(path))
           response.header("Cache-Control", assetCache);
       },
     });

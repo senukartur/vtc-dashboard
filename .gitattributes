@@ -1,6 +1,8 @@
 * text=auto eol=lf
 *.png binary
 *.jpg binary
+*.mp4 binary
+*.webp binary
 *.ttf binary
 *.woff2 binary
 third_party/huninn/OFL.txt whitespace=-blank-at-eol

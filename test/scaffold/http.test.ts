@@ -206,11 +206,35 @@ test("production SPA fallback never replaces API, evidence or missing-asset erro
   await mkdir(join(directory, "assets"));
   await writeFile(join(directory, "assets", "index-Ab12cd34.js"), "export default 1;");
   await writeFile(join(directory, "assets", "unversioned.js"), "export default 2;");
+  await writeFile(join(directory, "assets", "hero-Ab12cd34.mp4"), Buffer.alloc(4096, 1));
+  await writeFile(join(directory, "assets", "still-Ab_2cd-4.webp"), Buffer.alloc(64, 2));
+  await writeFile(join(directory, "assets", "unversioned.mp4"), Buffer.alloc(16, 3));
   const app = await createApp({ checkReadiness: async () => true, webRoot: directory });
   try {
     assert.equal(
       (await app.inject("/assets/index-Ab12cd34.js")).headers["cache-control"],
       "public, max-age=31536000, immutable",
+    );
+    // VTC-089 landing media: fingerprinted video and images are immutable, also for ranges.
+    const video = await app.inject("/assets/hero-Ab12cd34.mp4");
+    assert.equal(video.statusCode, 200);
+    assert.equal(video.headers["content-type"], "video/mp4");
+    assert.equal(video.headers["cache-control"], "public, max-age=31536000, immutable");
+    const range = await app.inject({
+      url: "/assets/hero-Ab12cd34.mp4",
+      headers: { range: "bytes=0-1023" },
+    });
+    assert.equal(range.statusCode, 206);
+    assert.equal(range.headers["content-range"], "bytes 0-1023/4096");
+    assert.equal(range.headers["accept-ranges"], "bytes");
+    assert.equal(range.headers["cache-control"], "public, max-age=31536000, immutable");
+    assert.equal(range.rawPayload.length, 1024);
+    const still = await app.inject("/assets/still-Ab_2cd-4.webp");
+    assert.equal(still.headers["content-type"], "image/webp");
+    assert.equal(still.headers["cache-control"], "public, max-age=31536000, immutable");
+    assert.equal(
+      (await app.inject("/assets/unversioned.mp4")).headers["cache-control"],
+      "no-store",
     );
     for (const url of [
       "/",
