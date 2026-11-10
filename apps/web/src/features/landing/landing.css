@@ -1,5 +1,6 @@
 /* R7d public landing (VTC-089). The page is deliberately dark and self-contained: it redeclares
-   every shared token it consumes, also for the portalled menu. Feature CSS loads before
+   every shared colour token (all of :root except the size, radius and type scale), also for
+   the portalled menu, so form feedback and badges stay legible. Feature CSS loads before
    shared/styles.css, so rules that meet shared selectors are compound. Motion exists only under
    prefers-reduced-motion: no-preference once the client sets data-motion running/paused. */
 
@@ -21,8 +22,14 @@
   --accent: #f59e0b;
   --accent-soft: rgba(52, 211, 153, 0.1);
   --selection-border: rgba(52, 211, 153, 0.55);
+  --destructive: #fca5a5;
+  --rejected-surface: #2a1218;
   --accepted: #34d399;
+  --accepted-surface: #0f2a22;
+  --pending: #fcd34d;
+  --pending-surface: #2a1f0a;
   --focus: #5eead4;
+  --chart: #2b4a7a;
   --landing-amber: #f59e0b;
   --landing-amber-hover: #fbbf24;
   --landing-on-amber: #1a1204;
