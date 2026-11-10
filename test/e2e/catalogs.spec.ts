@@ -1,17 +1,18 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
+import { rgbaLogo } from "../fixtures/catalogs/logos.ts";
 import {
+  cargoRowId,
   catalogItem,
   catalogLanguage,
   catalogList,
   chooseCatalogRow,
-  cargoRowId,
   companyRowId,
+  defaultRows,
   depotRow,
   depotRowId,
   dlcId,
-  defaultRows,
   entityId,
   envelope,
   logoRef,
@@ -19,7 +20,6 @@ import {
   regionId,
   trailerRowId,
 } from "./support/catalogs.ts";
-import { rgbaLogo } from "../fixtures/catalogs/logos.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
@@ -1217,6 +1217,27 @@ for (const locale of ["en", "ru"] as const) {
         "Fictional north city with a very long",
       );
       await expect(plate(page, freight.name)).toHaveAttribute("data-logo", "image");
+      // Filters: like the search and source fields, the company and city selectors show their
+      // name only as the placeholder (the label stays for assistive technology). Each input fills
+      // its field, so the chevron sits inside it, and shares the search box's row edges.
+      const searchBox = await page.getByRole("searchbox").boundingBox();
+      expect(searchBox).not.toBeNull();
+      for (const name of [c.companyFilter, c.cityFilter]) {
+        const input = page.getByRole("combobox", { name, exact: true });
+        await expect(input).toBeVisible();
+        await expect(input).toHaveAttribute("placeholder", name);
+        await expect(page.locator(`label[for="${await input.getAttribute("id")}"]`)).toHaveClass(
+          /visually-hidden/,
+        );
+        const field = await input.boundingBox();
+        const wrapper = await input.locator("xpath=..").boundingBox();
+        expect(field && wrapper && Math.abs(field.width - wrapper.width) < 1).toBe(true);
+        if (field && searchBox && field.y < searchBox.y + searchBox.height) {
+          expect(Math.abs(field.y + field.height - (searchBox.y + searchBox.height))).toBeLessThan(
+            1.5,
+          );
+        }
+      }
       await expect(rowOf(page, plainCo.name)).toHaveCount(0);
       await page.getByRole("checkbox", { name: c.showHidden }).click();
       await expect(plate(page, plainCo.name)).toHaveAttribute("data-logo", "placeholder");

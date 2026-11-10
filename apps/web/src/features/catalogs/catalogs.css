@@ -338,6 +338,11 @@
   flex: 1 1 200px;
   min-width: 180px;
 }
+/* The combobox input fills its wrapper so the chevron and clear button sit inside the field. */
+.catalog-page .catalog-toolbar .catalog-selector .input {
+  width: 100%;
+  min-width: 0;
+}
 .catalog-dialog .catalog-field-label {
   color: var(--muted);
   font-size: var(--font-small);

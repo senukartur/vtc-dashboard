@@ -44,6 +44,7 @@ export function CatalogSelector({
   value,
   onChange,
   extraRow,
+  labelHidden = false,
 }: {
   label: string;
   game: Game;
@@ -52,6 +53,8 @@ export function CatalogSelector({
   value: string | null;
   onChange: (value: string | null) => void;
   extraRow?: CatalogExtraRow | undefined;
+  /** Compact filters: the label stays the accessible name but shows only as the placeholder. */
+  labelHidden?: boolean | undefined;
 }) {
   const { t, i18n } = useTranslation("catalogs"),
     id = useId();
@@ -203,7 +206,9 @@ export function CatalogSelector({
 
   return (
     <div className="stack catalog-selector">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id} className={labelHidden ? "visually-hidden" : undefined}>
+        {label}
+      </Label>
       <div className="catalog-combobox">
         <Input
           ref={inputRef}
@@ -221,7 +226,9 @@ export function CatalogSelector({
           data-historical={incompatible || undefined}
           data-clear={canClear || undefined}
           data-chips={Number(fallback) + Number(hiddenMark) || undefined}
-          placeholder={t(value && selected.isPending ? "loading" : "choose")}
+          placeholder={
+            value && selected.isPending ? t("loading") : labelHidden ? label : t("choose")
+          }
           title={draft === null && !extraRow?.active ? currentDisplay?.text : undefined}
           value={shown}
           onChange={(event) => {
