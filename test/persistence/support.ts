@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 92 tables including the ledger and 22 migrations.
+// Fresh full-schema preparation now covers 95 tables including the ledger and 23 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -152,6 +152,9 @@ export async function reset(connection: Connection) {
     "external_steam_proofs",
     "external_steam_nonces",
     "external_steam_accounts",
+    "catalog_company_logos",
+    "catalog_company_cities",
+    "catalog_companies",
     "catalog_cities",
     "catalog_cargoes",
     "catalog_trailers",
@@ -240,7 +243,7 @@ export async function eventsPriorFolder(): Promise<string> {
 }
 
 async function publishedPrefixFolder(
-  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19,
+  count: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 22,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -282,6 +285,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_NOTIFICATION_MATERIAL_PREFIX_REQUIRED");
   if (count === 19 && entries[18]?.tag !== "0018_trip_review_queue")
     throw new Error("PUBLISHED_REVIEW_QUEUE_PREFIX_REQUIRED");
+  if (count === 22 && entries[21]?.tag !== "0021_careful_speed")
+    throw new Error("PUBLISHED_LOCALE_DEFAULT_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -376,6 +381,11 @@ export async function notificationMaterialPriorFolder(): Promise<string> {
 
 export async function reviewQueuePriorFolder(): Promise<string> {
   return publishedPrefixFolder(18);
+}
+
+/** Every published migration before the company and depot lists. */
+export async function companyCatalogsPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(22);
 }
 
 export async function simpleCatalogsPriorFolder(): Promise<string> {

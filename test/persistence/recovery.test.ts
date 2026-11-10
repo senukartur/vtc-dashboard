@@ -9,6 +9,7 @@ import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   analyticsPriorFolder,
+  companyCatalogsPriorFolder,
   decisionsPriorFolder,
   EXTENDED_TEST_TIMEOUT_MS,
   fixtureRoot,
@@ -122,7 +123,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 22);
+      assert.equal(await runMigrations(settings), 23);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -179,7 +180,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 22);
+      assert.equal(await runMigrations(settings), 23);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -354,7 +355,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 22);
+      assert.equal(await runMigrations(guardedSettings()), 23);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -449,7 +450,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 22);
+        assert.equal(await runMigrations(settings), 23);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -507,7 +508,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 22);
+      assert.equal(await runMigrations(guardedSettings()), 23);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -562,7 +563,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 22);
+      assert.equal(await runMigrations(guardedSettings()), 23);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -616,7 +617,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 22);
+      assert.equal(await runMigrations(guardedSettings()), 23);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -699,7 +700,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 22);
+      assert.equal(await runMigrations(settings), 23);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1143,7 +1144,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 3);
+      assert.equal(await runMigrations(settings), 4);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1193,6 +1194,9 @@ await recoveryTest(
         [
           "catalog_cargoes",
           "catalog_cities",
+          "catalog_companies",
+          "catalog_company_cities",
+          "catalog_company_logos",
           "catalog_dlcs",
           "catalog_regions",
           "catalog_trailers",
@@ -1223,7 +1227,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 22);
+      assert.equal(history.length, 23);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -1275,6 +1279,77 @@ await recoveryTest(
       await assert.rejects(
         runMigrations(settings, { folder, lockTimeoutSeconds: 0 }),
         /MIGRATION_RECOVERY_REQUIRED/,
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "the company and depot migration keeps existing catalog rows and enforces same-game depots",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await companyCatalogsPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 22);
+      const id = catalogUpgradeId;
+      await connection.execute(
+        "INSERT INTO catalog_dlcs (id,game,code,name_en) VALUES (?,'ets2','synthetic_pack','Synthetic pack')",
+        [id(90)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_cities (id,game,code,name_en,dlc_id) VALUES (?,'ets2','synthetic_city','Synthetic city',?)",
+        [id(91), id(90)],
+      );
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      assert.equal(await catalogUpgradeRowCount(connection, "catalog_dlcs"), 1);
+      assert.equal(await catalogUpgradeRowCount(connection, "catalog_cities"), 1);
+      for (const table of ["catalog_companies", "catalog_company_cities", "catalog_company_logos"])
+        assert.equal(await catalogUpgradeRowCount(connection, table), 0, table);
+
+      await connection.execute(
+        "INSERT INTO catalog_companies (id,game,code,name_en) VALUES (?,'ets2','synthetic_co','Synthetic Co')",
+        [id(92)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_companies (id,game,code,name_en) VALUES (?,'ats','synthetic_co','Synthetic Co')",
+        [id(93)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_company_cities (id,game,company_id,city_id) VALUES (?,'ets2',?,?)",
+        [id(94), id(92), id(91)],
+      );
+      await assert.rejects(
+        connection.execute(
+          "INSERT INTO catalog_company_cities (id,game,company_id,city_id) VALUES (?,'ats',?,?)",
+          [id(95), id(93), id(91)],
+        ),
+        hasCode("ER_NO_REFERENCED_ROW_2"),
+      );
+      await assert.rejects(
+        connection.execute(
+          "INSERT INTO catalog_company_cities (id,game,company_id,city_id) VALUES (?,'ets2',?,?)",
+          [id(96), id(92), id(91)],
+        ),
+        hasCode("ER_DUP_ENTRY"),
+      );
+      await assert.rejects(
+        connection.execute(
+          "INSERT INTO catalog_company_logos (company_id,png,byte_length,sha256,updated_at) VALUES (?,?,5,?,'2026-01-01 00:00:00.000')",
+          [id(92), Buffer.from("abcd"), Buffer.alloc(32)],
+        ),
+        hasCode("ER_CHECK_CONSTRAINT_VIOLATED"),
+      );
+      await assert.rejects(
+        connection.execute("DELETE FROM catalog_companies WHERE id=?", [id(92)]),
+        hasCode("ER_ROW_IS_REFERENCED_2"),
       );
     } finally {
       await connection.end();

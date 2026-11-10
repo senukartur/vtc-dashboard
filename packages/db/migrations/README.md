@@ -20,3 +20,6 @@ VTC-087 appends `0020_outstanding_cannonball.sql` without rewriting `0019` or ea
 
 
 VTC-089 appends `0021_careful_speed.sql` without rewriting `0020` or earlier assets: updates the column default of `identity_memberships.locale` and `admissions_applications.locale` from `'en'` to `'ru'`. It alters default column values only with no data loss, index change, or type change; existing rows and readers are unaffected. A failure between the statements follows the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).
+
+
+VTC-091 appends `0022_busy_professor_monster.sql` without rewriting `0021` or earlier assets: three additive tables, `catalog_companies`, `catalog_company_cities` (depots) and `catalog_company_logos` (bounded PNG rows with a size check), with composite same-game foreign keys, restrict deletes and no data statements or changes to existing tables. Old readers ignore them. The runtime role has no grants on the new tables until the stage-feature profile adds them. Rollback leaves the tables in place; a failure part-way through the statements follows the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).
