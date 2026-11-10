@@ -1217,13 +1217,18 @@ for (const locale of ["en", "ru"] as const) {
         "Fictional north city with a very long",
       );
       await expect(plate(page, freight.name)).toHaveAttribute("data-logo", "image");
-      // Filters: each selector input fills its field (so the chevron sits inside it). When a
-      // selector shares the search box's row, both keep one bottom edge, labelled or not.
+      // Filters: like the search and source fields, the company and city selectors show their
+      // name only as the placeholder (the label stays for assistive technology). Each input fills
+      // its field, so the chevron sits inside it, and shares the search box's row edges.
       const searchBox = await page.getByRole("searchbox").boundingBox();
       expect(searchBox).not.toBeNull();
       for (const name of [c.companyFilter, c.cityFilter]) {
         const input = page.getByRole("combobox", { name, exact: true });
         await expect(input).toBeVisible();
+        await expect(input).toHaveAttribute("placeholder", name);
+        await expect(page.locator(`label[for="${await input.getAttribute("id")}"]`)).toHaveClass(
+          /visually-hidden/,
+        );
         const field = await input.boundingBox();
         const wrapper = await input.locator("xpath=..").boundingBox();
         expect(field && wrapper && Math.abs(field.width - wrapper.width) < 1).toBe(true);

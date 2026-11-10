@@ -63,7 +63,7 @@
 .catalog-page .catalog-toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   gap: 8px;
 }
 .catalog-page .catalog-toolbar .input {
@@ -342,12 +342,6 @@
 .catalog-page .catalog-toolbar .catalog-selector .input {
   width: 100%;
   min-width: 0;
-}
-/* Quiet labels like the rest of the form; the controls share one baseline whether labelled or not. */
-.catalog-page .catalog-toolbar .catalog-selector label {
-  color: var(--muted);
-  font-size: var(--font-small);
-  font-weight: 500;
 }
 .catalog-dialog .catalog-field-label {
   color: var(--muted);

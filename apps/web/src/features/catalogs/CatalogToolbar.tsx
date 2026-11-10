@@ -111,6 +111,7 @@ export function CatalogToolbar({
         <>
           <CatalogSelector
             label={t("companyFilter")}
+            labelHidden
             game={filters.game}
             kind="company"
             value={filters.company || null}
@@ -118,6 +119,7 @@ export function CatalogToolbar({
           />
           <CatalogSelector
             label={t("cityFilter")}
+            labelHidden
             game={filters.game}
             kind="city"
             value={filters.city || null}
