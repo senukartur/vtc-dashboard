@@ -287,10 +287,9 @@ test("account entry copy keeps RU/EN parity, fixed visibility toggle names and o
     expect(locale.showField).toContain("{{field}}");
     expect("hidePassword" in locale).toBe(false);
   }
-  // The approved mockup slogan stays out of the app; the brand panel reuses the landing copy.
-  const mockupSlogan = /Достаточно суров|Yukon\?|Юкон\?/;
-  for (const value of [JSON.stringify(accountTranslations), JSON.stringify(publicContent)])
-    expect(mockupSlogan.test(value)).toBe(false);
+  // The brand panel reuses the live landing slogan (VTC-089) instead of carrying its own copy.
+  for (const locale of ["ru", "en"] as const)
+    expect(JSON.stringify(accountTranslations)).not.toContain(publicContent[locale].heading);
 });
 test("account settings copy covers every section and row in RU/EN and drops the single-page keys", () => {
   const { en, ru } = accountTranslations;

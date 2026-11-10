@@ -485,10 +485,10 @@ for (const locale of ["en", "ru"] as const) {
       await page.goto(locale === "en" ? "/en" : "/");
       const widget = page
         .getByRole("heading", {
-          name: locale === "en" ? "Public convoys" : "Открытые конвои",
+          name: locale === "en" ? "The convoy leaves on schedule" : "Колонна уходит по расписанию",
           exact: true,
         })
-        .locator("../..");
+        .locator("xpath=ancestor::section[1]");
       await widget.evaluate((element) => element.scrollIntoView({ block: "start" }));
       await viewportCapture(page, info, `landing-populated-${locale}`);
       await widget.screenshot({

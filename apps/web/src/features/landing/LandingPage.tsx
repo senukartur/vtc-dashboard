@@ -2,13 +2,8 @@ import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApplicationForm } from "../admissions/ApplicationForm.js";
 import { useEventQuery } from "../events/queries.js";
-import {
-  ConvoyChip,
-  ConvoySection,
-  MotionToggle,
-  publicConvoysPath,
-  RouteTicker,
-} from "./convoys.js";
+import { ConvoyChip, ConvoySection, MotionToggle, publicConvoysPath } from "./convoys.js";
+import { HeroVideo } from "./HeroVideo.js";
 import { LandingContent } from "./LandingContent.js";
 import { StatsBand } from "./StatsBand.js";
 
@@ -34,15 +29,8 @@ export function LandingPage() {
     <LandingContent
       locale={locale}
       motion={paused ? "paused" : "running"}
-      heroChip={
-        <ConvoyChip
-          items={items}
-          pending={query.isPending}
-          paused={paused}
-          locale={locale}
-          onPassed={onPassed}
-        />
-      }
+      heroChip={<ConvoyChip items={items} paused={paused} locale={locale} onPassed={onPassed} />}
+      heroVideo={<HeroVideo paused={paused} />}
       heroControls={
         <MotionToggle
           paused={paused}
@@ -51,7 +39,6 @@ export function LandingPage() {
           onToggle={() => setPaused((value) => !value)}
         />
       }
-      ticker={items && <RouteTicker items={items} />}
       stats={<StatsBand locale={locale} />}
       events={<ConvoySection query={query} locale={locale} />}
       application={<ApplicationForm />}

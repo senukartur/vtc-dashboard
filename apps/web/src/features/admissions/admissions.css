@@ -1,7 +1,10 @@
-/* Compact application card (VTC-050). Presentation only: field order, labels and behaviour are
-   unchanged. Feature CSS loads before shared/styles.css, so selectors stay compound. */
+/* Compact application card (VTC-050, restyled for the R7d landing in VTC-089). Presentation only:
+   field order, labels and behaviour are unchanged. Feature CSS loads before shared/styles.css, so
+   selectors stay compound. */
 .landing .application-card {
   padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   container-type: inline-size;
 }
 .landing .application-card > h3 {
@@ -20,7 +23,26 @@
   min-height: var(--field-h-sm);
 }
 .application-card textarea.input {
-  min-height: calc(var(--field-h-sm) * 2);
+  display: block;
+  width: 100%;
+  min-height: 104px;
+  padding: 10px 12px;
+  line-height: 20px;
+}
+/* The submit button spans the same width as the fields above it. */
+.application-card form > .button[type="submit"] {
+  width: 100%;
+  min-height: max(40px, var(--control-h-sm));
+}
+.landing .application-card form > .button-primary {
+  background: var(--landing-amber, var(--accent));
+  color: var(--landing-on-amber, white);
+  font-size: 14px;
+  font-weight: 700;
+}
+.landing .application-card form > .button-primary:hover:not(:disabled) {
+  background: var(--landing-amber-hover, var(--accent));
+  color: var(--landing-on-amber, white);
 }
 .application-card .game-options {
   display: flex;
@@ -68,6 +90,6 @@
 }
 @media (min-width: 760px) {
   .landing .application-card {
-    padding: 20px;
+    padding: 22px;
   }
 }

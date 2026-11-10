@@ -1,35 +1,35 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { type PublicLocale, publicContent, publicPath } from "./content.js";
 import { LandingContent } from "./LandingContent.js";
-import { publicContent, type PublicLocale, publicPath } from "./content.js";
+import { LandingFooter } from "./LandingFooter.js";
+import { LandingHeader } from "./LandingHeader.js";
+
+/** Build-time document: the same header, content and footer as the app, without client slots. */
 export function renderPublic(locale: PublicLocale) {
   const c = publicContent[locale];
+  const other = locale === "ru" ? "en" : "ru";
   return renderToStaticMarkup(
-    <div className="app-shell public-shell">
+    <div className="landing-shell">
       <a className="skip-link" href="#main-content">
         {locale === "ru" ? "Перейти к содержимому" : "Skip to content"}
       </a>
-      <header className="site-header">
-        <a className="wordmark" href={publicPath(locale)}>
-          Yukon Union
-        </a>
-        <nav
-          className="desktop-navigation"
-          aria-label={locale === "ru" ? "Навигация" : "Navigation"}
-        >
-          <a href="#about">{c.about}</a>
-          <a href="#apply">{c.apply}</a>
-          <a href="#contacts">{c.contacts}</a>
-          <a href="/events">{c.events}</a>
-          <a href="/login">{c.login}</a>
-        </nav>
-        <a href={publicPath(locale === "ru" ? "en" : "ru")} lang={locale === "ru" ? "en" : "ru"}>
-          {locale === "ru" ? "English" : "Русский"}
-        </a>
-      </header>
+      <LandingHeader
+        locale={locale}
+        account={
+          <a className="landing-header-signin" href="/login">
+            {c.login}
+          </a>
+        }
+        language={
+          <a className="landing-header-language" href={publicPath(other)} lang={other}>
+            {locale === "ru" ? "English" : "Русский"}
+          </a>
+        }
+      />
       <main id="main-content" tabIndex={-1}>
         <LandingContent locale={locale} />
       </main>
-      <footer className="site-footer">Yukon Union · ETS2 / ATS</footer>
+      <LandingFooter locale={locale} />
     </div>,
   );
 }

@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
 import { eventTranslations } from "../../apps/web/src/features/events/translations.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
 import { testConnection } from "../persistence/support.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+
 // Manual captures below contain controlled public states only; real HTTP material is never traced.
 test.use({ trace: "off", screenshot: "off", video: "off" });
 // Admissions/landing cases isolate the new widget; Events owns its real API integration.
@@ -51,6 +54,21 @@ async function capture(page: Page, info: TestInfo, name: string) {
   await page.screenshot({ path, fullPage: true, animations: "disabled" });
   await info.attach(name, { path, contentType: "image/png" });
 }
+/** Changes the language in the header or, where the header hides it, in the menu. */
+async function chooseLanguage(page: Page, from: "ru" | "en", to: "ru" | "en") {
+  const name = from === "ru" ? "Язык" : "Language";
+  const header = page.getByRole("banner").getByRole("combobox", { name, exact: true });
+  if (await header.isVisible()) {
+    await header.selectOption(to);
+    return;
+  }
+  await page
+    .getByRole("button", { name: from === "ru" ? "Открыть навигацию" : "Open navigation" })
+    .click();
+  await page.getByRole("dialog").getByRole("combobox", { name, exact: true }).selectOption(to);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+}
 const receipt = {
   data: { id: "41000000-0000-4000-8000-000000000001", version: 1 },
   meta: { requestId: "synthetic-request" },
@@ -65,7 +83,7 @@ for (const locale of ["ru", "en"] as const) {
       await page.evaluate(() => document.fonts.ready);
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-        locale === "ru" ? "Своя компания. Общая дорога." : "Your company. Our road.",
+        locale === "ru" ? "Юкон? Достаточно суров" : "Yukon? Tough enough.",
       );
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -104,9 +122,7 @@ for (const locale of ["ru", "en"] as const) {
         await expect(menu).toBeFocused();
       }
       await fill(page, locale);
-      await page
-        .getByRole("combobox", { name: locale === "ru" ? "Язык" : "Language", exact: true })
-        .selectOption(locale === "ru" ? "en" : "ru");
+      await chooseLanguage(page, locale, locale === "ru" ? "en" : "ru");
       await expect.poll(() => new URL(page.url()).pathname).toBe(locale === "ru" ? "/en" : "/");
       await expect(page.locator("html")).toHaveAttribute("lang", locale === "ru" ? "en" : "ru");
       await expect(
@@ -114,15 +130,10 @@ for (const locale of ["ru", "en"] as const) {
       ).toHaveValue("Fictional Applicant");
       await page.getByRole("link", { name: "Yukon Union", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("lang", locale === "ru" ? "en" : "ru");
-      await page
-        .getByRole("combobox", { name: locale === "ru" ? "Language" : "Язык", exact: true })
-        .selectOption(locale);
+      await chooseLanguage(page, locale === "ru" ? "en" : "ru", locale);
       await page
         .getByRole("main")
-        .getByRole("link", {
-          name: locale === "ru" ? "Публичные события" : "Public events",
-          exact: true,
-        })
+        .getByRole("link", { name: publicContent[locale].allEvents, exact: true })
         .click();
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
         locale === "ru" ? "Открытые конвои" : "Public convoys",
@@ -138,7 +149,7 @@ for (const locale of ["ru", "en"] as const) {
       await expect.poll(() => new URL(page.url()).pathname).toBe(locale === "ru" ? "/" : "/en");
       await expect(
         page.getByRole("heading", {
-          name: locale === "ru" ? "Начните со знакомства" : "Start with an introduction",
+          name: publicContent[locale].requirementsTitle,
           exact: true,
         }),
       ).toBeInViewport();
@@ -162,8 +173,8 @@ test(
   browserCase(["@functional"]),
   async ({ request }) => {
     for (const [path, locale, phrase] of [
-      ["/", "ru", "Своя компания. Общая дорога."],
-      ["/en", "en", "Your company. Our road."],
+      ["/", "ru", "Достаточно суров"],
+      ["/en", "en", "Tough enough."],
     ]) {
       const response = await request.get(path ?? "/");
       const body = await response.text();
@@ -178,23 +189,40 @@ test(
       expect(body).not.toContain("browser@example.invalid");
       expect(body).not.toContain("Synthetic Browser Member");
       expect(body).not.toContain("PRIVATE_SENTINEL");
-      // VTC-050: static ladder/join content and art are prerendered; live parts are client-only.
+      // VTC-089: the still, sections and join copy are prerendered; video and live parts are not.
       const c = publicContent[locale as "ru" | "en"];
       for (const text of [
-        c.ladderTitle,
-        ...c.ladder.map((level) => level.name),
+        c.headingLead,
+        c.convoysTitle,
+        c.eventsTitle,
+        ...c.eventFormats,
+        c.cabTelemetry,
+        c.aboutTitle,
+        ...c.ranks,
         ...c.joinSteps.map((step) => step.title),
         c.joinNote,
+        c.footerNote,
         'data-motion="static"',
-        'class="landing-hero-art" aria-hidden="true"',
+        'class="landing-hero-still"',
+        'class="landing-chip-slot"',
+        'class="landing-menu-placeholder"',
+        "https://vtc.haulmp.com/YukonUnion",
+        "https://hub.truckyapp.com/company/184",
       ])
         expect(body).toContain(text);
+      // React writes camel-cased attribute names; HTML attribute names are case-insensitive.
+      expect(body.toLowerCase()).toContain('fetchpriority="high"');
+      expect(body).toMatch(
+        /<source media="\(max-width: 760px\)" srcset="\/assets\/hero-still-854-[\w-]+\.webp"/i,
+      );
       for (const text of [
         "landing-stats",
-        "landing-ticker",
         "landing-convoy-chip",
         "aria-pressed",
-        "Достаточно суров",
+        "<video",
+        ".mp4",
+        "forum.vtc.world",
+        "ykn-u.ru",
       ])
         expect(body).not.toContain(text);
       expect(body).not.toMatch(/\d+ (д|d) \d/);
@@ -572,7 +600,7 @@ const noOverflow = (page: Page) =>
 
 for (const locale of ["ru", "en"] as const) {
   test(
-    `live ${locale} landing shows countdown, ticker, stats and cards with a working pause control`,
+    `live ${locale} landing shows countdown, stats and cards with a working pause control`,
     browserCase(["@layout"]),
     async ({ page, context, baseURL }, info) => {
       const c = publicContent[locale],
@@ -605,13 +633,6 @@ for (const locale of ["ru", "en"] as const) {
       await expect(chip).toHaveAccessibleName(name);
       await expect(page.locator(".landing-hero [aria-live]")).toHaveCount(0);
 
-      const ticker = page.locator(".landing-ticker");
-      await expect(ticker).toHaveAttribute("aria-hidden", "true");
-      await expect(ticker).toContainText("Fictional Origin → Fictional Destination");
-      await expect(ticker).toContainText("Fictional Route West");
-      await expect(ticker).not.toContainText("Fictional Cancelled Route");
-      await expect(ticker.locator("a, button, [tabindex]")).toHaveCount(0);
-
       const stats = page.getByRole("region", { name: c.statsTitle, exact: true });
       await expect(stats).toContainText(locale === "ru" ? /1\s234/ : "1,234");
       await expect(stats).toContainText(locale === "ru" ? /123\s456,7895 км/ : "123,456.7895 km");
@@ -624,8 +645,9 @@ for (const locale of ["ru", "en"] as const) {
       expect(cookies.events).toContain("vtc_fictional_probe");
       expect(cookies.stats).toBeUndefined();
 
-      const convoys = page.getByRole("region", { name: e.publicTitle, exact: true });
+      const convoys = page.getByRole("region", { name: c.convoysTitle, exact: true });
       await expect(convoys.getByRole("listitem")).toHaveCount(3);
+      await expect(convoys).toContainText("Fictional Origin → Fictional Destination");
       const titles = convoys.getByRole("heading", { level: 3 }).getByRole("link");
       await expect(titles).toHaveCount(3);
       for (const [index, event] of events.entries())
@@ -634,13 +656,11 @@ for (const locale of ["ru", "en"] as const) {
       await expect(convoys).toContainText("UTC");
       await expect(convoys).toContainText(c.convoysNote);
 
-      expect(await motionState(page, ".hero-marker")).toContain("running");
-      expect(await motionState(page, ".landing-ticker-track")).toContain("running");
+      expect(await motionState(page, ".landing-cab-image")).toContain("running");
       const toggle = page.getByRole("button", { name: c.pauseMotion, exact: true });
       await toggle.click();
       await expect(toggle).toHaveAttribute("aria-pressed", "true");
-      await expect.poll(() => motionState(page, ".hero-marker")).toEqual(["paused"]);
-      await expect.poll(() => motionState(page, ".landing-ticker-track")).toEqual(["paused"]);
+      await expect.poll(() => motionState(page, ".landing-cab-image")).toEqual(["paused"]);
       const visible = chip.locator(".landing-chip-text");
       await expect(visible).toContainText(`${c.nextConvoy}:`);
       await expect(visible).not.toContainText(c.units.min);
@@ -648,7 +668,7 @@ for (const locale of ["ru", "en"] as const) {
       await expect(toggle).toBeFocused();
       await page.keyboard.press("Space");
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
-      await expect.poll(() => motionState(page, ".hero-marker")).toEqual(["running"]);
+      await expect.poll(() => motionState(page, ".landing-cab-image")).toEqual(["running"]);
       await expect(visible).toContainText(c.units.min);
       expect(await noOverflow(page)).toBe(true);
       await capture(page, info, `${locale}-live`);
@@ -666,7 +686,6 @@ test(
     await page.goto("/en");
     const c = publicContent.en;
     await expect(chipFor(page, "en", "Fictional Evening Convoy")).toBeVisible();
-    await expect(page.locator(".landing-ticker")).toBeAttached();
     await page.evaluate(() => document.fonts.ready);
     // Keyframe motion only: the shared reduced-motion rule turns any style change (such as a font
     // swap resizing `ch` widths) into a 0.01ms CSS transition, which is not landing motion.
@@ -680,10 +699,9 @@ test(
               .filter((animation) => animation instanceof CSSAnimation).length,
         ),
     ).toBe(0);
-    for (const selector of [".hero-marker", ".hero-ping", ".landing-ticker-track"])
+    for (const selector of [".landing-cab-image", ".landing-cab-sun", ".landing-chip-dot"])
       for (const element of await page.locator(selector).all())
         expect(await element.evaluate((node) => node.getAnimations().length)).toBe(0);
-    await expect(page.locator(".landing-ticker [data-copy]").first()).toBeHidden();
     await expect(page.getByRole("button", { name: c.pauseMotion, exact: true })).toBeVisible();
     expect(await noOverflow(page)).toBe(true);
     await capture(page, info, "en-reduced-motion");
@@ -775,18 +793,17 @@ test(
 );
 
 test(
-  "convoy chip and ticker disappear for empty, cancelled-only and failed public event reads",
+  "convoy pill disappears for empty, cancelled-only and failed public event reads",
   browserCase(["@functional"]),
   async ({ page }) => {
     const c = publicContent.en,
       e = eventTranslations.en;
-    const convoys = page.getByRole("region", { name: e.publicTitle, exact: true });
+    const convoys = page.getByRole("region", { name: c.convoysTitle, exact: true });
     const nextChip = page.getByRole("link", { name: /^Next convoy/ });
     await page.clock.install({ time: liveClock });
     await page.goto("/en");
     await expect(convoys.getByText(c.convoysEmpty, { exact: true })).toBeVisible();
     await expect(nextChip).toHaveCount(0);
-    await expect(page.locator(".landing-ticker")).toHaveCount(0);
 
     await routeEvents(
       page,
@@ -796,7 +813,6 @@ test(
     await expect(convoys.getByRole("listitem")).toHaveCount(1);
     await expect(convoys).toContainText(e.cancelled);
     await expect(nextChip).toHaveCount(0);
-    await expect(page.locator(".landing-ticker")).toHaveCount(0);
 
     await page.route("**/api/v1/public/events?*", (route) =>
       route.fulfill({ status: 503, json: { error: { code: "UNAVAILABLE" } } }),
@@ -805,7 +821,6 @@ test(
     await expect(convoys.getByRole("alert")).toContainText(e.unavailable);
     await expect(convoys.getByRole("button", { name: e.retry, exact: true })).toBeVisible();
     await expect(nextChip).toHaveCount(0);
-    await expect(page.locator(".landing-ticker")).toHaveCount(0);
   },
 );
 
@@ -837,15 +852,16 @@ test(
   "live controls keep keyboard order, visible focus and pointer-sized targets",
   browserCase(["@layout"]),
   async ({ page }) => {
-    const c = publicContent.en,
-      e = eventTranslations.en;
+    const c = publicContent.en;
     await page.clock.install({ time: liveClock });
     await routeEvents(page, liveEvents("en"));
     await page.goto("/en");
     const main = page.getByRole("main"),
       chip = chipFor(page, "en", "Fictional Evening Convoy"),
       apply = main.locator(".landing-hero").getByRole("link", { name: c.apply, exact: true }),
-      publicEvents = main.getByRole("link", { name: c.events, exact: true }),
+      heroConvoys = main
+        .locator(".landing-hero")
+        .getByRole("link", { name: c.heroConvoys, exact: true }),
       toggle = page.getByRole("button", { name: c.pauseMotion, exact: true });
     await expect(chip).toBeVisible();
     await main.focus();
@@ -860,7 +876,7 @@ test(
     await page.keyboard.press("Tab");
     await expect(apply).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(publicEvents).toBeFocused();
+    await expect(heroConvoys).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(toggle).toBeFocused();
     expect(await outlined(toggle)).toBe(true);
@@ -871,8 +887,8 @@ test(
       chip,
       toggle,
       apply,
-      publicEvents,
-      main.getByRole("link", { name: e.title, exact: true }),
+      heroConvoys,
+      main.getByRole("link", { name: c.allEvents, exact: true }),
       ...(await main.getByRole("heading", { level: 3 }).getByRole("link").all()),
       ...(await page.locator(".application-card .checkbox-label").all()),
     ];
@@ -938,5 +954,602 @@ test(
         .getByRole("button", { name: "Send application", exact: true })
         .boundingBox();
     expect(privacy.y + privacy.height).toBeLessThanOrEqual(submit?.y ?? 0);
+  },
+);
+
+// VTC-089 hero video. Playwright's Chromium has no H.264 decoder, so these cases prove request
+// timing, lifecycle and fallbacks with routed or stubbed media; real playback is an owner check.
+type MediaProbe = {
+  log: string[];
+  firePlaying: () => void;
+  setHidden: (hidden: boolean) => void;
+};
+const probe = (page: Page) =>
+  page.evaluate(() => (window as unknown as { __media: MediaProbe }).__media.log.slice());
+/**
+ * Replaces media loading with a recorder, so no file is fetched and `playing` fires on demand.
+ * Like iOS Safari, a layer has metadata only (HAVE_METADATA) until it has played once.
+ */
+function stubMedia() {
+  const log: string[] = [];
+  const state = new WeakMap<HTMLMediaElement, { src: string; time: number; ready: number }>();
+  const own = (element: HTMLMediaElement) => {
+    const value = state.get(element) ?? { src: "", time: 0, ready: 0 };
+    state.set(element, value);
+    return value;
+  };
+  const at = (element: HTMLMediaElement) =>
+    Array.from(document.querySelectorAll("video")).indexOf(element as HTMLVideoElement);
+  const proto = HTMLMediaElement.prototype;
+  Object.defineProperty(proto, "src", {
+    configurable: true,
+    get() {
+      return own(this).src;
+    },
+    set(value: string) {
+      own(this).src = value;
+      own(this).ready = 1;
+      this.setAttribute("data-stub-src", value);
+      log.push(`src${at(this)}`);
+      // Muting and preload must already be in place when the source is assigned.
+      log.push(
+        `flags${at(this)}:${this.muted}:${this.hasAttribute("muted")}:${this.getAttribute("preload")}`,
+      );
+    },
+  });
+  Object.defineProperty(proto, "currentTime", {
+    configurable: true,
+    get() {
+      return own(this).time;
+    },
+    set(value: number) {
+      own(this).time = value;
+      log.push(`seek${at(this)}:${value}`);
+    },
+  });
+  Object.defineProperty(proto, "duration", { configurable: true, get: () => 7.917 });
+  Object.defineProperty(proto, "readyState", {
+    configurable: true,
+    get() {
+      return own(this).ready;
+    },
+  });
+  proto.play = function () {
+    log.push(`play${at(this)}`);
+    const media = own(this);
+    if (media.ready < 2) log.push(`rise${at(this)}:${media.ready}`);
+    media.ready = 4;
+    return Promise.resolve();
+  };
+  proto.pause = function () {
+    log.push(`pause${at(this)}`);
+  };
+  proto.load = function () {
+    log.push(`load${at(this)}`);
+  };
+  let hidden = false;
+  Object.defineProperty(Document.prototype, "visibilityState", {
+    configurable: true,
+    get: () => (hidden ? "hidden" : "visible"),
+  });
+  (window as unknown as { __media: MediaProbe }).__media = {
+    log,
+    firePlaying: () => document.querySelector("video")?.dispatchEvent(new Event("playing")),
+    setHidden(value) {
+      hidden = value;
+      document.dispatchEvent(new Event("visibilitychange"));
+    },
+  };
+}
+/** Both layers drop their source with load() on teardown (they are already detached then). */
+const released = (log: string[]) => log.filter((entry) => entry.startsWith("load")).length;
+const builtAsset = (pattern: RegExp) => {
+  const directory = resolve("apps/web/dist/assets");
+  const name = readdirSync(directory).find((file) => pattern.test(file));
+  if (!name) throw new Error("MISSING_BUILT_LANDING_ASSET");
+  return { url: `/assets/${name}`, bytes: statSync(resolve(directory, name)).size };
+};
+
+test(
+  "the still paints first; the video waits for load, picks one size and failures keep the still",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.addInitScript(() =>
+      window.addEventListener("load", () => {
+        (window as unknown as { __loadedAt: number }).__loadedAt = Date.now();
+      }),
+    );
+    for (const outcome of ["abort", "corrupt"] as const) {
+      const media: { url: string; at: number }[] = [];
+      let release = () => {};
+      const gate = new Promise<void>((done) => {
+        release = done;
+      });
+      await page.route("**/*.mp4", async (route) => {
+        media.push({ url: route.request().url(), at: Date.now() });
+        await gate;
+        if (outcome === "abort") await route.abort("failed");
+        else await route.fulfill({ contentType: "video/mp4", body: "NOT_A_VIDEO" });
+      });
+      await page.goto("/en");
+      const still = page.locator(".landing-hero-still");
+      await expect(still).toBeVisible();
+      await expect
+        .poll(() => still.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0))
+        .toBe(true);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Send application", exact: true }),
+      ).toBeEnabled();
+      await expect.poll(() => media.length).toBeGreaterThan(0);
+      const narrow = (page.viewportSize()?.width ?? 1280) <= 760;
+      for (const request of media)
+        expect(request.url).toMatch(
+          narrow ? /\/hero-854-[\w-]+\.mp4#?/ : /\/hero-1280-[\w-]+\.mp4#?/,
+        );
+      expect(await still.evaluate((img: HTMLImageElement) => img.currentSrc)).toMatch(
+        narrow ? /hero-still-854-/ : /hero-still-1280-/,
+      );
+      const loadedAt = await page.evaluate(
+        () => (window as unknown as { __loadedAt: number }).__loadedAt,
+      );
+      expect(media[0]?.at ?? 0).toBeGreaterThanOrEqual(loadedAt);
+      release();
+      await expect(page.locator(".landing-hero video")).toHaveCount(0);
+      await expect(still).toBeVisible();
+      await page.unroute("**/*.mp4");
+    }
+  },
+);
+
+test(
+  "video layers start muted at 1 s, reveal on playing, pause with the toggle and tab, and unmount",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = publicContent.en;
+    await page.addInitScript(stubMedia);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.clock.install({ time: liveClock });
+    await routeEvents(page, liveEvents("en"));
+    await page.goto("/en");
+    const videos = page.locator(".landing-hero video"),
+      first = videos.nth(0),
+      second = videos.nth(1);
+    await expect(videos).toHaveCount(2);
+    const source = /\/assets\/hero-(854|1280)-[\w-]+\.mp4#t=1$/;
+    await expect(first).toHaveAttribute("data-stub-src", source);
+    for (const video of [first, second]) {
+      await expect(video).toHaveAttribute("muted", "");
+      await expect(video).toHaveAttribute("preload", "auto");
+      await expect(video).toHaveAttribute("aria-hidden", "true");
+      await expect(video).toHaveAttribute("tabindex", "-1");
+      expect(await video.evaluate((node: HTMLVideoElement) => node.muted && node.playsInline)).toBe(
+        true,
+      );
+    }
+    await expect.poll(() => probe(page)).toContain("play0");
+    const log = await probe(page);
+    expect(log.indexOf("seek0:1")).toBeGreaterThan(-1);
+    expect(log.indexOf("seek0:1")).toBeLessThan(log.indexOf("play0"));
+    // Nothing is visible and the second layer is not requested before real playback.
+    await expect(first).not.toHaveAttribute("data-active", "true");
+    expect(await first.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+    await expect(second).not.toHaveAttribute("data-stub-src");
+    await page.evaluate(() => (window as unknown as { __media: MediaProbe }).__media.firePlaying());
+    await expect(first).toHaveAttribute("data-active", "true");
+    await expect(second).toHaveAttribute("data-stub-src", source);
+    // The hidden layer is primed (muted play, pause, back to 1 s) from below HAVE_CURRENT_DATA.
+    await expect
+      .poll(() => probe(page))
+      .toEqual(expect.arrayContaining(["rise1:1", "pause1", "seek1:1"]));
+    const primed = await probe(page);
+    expect(primed).toEqual(
+      expect.arrayContaining(["flags0:true:true:auto", "flags1:true:true:auto"]),
+    );
+    expect(primed.indexOf("src1")).toBeLessThan(primed.indexOf("play1"));
+    expect(primed.indexOf("play1")).toBeLessThan(primed.indexOf("pause1"));
+    expect(primed.indexOf("pause1")).toBeLessThan(primed.lastIndexOf("seek1:1"));
+    await expect(second).not.toHaveAttribute("data-active", "true");
+    expect(await second.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+    await page.clock.runFor(1200);
+    await expect.poll(() => first.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+
+    const toggle = page.getByRole("button", { name: c.pauseMotion, exact: true });
+    const count = async (entry: string) =>
+      (await probe(page)).filter((item) => item === entry).length;
+    const pauses = await count("pause0");
+    await toggle.click();
+    await expect.poll(() => count("pause0")).toBeGreaterThan(pauses);
+    const plays = await count("play0");
+    await toggle.click();
+    await expect.poll(() => count("play0")).toBeGreaterThan(plays);
+    const hiddenPauses = await count("pause0");
+    await page.evaluate(() =>
+      (window as unknown as { __media: MediaProbe }).__media.setHidden(true),
+    );
+    await expect.poll(() => count("pause0")).toBeGreaterThan(hiddenPauses);
+    const visiblePlays = await count("play0");
+    await page.evaluate(() =>
+      (window as unknown as { __media: MediaProbe }).__media.setHidden(false),
+    );
+    await expect.poll(() => count("play0")).toBeGreaterThan(visiblePlays);
+
+    // Near the end the primed layer fades in instead of the visible one jumping back.
+    const beforeSwap = (await probe(page)).length;
+    await first.evaluate((node: HTMLVideoElement) => {
+      node.currentTime = 7.5;
+    });
+    await page.clock.runFor(100);
+    await expect(second).toHaveAttribute("data-active", "true");
+    await expect(first).toHaveAttribute("data-active", "false");
+    const swap = (await probe(page)).slice(beforeSwap);
+    expect(swap).toEqual(expect.arrayContaining(["seek1:1", "play1"]));
+    expect(swap.slice(0, swap.indexOf("play1"))).not.toContain("seek0:1");
+    expect(swap).not.toContain("rise1:1");
+
+    await page.getByRole("main").getByRole("link", { name: c.allEvents, exact: true }).click();
+    await expect(videos).toHaveCount(0);
+    expect(released(await probe(page))).toBeGreaterThanOrEqual(2);
+  },
+);
+
+test(
+  "reduced motion never requests the video and a live switch tears it down",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const media: string[] = [];
+    page.on("request", (request) => {
+      if (/\.mp4/.test(request.url())) media.push(request.url());
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/en");
+    await page.waitForLoadState("load");
+    // Longer than the idle-callback deadline that would otherwise start the video.
+    await page.waitForTimeout(2000);
+    await expect(page.locator("video")).toHaveCount(0);
+    expect(media).toEqual([]);
+    await expect(page.locator(".landing-hero-still")).toBeVisible();
+
+    await page.addInitScript(stubMedia);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.goto("/en");
+    await expect(page.locator(".landing-hero video")).toHaveCount(2);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect(page.locator(".landing-hero video")).toHaveCount(0);
+    expect(released(await probe(page))).toBeGreaterThanOrEqual(2);
+    expect(
+      await page
+        .locator(".landing")
+        .evaluate(
+          (element) =>
+            element
+              .getAnimations({ subtree: true })
+              .filter((animation) => animation instanceof CSSAnimation).length,
+        ),
+    ).toBe(0);
+    expect(media).toEqual([]);
+  },
+);
+
+test(
+  "built server serves landing media with ranges, exact types and immutable caching",
+  browserCase(["@functional"]),
+  async ({ request }) => {
+    const video = builtAsset(/^hero-854-[\w-]+\.mp4$/),
+      still = builtAsset(/^hero-still-854-[\w-]+\.webp$/);
+    const partial = await request.get(video.url, { headers: { Range: "bytes=0-1023" } });
+    expect(partial.status()).toBe(206);
+    expect(partial.headers()["content-range"]).toBe(`bytes 0-1023/${video.bytes}`);
+    expect(partial.headers()["accept-ranges"]).toBe("bytes");
+    expect(partial.headers()["content-type"]).toBe("video/mp4");
+    expect(partial.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+    expect((await partial.body()).length).toBe(1024);
+    const full = await request.get(video.url);
+    expect(full.status()).toBe(200);
+    expect(full.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+    expect((await full.body()).length).toBe(video.bytes);
+    const image = await request.get(still.url);
+    expect(image.status()).toBe(200);
+    expect(image.headers()["content-type"]).toBe("image/webp");
+    expect(image.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
+  },
+);
+
+test(
+  "menu traps focus, Esc returns to its button and section links focus their section",
+  browserCase(["@layout", "@viewport-narrow"]),
+  async ({ page }) => {
+    await page.goto("/");
+    const trigger = page.getByRole("button", { name: "Открыть навигацию", exact: true });
+    await expect(trigger).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Разделы", exact: true })).toBeHidden();
+    await trigger.click();
+    const dialog = page.getByRole("dialog", { name: "Навигация", exact: true });
+    await expect(dialog.getByRole("link", { name: "Конвои", exact: true })).toBeFocused();
+    await expect(dialog.getByRole("link", { name: "Войти", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Язык", exact: true })).toBeVisible();
+    for (let step = 0; step < 12; step++) {
+      await page.keyboard.press("Tab");
+      expect(
+        await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null),
+      ).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.click();
+    await dialog.getByRole("link", { name: "Ранги", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator("#ranks")).toBeFocused();
+    await expect(page.locator("#ranks")).toBeInViewport();
+    expect(new URL(page.url()).hash).toBe("#ranks");
+    expect(await noOverflow(page)).toBe(true);
+    // Widening past the menu breakpoint closes an open sheet, whose trigger is gone there.
+    await trigger.click();
+    await expect(dialog).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeHidden();
+  },
+);
+
+test(
+  "pill and slogan stay below the truck and logo at every width without overflow",
+  browserCase(["@layout", "@viewport-desktop"]),
+  async ({ page }) => {
+    await page.clock.install({ time: liveClock });
+    await routeEvents(page, liveEvents("ru"));
+    await page.goto("/");
+    await expect(chipFor(page, "ru", "Fictional Evening Convoy")).toBeVisible();
+    for (const width of [360, 390, 820, 1280, 1440, 1920, 2560]) {
+      await page.setViewportSize({ width, height: 900 });
+      const layout = await page.evaluate(() => {
+        const rect = (selector: string) =>
+          (document.querySelector(selector) as Element).getBoundingClientRect();
+        const frame = rect(".landing-hero-frame");
+        // Same cover/object-position as the CSS: 1280x720 source anchored at 50% 30%.
+        const scale = Math.max(frame.width / 1280, frame.height / 720),
+          width = 1280 * scale,
+          height = 720 * scale,
+          left = frame.left + (frame.width - width) * 0.5,
+          top = frame.top + (frame.height - height) * 0.3;
+        const area = (x1: number, x2: number, y1: number, y2: number) => ({
+          left: left + x1 * width,
+          right: left + x2 * width,
+          top: top + y1 * height,
+          bottom: top + y2 * height,
+        });
+        const plain = (box: DOMRect) => ({
+          left: box.left,
+          right: box.right,
+          top: box.top,
+          bottom: box.bottom,
+        });
+        return {
+          truck: area(0.19, 0.51, 0.35, 0.74),
+          logo: area(0.48, 0.76, 0.13, 0.46),
+          pill: plain(rect(".landing-convoy-chip")),
+          slot: plain(rect(".landing-chip-slot")),
+          heading: plain(rect(".landing-shell h1")),
+          overflow: document.documentElement.scrollWidth > window.innerWidth,
+        };
+      });
+      const overlaps = (
+        a: { left: number; right: number; top: number; bottom: number },
+        b: typeof a,
+      ) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      expect(layout.overflow, `overflow at ${width}`).toBe(false);
+      for (const name of ["pill", "slot", "heading"] as const) {
+        expect(layout[name].top, `${name} below the truck at ${width}`).toBeGreaterThanOrEqual(
+          layout.truck.bottom - 0.5,
+        );
+        expect(overlaps(layout[name], layout.truck), `${name}/truck at ${width}`).toBe(false);
+        expect(overlaps(layout[name], layout.logo), `${name}/logo at ${width}`).toBe(false);
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const header = page.getByRole("navigation", { name: "Разделы", exact: true });
+    await header.getByRole("link", { name: "Ранги", exact: true }).click();
+    await expect(page.locator("#ranks")).toBeFocused();
+    await expect(page.locator("#ranks")).toBeInViewport();
+  },
+);
+
+test(
+  "without JavaScript the document shows every header link and the form note",
+  browserCase(["@functional"]),
+  async ({ browser, baseURL }) => {
+    const context = await browser.newContext({
+      javaScriptEnabled: false,
+      viewport: { width: 390, height: 844 },
+      ...(baseURL ? { baseURL } : {}),
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("Юкон? Достаточно суров");
+      const sections = page.getByRole("navigation", { name: "Разделы", exact: true });
+      await expect(sections.getByRole("link")).toHaveCount(5);
+      for (const link of await sections.getByRole("link").all()) await expect(link).toBeVisible();
+      await expect(page.getByRole("link", { name: "Войти", exact: true })).toBeVisible();
+      await expect(page.locator(".landing-menu-placeholder")).toBeHidden();
+      await expect(page.getByText(publicContent.ru.noScript, { exact: true })).toBeVisible();
+      await expect(page.locator("video")).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+    } finally {
+      await context.close();
+    }
+  },
+);
+
+test(
+  "throttled phone profile loads only the small still and video, after the page",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }, info) => {
+    // Step budgets (45 + 20 + 20 + 3 × 15 + 30 s) stay below the test timeout, so a slow or
+    // stuck step fails under its own name instead of the whole test timing out.
+    test.setTimeout(180000);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Network.enable");
+    await cdp.send("Page.enable");
+    await cdp.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 150,
+      downloadThroughput: (1.6 * 1024 * 1024) / 8,
+      uploadThroughput: (750 * 1024) / 8,
+    });
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+    type Entry = {
+      url: string;
+      start: number;
+      received: number;
+      bytes?: number;
+      failed?: string;
+    };
+    const requests = new Map<string, Entry>();
+    let loadedAt: number | undefined;
+    cdp.on("Page.loadEventFired", (event) => {
+      loadedAt ??= event.timestamp;
+    });
+    cdp.on("Network.requestWillBeSent", (event) =>
+      requests.set(event.requestId, {
+        url: event.request.url,
+        start: event.timestamp,
+        received: 0,
+      }),
+    );
+    cdp.on("Network.dataReceived", (event) => {
+      const entry = requests.get(event.requestId);
+      if (entry) entry.received += event.encodedDataLength;
+    });
+    cdp.on("Network.loadingFinished", (event) => {
+      const entry = requests.get(event.requestId);
+      if (entry) entry.bytes = event.encodedDataLength;
+    });
+    cdp.on("Network.loadingFailed", (event) => {
+      const entry = requests.get(event.requestId);
+      if (entry) entry.failed = event.canceled ? "canceled" : event.errorText || "failed";
+    });
+    const media = () =>
+      [...requests.values()]
+        .filter((entry) => /\/assets\/[^/?#]+\.(webp|mp4)/.test(entry.url))
+        .map((entry) => {
+          const name = new URL(entry.url).pathname.split("/").pop() ?? "";
+          return { ...entry, name, plain: name.replace(/-[\w-]{8}\.(webp|mp4)$/, ".$1") };
+        });
+    // Without H.264 (Playwright's Chromium) the hero falls back to the still and removes its
+    // video elements; a request such an element abandoned never has to finish.
+    const videoMounted = () => page.locator(".landing-hero video").count();
+    const settled = async () => {
+      const mounted = (await videoMounted()) > 0;
+      return media().every(
+        (entry) =>
+          entry.bytes !== undefined ||
+          entry.failed !== undefined ||
+          (!mounted && entry.plain.endsWith(".mp4")),
+      );
+    };
+    const lazy = [
+      { selector: ".landing-cab-image", variant: "cab-828.webp" },
+      { selector: ".landing-photo-main img", variant: "about-parking-480.webp" },
+      { selector: ".landing-photo-inset img", variant: "about-convoy-320.webp" },
+    ];
+    let mountedAtEnd: number | undefined;
+    try {
+      await test.step("page and form become usable", async () => {
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.goto("/", { timeout: 45000 });
+        await expect(
+          page.getByRole("button", { name: "Отправить заявку", exact: true }),
+        ).toBeEnabled({ timeout: 20000 });
+        // The expected variants below are for this project's 390px viewport at 1x density.
+        expect(await page.evaluate(() => [innerWidth, devicePixelRatio])).toEqual([390, 1]);
+      });
+      await test.step("the small video is requested", async () => {
+        await expect
+          .poll(() => media().some((entry) => entry.plain === "hero-854.mp4"), { timeout: 20000 })
+          .toBe(true);
+      });
+      for (const { selector } of lazy)
+        await test.step(`lazy image ${selector} loads`, async () => {
+          const image = page.locator(selector);
+          // The cab image drifts while motion runs, so scroll without an actionability wait.
+          await image.evaluate((node) => node.scrollIntoView({ block: "center" }));
+          await expect
+            .poll(
+              () => image.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth),
+              { timeout: 15000 },
+            )
+            .toBeGreaterThan(0);
+        });
+      await test.step("every media request settles", async () => {
+        await expect.poll(settled, { timeout: 30000 }).toBe(true);
+        mountedAtEnd = await videoMounted();
+      });
+    } finally {
+      // Written before the assertions, so a failing run still leaves its numbers on disk.
+      const report = info.outputPath("landing-mobile-media.json");
+      writeFileSync(
+        report,
+        JSON.stringify(
+          {
+            videoElementsAtEnd: mountedAtEnd ?? null,
+            requests: media().map(({ name, start, received, bytes, failed }) => ({
+              name,
+              afterLoadMs: loadedAt === undefined ? null : Math.round((start - loadedAt) * 1000),
+              encodedDataLength: bytes ?? null,
+              receivedBytes: received,
+              failed: failed ?? null,
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+      await info.attach("landing-mobile-media.json", {
+        path: report,
+        contentType: "application/json",
+      });
+    }
+    const loaded = media();
+    const names = loaded.map((entry) => entry.plain);
+    expect(names).toContain("hero-still-854.webp");
+    expect(names).toContain("hero-854.mp4");
+    for (const absent of ["hero-still-1280.webp", "hero-1280.mp4"])
+      expect(names).not.toContain(absent);
+    for (const { selector, variant } of lazy) {
+      const chosen = await page
+        .locator(selector)
+        .evaluate((node: HTMLImageElement) => new URL(node.currentSrc).pathname.split("/").pop());
+      expect(chosen?.replace(/-[\w-]{8}\.webp$/, ".webp"), selector).toBe(variant);
+      // Exactly the chosen variant of each image family was requested.
+      const family = variant.replace(/-\d+\.webp$/, "-");
+      expect(
+        names.filter((name) => name.startsWith(family)),
+        family,
+      ).toEqual([variant]);
+    }
+    const still = loaded.find((entry) => entry.plain === "hero-still-854.webp");
+    const videos = loaded.filter((entry) => entry.plain === "hero-854.mp4");
+    expect(loadedAt, "load event observed").toBeDefined();
+    for (const video of videos) {
+      expect(still?.start ?? Number.POSITIVE_INFINITY).toBeLessThan(video.start);
+      expect(video.start, "video requested after the load event").toBeGreaterThanOrEqual(
+        loadedAt ?? Number.POSITIVE_INFINITY,
+      );
+    }
+    // Images always finish. Encoded lengths include response headers; allow 2 KB per file.
+    for (const entry of loaded) {
+      if (entry.plain.endsWith(".webp"))
+        expect(entry.bytes, `${entry.name} finished`).toBeDefined();
+      if (entry.bytes === undefined) continue;
+      const prepared = builtAsset(new RegExp(`^${entry.name.replace(/[.]/g, "\\.")}$`)).bytes;
+      expect(entry.bytes, entry.name).toBeLessThanOrEqual(prepared + 2048);
+    }
+    // At most one complete download per video layer.
+    expect(videos.filter((video) => video.bytes !== undefined).length).toBeLessThanOrEqual(2);
   },
 );

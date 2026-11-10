@@ -301,9 +301,6 @@ for (const locale of ["en", "ru"] as const) {
         await expect(brand).toBeVisible();
         expect((await box(brand)).x).toBeGreaterThanOrEqual(formBox.x + formBox.width);
       } else await expect(brand).toBeHidden();
-      expect(
-        await page.evaluate(() => document.body.textContent?.includes("Достаточно суров")),
-      ).toBe(false);
       for (const reducedMotion of ["no-preference", "reduce"] as const) {
         await page.emulateMedia({ reducedMotion });
         expect(

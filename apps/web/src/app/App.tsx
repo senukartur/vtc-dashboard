@@ -142,6 +142,8 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   const location = useLocation();
   const memberMatch = useMatch(memberPath);
   const accountMatch = useMatch("/account/*");
+  const ruLanding = useMatch("/");
+  const enLanding = useMatch("/en");
   const previousPath = useRef(location.pathname);
   const mobileFocus = useRef<{
     origin: typeof location;
@@ -164,7 +166,7 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
     if (!isOrigin) mobileFocus.current = null;
   }, [location]);
   useEffect(() => {
-    if (["#about", "#apply", "#contacts"].includes(location.hash))
+    if (["#convoys", "#events", "#about", "#ranks", "#apply", "#contacts"].includes(location.hash))
       document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
   }, [location.hash]);
   useEffect(() => {
@@ -209,6 +211,7 @@ function Shell({ handoff }: { handoff: LinkHandoff }) {
   return (
     <AppLayout
       member={memberMatch !== null || accountMatch !== null}
+      landing={ruLanding !== null || enLanding !== null}
       onMobileNavigate={(href, trigger) => {
         const destination = new URL(href, window.location.href);
         mobileFocus.current = {
