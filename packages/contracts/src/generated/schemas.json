@@ -7740,6 +7740,45 @@
         },
         "ruleContextComplete": {
           "type": "boolean"
+        },
+        "recordedTelemetry": {
+          "description": "Recorded classifications for the effective telemetry fact in a private trip view.",
+          "type": "object",
+          "properties": {
+            "jobType": {
+              "type": "string",
+              "enum": [
+                "quick-job",
+                "freight-market",
+                "cargo-market",
+                "world-of-trucks",
+                "unknown"
+              ]
+            },
+            "gameMode": {
+              "type": "string",
+              "enum": [
+                "single-player",
+                "truckersmp",
+                "haulmp",
+                "unknown"
+              ]
+            },
+            "hardModeResult": {
+              "type": "string",
+              "enum": [
+                "qualified",
+                "not-qualified",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "jobType",
+            "gameMode",
+            "hardModeResult"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

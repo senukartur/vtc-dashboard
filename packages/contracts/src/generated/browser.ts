@@ -2972,6 +2972,15 @@ export interface components {
             plannedDistanceM: components["schemas"]["Decimal"] | null;
             /** @enum {string} */
             provider: "manual" | "ets2telemetry";
+            /** @description Recorded classifications for the effective telemetry fact in a private trip view. */
+            recordedTelemetry?: {
+                /** @enum {string} */
+                gameMode: "single-player" | "truckersmp" | "haulmp" | "unknown";
+                /** @enum {string} */
+                hardModeResult: "qualified" | "not-qualified" | "unknown";
+                /** @enum {string} */
+                jobType: "quick-job" | "freight-market" | "cargo-market" | "world-of-trucks" | "unknown";
+            };
             ruleContextComplete: boolean;
             trailers: (components["schemas"]["EffectiveCatalogPin"] | null)[];
             trailersComplete: boolean;

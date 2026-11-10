@@ -1336,6 +1336,69 @@
       }
     },
     {
+      "id": "getTrip:private-recorded-telemetry",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "41000000-0000-4000-8000-000000000001",
+            "version": 1,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "123400",
+            "reportingAt": "2026-10-17T11:00:00.000Z",
+            "sourceKinds": [
+              "ets2telemetry"
+            ]
+          },
+          "manualRevision": null,
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": [
+            "rule_context_incomplete"
+          ],
+          "effectiveFacts": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "provider": "ets2telemetry",
+            "actualStartAt": "2026-10-17T10:00:00.000Z",
+            "actualCompletedAt": "2026-10-17T11:00:00.000Z",
+            "actualDistanceM": "123400",
+            "plannedDistanceM": null,
+            "cargoMassKg": null,
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "trailers": [],
+            "trailersComplete": false,
+            "wholeTripDistanceSupported": true,
+            "ruleContextComplete": false,
+            "recordedTelemetry": {
+              "jobType": "freight-market",
+              "gameMode": "haulmp",
+              "hardModeResult": "qualified"
+            }
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
       "id": "getMyTripStatusSummary:success",
       "operationId": "getMyTripStatusSummary",
       "status": 200,

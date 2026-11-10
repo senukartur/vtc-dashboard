@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/vtc-dashboard/contracts/telemetry-v1.schema.json",
-  "title": "VTC-003 telemetry ingestion request v1.0",
+  "title": "Telemetry ingestion request v1.0 and v1.1",
   "description": "Structural request schema only. Authorization, UTF-8 byte/depth/decimal ranges, identity conflicts, source truth and durable acknowledgement require contract semantic/integration checks.",
   "type": "object",
   "additionalProperties": false,
@@ -31,7 +31,10 @@
           "const": 1
         },
         "minor": {
-          "const": 0
+          "enum": [
+            0,
+            1
+          ]
         }
       }
     },
@@ -141,6 +144,40 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "contract": {
+            "properties": {
+              "minor": {
+                "const": 1
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "snapshot": {
+            "required": [
+              "hardModeResult"
+            ],
+            "properties": {
+              "hardModeResult": true
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "snapshot": {
+            "properties": {
+              "hardModeResult": false
+            }
+          }
+        }
+      }
+    },
     {
       "if": {
         "properties": {
@@ -1040,6 +1077,7 @@
               "enum": [
                 "single-player",
                 "truckersmp",
+                "haulmp",
                 "unknown"
               ]
             },
@@ -1242,6 +1280,13 @@
               }
             }
           }
+        },
+        "hardModeResult": {
+          "enum": [
+            "qualified",
+            "not-qualified",
+            "unknown"
+          ]
         }
       },
       "allOf": [
