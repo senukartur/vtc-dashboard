@@ -1389,9 +1389,12 @@ test(
   "throttled phone profile loads only the small still and video, after the page",
   browserCase(["@layout", "@viewport-mobile"]),
   async ({ page }, info) => {
-    test.setTimeout(150000);
+    // Step budgets (45 + 20 + 20 + 3 × 15 + 30 s) stay below the test timeout, so a slow or
+    // stuck step fails under its own name instead of the whole test timing out.
+    test.setTimeout(180000);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");
+    await cdp.send("Page.enable");
     await cdp.send("Network.emulateNetworkConditions", {
       offline: false,
       latency: 150,
@@ -1399,116 +1402,154 @@ test(
       uploadThroughput: (750 * 1024) / 8,
     });
     await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-    const requests = new Map<
-      string,
-      { url: string; start: number; bytes?: number; failed?: boolean }
-    >();
+    type Entry = {
+      url: string;
+      start: number;
+      received: number;
+      bytes?: number;
+      failed?: string;
+    };
+    const requests = new Map<string, Entry>();
+    let loadedAt: number | undefined;
+    cdp.on("Page.loadEventFired", (event) => {
+      loadedAt ??= event.timestamp;
+    });
     cdp.on("Network.requestWillBeSent", (event) =>
-      requests.set(event.requestId, { url: event.request.url, start: event.timestamp }),
+      requests.set(event.requestId, {
+        url: event.request.url,
+        start: event.timestamp,
+        received: 0,
+      }),
     );
+    cdp.on("Network.dataReceived", (event) => {
+      const entry = requests.get(event.requestId);
+      if (entry) entry.received += event.encodedDataLength;
+    });
     cdp.on("Network.loadingFinished", (event) => {
       const entry = requests.get(event.requestId);
       if (entry) entry.bytes = event.encodedDataLength;
     });
     cdp.on("Network.loadingFailed", (event) => {
       const entry = requests.get(event.requestId);
-      if (entry) entry.failed = true;
+      if (entry) entry.failed = event.canceled ? "canceled" : event.errorText || "failed";
     });
-    await page.emulateMedia({ reducedMotion: "no-preference" });
-    await page.goto("/", { timeout: 60000 });
-    await expect(page.getByRole("button", { name: "Отправить заявку", exact: true })).toBeEnabled({
-      timeout: 30000,
-    });
-    // The expected variants below are for this project's 390px viewport at 1x density.
-    expect(await page.evaluate(() => [innerWidth, devicePixelRatio])).toEqual([390, 1]);
     const media = () =>
       [...requests.values()]
         .filter((entry) => /\/assets\/[^/?#]+\.(webp|mp4)/.test(entry.url))
-        .map((entry) => ({
-          ...entry,
-          name: new URL(entry.url).pathname.split("/").pop() ?? "",
-          plain: (new URL(entry.url).pathname.split("/").pop() ?? "").replace(
-            /-[\w-]{8}\.(webp|mp4)$/,
-            ".$1",
-          ),
-        }));
-    await expect
-      .poll(() => media().some((entry) => entry.plain.endsWith(".mp4")), { timeout: 30000 })
-      .toBe(true);
-    // Bring the lazy images into range, then let every media request settle.
+        .map((entry) => {
+          const name = new URL(entry.url).pathname.split("/").pop() ?? "";
+          return { ...entry, name, plain: name.replace(/-[\w-]{8}\.(webp|mp4)$/, ".$1") };
+        });
+    // Without H.264 (Playwright's Chromium) the hero falls back to the still and removes its
+    // video elements; a request such an element abandoned never has to finish.
+    const videoMounted = () => page.locator(".landing-hero video").count();
+    const settled = async () => {
+      const mounted = (await videoMounted()) > 0;
+      return media().every(
+        (entry) =>
+          entry.bytes !== undefined ||
+          entry.failed !== undefined ||
+          (!mounted && entry.plain.endsWith(".mp4")),
+      );
+    };
     const lazy = [
       { selector: ".landing-cab-image", variant: "cab-828.webp" },
       { selector: ".landing-photo-main img", variant: "about-parking-480.webp" },
       { selector: ".landing-photo-inset img", variant: "about-convoy-320.webp" },
     ];
-    for (const { selector } of lazy) {
-      const image = page.locator(selector);
-      await image.scrollIntoViewIfNeeded();
-      await expect
-        .poll(
-          () => image.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth),
+    let mountedAtEnd: number | undefined;
+    try {
+      await test.step("page and form become usable", async () => {
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.goto("/", { timeout: 45000 });
+        await expect(
+          page.getByRole("button", { name: "Отправить заявку", exact: true }),
+        ).toBeEnabled({ timeout: 20000 });
+        // The expected variants below are for this project's 390px viewport at 1x density.
+        expect(await page.evaluate(() => [innerWidth, devicePixelRatio])).toEqual([390, 1]);
+      });
+      await test.step("the small video is requested", async () => {
+        await expect
+          .poll(() => media().some((entry) => entry.plain === "hero-854.mp4"), { timeout: 20000 })
+          .toBe(true);
+      });
+      for (const { selector } of lazy)
+        await test.step(`lazy image ${selector} loads`, async () => {
+          const image = page.locator(selector);
+          // The cab image drifts while motion runs, so scroll without an actionability wait.
+          await image.evaluate((node) => node.scrollIntoView({ block: "center" }));
+          await expect
+            .poll(
+              () => image.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth),
+              { timeout: 15000 },
+            )
+            .toBeGreaterThan(0);
+        });
+      await test.step("every media request settles", async () => {
+        await expect.poll(settled, { timeout: 30000 }).toBe(true);
+        mountedAtEnd = await videoMounted();
+      });
+    } finally {
+      // Written before the assertions, so a failing run still leaves its numbers on disk.
+      const report = info.outputPath("landing-mobile-media.json");
+      writeFileSync(
+        report,
+        JSON.stringify(
           {
-            timeout: 30000,
+            videoElementsAtEnd: mountedAtEnd ?? null,
+            requests: media().map(({ name, start, received, bytes, failed }) => ({
+              name,
+              afterLoadMs: loadedAt === undefined ? null : Math.round((start - loadedAt) * 1000),
+              encodedDataLength: bytes ?? null,
+              receivedBytes: received,
+              failed: failed ?? null,
+            })),
           },
-        )
-        .toBeGreaterThan(0);
+          null,
+          2,
+        ),
+      );
+      await info.attach("landing-mobile-media.json", {
+        path: report,
+        contentType: "application/json",
+      });
     }
-    await expect
-      .poll(() => media().every((entry) => entry.bytes !== undefined || entry.failed), {
-        timeout: 60000,
-      })
-      .toBe(true);
     const loaded = media();
     const names = loaded.map((entry) => entry.plain);
     expect(names).toContain("hero-still-854.webp");
     expect(names).toContain("hero-854.mp4");
+    for (const absent of ["hero-still-1280.webp", "hero-1280.mp4"])
+      expect(names).not.toContain(absent);
     for (const { selector, variant } of lazy) {
       const chosen = await page
         .locator(selector)
         .evaluate((node: HTMLImageElement) => new URL(node.currentSrc).pathname.split("/").pop());
       expect(chosen?.replace(/-[\w-]{8}\.webp$/, ".webp"), selector).toBe(variant);
+      // Exactly the chosen variant of each image family was requested.
       const family = variant.replace(/-\d+\.webp$/, "-");
-      // Exactly the chosen variant of each image family was requested, and it finished.
       expect(
         names.filter((name) => name.startsWith(family)),
         family,
       ).toEqual([variant]);
-      expect(loaded.find((entry) => entry.plain === variant)?.bytes, variant).toBeDefined();
     }
-    for (const absent of ["hero-still-1280.webp", "hero-1280.mp4"])
-      expect(names).not.toContain(absent);
     const still = loaded.find((entry) => entry.plain === "hero-still-854.webp");
-    const video = loaded.find((entry) => entry.plain === "hero-854.mp4");
-    expect(still?.bytes, "hero still finished").toBeDefined();
-    expect(still?.start ?? Number.POSITIVE_INFINITY).toBeLessThan(video?.start ?? 0);
-    // Encoded lengths include response headers; allow 2 KB for them per file. Video requests
-    // may be cancelled and resumed as ranges by the media pipeline; they must still settle.
+    const videos = loaded.filter((entry) => entry.plain === "hero-854.mp4");
+    expect(loadedAt, "load event observed").toBeDefined();
+    for (const video of videos) {
+      expect(still?.start ?? Number.POSITIVE_INFINITY).toBeLessThan(video.start);
+      expect(video.start, "video requested after the load event").toBeGreaterThanOrEqual(
+        loadedAt ?? Number.POSITIVE_INFINITY,
+      );
+    }
+    // Images always finish. Encoded lengths include response headers; allow 2 KB per file.
     for (const entry of loaded) {
       if (entry.plain.endsWith(".webp"))
         expect(entry.bytes, `${entry.name} finished`).toBeDefined();
-      if (entry.bytes === undefined) {
-        expect(entry.failed, `${entry.name} settled`).toBe(true);
-        continue;
-      }
+      if (entry.bytes === undefined) continue;
       const prepared = builtAsset(new RegExp(`^${entry.name.replace(/[.]/g, "\\.")}$`)).bytes;
       expect(entry.bytes, entry.name).toBeLessThanOrEqual(prepared + 2048);
     }
-    const report = info.outputPath("landing-mobile-media.json");
-    writeFileSync(
-      report,
-      JSON.stringify(
-        loaded.map(({ name, bytes, failed }) => ({
-          name,
-          encodedDataLength: bytes ?? null,
-          failed: !!failed,
-        })),
-        null,
-        2,
-      ),
-    );
-    await info.attach("landing-mobile-media.json", {
-      path: report,
-      contentType: "application/json",
-    });
+    // At most one complete download per video layer.
+    expect(videos.filter((video) => video.bytes !== undefined).length).toBeLessThanOrEqual(2);
   },
 );
