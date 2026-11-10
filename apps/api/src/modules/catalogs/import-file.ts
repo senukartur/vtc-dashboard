@@ -1,6 +1,6 @@
 import {
   CATALOG_IMPORT_MAX_ROWS,
-  type CatalogList,
+  type ImportList,
   importColumns,
   optionalImportColumns,
 } from "./config.js";
@@ -155,7 +155,7 @@ function fromJson(text: string, columns: readonly string[]): ImportRow[] {
 }
 
 /** Reads an upload. CSV unless the first non-whitespace byte opens a JSON array. */
-export function readImportFile(list: CatalogList, bytes: Buffer): ImportRow[] {
+export function readImportFile(list: ImportList, bytes: Buffer): ImportRow[] {
   if (bytes.length === 0) throw new CatalogFileError("empty");
   const text = decode(bytes);
   const columns = importColumns[list];

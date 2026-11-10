@@ -2297,6 +2297,7 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
                 "cargoes",
                 "trailers"
               ]
@@ -2421,6 +2422,7 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
                 "cargoes",
                 "trailers"
               ]
@@ -2498,6 +2500,7 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
                 "cargoes",
                 "trailers"
               ]
@@ -2521,6 +2524,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CatalogCityInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatalogCompanyInput"
                   },
                   {
                     "$ref": "#/components/schemas/CatalogCargoInput"
@@ -2582,6 +2588,7 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
                 "cargoes",
                 "trailers"
               ]
@@ -2660,6 +2667,8 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
+                "depots",
                 "cargoes",
                 "trailers"
               ]
@@ -2676,7 +2685,7 @@
             }
           }
         },
-        "description": "Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error."
+        "description": "Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error. For depots, lines name the company code; companies, cities and DLCs are referenced by (game, code)."
       }
     },
     "/api/v1/admin/catalogs/{list}/imports": {
@@ -2728,6 +2737,8 @@
                 "dlcs",
                 "regions",
                 "cities",
+                "companies",
+                "depots",
                 "cargoes",
                 "trailers"
               ]
@@ -2759,6 +2770,599 @@
           }
         },
         "description": "Revalidates the same file and applies it in one transaction. Upserts by (game, code); an empty optional cell keeps the stored value, so import cannot clear a value."
+      }
+    },
+    "/api/v1/catalogs/depots": {
+      "get": {
+        "operationId": "listCatalogDepots",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "listCatalogDepots",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "company.read",
+        "x-guards": [],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogDepotList"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
+          },
+          {
+            "name": "companyId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "description": "Cities of this company."
+            }
+          },
+          {
+            "name": "cityId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "description": "Companies in this city."
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "includeHidden",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "dlc",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "base"
+                },
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ],
+              "description": "`base` selects depots with no DLC."
+            }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ],
+              "default": "en"
+            }
+          }
+        ],
+        "description": "Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true."
+      }
+    },
+    "/api/v1/admin/catalogs/depots": {
+      "post": {
+        "operationId": "createCatalogDepot",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "createCatalogDepot",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "same_game_parent",
+          "company_city_pair_unique"
+        ],
+        "responses": {
+          "201": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogDepot"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogDepotInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/catalogs/depots/{id}": {
+      "patch": {
+        "operationId": "updateCatalogDepot",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "updateCatalogDepot",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "same_game_parent"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogDepot"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogDepotPatch"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/catalogs/companies/{id}/logo": {
+      "get": {
+        "operationId": "getCatalogCompanyLogo",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "getCatalogCompanyLogo",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "company.read",
+        "x-guards": [
+          "session_company_read_on_every_request",
+          "private_cache_only"
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored PNG. Strong ETag; Cache-Control is private, max-age=86400 when v is the current version and private, no-cache otherwise.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Strong validator: the quoted SHA-256 of the image."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "private, max-age=86400",
+                    "private, no-cache"
+                  ]
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "If-None-Match matches the current image; sent only after authorization."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}$",
+              "description": "CatalogLogo.version of the item being shown."
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          }
+        ],
+        "description": "Authenticated read with company.read on every request. The UI requests it only when the item has a logo; a company without one answers 404."
+      }
+    },
+    "/api/v1/admin/catalogs/companies/{id}/logo": {
+      "put": {
+        "operationId": "uploadCatalogCompanyLogo",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "uploadCatalogCompanyLogo",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "png_only_server_checked",
+          "bounded_single_file",
+          "one_audit_entry"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadInput"
+              }
+            }
+          }
+        },
+        "description": "Stores or replaces the company's logo. One PNG up to 32 KiB, at most 128x32 pixels, checked on the server. The original bytes are kept."
+      },
+      "delete": {
+        "operationId": "removeCatalogCompanyLogo",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "removeCatalogCompanyLogo",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "one_audit_entry"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogItem"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "Removes the logo. Removing a logo that is not there changes nothing and writes no audit entry."
+      }
+    },
+    "/api/v1/admin/catalogs/companies/logo-previews": {
+      "post": {
+        "operationId": "previewCatalogLogos",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "previewCatalogLogos",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "bounded_files",
+          "no_database_write"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogImportPreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogLogoBatchInput"
+              }
+            }
+          }
+        },
+        "description": "Dry-run of up to 500 PNG files named <company code>.png (16 MiB). line is the file's 1-based position in the upload; issues name the field file (bad_name, not_png, too_large, bad_dimensions, corrupt, duplicate_in_file) or code (unknown_reference). The token binds this actor, the game and the exact files and is null when any file has an error."
+      }
+    },
+    "/api/v1/admin/catalogs/companies/logo-imports": {
+      "post": {
+        "operationId": "applyCatalogLogos",
+        "tags": [
+          "catalogs"
+        ],
+        "summary": "applyCatalogLogos",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "catalogs",
+        "x-owner-card": "VTC-091",
+        "x-capability": "qualifications.manage",
+        "x-guards": [
+          "exact_origin_session_csrf",
+          "dry_run_token_for_same_files_and_actor",
+          "all_or_nothing",
+          "one_audit_entry"
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCatalogImportResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "game",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 2050
+            },
+            "description": "Quoted dry-run token returned by previewCatalogLogos."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogLogoBatchInput"
+              }
+            }
+          }
+        },
+        "description": "Revalidates every file and stores all logos in one transaction or none. Identical bytes count as unchanged."
       }
     },
     "/api/v1/me/telemetry-tokens": {
@@ -17901,6 +18505,16 @@
                 "type": "null"
               }
             ]
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLogo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -17915,7 +18529,27 @@
           "dlc"
         ],
         "additionalProperties": false,
-        "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type."
+        "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type."
+      },
+      "CatalogLogo": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "byteLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32768
+          }
+        },
+        "required": [
+          "version",
+          "byteLength"
+        ],
+        "additionalProperties": false,
+        "description": "Present only when the company has a logo. version changes whenever the stored image changes and is passed as ?v= to the logo route."
       },
       "CatalogItemList": {
         "type": "object",
@@ -18025,6 +18659,46 @@
                 ],
                 "additionalProperties": false
               },
+              "companies": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
+              "depots": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "hidden": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "visible",
+                  "hidden"
+                ],
+                "additionalProperties": false
+              },
               "cargoes": {
                 "type": "object",
                 "properties": {
@@ -18070,6 +18744,8 @@
               "dlcs",
               "regions",
               "cities",
+              "companies",
+              "depots",
               "cargoes",
               "trailers"
             ],
@@ -18393,6 +19069,60 @@
         ],
         "additionalProperties": false
       },
+      "CatalogCompanyInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "nameEn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "nameRu": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "code",
+          "nameEn"
+        ],
+        "additionalProperties": false
+      },
       "CatalogItemPatch": {
         "type": "object",
         "properties": {
@@ -18492,6 +19222,245 @@
         "minProperties": 1,
         "additionalProperties": false,
         "description": "Partial edit of one row. game is immutable. A field that does not exist on the list is rejected. Hide and restore are `{hidden}`."
+      },
+      "CatalogDepotCompany": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "label": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLogo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label",
+          "logo"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogDepotCity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+            "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+          },
+          "label": {
+            "$ref": "#/components/schemas/CatalogLabel"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "label"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogDepot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dlc": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "company": {
+            "$ref": "#/components/schemas/CatalogDepotCompany"
+          },
+          "city": {
+            "$ref": "#/components/schemas/CatalogDepotCity"
+          }
+        },
+        "required": [
+          "id",
+          "game",
+          "hidden",
+          "dlcId",
+          "dlc",
+          "company",
+          "city"
+        ],
+        "additionalProperties": false,
+        "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible."
+      },
+      "CatalogDepotList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogDepot"
+            },
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogDepotInput": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "cityId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "game",
+          "companyId",
+          "cityId"
+        ],
+        "additionalProperties": false
+      },
+      "CatalogDepotPatch": {
+        "type": "object",
+        "properties": {
+          "dlcId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hidden": {
+            "type": "boolean"
+          }
+        },
+        "minProperties": 1,
+        "additionalProperties": false,
+        "description": "Partial edit of one depot. game, company and city are immutable."
+      },
+      "CatalogLogoBatchInput": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "minItems": 1,
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false,
+        "description": "Up to 500 PNG files named <company code>.png; each is checked on its own."
       },
       "CatalogImportIssue": {
         "type": "object",
@@ -18744,6 +19713,38 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/CatalogImportResult"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogDepot": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogDepot"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeCatalogDepotList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CatalogDepotList"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"

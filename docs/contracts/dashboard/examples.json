@@ -5688,6 +5688,14 @@
               "visible": 1,
               "hidden": 0
             },
+            "companies": {
+              "visible": 1,
+              "hidden": 0
+            },
+            "depots": {
+              "visible": 1,
+              "hidden": 0
+            },
             "cargoes": {
               "visible": 1,
               "hidden": 0
@@ -5935,6 +5943,365 @@
           "importId": "41000000-0000-4000-8000-000000000001",
           "rows": 2,
           "added": 1,
+          "changed": 1,
+          "unchanged": 0
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:company-with-logo",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000011",
+              "game": "ets2",
+              "code": "synthetic_freight",
+              "nameEn": "Synthetic Freight",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "41000000-0000-4000-8000-000000000011",
+                "label": "Synthetic Freight",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "logo": {
+                "version": "0123456789abcdef",
+                "byteLength": 2048
+              }
+            },
+            {
+              "id": "41000000-0000-4000-8000-000000000012",
+              "game": "ets2",
+              "code": "synthetic_nologo",
+              "nameEn": "Synthetic Without Logo",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "41000000-0000-4000-8000-000000000012",
+                "label": "Synthetic Without Logo",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "logo": null
+            }
+          ],
+          "nextCursor": null,
+          "total": 2
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listCatalogDepots:success",
+      "operationId": "listCatalogDepots",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000021",
+              "game": "ets2",
+              "hidden": false,
+              "dlcId": null,
+              "dlc": null,
+              "company": {
+                "id": "41000000-0000-4000-8000-000000000011",
+                "code": "synthetic_freight",
+                "label": {
+                  "entityId": "41000000-0000-4000-8000-000000000011",
+                  "label": "Synthetic Freight",
+                  "requestedLocale": "en",
+                  "renderedLocale": "en",
+                  "englishFallback": false,
+                  "hidden": false
+                },
+                "logo": {
+                  "version": "0123456789abcdef",
+                  "byteLength": 2048
+                }
+              },
+              "city": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "code": "synthetic_city",
+                "label": {
+                  "entityId": "41000000-0000-4000-8000-000000000001",
+                  "label": "Synthetic City",
+                  "requestedLocale": "en",
+                  "renderedLocale": "en",
+                  "englishFallback": false,
+                  "hidden": false
+                }
+              }
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "createCatalogDepot:success",
+      "operationId": "createCatalogDepot",
+      "status": 201,
+      "request": {
+        "game": "ets2",
+        "companyId": "41000000-0000-4000-8000-000000000011",
+        "cityId": "41000000-0000-4000-8000-000000000001",
+        "dlcId": null
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000021",
+          "game": "ets2",
+          "hidden": false,
+          "dlcId": null,
+          "dlc": null,
+          "company": {
+            "id": "41000000-0000-4000-8000-000000000011",
+            "code": "synthetic_freight",
+            "label": {
+              "entityId": "41000000-0000-4000-8000-000000000011",
+              "label": "Synthetic Freight",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            },
+            "logo": {
+              "version": "0123456789abcdef",
+              "byteLength": 2048
+            }
+          },
+          "city": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "code": "synthetic_city",
+            "label": {
+              "entityId": "41000000-0000-4000-8000-000000000001",
+              "label": "Synthetic City",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            }
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "updateCatalogDepot:hide",
+      "operationId": "updateCatalogDepot",
+      "status": 200,
+      "request": {
+        "hidden": true
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000021",
+          "game": "ets2",
+          "hidden": true,
+          "dlcId": null,
+          "dlc": null,
+          "company": {
+            "id": "41000000-0000-4000-8000-000000000011",
+            "code": "synthetic_freight",
+            "label": {
+              "entityId": "41000000-0000-4000-8000-000000000011",
+              "label": "Synthetic Freight",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            },
+            "logo": {
+              "version": "0123456789abcdef",
+              "byteLength": 2048
+            }
+          },
+          "city": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "code": "synthetic_city",
+            "label": {
+              "entityId": "41000000-0000-4000-8000-000000000001",
+              "label": "Synthetic City",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            }
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "uploadCatalogCompanyLogo:success",
+      "operationId": "uploadCatalogCompanyLogo",
+      "status": 200,
+      "request": {
+        "file": "synthetic_freight.png"
+      },
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000011",
+          "game": "ets2",
+          "code": "synthetic_freight",
+          "nameEn": "Synthetic Freight",
+          "nameRu": null,
+          "hidden": false,
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000011",
+            "label": "Synthetic Freight",
+            "requestedLocale": "en",
+            "renderedLocale": "en",
+            "englishFallback": false,
+            "hidden": false
+          },
+          "dlcId": null,
+          "dlc": null,
+          "logo": {
+            "version": "0123456789abcdef",
+            "byteLength": 2048
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "removeCatalogCompanyLogo:success",
+      "operationId": "removeCatalogCompanyLogo",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000011",
+          "game": "ets2",
+          "code": "synthetic_freight",
+          "nameEn": "Synthetic Freight",
+          "nameRu": null,
+          "hidden": false,
+          "display": {
+            "entityId": "41000000-0000-4000-8000-000000000011",
+            "label": "Synthetic Freight",
+            "requestedLocale": "en",
+            "renderedLocale": "en",
+            "englishFallback": false,
+            "hidden": false
+          },
+          "dlcId": null,
+          "dlc": null,
+          "logo": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "previewCatalogLogos:with-errors",
+      "operationId": "previewCatalogLogos",
+      "status": 200,
+      "request": {
+        "file": [
+          "synthetic_freight.png",
+          "unknown_co.png",
+          "notes.txt"
+        ]
+      },
+      "response": {
+        "data": {
+          "fileSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "token": null,
+          "rows": 3,
+          "added": 0,
+          "changed": 1,
+          "unchanged": 0,
+          "errors": 2,
+          "lines": [
+            {
+              "line": 1,
+              "code": "synthetic_freight",
+              "status": "changed",
+              "issues": [],
+              "changedFields": [
+                "logo"
+              ]
+            },
+            {
+              "line": 2,
+              "code": "unknown_co",
+              "status": "error",
+              "issues": [
+                {
+                  "field": "code",
+                  "reason": "unknown_reference"
+                }
+              ],
+              "changedFields": []
+            },
+            {
+              "line": 3,
+              "code": null,
+              "status": "error",
+              "issues": [
+                {
+                  "field": "file",
+                  "reason": "bad_name"
+                },
+                {
+                  "field": "file",
+                  "reason": "not_png"
+                }
+              ],
+              "changedFields": []
+            }
+          ],
+          "truncated": false
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "applyCatalogLogos:success",
+      "operationId": "applyCatalogLogos",
+      "status": 200,
+      "request": {
+        "file": [
+          "synthetic_freight.png"
+        ]
+      },
+      "response": {
+        "data": {
+          "importId": "41000000-0000-4000-8000-000000000002",
+          "rows": 1,
+          "added": 0,
           "changed": 1,
           "unchanged": 0
         },

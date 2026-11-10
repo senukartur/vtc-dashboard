@@ -86,6 +86,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   instant = Date.parse("2026-10-30T12:00:00.000Z");
   for (const table of [
+    "catalog_company_logos",
+    "catalog_company_cities",
+    "catalog_companies",
     "catalog_cities",
     "catalog_cargoes",
     "catalog_trailers",

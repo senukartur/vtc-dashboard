@@ -1,7 +1,16 @@
 import { adrClasses } from "@vtc/db/catalogs-schema";
 
-export const catalogLists = ["dlcs", "regions", "cities", "cargoes", "trailers"] as const;
+export const catalogLists = [
+  "dlcs",
+  "regions",
+  "cities",
+  "companies",
+  "cargoes",
+  "trailers",
+] as const;
 export type CatalogList = (typeof catalogLists)[number];
+/** Depots are not a plain list but share the import flow. */
+export type ImportList = CatalogList | "depots";
 export type Game = "ets2" | "ats";
 export type CatalogKind = "city" | "cargo" | "trailer";
 export type { AdrClass } from "@vtc/db/catalogs-schema";
@@ -12,6 +21,13 @@ export const CATALOG_IMPORT_MAX_ROWS = 5000;
 export const CATALOG_IMPORT_TOKEN_TTL_MS = 30 * 60 * 1000;
 export const CATALOG_PREVIEW_MAX_LINES = 500;
 
+// Engineering bounds for company logos; they are not product policy.
+export const CATALOG_LOGO_MAX_BYTES = 32 * 1024;
+export const CATALOG_LOGO_MAX_WIDTH = 128;
+export const CATALOG_LOGO_MAX_HEIGHT = 32;
+export const CATALOG_LOGO_BULK_MAX_FILES = 500;
+export const CATALOG_LOGO_BULK_MAX_BYTES = 16 * 1024 * 1024;
+
 export interface CatalogConfig {
   cursorKey: string;
 }
@@ -20,16 +36,18 @@ export function validateCatalogConfig(config: CatalogConfig) {
 }
 
 /** Import columns per list; a header carries exactly this set, in any order, minus optional ones. */
-export const importColumns: Readonly<Record<CatalogList, readonly string[]>> = {
+export const importColumns: Readonly<Record<ImportList, readonly string[]>> = {
   dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
   cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
+  companies: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
 };
 
 /** Columns a file header may leave out; an absent column reads as an empty cell. */
-export const optionalImportColumns: Readonly<Partial<Record<CatalogList, readonly string[]>>> = {
+export const optionalImportColumns: Readonly<Partial<Record<ImportList, readonly string[]>>> = {
   cities: ["name_native"],
 };
 

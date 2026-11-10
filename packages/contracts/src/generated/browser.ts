@@ -130,7 +130,7 @@ export interface paths {
         put?: never;
         /**
          * previewCatalogImport
-         * @description Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error.
+         * @description Dry-run of one CSV or JSON file (8 MiB). Writes nothing. The returned token authorizes applying exactly these bytes by this actor for 30 minutes and is null when any line has an error. For depots, lines name the company code; companies, cities and DLCs are referenced by (game, code).
          */
         post: operations["previewCatalogImport"];
         delete?: never;
@@ -157,6 +157,104 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/catalogs/companies/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * uploadCatalogCompanyLogo
+         * @description Stores or replaces the company's logo. One PNG up to 32 KiB, at most 128x32 pixels, checked on the server. The original bytes are kept.
+         */
+        put: operations["uploadCatalogCompanyLogo"];
+        post?: never;
+        /**
+         * removeCatalogCompanyLogo
+         * @description Removes the logo. Removing a logo that is not there changes nothing and writes no audit entry.
+         */
+        delete: operations["removeCatalogCompanyLogo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/catalogs/companies/logo-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * applyCatalogLogos
+         * @description Revalidates every file and stores all logos in one transaction or none. Identical bytes count as unchanged.
+         */
+        post: operations["applyCatalogLogos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/catalogs/companies/logo-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * previewCatalogLogos
+         * @description Dry-run of up to 500 PNG files named <company code>.png (16 MiB). line is the file's 1-based position in the upload; issues name the field file (bad_name, not_png, too_large, bad_dimensions, corrupt, duplicate_in_file) or code (unknown_reference). The token binds this actor, the game and the exact files and is null when any file has an error.
+         */
+        post: operations["previewCatalogLogos"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/catalogs/depots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** createCatalogDepot */
+        post: operations["createCatalogDepot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/catalogs/depots/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** updateCatalogDepot */
+        patch: operations["updateCatalogDepot"];
         trace?: never;
     };
     "/api/v1/admin/company-settings": {
@@ -887,6 +985,46 @@ export interface paths {
         };
         /** getCatalogItem */
         get: operations["getCatalogItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalogs/companies/{id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getCatalogCompanyLogo
+         * @description Authenticated read with company.read on every request. The UI requests it only when the item has a logo; a company without one answers 404.
+         */
+        get: operations["getCatalogCompanyLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalogs/depots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listCatalogDepots
+         * @description Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true.
+         */
+        get: operations["listCatalogDepots"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2499,6 +2637,61 @@ export interface components {
             nameRu?: string | null;
             regionId?: string | null;
         };
+        CatalogCompanyInput: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            dlcId?: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            nameEn: string;
+            nameRu?: string | null;
+        };
+        /** @description A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible. */
+        CatalogDepot: {
+            city: components["schemas"]["CatalogDepotCity"];
+            company: components["schemas"]["CatalogDepotCompany"];
+            dlc: components["schemas"]["CatalogLabel"] | null;
+            dlcId: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            hidden: boolean;
+            /** Format: uuid */
+            id: string;
+        };
+        CatalogDepotCity: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            /** Format: uuid */
+            id: string;
+            label: components["schemas"]["CatalogLabel"];
+        };
+        CatalogDepotCompany: {
+            /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
+            code: string;
+            /** Format: uuid */
+            id: string;
+            label: components["schemas"]["CatalogLabel"];
+            logo: components["schemas"]["CatalogLogo"] | null;
+        };
+        CatalogDepotInput: {
+            /** Format: uuid */
+            cityId: string;
+            /** Format: uuid */
+            companyId: string;
+            dlcId?: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+        };
+        CatalogDepotList: {
+            items: components["schemas"]["CatalogDepot"][];
+            nextCursor: string | null;
+            total: number;
+        };
+        /** @description Partial edit of one depot. game, company and city are immutable. */
+        CatalogDepotPatch: {
+            dlcId?: string | null;
+            hidden?: boolean;
+        };
         CatalogDlcInput: {
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
@@ -2540,7 +2733,7 @@ export interface components {
             rows: number;
             unchanged: number;
         };
-        /** @description One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type. */
+        /** @description One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type. */
         CatalogItem: {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
@@ -2553,6 +2746,7 @@ export interface components {
             hidden: boolean;
             /** Format: uuid */
             id: string;
+            logo?: components["schemas"]["CatalogLogo"] | null;
             nameEn: string;
             /** @description The city's canonical name. Present only on the cities list. */
             nameNative?: string | null;
@@ -2592,6 +2786,15 @@ export interface components {
             /** @enum {string} */
             requestedLocale: "en" | "ru";
         };
+        /** @description Present only when the company has a logo. version changes whenever the stored image changes and is passed as ?v= to the logo route. */
+        CatalogLogo: {
+            byteLength: number;
+            version: string;
+        };
+        /** @description Up to 500 PNG files named <company code>.png; each is checked on its own. */
+        CatalogLogoBatchInput: {
+            file: string[];
+        };
         CatalogRegionInput: {
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
@@ -2610,6 +2813,14 @@ export interface components {
                     visible: number;
                 };
                 cities: {
+                    hidden: number;
+                    visible: number;
+                };
+                companies: {
+                    hidden: number;
+                    visible: number;
+                };
+                depots: {
                     hidden: number;
                     visible: number;
                 };
@@ -2788,6 +2999,14 @@ export interface components {
         };
         EnvelopeAssignment: {
             data: components["schemas"]["Assignment"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeCatalogDepot: {
+            data: components["schemas"]["CatalogDepot"];
+            meta: components["schemas"]["Meta"];
+        };
+        EnvelopeCatalogDepotList: {
+            data: components["schemas"]["CatalogDepotList"];
             meta: components["schemas"]["Meta"];
         };
         EnvelopeCatalogImportPreview: {
@@ -4426,13 +4645,13 @@ export interface operations {
                 "Idempotency-Key": components["parameters"]["IdempotencyKey"];
             };
             path: {
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CatalogDlcInput"] | components["schemas"]["CatalogRegionInput"] | components["schemas"]["CatalogCityInput"] | components["schemas"]["CatalogCargoInput"] | components["schemas"]["CatalogTrailerInput"];
+                "application/json": components["schemas"]["CatalogDlcInput"] | components["schemas"]["CatalogRegionInput"] | components["schemas"]["CatalogCityInput"] | components["schemas"]["CatalogCompanyInput"] | components["schemas"]["CatalogCargoInput"] | components["schemas"]["CatalogTrailerInput"];
             };
         };
         responses: {
@@ -4456,7 +4675,7 @@ export interface operations {
             };
             path: {
                 id: string;
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -4483,7 +4702,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "depots" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -4514,7 +4733,7 @@ export interface operations {
                 "If-Match": string;
             };
             path: {
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "depots" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -4531,6 +4750,174 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeCatalogImportResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadCatalogCompanyLogo: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["UploadInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    removeCatalogCompanyLogo: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogItem"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    applyCatalogLogos: {
+        parameters: {
+            query: {
+                game: "ets2" | "ats";
+            };
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                /** @description Quoted dry-run token returned by previewCatalogLogos. */
+                "If-Match": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["CatalogLogoBatchInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogImportResult"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    previewCatalogLogos: {
+        parameters: {
+            query: {
+                game: "ets2" | "ats";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["CatalogLogoBatchInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogImportPreview"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    createCatalogDepot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogDepotInput"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogDepot"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    updateCatalogDepot: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogDepotPatch"];
+            };
+        };
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogDepot"];
                 };
             };
             default: components["responses"]["Error"];
@@ -5804,7 +6191,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -5830,7 +6217,7 @@ export interface operations {
             header?: never;
             path: {
                 id: string;
-                list: "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+                list: "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
             };
             cookie?: never;
         };
@@ -5843,6 +6230,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EnvelopeCatalogItem"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getCatalogCompanyLogo: {
+        parameters: {
+            query?: {
+                v?: string;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored PNG. Strong ETag; Cache-Control is private, max-age=86400 when v is the current version and private, no-cache otherwise. */
+            200: {
+                headers: {
+                    "Cache-Control"?: "private, max-age=86400" | "private, no-cache";
+                    /** @description Strong validator: the quoted SHA-256 of the image. */
+                    ETag?: string;
+                    "X-Content-Type-Options"?: "nosniff";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            /** @description If-None-Match matches the current image; sent only after authorization. */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listCatalogDepots: {
+        parameters: {
+            query: {
+                cityId?: string;
+                companyId?: string;
+                cursor?: components["parameters"]["Cursor"];
+                dlc?: "base" | string;
+                game: "ets2" | "ats";
+                includeHidden?: boolean;
+                limit?: components["parameters"]["Limit"];
+                locale?: "en" | "ru";
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed result; see semantic preconditions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCatalogDepotList"];
                 };
             };
             default: components["responses"]["Error"];

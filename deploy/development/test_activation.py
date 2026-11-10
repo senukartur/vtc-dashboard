@@ -464,6 +464,9 @@ class ActivationTests(unittest.TestCase):
                 self.assertIn(f"REVOKE IF EXISTS ALL PRIVILEGES ON vtc.{table} FROM '{user}'@'%';", statement)
         for table in ['catalog_dlcs', 'catalog_regions', 'catalog_cities', 'catalog_cargoes', 'catalog_trailers']:
             self.assertIn(f"GRANT SELECT,INSERT,UPDATE ON vtc.{table} TO 'vtc_runtime'@'%';", statement)
+        for table in ['catalog_companies', 'catalog_company_cities']:
+            self.assertIn(f"GRANT SELECT,INSERT,UPDATE ON vtc.{table} TO 'vtc_runtime'@'%';", statement)
+        self.assertIn("GRANT SELECT,INSERT,UPDATE,DELETE ON vtc.catalog_company_logos TO 'vtc_runtime'@'%';", statement)
 
     def test_retired_table_grants_are_tolerated_only_before_apply(self):
         self.stage_profile()
