@@ -273,7 +273,7 @@ for (const visibility of ["public", "members"] as const) {
         await expect(page.getByRole("alert")).toContainText("do not have access");
         await page.goto("/en");
         await expect(
-          page.getByRole("heading", { name: "Public convoys", exact: true }),
+          page.getByRole("heading", { name: "The convoy leaves on schedule", exact: true }),
         ).toBeVisible();
         const list = (await (await page.request.get("/api/v1/public/events?limit=100")).json()).data
           .items;

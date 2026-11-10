@@ -6,12 +6,16 @@ import { SignOutStatus, useSignOut } from "../features/account/sign-out.js";
 import { BottomNavigation } from "./BottomNavigation.js";
 import { type MobileNavigate, Navigation } from "./Navigation.js";
 import { Breadcrumb, MemberSidebar } from "./MemberNavigation.js";
-import { sidebarStorageKey } from "./navigation-model.js";
+import { landingPath, sidebarStorageKey } from "./navigation-model.js";
 import { writeStoredLocale } from "../shared/i18n.js";
 import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
 import { NearestEvent } from "../features/events/components.js";
 import "../features/events/events.css";
+import { publicContent } from "../features/landing/content.js";
+import { LandingFooter } from "../features/landing/LandingFooter.js";
+import { LandingHeader } from "../features/landing/LandingHeader.js";
+import { LandingMenu } from "../features/landing/LandingMenu.js";
 import { OptionalNotifications } from "../features/notifications/controller.js";
 import { NotificationBell, NotificationToasts } from "../features/notifications/components.js";
 import "../features/notifications/notifications.css";
@@ -27,13 +31,16 @@ function storedCollapse() {
 /**
  * Shared landmarks: public horizontal navigation, the synthetic member preview, or the live
  * workspace with role-grouped sidebar, breadcrumb topbar and user menu (bottom bar on phones).
+ * The public landing (`landing`) swaps in its own self-contained dark header and footer.
  */
 export function AppLayout({
   member,
+  landing = false,
   children,
   onMobileNavigate,
 }: {
   member: boolean;
+  landing?: boolean;
   children: ReactNode;
   onMobileNavigate: MobileNavigate;
 }) {
@@ -64,7 +71,7 @@ export function AppLayout({
   const languageSelect = !live || (!userMenu && session.state !== "checking");
   const languagePicker = languageSelect && (
     <label className="language-picker">
-      {t("language")}
+      <span>{t("language")}</span>
       <select
         value={i18n.resolvedLanguage}
         onChange={(event) => {
@@ -97,20 +104,26 @@ export function AppLayout({
       <NotificationBell />
     </OptionalNotifications>
   );
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  const account = session.self
+    ? { to: landingPath, label: t("nav.workspaceLink") }
+    : { to: "/login", label: publicContent[locale].login };
   return (
     <div
       className={
-        live
-          ? `app-shell member-shell event-member-shell workspace-shell${collapsed ? " sidebar-collapsed" : ""}${bar ? " has-bottom-bar" : ""}`
-          : member
-            ? "app-shell member-shell"
-            : "app-shell public-shell"
+        landing
+          ? "landing-shell"
+          : live
+            ? `app-shell member-shell event-member-shell workspace-shell${collapsed ? " sidebar-collapsed" : ""}${bar ? " has-bottom-bar" : ""}`
+            : member
+              ? "app-shell member-shell"
+              : "app-shell public-shell"
       }
     >
       <a className="skip-link" href="#main-content">
         {t("skip")}
       </a>
-      {live ? (
+      {landing ? null : live ? (
         <MemberSidebar
           collapsed={collapsed}
           onToggle={() => {
@@ -133,63 +146,89 @@ export function AppLayout({
           <p className="sidebar-note">{t("presentationOnly")}</p>
         </aside>
       )}
-      <div className="event-shell-header">
-        <header className="site-header">
-          <Link
-            className="wordmark header-wordmark"
-            to={
-              live
-                ? "/account/dashboard"
-                : member || preview || location.pathname === "/status"
-                  ? "/"
-                  : home
-            }
-          >
+      {landing ? (
+        <LandingHeader
+          locale={locale}
+          interactive
+          account={
+            <Link className="landing-header-signin" to={account.to}>
+              {account.label}
+            </Link>
+          }
+          language={languagePicker}
+          bell={bell}
+          menu={
+            <LandingMenu
+              locale={locale}
+              account={account}
+              language={languagePicker}
+              onMobileNavigate={onMobileNavigate}
+            />
+          }
+        />
+      ) : (
+        <div className="event-shell-header">
+          <header className="site-header">
+            <Link
+              className="wordmark header-wordmark"
+              to={
+                live
+                  ? "/account/dashboard"
+                  : member || preview || location.pathname === "/status"
+                    ? "/"
+                    : home
+              }
+            >
+              {live ? (
+                <>
+                  <span className="wordmark-full">Yukon Union</span>
+                  <span className="wordmark-short" aria-hidden="true">
+                    YU
+                  </span>
+                </>
+              ) : (
+                "Yukon Union"
+              )}
+            </Link>
             {live ? (
               <>
-                <span className="wordmark-full">Yukon Union</span>
-                <span className="wordmark-short" aria-hidden="true">
-                  YU
-                </span>
+                <Breadcrumb />
+                <div className="topbar-actions">
+                  {session.state === "authenticated" && <NearestEvent variant="chip" />}
+                  {bell}
+                  {userMenu && <UserMenu placement="topbar" />}
+                  <Navigation variant="mobile" onMobileNavigate={onMobileNavigate} />
+                  {languagePicker}
+                </div>
               </>
             ) : (
-              "Yukon Union"
-            )}
-          </Link>
-          {live ? (
-            <>
-              <Breadcrumb />
-              <div className="topbar-actions">
-                {session.state === "authenticated" && <NearestEvent variant="chip" />}
+              <>
+                <p className="member-context">{t("member")}</p>
+                <Navigation
+                  variant={member ? "mobile" : "public"}
+                  onMobileNavigate={onMobileNavigate}
+                />
                 {bell}
-                {userMenu && <UserMenu placement="topbar" />}
-                <Navigation variant="mobile" onMobileNavigate={onMobileNavigate} />
                 {languagePicker}
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="member-context">{t("member")}</p>
-              <Navigation
-                variant={member ? "mobile" : "public"}
-                onMobileNavigate={onMobileNavigate}
-              />
-              {bell}
-              {languagePicker}
-            </>
-          )}
-        </header>
-      </div>
+              </>
+            )}
+          </header>
+        </div>
+      )}
       {bar && <BottomNavigation onMobileNavigate={onMobileNavigate} />}
       <main id="main-content" tabIndex={-1}>
         {signingOut ? <SignOutStatus /> : children}
       </main>
-      <footer className="site-footer">
-        <span>
-          {preview || location.pathname === "/status" ? t("footer") : "Yukon Union · ETS2 / ATS"}
-        </span>
-        <a href={fontLicenseUrl}>{t("fontLicense")}</a>
-      </footer>
+      {landing ? (
+        <LandingFooter locale={locale} interactive />
+      ) : (
+        <footer className="site-footer">
+          <span>
+            {preview || location.pathname === "/status" ? t("footer") : "Yukon Union · ETS2 / ATS"}
+          </span>
+          <a href={fontLicenseUrl}>{t("fontLicense")}</a>
+        </footer>
+      )}
       <OptionalNotifications>
         <NotificationToasts />
       </OptionalNotifications>

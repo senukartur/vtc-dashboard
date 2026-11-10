@@ -433,10 +433,12 @@ test(
         const navigation = page.getByRole("dialog", { name: "Навигация", exact: true });
         await navigation.getByRole("link", { name: "О компании", exact: true }).click();
         await expect(navigation).toHaveCount(0);
-        await expect(publicMenu).toBeFocused();
+        // A section link hands focus to its section rather than the menu button or main.
+        await expect(page.locator("#about")).toBeFocused();
+        await expect(page.locator("#about")).toBeInViewport();
         await expect(main).toHaveAttribute("data-ordering-focus-count", "0");
         phase = "AFTER_HASH";
-        await main.getByRole("link", { name: "Публичные события", exact: true }).click();
+        await main.getByRole("link", { name: "Все события", exact: true }).click();
         await expect(page.getByRole("heading", { level: 1 })).toHaveText("Открытые конвои");
         await expect(main).toBeFocused();
       }

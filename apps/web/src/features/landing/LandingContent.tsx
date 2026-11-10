@@ -1,15 +1,24 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { publicContacts, publicContent, type PublicLocale, publicPath } from "./content.js";
-import { HeroArt } from "./HeroArt.js";
+import { type PublicLocale, publicContent } from "./content.js";
+import {
+  AboutSection,
+  CabView,
+  ContactsSection,
+  EventFormats,
+  JoinSection,
+  LandingSectionLink,
+  PublicLink,
+  RanksSection,
+} from "./LandingSections.js";
+import { heroStill854, heroStill1280 } from "./media.js";
 import "./landing.css";
 
 export type LandingMotion = "static" | "running" | "paused";
 
 /**
- * Shared public copy for the build-time document and interactive page. Time-dependent and
- * fetched parts arrive only through the client slots, so the prerendered output depends on
- * the locale and static content alone.
+ * Shared public copy for the build-time document and interactive page. Time-dependent, fetched
+ * and media-playback parts arrive only through the client slots, so the prerendered output
+ * depends on the locale and static content alone.
  */
 export function LandingContent({
   locale,
@@ -17,7 +26,7 @@ export function LandingContent({
   events,
   heroChip,
   heroControls,
-  ticker,
+  heroVideo,
   stats,
   motion = "static",
   interactive = false,
@@ -27,7 +36,7 @@ export function LandingContent({
   events?: ReactNode;
   heroChip?: ReactNode;
   heroControls?: ReactNode;
-  ticker?: ReactNode;
+  heroVideo?: ReactNode;
   stats?: ReactNode;
   motion?: LandingMotion;
   interactive?: boolean;
@@ -36,126 +45,85 @@ export function LandingContent({
   return (
     <div className="landing" data-motion={motion}>
       <section className="landing-hero" aria-labelledby="landing-title">
-        {heroChip}
-        <p className="eyebrow">{c.eyebrow}</p>
-        <h1 id="landing-title">{c.heading}</h1>
-        <p className="lead">{c.intro}</p>
-        <div className="heading-actions">
-          <PublicLink
-            interactive={interactive}
-            className="button button-primary"
-            href={`${publicPath(locale)}#apply`}
-          >
-            {c.apply} <span aria-hidden="true">↗</span>
-          </PublicLink>
-          <PublicLink interactive={interactive} className="button button-outline" href="/events">
-            {c.events}
-          </PublicLink>
+        <div className="landing-hero-frame">
+          <picture>
+            <source media="(max-width: 760px)" srcSet={heroStill854} />
+            <img
+              className="landing-hero-still"
+              src={heroStill1280}
+              width={1280}
+              height={720}
+              fetchPriority="high"
+              decoding="sync"
+              alt={c.heroAlt}
+            />
+          </picture>
+          {heroVideo}
+          <span className="landing-hero-fade" aria-hidden="true" />
         </div>
-        {heroControls}
-        <HeroArt />
+        <div className="landing-wrap landing-hero-copy">
+          {/* Always reserved, so the slogan never moves when the countdown appears or not. */}
+          <div className="landing-chip-slot">{heroChip}</div>
+          <h1 id="landing-title">
+            <span>{c.headingLead}</span>{" "}
+            <span className="landing-aurora-text landing-heading-accent">{c.headingAccent}</span>
+          </h1>
+          <p className="landing-lead">{c.intro}</p>
+          <div className="landing-hero-actions">
+            <LandingSectionLink
+              interactive={interactive}
+              locale={locale}
+              section="apply"
+              className="landing-cta landing-cta-primary"
+            >
+              {c.apply}
+              <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" focusable="false">
+                <path
+                  d="M5 12h14M13 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="2.4"
+                />
+              </svg>
+            </LandingSectionLink>
+            <LandingSectionLink
+              interactive={interactive}
+              locale={locale}
+              section="convoys"
+              className="landing-cta landing-cta-outline"
+            >
+              {c.heroConvoys}
+            </LandingSectionLink>
+            {heroControls}
+          </div>
+          {stats}
+        </div>
       </section>
-      {ticker}
-      {stats}
       {events ?? (
-        <section className="landing-section">
-          <h2>{c.events}</h2>
-          <PublicLink interactive={interactive} className="button button-outline" href="/events">
-            {c.events}
-          </PublicLink>
+        <section
+          id="convoys"
+          tabIndex={-1}
+          className="landing-section landing-wrap"
+          aria-labelledby="landing-convoys-title"
+        >
+          <header className="landing-section-head">
+            <div>
+              <p className="landing-eyebrow">{c.convoysEyebrow}</p>
+              <h2 id="landing-convoys-title">{c.convoysTitle}</h2>
+            </div>
+            <PublicLink interactive={interactive} className="landing-convoys-link" href="/events">
+              {c.allEvents} <span aria-hidden="true">→</span>
+            </PublicLink>
+          </header>
         </section>
       )}
-      <section id="about" className="landing-section" aria-labelledby="about-title">
-        <p className="eyebrow">Yukon Union</p>
-        <h2 id="about-title">{c.aboutTitle}</h2>
-        <div className="landing-values">
-          {c.values.map((value, index) => (
-            <article key={value.title}>
-              <span className="value-number" aria-hidden="true">
-                0{index + 1}
-              </span>
-              <h3>{value.title}</h3>
-              <p>{value.text}</p>
-            </article>
-          ))}
-        </div>
-        <div className="landing-ladder">
-          <h3 id="landing-ladder-title">{c.ladderTitle}</h3>
-          <ol aria-labelledby="landing-ladder-title">
-            {c.ladder.map((level, index) => (
-              <li key={level.name}>
-                <span className="landing-ladder-mark" aria-hidden="true">
-                  <span className="landing-ladder-number">{index + 1}</span>
-                  <span className="landing-ladder-line" />
-                </span>
-                <strong>{level.name}</strong>
-                {level.text && <span className="landing-ladder-text">{level.text}</span>}
-              </li>
-            ))}
-          </ol>
-          <p className="muted">{c.ladderNote}</p>
-        </div>
-      </section>
-      <section id="apply" className="landing-section application-grid" aria-labelledby="join-title">
-        <div className="join-copy">
-          <p className="eyebrow">{c.requirements}</p>
-          <h2 id="join-title">{c.requirementsTitle}</h2>
-          <ol className="landing-steps">
-            {c.joinSteps.map((step, index) => (
-              <li key={step.title}>
-                <span className="landing-step-number" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <div>
-                  <strong>{step.title}</strong>
-                  <p>{step.text}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-          <p className="muted">{c.joinNote}</p>
-        </div>
-        {application ?? <p>{c.noScript}</p>}
-      </section>
-      <section id="contacts" className="landing-section" aria-labelledby="contacts-title">
-        <h2 id="contacts-title">{c.contactsTitle}</h2>
-        <p className="lead">{c.contactsText}</p>
-        <ul className="contact-links">
-          {publicContacts.map((contact) => (
-            <li key={contact.label}>
-              <a href={contact.href} rel="noreferrer">
-                {contact.label} <span aria-hidden="true">↗</span>
-              </a>
-            </li>
-          ))}
-          <li>
-            <a href="https://ykn-u.ru/portal/contact" rel="noreferrer">
-              {c.contactPage} <span aria-hidden="true">↗</span>
-            </a>
-          </li>
-        </ul>
-      </section>
+      <EventFormats c={c} />
+      <CabView c={c} />
+      <AboutSection c={c} />
+      <RanksSection c={c} />
+      <JoinSection c={c} application={application} />
+      <ContactsSection c={c} />
     </div>
-  );
-}
-function PublicLink({
-  interactive,
-  href,
-  children,
-  className,
-}: {
-  interactive: boolean;
-  href: string;
-  children: ReactNode;
-  className: string;
-}) {
-  return interactive ? (
-    <Link className={className} to={href}>
-      {children}
-    </Link>
-  ) : (
-    <a className={className} href={href}>
-      {children}
-    </a>
   );
 }

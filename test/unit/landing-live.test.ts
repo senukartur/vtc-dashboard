@@ -1,13 +1,12 @@
 import { readFileSync } from "node:fs";
 import type { components } from "@vtc/contracts";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { publicContent } from "../../apps/web/src/features/landing/content.ts";
+import { publicContacts, publicContent } from "../../apps/web/src/features/landing/content.ts";
 import {
+  convoyDateParts,
   formatCountdown,
   nextChangeDelay,
   nextConvoy,
-  tickerHalf,
-  tickerRoutes,
 } from "../../apps/web/src/features/landing/model.ts";
 import { readCompanyStats, statsView } from "../../apps/web/src/features/landing/stats.ts";
 import { qualificationTranslations } from "../../apps/web/src/features/qualifications/translations.ts";
@@ -24,14 +23,6 @@ const example = (id: string) => {
     meta: { requestId: string };
   };
 };
-const label = (text: string) => ({
-  entityId: "51000000-0000-4000-8000-000000000001",
-  label: text,
-  requestedLocale: "en" as const,
-  renderedLocale: "en" as const,
-  englishFallback: false,
-  hidden: false,
-});
 const convoy = (index: number, overrides: Partial<EventPublic> = {}): EventPublic => ({
   id: `41000000-0000-4000-8000-00000000000${index}`,
   version: 1,
@@ -63,41 +54,49 @@ function keyShape(value: unknown): unknown {
 }
 
 describe("U1 landing content", () => {
-  test("RU/EN share the same keys, keep the live slogan and trace the ladder to qualifications", () => {
+  test("RU/EN share the same keys and carry the approved R7d slogan, events, ranks and steps", () => {
     expect(keyShape(publicContent.ru)).toEqual(keyShape(publicContent.en));
-    expect(publicContent.ru.heading).toBe("Своя компания. Общая дорога.");
-    expect(publicContent.en.heading).toBe("Your company. Our road.");
-    expect(publicContent.ru.eyebrow).toBe("Виртуальная транспортная компания · ETS2 / ATS");
-    expect(publicContent.en.eyebrow).toBe("Virtual trucking company · ETS2 / ATS");
+    expect(publicContent.ru.heading).toBe("Юкон? Достаточно суров");
+    expect(publicContent.en.heading).toBe("Yukon? Tough enough.");
     expect(publicContent.ru.apply).toBe("Подать заявку");
     expect(publicContent.en.apply).toBe("Apply to join");
-    expect(publicContent.ru.requirementsTitle).toBe("Начните со знакомства");
-    expect(publicContent.en.requirementsTitle).toBe("Start with an introduction");
-    expect(/Достаточно суров|Yukon\?|Юкон\?/.test(JSON.stringify(publicContent))).toBe(false);
+    expect(publicContent.ru.requirementsTitle).toBe("Три шага до первого рейса");
+    expect(publicContent.en.requirementsTitle).toBe("Three steps to your first run");
     for (const locale of ["ru", "en"] as const) {
-      const q = qualificationTranslations[locale],
-        c = publicContent[locale];
-      expect(c.ladder.map((level) => level.name)).toEqual([
-        q.trainee,
-        q.driver_iii,
-        q.driver_ii,
-        q.driver_i,
-      ]);
-      expect(c.ladder.filter((level) => level.text).map((level) => level.name)).toEqual([
-        q.trainee,
-      ]);
+      const c = publicContent[locale],
+        q = qualificationTranslations[locale];
+      // The rendered H1 is the lead and accent joined by one space.
+      expect(`${c.headingLead} ${c.headingAccent}`).toBe(c.heading);
+      expect(c.eventFormats).toHaveLength(9);
+      expect(new Set(c.eventFormats).size).toBe(9);
+      expect(c.ranks).toHaveLength(9);
+      expect(new Set(c.ranks).size).toBe(9);
+      // The nine ranks are presentation; the product still starts every member as a Trainee.
+      expect(c.ranksNote.toLowerCase()).toContain(
+        locale === "ru" ? "стажёр" : q.trainee.toLowerCase(),
+      );
       expect(c.joinSteps).toHaveLength(3);
-      expect(c.joinSteps[1]?.text).toContain(locale === "ru" ? "семь" : "seven");
-      for (const removed of [
-        "requirementsText",
-        "review",
-        "eventsTitle",
-        "eventsText",
-        "loginTitle",
-        "loginText",
-      ])
+      expect(c.joinSteps[1]?.text).toContain(locale === "ru" ? "7 дней" : "seven");
+      expect(c.joinSteps[2]?.text.toLowerCase()).toContain(
+        locale === "ru" ? "стажёром" : q.trainee.toLowerCase(),
+      );
+      for (const removed of ["values", "ladder", "ladderTitle", "contactPage", "contactsText"])
         expect(removed in c).toBe(false);
     }
+    expect(publicContent.ru.eventFormats[0]).toBe("Колонна");
+    expect(publicContent.ru.ranks[8]).toBe("Легенда");
+    expect(publicContent.en.ranks[8]).toBe("Legend");
+  });
+  test("exactly the six approved company links, without VTC.World", () => {
+    expect(publicContacts.map(({ label, href }) => [label, href])).toEqual([
+      ["TruckersMP", "https://truckersmp.com/vtc/190"],
+      ["Discord", "https://discord.com/invite/fBXecKW"],
+      ["HaulMP", "https://vtc.haulmp.com/YukonUnion"],
+      ["Trucky Hub", "https://hub.truckyapp.com/company/184"],
+      ["Steam", "https://steamcommunity.com/groups/yukon_union"],
+      ["VK", "https://vk.com/yukon_union_2"],
+    ]);
+    expect(JSON.stringify(publicContacts)).not.toMatch(/vtc\.world/i);
   });
 });
 
@@ -139,27 +138,17 @@ describe("U3 countdown", () => {
   });
 });
 
-describe("U4 ticker routes", () => {
-  test("uses scheduled events only, prefers catalog labels and fills two halves of eight", () => {
-    const routes = tickerRoutes([
-      convoy(1, { origin: label("Origin"), destination: label("Destination") }),
-      convoy(2, { game: "ats", origin: label("Only origin") }),
-      convoy(3, { status: "cancelled" }),
-      convoy(4, { status: "completed" }),
-    ]);
-    expect(routes).toHaveLength(tickerHalf * 2);
-    expect(routes.filter((route) => !route.copy)).toHaveLength(8);
-    expect(routes.filter((route) => route.copy)).toHaveLength(8);
-    expect(routes.slice(8).map((route) => route.label)).toEqual(
-      routes.slice(0, 8).map((route) => route.label),
-    );
-    expect(new Set(routes.map((route) => route.key)).size).toBe(16);
-    expect(new Set(routes.map((route) => route.label))).toEqual(
-      new Set(["Origin → Destination", "Fictional route 2"]),
-    );
-    expect(routes.map((route) => route.game).slice(0, 2)).toEqual(["ets2", "ats"]);
-    expect(tickerRoutes([convoy(3, { status: "cancelled" })])).toEqual([]);
-    expect(tickerRoutes([])).toEqual([]);
+describe("U4 convoy date tile", () => {
+  test("uses the display timezone and drops the abbreviation dot", () => {
+    expect(convoyDateParts("2026-11-02T23:30:00.000Z", "en", "UTC")).toEqual({
+      day: "2",
+      month: "Nov",
+    });
+    expect(convoyDateParts("2026-11-02T23:30:00.000Z", "en", "Europe/Moscow").day).toBe("3");
+    const ru = convoyDateParts("2026-11-02T18:30:00.000Z", "ru", "UTC");
+    expect(ru.day).toBe("2");
+    expect(ru.month.endsWith(".")).toBe(false);
+    expect(ru.month.startsWith("нояб")).toBe(true);
   });
 });
 

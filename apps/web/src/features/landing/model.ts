@@ -1,13 +1,11 @@
 import type { components } from "@vtc/contracts";
-import { publicContent, type PublicLocale } from "./content.js";
+import { type PublicLocale, publicContent } from "./content.js";
 
 type EventPublic = components["schemas"]["EventPublic"];
 type ConvoyLike = Pick<EventPublic, "id" | "status" | "startsAt">;
 
 /** Largest delay a browser timer accepts without firing immediately. */
 export const maxTimerDelay = 2147483647;
-/** Every ticker half repeats the scheduled routes to this many items. */
-export const tickerHalf = 8;
 
 /** The earliest scheduled convoy that has not started yet; cancelled/completed/started never count. */
 export function nextConvoy<T extends ConvoyLike>(items: readonly T[], now: number): T | undefined {
@@ -46,26 +44,20 @@ export function routeLabel(event: Pick<EventPublic, "origin" | "destination" | "
     : event.route;
 }
 
-export type TickerRoute = { key: string; game: EventPublic["game"]; label: string; copy: boolean };
-
-/** Scheduled routes cycled to two identical halves; the second half only exists for a seamless loop. */
-export function tickerRoutes(
-  items: readonly Pick<
-    EventPublic,
-    "id" | "status" | "game" | "origin" | "destination" | "route"
-  >[],
-): TickerRoute[] {
-  const scheduled = items.filter((item) => item.status === "scheduled");
-  if (!scheduled.length) return [];
-  return Array.from({ length: tickerHalf * 2 }, (_, index) => {
-    const event = scheduled[(index % tickerHalf) % scheduled.length] as (typeof scheduled)[number];
-    return {
-      key: `${event.id}-${index}`,
-      game: event.game,
-      label: routeLabel(event),
-      copy: index >= tickerHalf,
-    };
-  });
+/** Day and short month for the card's date tile, in the display timezone. */
+export function convoyDateParts(
+  startsAt: string,
+  locale: PublicLocale,
+  timeZone: string,
+): { day: string; month: string } {
+  const parts = new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).formatToParts(new Date(startsAt));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((entry) => entry.type === type)?.value ?? "";
+  return { day: part("day"), month: part("month").replace(/\.$/, "") };
 }
 
 /** Reporting month label; the month string is a calendar value, so it is formatted in UTC. */

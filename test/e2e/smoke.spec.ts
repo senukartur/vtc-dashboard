@@ -33,7 +33,7 @@ test(
     await page.goto("/synthetic-unknown-route");
     await expect(page.getByRole("heading", { name: "Этой страницы пока нет" })).toBeVisible();
     await page.getByRole("link", { name: "На главную" }).click();
-    await expect(page.getByRole("heading", { name: "Своя компания. Общая дорога." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Юкон? Достаточно суров" })).toBeVisible();
     await page.goto("/status");
     await expect(page.getByRole("heading", { name: "VTC Dashboard" })).toBeVisible();
     await expect(
