@@ -1,11 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import {
   type CatalogItem,
-  type CatalogList,
   catalogParams,
   itemSchema,
   listSchema,
@@ -18,9 +17,19 @@ import { CatalogForm, type FormTarget } from "./CatalogForm.js";
 import { CatalogImport } from "./CatalogImport.js";
 import { CatalogTable } from "./CatalogTable.js";
 import { CatalogToolbar } from "./CatalogToolbar.js";
+import { type Depot, DepotForm, type DepotTarget } from "./DepotForm.js";
+import { DepotCards, DepotTable } from "./DepotRows.js";
 import { Failure } from "./Feedback.js";
-import { type CatalogFilters, catalogTabs, filterParams, parseFilters } from "./model.js";
-import { summarySchema } from "./transport.js";
+import { LogoBulkDialog } from "./LogoUpload.js";
+import {
+  addLabels,
+  type CatalogFilters,
+  catalogTabs,
+  filterParams,
+  parseFilters,
+  tabLabels,
+} from "./model.js";
+import { depotListSchema, depotSchema, summarySchema } from "./transport.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 import "./catalogs.css";
 
@@ -28,20 +37,6 @@ const games = [
   { value: "ets2", label: "ETS2" },
   { value: "ats", label: "ATS" },
 ] as const;
-const tabLabels: Record<CatalogList, string> = {
-  dlcs: "tabDlcs",
-  regions: "tabRegions",
-  cities: "tabCities",
-  cargoes: "tabCargoes",
-  trailers: "tabTrailers",
-};
-const addLabels: Record<CatalogList, string> = {
-  dlcs: "addDlcs",
-  regions: "addRegions",
-  cities: "addCities",
-  cargoes: "addCargoes",
-  trailers: "addTrailers",
-};
 
 /** Gate: without company.read no catalog query hook mounts, so nothing is requested. */
 export function CatalogsPage() {
@@ -73,7 +68,17 @@ function CatalogWorkspace() {
     () => void queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
     [queryClient],
   );
-  const filterKey = `${filters.game}/${filters.tab}/${filters.q}/${filters.dlc}/${filters.region}/${filters.hidden}/${locale}`;
+  const filterKey = [
+    filters.game,
+    filters.tab,
+    filters.q,
+    filters.dlc,
+    filters.region,
+    filters.company,
+    filters.city,
+    filters.hidden,
+    locale,
+  ].join("/");
   // Cursors belong to one filter set; a changed filter set restarts at the first page.
   const [paging, setPaging] = useState<{ key: string; cursors: string[] }>({
     key: filterKey,
@@ -82,7 +87,18 @@ function CatalogWorkspace() {
   const cursors = paging.key === filterKey ? paging.cursors : [];
   const setCursors = (next: string[]) => setPaging({ key: filterKey, cursors: next });
   const [form, setForm] = useState<FormTarget | null>(null);
+  const [depotForm, setDepotForm] = useState<DepotTarget | null>(null);
   const [importing, setImporting] = useState(false);
+  const [uploadingLogos, setUploadingLogos] = useState(false);
+  const depots = filters.tab === "depots";
+  // Seven tabs scroll sideways on a phone; the chosen one must not be left out of view.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabsRef.current
+      ?.querySelector<HTMLElement>(`[data-tab="${filters.tab}"]`)
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [filters.tab]);
+  const plain = filters.tab === "depots" ? null : filters.tab;
   const update = useCallback(
     (patch: Partial<CatalogFilters>) => {
       setParams((previous) => filterParams({ ...parseFilters(previous), ...patch }), {
@@ -99,17 +115,34 @@ function CatalogWorkspace() {
   );
   const list = useCatalogQuery(
     ["list", filterKey, cursor],
-    `/catalogs/${filters.tab}?${catalogParams({
+    `/catalogs/${plain ?? "cities"}?${catalogParams({
       game: filters.game,
       search: filters.q || undefined,
       includeHidden: filters.hidden ? "true" : undefined,
-      dlc: filters.tab !== "dlcs" ? filters.dlc || undefined : undefined,
-      regionId: filters.tab === "cities" ? filters.region || undefined : undefined,
+      dlc: plain !== "dlcs" ? filters.dlc || undefined : undefined,
+      regionId: plain === "cities" ? filters.region || undefined : undefined,
       locale,
       limit: 25,
       cursor,
     })}`,
     listSchema,
+    !depots,
+  );
+  const depotList = useCatalogQuery(
+    ["depots", filterKey, cursor],
+    `/catalogs/depots?${catalogParams({
+      game: filters.game,
+      search: filters.q || undefined,
+      includeHidden: filters.hidden ? "true" : undefined,
+      dlc: filters.dlc || undefined,
+      companyId: filters.company || undefined,
+      cityId: filters.city || undefined,
+      locale,
+      limit: 25,
+      cursor,
+    })}`,
+    depotListSchema,
+    depots,
   );
   const hide = useCatalogCommand();
   const toggleHidden = useCallback(
@@ -124,11 +157,34 @@ function CatalogWorkspace() {
     },
     [hide, filters.tab, refresh],
   );
-  const page = list.data?.data.data;
+  const toggleDepot = useCallback(
+    async (depot: Depot) => {
+      const result = await hide.run(
+        `/admin/catalogs/depots/${depot.id}`,
+        { hidden: !depot.hidden },
+        depotSchema,
+        { method: "PATCH" },
+      );
+      if (result) refresh();
+    },
+    [hide, refresh],
+  );
+  const activeQuery = depots ? depotList : list;
+  const page = activeQuery.data?.data.data;
   const counts = summary.data?.data.data.lists;
-  const openAdd = () => setForm({ list: filters.tab, game: filters.game, item: null });
-  const openEdit = (item: CatalogItem) => setForm({ list: filters.tab, game: filters.game, item });
-  const filtered = !!(filters.q || filters.dlc || filters.region);
+  const openAdd = () =>
+    plain
+      ? setForm({ list: plain, game: filters.game, item: null })
+      : setDepotForm({ game: filters.game, depot: null });
+  const openEdit = (item: CatalogItem) =>
+    plain && setForm({ list: plain, game: filters.game, item });
+  const filtered = !!(
+    filters.q ||
+    filters.dlc ||
+    filters.region ||
+    filters.company ||
+    filters.city
+  );
   const tabLabel = t(tabLabels[filters.tab]);
   return (
     <div className="catalog-page">
@@ -139,10 +195,15 @@ function CatalogWorkspace() {
           className="catalog-game"
           value={filters.game}
           options={games}
-          onValueChange={(game) => update({ game, dlc: "", region: "" })}
+          onValueChange={(game) => update({ game, dlc: "", region: "", company: "", city: "" })}
         />
         {staff && (
           <div className="catalog-actions">
+            {filters.tab === "companies" && (
+              <Button type="button" variant="outline" onClick={() => setUploadingLogos(true)}>
+                {t("logoUploadAll")}
+              </Button>
+            )}
             <Button type="button" variant="outline" onClick={() => setImporting(true)}>
               {t("importButton")}
             </Button>
@@ -153,15 +214,16 @@ function CatalogWorkspace() {
         )}
         <p className="catalog-description">{t("description")}</p>
       </header>
-      <div className="catalog-tabs" role="tablist" aria-label={t("title")}>
+      <div ref={tabsRef} className="catalog-tabs" role="tablist" aria-label={t("title")}>
         {catalogTabs.map((tab) => (
           <button
             key={tab}
             type="button"
             role="tab"
+            data-tab={tab}
             className="catalog-tab"
             aria-selected={tab === filters.tab}
-            onClick={() => update({ tab, dlc: "", region: "" })}
+            onClick={() => update({ tab, dlc: "", region: "", company: "", city: "" })}
           >
             {t(tabLabels[tab])}
             {counts && <small>{counts[tab].visible}</small>}
@@ -170,31 +232,49 @@ function CatalogWorkspace() {
       </div>
       <Card className="catalog-card">
         <CatalogToolbar filters={filters} tab={filters.tab} onChange={update} />
-        {list.isPending && <p role="status">{t("loading")}</p>}
-        {list.isError && (
+        {activeQuery.isPending && <p role="status">{t("loading")}</p>}
+        {activeQuery.isError && (
           <div role="alert">
             <p>{t("readError")}</p>
-            <Button type="button" variant="outline" onClick={() => void list.refetch()}>
+            <Button type="button" variant="outline" onClick={() => void activeQuery.refetch()}>
               {t("refresh")}
             </Button>
           </div>
         )}
-        {page && page.items.length === 0 && !list.isPending && (
+        {page && page.items.length === 0 && !activeQuery.isPending && (
           <p className="catalog-muted">{t(filtered || filters.hidden ? "empty" : "emptyList")}</p>
         )}
-        {page && page.items.length > 0 && (
+        {depots && depotList.data && depotList.data.data.data.items.length > 0 && (
+          <>
+            <DepotTable
+              depots={depotList.data.data.data.items}
+              staff={staff}
+              busy={hide.pending}
+              onEdit={(depot) => setDepotForm({ game: filters.game, depot })}
+              onToggleHidden={(depot) => void toggleDepot(depot)}
+            />
+            <DepotCards
+              depots={depotList.data.data.data.items}
+              staff={staff}
+              busy={hide.pending}
+              onEdit={(depot) => setDepotForm({ game: filters.game, depot })}
+              onToggleHidden={(depot) => void toggleDepot(depot)}
+            />
+          </>
+        )}
+        {plain && list.data && list.data.data.data.items.length > 0 && (
           <>
             <CatalogTable
-              list={filters.tab}
-              items={page.items}
+              list={plain}
+              items={list.data.data.data.items}
               staff={staff}
               busy={hide.pending}
               onEdit={openEdit}
               onToggleHidden={(item) => void toggleHidden(item)}
             />
             <CatalogCards
-              list={filters.tab}
-              items={page.items}
+              list={plain}
+              items={list.data.data.data.items}
               staff={staff}
               busy={hide.pending}
               onEdit={openEdit}
@@ -230,6 +310,11 @@ function CatalogWorkspace() {
       </Card>
       {staff && (
         <div className="catalog-mobile-bar">
+          {filters.tab === "companies" && (
+            <Button type="button" variant="outline" onClick={() => setUploadingLogos(true)}>
+              {t("logoUploadShort")}
+            </Button>
+          )}
           <Button type="button" variant="outline" onClick={() => setImporting(true)}>
             {t("importShort")}
           </Button>
@@ -247,6 +332,25 @@ function CatalogWorkspace() {
             setForm(null);
             refresh();
           }}
+          onLogoChanged={refresh}
+        />
+      )}
+      {depotForm && (
+        <DepotForm
+          key={depotForm.depot?.id ?? "new"}
+          target={depotForm}
+          onClose={() => setDepotForm(null)}
+          onSaved={() => {
+            setDepotForm(null);
+            refresh();
+          }}
+        />
+      )}
+      {uploadingLogos && (
+        <LogoBulkDialog
+          game={filters.game}
+          onClose={() => setUploadingLogos(false)}
+          onApplied={refresh}
         />
       )}
       {importing && (

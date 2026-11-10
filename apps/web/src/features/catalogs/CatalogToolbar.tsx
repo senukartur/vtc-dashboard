@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CatalogList, Game } from "../../shared/catalog-selectors/contracts.js";
+import { CatalogSelector } from "../../shared/catalog-selectors/CatalogSelector.js";
+import type { Game } from "../../shared/catalog-selectors/contracts.js";
 import { listSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogPages } from "../../shared/catalog-selectors/queries.js";
 import { Input, Label } from "../../shared/ui/primitives.js";
-import type { CatalogFilters } from "./model.js";
+import type { CatalogFilters, CatalogTab } from "./model.js";
 
 function ParentFilter({
   list,
@@ -60,7 +61,7 @@ export function CatalogToolbar({
   onChange,
 }: {
   filters: CatalogFilters;
-  tab: CatalogList;
+  tab: CatalogTab;
   onChange: (patch: Partial<CatalogFilters>) => void;
 }) {
   const { t } = useTranslation("catalogs");
@@ -105,6 +106,24 @@ export function CatalogToolbar({
           label={t("regionFilter")}
           emptyLabel={t("allRegions")}
         />
+      )}
+      {tab === "depots" && (
+        <>
+          <CatalogSelector
+            label={t("companyFilter")}
+            game={filters.game}
+            kind="company"
+            value={filters.company || null}
+            onChange={(company) => onChange({ company: company ?? "" })}
+          />
+          <CatalogSelector
+            label={t("cityFilter")}
+            game={filters.game}
+            kind="city"
+            value={filters.city || null}
+            onChange={(city) => onChange({ city: city ?? "" })}
+          />
+        </>
       )}
       <label className="catalog-check">
         <input

@@ -51,7 +51,11 @@ export function useCatalogCommand() {
     path: string,
     body: unknown,
     schema: T,
-    options: { method?: "POST" | "PATCH"; etag?: string; fingerprint?: string } = {},
+    options: {
+      method?: "POST" | "PATCH" | "PUT" | "DELETE";
+      etag?: string;
+      fingerprint?: string;
+    } = {},
   ): Promise<z.output<T> | undefined> {
     if (controller.current || waitUntil > Date.now()) return;
     const ctl = new AbortController();
@@ -76,10 +80,14 @@ export function useCatalogCommand() {
           Accept: "application/json",
           "X-CSRF-Token": csrf.data.data.token,
           "Idempotency-Key": attempt.current.key,
-          ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+          ...(body === undefined || body instanceof FormData
+            ? {}
+            : { "Content-Type": "application/json" }),
           ...(options.etag ? { "If-Match": options.etag } : {}),
         },
-        body: body instanceof FormData ? body : JSON.stringify(body),
+        ...(body === undefined
+          ? {}
+          : { body: body instanceof FormData ? body : JSON.stringify(body) }),
       });
       if (response.status !== 200 && response.status !== 201) {
         const payload = (await response.json().catch(() => null)) as {

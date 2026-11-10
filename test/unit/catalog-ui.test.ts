@@ -9,6 +9,7 @@ import {
   importColumns,
   importIssueText,
   importLinesFromDetails,
+  logoSrc,
   parseFilters,
   templateCsv,
   templateJson,
@@ -29,6 +30,8 @@ import {
 } from "../../apps/web/src/shared/catalog-selectors/native-name.ts";
 import {
   catalogAttempt,
+  depotListSchema,
+  depotSchema,
   importPreviewSchema,
   importResultSchema,
   summarySchema,
@@ -41,6 +44,7 @@ import {
   labelSchema,
   listOfKind,
   listSchema,
+  logoSchema,
 } from "../../apps/web/src/shared/catalog-selectors/contracts.ts";
 
 const id = "51000000-0000-4000-8000-000000000020",
@@ -73,7 +77,12 @@ test("a selector offers visible same-game rows only, and a hidden row stays read
   expect(compatibleSelection(item, "ets2")).toBe(false);
   expect(compatibleSelection(item, "ats", id)).toBe(false);
   expect(compatibleSelection({ ...item, hidden: true }, "ats")).toBe(false);
-  expect(listOfKind).toEqual({ city: "cities", cargo: "cargoes", trailer: "trailers" });
+  expect(listOfKind).toEqual({
+    city: "cities",
+    cargo: "cargoes",
+    trailer: "trailers",
+    company: "companies",
+  });
 });
 
 const row = (entityId: string, overrides: Partial<CatalogItem> = {}): CatalogItem => ({
@@ -247,13 +256,31 @@ test("filters parse safely from a shared URL and only non-default values are wri
     q: "",
     dlc: "",
     region: "",
+    company: "",
+    city: "",
     hidden: false,
   });
   expect(
     parseFilters(
-      new URLSearchParams({ game: "other", tab: "unknown", dlc: "not-a-uuid", region: "x" }),
+      new URLSearchParams({
+        game: "other",
+        tab: "unknown",
+        dlc: "not-a-uuid",
+        region: "x",
+        company: "y",
+        city: "z",
+      }),
     ),
-  ).toEqual({ game: "ets2", tab: "cities", q: "", dlc: "", region: "", hidden: false });
+  ).toEqual({
+    game: "ets2",
+    tab: "cities",
+    q: "",
+    dlc: "",
+    region: "",
+    company: "",
+    city: "",
+    hidden: false,
+  });
   expect(parseFilters(new URLSearchParams({ q: "x".repeat(200) })).q).toHaveLength(128);
   const full: CatalogFilters = {
     game: "ats",
@@ -261,6 +288,8 @@ test("filters parse safely from a shared URL and only non-default values are wri
     q: "A & Б",
     dlc: "base",
     region: regionId,
+    company: "",
+    city: "",
     hidden: true,
   };
   expect(parseFilters(filterParams(full))).toEqual(full);
@@ -272,7 +301,27 @@ test("filters parse safely from a shared URL and only non-default values are wri
     filterParams({ ...full, game: "ets2", q: "", dlc: "", region: "", hidden: false }).size,
   ).toBe(0);
   expect(parseFilters(new URLSearchParams({ tab: "cargoes" })).tab).toBe("cargoes");
-  expect(catalogTabs).toEqual(["dlcs", "regions", "cities", "cargoes", "trailers"]);
+  expect(catalogTabs).toEqual([
+    "dlcs",
+    "regions",
+    "cities",
+    "companies",
+    "depots",
+    "cargoes",
+    "trailers",
+  ]);
+  // The company and city filters belong to the depots tab and survive a shared link there only.
+  const depots: CatalogFilters = {
+    ...full,
+    tab: "depots",
+    region: "",
+    company: id,
+    city: regionId,
+  };
+  expect(parseFilters(filterParams(depots))).toEqual(depots);
+  expect(filterParams({ ...depots, tab: "companies" }).has("company")).toBe(false);
+  expect(filterParams({ ...depots, tab: "companies" }).has("city")).toBe(false);
+  expect(parseFilters(new URLSearchParams({ tab: "depots", company: "nope" })).company).toBe("");
 });
 
 test("request parameters drop empty values and keep exact IDs and search text", () => {
@@ -300,9 +349,20 @@ test("web schemas accept server shapes and reject unknown or retired fields", ()
   expect(labelSchema.safeParse({ ...label, retired: false }).success).toBe(false);
 
   const count = { visible: 1, hidden: 0 };
-  const lists = { dlcs: count, regions: count, cities: count, cargoes: count, trailers: count };
+  const lists = {
+    dlcs: count,
+    regions: count,
+    cities: count,
+    companies: count,
+    depots: count,
+    cargoes: count,
+    trailers: count,
+  };
   expect(summarySchema.safeParse({ game: "ats", lists }).success).toBe(true);
   expect(summarySchema.safeParse({ game: "ats", lists, latest: id }).success).toBe(false);
+  // A summary without the company counters is not this contract.
+  const { depots: _depots, ...withoutDepots } = lists;
+  expect(summarySchema.safeParse({ game: "ats", lists: withoutDepots }).success).toBe(false);
 
   const preview = {
     fileSha256: "a".repeat(64),
@@ -416,6 +476,8 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
   ])
     expect(en).toHaveProperty(key);
   expect(en.tabTrailers).toBe("Trailers");
+  expect([en.tabCompanies, en.tabDepots]).toEqual(["Companies", "Depots"]);
+  expect([ru.tabCompanies, ru.tabDepots]).toEqual(["Компании", "Депо"]);
   expect(ru.tabTrailers).toBe("Прицепы");
   expect(en.trailerCodeHint).toBe(
     "Body type from telemetry (body.type), not the trailer ID. A coupling counts as its first trailer's type.",
@@ -427,4 +489,85 @@ test("catalog strings keep RU/EN parity and name the shared and owner-required t
     expect(en).not.toHaveProperty(key);
   for (const value of [...Object.values(en), ...Object.values(ru)])
     expect(value).not.toMatch(/справочник/i);
+});
+
+const { regionId: _unusedRegionId, region: _unusedRegion, ...cityless } = item;
+const companyItem: CatalogItem = {
+  ...cityless,
+  code: "fictional_co",
+  nameEn: "Fictional Freight Co",
+};
+
+test("a company row carries an optional logo reference and nothing else about the image", () => {
+  const logo = { version: "0123456789abcdef", byteLength: 4096 };
+  expect(itemSchema.parse({ ...companyItem, logo }).logo).toEqual(logo);
+  expect(itemSchema.parse({ ...companyItem, logo: null }).logo).toBeNull();
+  expect(itemSchema.parse(companyItem).logo).toBeUndefined();
+  for (const bad of [
+    { ...logo, extra: 1 },
+    { version: "short", byteLength: 10 },
+    { version: logo.version, byteLength: 0 },
+    { version: logo.version, byteLength: 32769 },
+    { version: logo.version },
+  ])
+    expect(logoSchema.safeParse(bad).success).toBe(false);
+  expect(itemSchema.safeParse({ ...companyItem, logo: { ...logo, png: "AAAA" } }).success).toBe(
+    false,
+  );
+  // The image URL names the company and the version, so a replaced logo is fetched again.
+  expect(logoSrc(id, logo)).toBe(`/api/v1/catalogs/companies/${id}/logo?v=0123456789abcdef`);
+  expect(logoSrc(id, { ...logo, version: "fedcba9876543210" })).not.toBe(logoSrc(id, logo));
+});
+
+test("depot rows accept the server shape and reject extras", () => {
+  const depot = {
+    id: regionId,
+    game: "ats",
+    hidden: false,
+    dlcId: null,
+    dlc: null,
+    company: {
+      id,
+      code: "fictional_co",
+      label: { ...label, entityId: id, label: "Fictional Freight Co" },
+      logo: null,
+    },
+    city: { id: regionId, code: "_x__x", label: { ...label, nameNative: "Fictional city" } },
+  };
+  expect(depotSchema.safeParse(depot).success).toBe(true);
+  expect(depotListSchema.safeParse({ items: [depot], nextCursor: null, total: 1 }).success).toBe(
+    true,
+  );
+  expect(depotSchema.safeParse({ ...depot, extra: true }).success).toBe(false);
+  expect(
+    depotSchema.safeParse({ ...depot, company: { ...depot.company, blob: "AAAA" } }).success,
+  ).toBe(false);
+  expect(depotSchema.safeParse({ ...depot, city: { ...depot.city, region: null } }).success).toBe(
+    false,
+  );
+  const { company: _company, ...withoutCompany } = depot;
+  expect(depotSchema.safeParse(withoutCompany).success).toBe(false);
+});
+
+test("logo and depot dry-run messages are localized for both languages", () => {
+  const en = translate("en"),
+    ru = translate("ru");
+  const cases: [string, string, keyof typeof catalogTranslations.en][] = [
+    ["file", "bad_name", "issueBadName"],
+    ["file", "not_png", "issueNotPng"],
+    ["file", "too_large", "issueLogoTooLarge"],
+    ["file", "bad_dimensions", "issueBadDimensions"],
+    ["file", "corrupt", "issueCorrupt"],
+    ["file", "duplicate_in_file", "issueDuplicateFile"],
+    ["code", "unknown_reference", "issueUnknownCompany"],
+    ["company_code", "unknown_reference", "issueUnknownCompany"],
+    ["city_code", "unknown_reference", "issueUnknownCity"],
+    ["company_code", "hidden_reference", "issueHiddenCompany"],
+    ["city_code", "hidden_reference", "issueHiddenCity"],
+  ];
+  for (const [field, reason, key] of cases) {
+    expect(importIssueText(en, { field, reason })).toBe(catalogTranslations.en[key]);
+    expect(importIssueText(ru, { field, reason })).toBe(catalogTranslations.ru[key]);
+  }
+  expect(importChangedText(en, ["logo", "dlc_code"])).toBe("Changed fields: Logo, Source");
 });
