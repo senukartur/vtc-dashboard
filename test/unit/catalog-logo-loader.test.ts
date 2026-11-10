@@ -40,6 +40,16 @@ const flush = async () => {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 };
 
+/** Answers every request with a logo, in bounded rounds so a regression fails instead of hanging. */
+async function answerAll(f: ReturnType<typeof controlledFetch>) {
+  for (let round = 0; round < 20; round += 1) {
+    await flush();
+    const next = f.pending.shift();
+    if (!next) return;
+    next.answer(png());
+  }
+}
+
 function loader(fetch: (url: string) => Promise<Response>, waits: number[] = []) {
   let n = 0;
   return createLogoLoader({
@@ -154,10 +164,8 @@ test("one of two rows leaving does not cancel a shared queued logo", async () =>
   const staying = logos.request("/logo/shared?v=a");
   leaving.release();
   leaving.release();
-  while (f.pending.length > 0 || f.calls.length < 4) {
-    await flush();
-    f.pending.shift()?.answer(png());
-  }
+  await answerAll(f);
+  expect(f.calls).toHaveLength(4);
   await expect(staying.promise).resolves.toMatch(/^blob:/);
   expect(f.calls.filter((u) => u.includes("shared"))).toHaveLength(1);
 });
@@ -178,6 +186,8 @@ test("releasing a started request keeps its slot accounting, so later logos stil
   await flush();
   f.pending.shift()?.answer(png());
   await expect(later.promise).resolves.toMatch(/^blob:/);
+  // A started request still delivers to whoever holds its promise.
+  await expect(Promise.all(started.map((r) => r.promise))).resolves.toHaveLength(3);
   expect(f.calls).toEqual(["/logo/0?v=a", "/logo/1?v=a", "/logo/2?v=a", "/logo/later?v=a"]);
 });
 
@@ -189,10 +199,8 @@ test("a cancelled logo is requested afresh by the next row that needs it", async
   cancelled.release();
   await expect(cancelled.promise).rejects.toBeInstanceOf(LogoUnavailable);
   const fresh = logos.request("/logo/x?v=a");
-  while (f.pending.length > 0 || f.calls.length < 4) {
-    await flush();
-    f.pending.shift()?.answer(png());
-  }
+  await answerAll(f);
+  expect(f.calls).toHaveLength(4);
   await expect(fresh.promise).resolves.toMatch(/^blob:/);
   expect(f.calls.filter((u) => u.includes("/x"))).toHaveLength(1);
 });
