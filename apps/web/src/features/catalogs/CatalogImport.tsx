@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CatalogDTO, CatalogList } from "../../shared/catalog-selectors/contracts.js";
+import type { CatalogDTO } from "../../shared/catalog-selectors/contracts.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
@@ -11,6 +11,7 @@ import {
   importColumns,
   importIssueText,
   importLinesFromDetails,
+  type CatalogTab,
   templateCsv,
   templateJson,
 } from "./model.js";
@@ -25,7 +26,14 @@ type Step =
   | { step: "preview"; file: File; preview: Preview }
   | { step: "done"; file: File; result: Result };
 
-function ImportLines({ lines }: { lines: Preview["lines"] }) {
+/** Dry-run lines; for a file upload the first column names the file instead of a line number. */
+export function ImportLines({
+  lines,
+  fileNames,
+}: {
+  lines: Preview["lines"];
+  fileNames?: readonly string[];
+}) {
   const { t } = useTranslation("catalogs");
   if (!lines.length) return null;
   return (
@@ -33,7 +41,7 @@ function ImportLines({ lines }: { lines: Preview["lines"] }) {
       <table>
         <thead>
           <tr>
-            <th>{t("colLine")}</th>
+            <th>{t(fileNames ? "colFile" : "colLine")}</th>
             <th>{t("colCode")}</th>
             <th>{t("colResult")}</th>
           </tr>
@@ -41,7 +49,7 @@ function ImportLines({ lines }: { lines: Preview["lines"] }) {
         <tbody>
           {lines.map((line) => (
             <tr key={line.line} data-status={line.status}>
-              <td>{line.line}</td>
+              <td>{fileNames ? (fileNames[line.line - 1] ?? line.line) : line.line}</td>
               <td>
                 <code>{line.code ?? "—"}</code>
               </td>
@@ -67,7 +75,7 @@ export function CatalogImport({
   onClose,
   onApplied,
 }: {
-  list: CatalogList;
+  list: CatalogTab;
   listLabel: string;
   onClose: () => void;
   onApplied: () => void;

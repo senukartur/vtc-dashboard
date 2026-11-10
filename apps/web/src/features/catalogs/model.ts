@@ -3,36 +3,68 @@ import {
   type CatalogDTO,
   type CatalogItem,
   type CatalogList,
+  type CatalogLogo,
   type Game,
   uuid,
 } from "../../shared/catalog-selectors/contracts.js";
 
-export const catalogTabs: readonly CatalogList[] = [
+/** The page's tabs: the plain lists plus depots, which pair a company with a city. */
+export type CatalogTab = CatalogList | "depots";
+export const catalogTabs: readonly CatalogTab[] = [
   "dlcs",
   "regions",
   "cities",
+  "companies",
+  "depots",
   "cargoes",
   "trailers",
 ];
+export const tabLabels: Record<CatalogTab, string> = {
+  dlcs: "tabDlcs",
+  regions: "tabRegions",
+  cities: "tabCities",
+  companies: "tabCompanies",
+  depots: "tabDepots",
+  cargoes: "tabCargoes",
+  trailers: "tabTrailers",
+};
+export const addLabels: Record<CatalogTab, string> = {
+  dlcs: "addDlcs",
+  regions: "addRegions",
+  cities: "addCities",
+  companies: "addCompanies",
+  depots: "addDepots",
+  cargoes: "addCargoes",
+  trailers: "addTrailers",
+};
 export interface CatalogFilters {
   game: Game;
-  tab: CatalogList;
+  tab: CatalogTab;
   q: string;
   dlc: string;
   region: string;
+  /** Depots only: show the cities of this company. */
+  company: string;
+  /** Depots only: show the companies in this city. */
+  city: string;
   hidden: boolean;
 }
+/** The authenticated logo image of a company; the version busts the cache when it changes. */
+export const logoSrc = (companyId: string, logo: CatalogLogo) =>
+  `/api/v1/catalogs/companies/${companyId}/logo?v=${logo.version}`;
 export function parseFilters(params: URLSearchParams): CatalogFilters {
   const tab = params.get("tab");
   return {
     game: params.get("game") === "ats" ? "ats" : "ets2",
-    tab: (catalogTabs as readonly string[]).includes(tab ?? "") ? (tab as CatalogList) : "cities",
+    tab: (catalogTabs as readonly string[]).includes(tab ?? "") ? (tab as CatalogTab) : "cities",
     q: (params.get("q") ?? "").slice(0, 128),
     dlc:
       params.get("dlc") === "base" || uuid.safeParse(params.get("dlc")).success
         ? (params.get("dlc") as string)
         : "",
     region: uuid.safeParse(params.get("region")).success ? (params.get("region") as string) : "",
+    company: uuid.safeParse(params.get("company")).success ? (params.get("company") as string) : "",
+    city: uuid.safeParse(params.get("city")).success ? (params.get("city") as string) : "",
     hidden: params.get("hidden") === "true",
   };
 }
@@ -44,6 +76,8 @@ export function filterParams(filters: CatalogFilters): URLSearchParams {
   if (filters.q) next.set("q", filters.q);
   if (filters.tab !== "dlcs" && filters.dlc) next.set("dlc", filters.dlc);
   if (filters.tab === "cities" && filters.region) next.set("region", filters.region);
+  if (filters.tab === "depots" && filters.company) next.set("company", filters.company);
+  if (filters.tab === "depots" && filters.city) next.set("city", filters.city);
   if (filters.hidden) next.set("hidden", "true");
   return next;
 }
@@ -59,6 +93,10 @@ const importFieldKeys = new Map([
   ["adr_class", "fieldAdr"],
   ["dlc_code", "fieldDlc"],
   ["region_code", "fieldRegion"],
+  ["company_code", "fieldCompanyCode"],
+  ["city_code", "fieldCityCode"],
+  ["file", "fieldFile"],
+  ["logo", "fieldLogo"],
 ]);
 const importFieldLabel = (t: TFunction<"catalogs">, field: string): string => {
   const key = importFieldKeys.get(field);
@@ -78,15 +116,29 @@ export function importIssueText(
     case "too_long":
       return t("issueTooLong", { field });
     case "duplicate_in_file":
-      return t("issueDuplicate");
+      return t(issue.field === "file" ? "issueDuplicateFile" : "issueDuplicate");
     case "unknown_reference":
       if (issue.field === "dlc_code") return t("issueUnknownDlc");
       if (issue.field === "region_code") return t("issueUnknownRegion");
+      if (issue.field === "company_code" || issue.field === "code") return t("issueUnknownCompany");
+      if (issue.field === "city_code") return t("issueUnknownCity");
       return t("issueUnknownReference", { field });
     case "hidden_reference":
       if (issue.field === "dlc_code") return t("issueHiddenDlc");
       if (issue.field === "region_code") return t("issueHiddenRegion");
+      if (issue.field === "company_code") return t("issueHiddenCompany");
+      if (issue.field === "city_code") return t("issueHiddenCity");
       return t("issueHiddenReference", { field });
+    case "bad_name":
+      return t("issueBadName");
+    case "not_png":
+      return t("issueNotPng");
+    case "too_large":
+      return t("issueLogoTooLarge");
+    case "bad_dimensions":
+      return t("issueBadDimensions");
+    case "corrupt":
+      return t("issueCorrupt");
     case "column_count":
       return t("issueColumnCount");
     case "invalid_row":
@@ -117,17 +169,19 @@ export function importLinesFromDetails(details: unknown): CatalogDTO["CatalogImp
     .map(([line, issues]) => ({ line, code: null, status: "error", issues, changedFields: [] }));
 }
 
-export const importColumns: Record<CatalogList, readonly string[]> = {
+export const importColumns: Record<CatalogTab, readonly string[]> = {
   dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
   cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
+  companies: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
 };
-export function templateCsv(list: CatalogList) {
+export function templateCsv(list: CatalogTab) {
   return `${importColumns[list].join(",")}\r\n`;
 }
-export function templateJson(list: CatalogList) {
+export function templateJson(list: CatalogTab) {
   const example = Object.fromEntries(importColumns[list].map((column) => [column, ""]));
   return `${JSON.stringify([example], null, 2)}\n`;
 }

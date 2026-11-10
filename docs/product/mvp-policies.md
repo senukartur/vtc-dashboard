@@ -14,7 +14,7 @@ Change this file only when the owner approves new or changed behavior. Edit the 
 
 ## Game catalogs and localization
 
-The owner chose on 2026-11-08 to replace the versioned catalog system (staged imports, revisions, publication, source trust, mapping review) with five plain per-game lists: DLCs, regions, cities, cargo and trailer types. Staff keep them by hand or by CSV/JSON import from `qualifications.manage`; there is no build, map or publication gate.
+The owner chose on 2026-11-08 to replace the versioned catalog system (staged imports, revisions, publication, source trust, mapping review) with plain per-game lists: DLCs, regions, cities, cargo and trailer types. Staff keep them by hand or by CSV/JSON import from `qualifications.manage`; there is no build, map or publication gate. Game companies and their depots (a company in a city) were added as two more lists on 2026-11-10, with the same editing, hiding and import rules; a company may carry a logo.
 
 Rows are matched to telemetry by exact `(game, code)`. Trailers are identified by telemetry body type, and a coupling takes its first trailer's type. A cargo's ADR class is one of 1, 2, 3, 4, 6 or 8 or empty for non-hazardous cargo; it travels with the trip as evaluated, so a later edit does not rewrite past results. Cities, cargo and trailer types are selected by canonical row IDs; changing language changes labels only. Hidden rows stay readable but leave new selections; a rule or event can keep a row that has since been hidden.
 
@@ -23,6 +23,8 @@ The owner approved an explicit English-name fallback when a Russian translation 
 ### Catalog source use basis
 
 On 2026-10-20 the owner selected closed, non-commercial use of game-derived catalog metadata for this VTC, from the owner-authorized game/DLC installations. A separate SCS permission reply is not a prerequisite for this selected delivery scope. This records the owner's project decision; it does not claim a provider permission grant or authorize public bulk redistribution of extracted definitions, label/localization corpora or game assets. Preserve attribution, exact private provenance and independent dataset review. Public Git contains original machinery, fictional fixtures and aggregate evidence. Production deployment and activation remain separate operational gates.
+
+On 2026-11-10 the owner decided that company logos taken from the owner's game installations may be shown to authenticated dashboard members under the same closed, non-commercial basis. This records the owner's project decision; it does not claim a provider permission grant. Logos are uploaded by staff with `qualifications.manage` through the catalog page after private conversion and are shown only to authenticated members with `company.read`, never on public pages. Logo files stay out of public Git, the web bundle and fixtures, which use only drawn fictional images, and public redistribution remains excluded.
 
 ## Permission matrix
 

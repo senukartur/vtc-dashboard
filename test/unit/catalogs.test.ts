@@ -179,6 +179,37 @@ test("every list declares its import columns, and a template header round-trips 
   }
 });
 
+test("companies are a plain list and depots read their company and city by code", () => {
+  expect(catalogLists).toContain("companies");
+  expect(catalogLists).not.toContain("depots");
+  expect(importColumns.companies).toEqual(["game", "code", "name_en", "name_ru", "dlc_code"]);
+  expect(importColumns.depots).toEqual(["game", "company_code", "city_code", "dlc_code"]);
+  const rows = readImportFile(
+    "depots",
+    csv(
+      importColumns.depots.join(","),
+      "ets2,fictional_co,fictional_city,",
+      "ats,fictional_co,fictional_city,fictional_pack",
+    ),
+  );
+  expect(rows.map((row) => row.values)).toEqual([
+    { game: "ets2", company_code: "fictional_co", city_code: "fictional_city", dlc_code: "" },
+    {
+      game: "ats",
+      company_code: "fictional_co",
+      city_code: "fictional_city",
+      dlc_code: "fictional_pack",
+    },
+  ]);
+  // A depot file with the company columns of a plain list is not a depot file.
+  expect(
+    reason(() => readImportFile("depots", csv(importColumns.companies.join(","), "ets2,a,b,,"))),
+  ).toBe("unknown_column");
+  expect(reason(() => readImportFile("depots", csv("game,company_code,dlc_code", "ets2,a,")))).toBe(
+    "missing_column",
+  );
+});
+
 test("code validation keeps opaque bytes but refuses blanks, whitespace, controls and overflow", () => {
   for (const value of ["_x__x", ".a.b", "Ünï-çødé", "a".repeat(128), "é".repeat(64)])
     expect(validCode(value)).toBe(true);

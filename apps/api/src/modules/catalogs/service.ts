@@ -6,6 +6,9 @@ import {
   asc,
   catalogCargoes,
   catalogCities,
+  catalogCompanies,
+  catalogCompanyCities,
+  catalogCompanyLogos,
   catalogDlcs,
   catalogRegions,
   catalogTrailers,
@@ -15,6 +18,7 @@ import {
   or,
   sql,
 } from "@vtc/db/catalogs-schema";
+import type { SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { retryTransaction } from "../../platform/jobs/queue.js";
 import { duplicateKey } from "../../platform/outbox/events.js";
@@ -23,16 +27,19 @@ import {
   type AdrClass,
   adrClasses,
   CATALOG_IMPORT_TOKEN_TTL_MS,
+  CATALOG_LOGO_BULK_MAX_FILES,
   CATALOG_PREVIEW_MAX_LINES,
   type CatalogConfig,
   type CatalogKind,
   type CatalogList,
   type Game,
+  type ImportList,
   validateCatalogConfig,
   validCode,
 } from "./config.js";
-import { cursorCodec } from "./cursor.js";
+import { cursorCodec, ordered } from "./cursor.js";
 import { CatalogFileError, type ImportRow, readImportFile } from "./import-file.js";
+import { inspectPng, logoCodeFromName, PngError } from "./png.js";
 
 type S = components["schemas"];
 type Locale = "en" | "ru";
@@ -49,6 +56,7 @@ const tables = {
   dlcs: catalogDlcs,
   regions: catalogRegions,
   cities: catalogCities,
+  companies: catalogCompanies,
   cargoes: catalogCargoes,
   trailers: catalogTrailers,
 } as const;
@@ -100,6 +108,13 @@ const fileError = (error: unknown): never => {
   throw error;
 };
 
+/** One uploaded logo file; `truncated` marks a file cut off at the per-logo size limit. */
+export interface LogoFile {
+  name: string;
+  bytes: Buffer;
+  truncated: boolean;
+}
+
 export interface CatalogEntity {
   id: string;
   game: Game;
@@ -126,8 +141,9 @@ export function createCatalogs(
       admin ? "qualifications.manage" : "company.read",
     );
   const parentTable = (kind: keyof typeof parentKinds) => parentKinds[kind];
-  function selectColumns(list: CatalogList) {
+  function selectColumns(list: CatalogList, withLogo = false) {
     const t = common(list);
+    const logo = withLogo && list === "companies";
     return {
       id: t.id,
       game: t.game,
@@ -146,6 +162,9 @@ export function createCatalogs(
       regionEn: list === "cities" ? regionParent.nameEn : sql<string | null>`NULL`,
       regionRu: list === "cities" ? regionParent.nameRu : sql<string | null>`NULL`,
       regionHidden: list === "cities" ? regionParent.hidden : sql<boolean | null>`NULL`,
+      // Only the digest and size are listed; the image bytes are never part of a list query.
+      logoSha: logo ? catalogCompanyLogos.sha256 : sql<Buffer | null>`NULL`,
+      logoBytes: logo ? catalogCompanyLogos.byteLength : sql<number | null>`NULL`,
     };
   }
   type ListRow = {
@@ -166,6 +185,8 @@ export function createCatalogs(
     regionEn: string | null;
     regionRu: string | null;
     regionHidden: boolean | null;
+    logoSha: Buffer | null;
+    logoBytes: number | null;
   };
   async function fetchRows(
     tx: TxContext,
@@ -176,10 +197,15 @@ export function createCatalogs(
     locale: Locale = "en",
   ): Promise<ListRow[]> {
     const t = common(list);
-    let query = c(tx).select(selectColumns(list)).from(t).$dynamic();
+    let query = c(tx).select(selectColumns(list, true)).from(t).$dynamic();
     if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
     if (list === "cities")
       query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
+    if (list === "companies")
+      query = query.leftJoin(
+        catalogCompanyLogos,
+        eq(catalogCompanyLogos.companyId, catalogCompanies.id),
+      );
     query = query.where(where);
     if (order) {
       const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
@@ -188,6 +214,10 @@ export function createCatalogs(
     if (limit !== undefined) query = query.limit(limit);
     return (await query) as unknown as ListRow[];
   }
+  const logoOf = (sha: Buffer | null, bytes: number | null): S["CatalogLogo"] | null =>
+    sha === null || bytes === null
+      ? null
+      : { version: Buffer.from(sha).toString("hex").slice(0, 16), byteLength: Number(bytes) };
   function itemDto(list: CatalogList, row: ListRow, locale: Locale): S["CatalogItem"] {
     const dlc =
       row.dlcId && row.dlcEn !== null
@@ -215,6 +245,7 @@ export function createCatalogs(
           }
         : {}),
       ...(list === "cargoes" ? { adrClass: row.adrClass } : {}),
+      ...(list === "companies" ? { logo: logoOf(row.logoSha, row.logoBytes) } : {}),
     };
   }
   async function itemById(tx: TxContext, list: CatalogList, id: string, locale: Locale) {
@@ -282,6 +313,7 @@ export function createCatalogs(
     const allowed: readonly string[] = {
       dlcs: ["code", "nameEn", "nameRu", "steamAppId", "hidden"],
       regions: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
+      companies: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
       cities: ["code", "nameEn", "nameRu", "nameNative", "regionId", "dlcId", "hidden"],
       cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
       trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
@@ -493,6 +525,130 @@ export function createCatalogs(
     }
     return { inserts, updates, lines, added, changed: changedCount, unchanged, errors };
   }
+  /** Depot rows name their company, city and optional DLC by `(game, code)`; nothing is deleted. */
+  async function computeDepotImport(tx: TxContext, rows: readonly ImportRow[], lock: boolean) {
+    const games = [
+      ...new Set(
+        rows.flatMap((row) =>
+          row.values.game === "ets2" || row.values.game === "ats" ? [row.values.game as Game] : [],
+        ),
+      ),
+    ];
+    async function codes(
+      table: typeof catalogCompanies | typeof catalogCities | typeof catalogDlcs,
+    ) {
+      const map = new Map<string, { id: string; hidden: boolean }>();
+      for (const game of games) {
+        const query = c(tx)
+          .select({ id: table.id, code: table.code, hidden: table.hidden })
+          .from(table)
+          .where(eq(table.game, game))
+          .orderBy(asc(table.id));
+        const found = await (lock ? query.for("share") : query);
+        for (const row of found) map.set(keyOf(game, row.code), row);
+      }
+      return map;
+    }
+    const companyCodes = await codes(catalogCompanies),
+      cityCodes = await codes(catalogCities),
+      dlcCodes = await codes(catalogDlcs);
+    const existing = new Map<string, { id: string; dlcId: string | null }>();
+    for (const game of games) {
+      const query = c(tx)
+        .select({
+          id: catalogCompanyCities.id,
+          companyId: catalogCompanyCities.companyId,
+          cityId: catalogCompanyCities.cityId,
+          dlcId: catalogCompanyCities.dlcId,
+        })
+        .from(catalogCompanyCities)
+        .where(eq(catalogCompanyCities.game, game))
+        .orderBy(asc(catalogCompanyCities.id));
+      for (const row of await (lock ? query.for("update") : query))
+        existing.set(`${row.companyId}\0${row.cityId}`, row);
+    }
+    const seen = new Set<string>();
+    const inserts: Record<string, unknown>[] = [];
+    const updates: { id: string; set: Record<string, unknown> }[] = [];
+    const lines: S["CatalogImportLine"][] = [];
+    let added = 0,
+      changedCount = 0,
+      unchanged = 0,
+      errors = 0;
+    for (const row of rows) {
+      const v = row.values;
+      const issues: S["CatalogImportIssue"][] = [...row.fileIssues];
+      const game = v.game === "ets2" || v.game === "ats" ? (v.game as Game) : null;
+      if (!game) issues.push({ field: "game", reason: v.game ? "invalid" : "required" });
+      const companyCode = v.company_code ?? "",
+        cityCode = v.city_code ?? "";
+      const companyOk = validCode(companyCode),
+        cityOk = validCode(cityCode);
+      if (!companyOk)
+        issues.push({ field: "company_code", reason: companyCode === "" ? "required" : "invalid" });
+      if (!cityOk)
+        issues.push({ field: "city_code", reason: cityCode === "" ? "required" : "invalid" });
+      const company = game && companyOk ? companyCodes.get(keyOf(game, companyCode)) : undefined;
+      const city = game && cityOk ? cityCodes.get(keyOf(game, cityCode)) : undefined;
+      if (game && companyOk && !company)
+        issues.push({ field: "company_code", reason: "unknown_reference" });
+      if (game && cityOk && !city) issues.push({ field: "city_code", reason: "unknown_reference" });
+      const current = company && city ? existing.get(`${company.id}\0${city.id}`) : undefined;
+      // A hidden company or city stays valid only for a depot that already exists.
+      if (company?.hidden && !current)
+        issues.push({ field: "company_code", reason: "hidden_reference" });
+      if (city?.hidden && !current) issues.push({ field: "city_code", reason: "hidden_reference" });
+      let dlcId: string | undefined;
+      if (v.dlc_code && game) {
+        const found = dlcCodes.get(keyOf(game, v.dlc_code));
+        if (!found) issues.push({ field: "dlc_code", reason: "unknown_reference" });
+        else if (found.hidden && current?.dlcId !== found.id)
+          issues.push({ field: "dlc_code", reason: "hidden_reference" });
+        else dlcId = found.id;
+      }
+      if (game && companyOk && cityOk) {
+        const key = `${keyOf(game, companyCode)}\0${Buffer.from(cityCode).toString("hex")}`;
+        if (seen.has(key)) issues.push({ field: "city_code", reason: "duplicate_in_file" });
+        seen.add(key);
+      }
+      const reportedCode = companyOk ? companyCode : null;
+      if (issues.length || !game || !company || !city) {
+        errors++;
+        lines.push({
+          line: row.line,
+          code: reportedCode,
+          status: "error",
+          issues: issues.slice(0, 16),
+          changedFields: [],
+        });
+        continue;
+      }
+      if (!current) {
+        added++;
+        inserts.push({
+          id: newId(),
+          game,
+          companyId: company.id,
+          cityId: city.id,
+          dlcId: dlcId ?? null,
+          hidden: false,
+        });
+        continue;
+      }
+      if (dlcId !== undefined && dlcId !== current.dlcId) {
+        changedCount++;
+        updates.push({ id: current.id, set: { dlcId } });
+        lines.push({
+          line: row.line,
+          code: reportedCode,
+          status: "changed",
+          issues: [],
+          changedFields: ["dlc_code"],
+        });
+      } else unchanged++;
+    }
+    return { inserts, updates, lines, added, changed: changedCount, unchanged, errors };
+  }
   const previewLines = (lines: S["CatalogImportLine"][]) => {
     const sorted = [
       ...lines.filter((l) => l.status === "error"),
@@ -503,9 +659,16 @@ export function createCatalogs(
       truncated: sorted.length > CATALOG_PREVIEW_MAX_LINES,
     };
   };
-  const tokenBinding = (list: CatalogList, fileHash: string, actor: Actor) =>
+  const tokenBinding = (list: ImportList, fileHash: string, actor: Actor) =>
     ["catalog-import", list, fileHash, actor.userId] as const;
-  function parseFile(list: CatalogList, bytes: Buffer) {
+  const computePlan = (
+    tx: TxContext,
+    list: ImportList,
+    rows: readonly ImportRow[],
+    lock: boolean,
+  ) =>
+    list === "depots" ? computeDepotImport(tx, rows, lock) : computeImport(tx, list, rows, lock);
+  function parseFile(list: ImportList, bytes: Buffer) {
     let rows: ImportRow[];
     try {
       rows = readImportFile(list, bytes);
@@ -516,6 +679,235 @@ export function createCatalogs(
     if (!rows.length) throw catalogError(422, "CATALOG_FILE_INVALID");
     return rows;
   }
+
+  // ---- Depots: a company that operates in a city ----
+  const depotColumns = {
+    id: catalogCompanyCities.id,
+    game: catalogCompanyCities.game,
+    hidden: catalogCompanyCities.hidden,
+    dlcId: catalogCompanyCities.dlcId,
+    dlcEn: dlcParent.nameEn,
+    dlcRu: dlcParent.nameRu,
+    dlcHidden: dlcParent.hidden,
+    companyId: catalogCompanies.id,
+    companyCode: catalogCompanies.code,
+    companyEn: catalogCompanies.nameEn,
+    companyRu: catalogCompanies.nameRu,
+    companyHidden: catalogCompanies.hidden,
+    logoSha: catalogCompanyLogos.sha256,
+    logoBytes: catalogCompanyLogos.byteLength,
+    cityId: catalogCities.id,
+    cityCode: catalogCities.code,
+    cityEn: catalogCities.nameEn,
+    cityRu: catalogCities.nameRu,
+    cityNative: catalogCities.nameNative,
+    cityHidden: catalogCities.hidden,
+  };
+  async function fetchDepots(
+    tx: TxContext,
+    where: ReturnType<typeof and>,
+    options: { limit?: number; order?: SQL } = {},
+  ) {
+    let query = c(tx)
+      .select(depotColumns)
+      .from(catalogCompanyCities)
+      .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+      .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+      .leftJoin(dlcParent, eq(catalogCompanyCities.dlcId, dlcParent.id))
+      .leftJoin(catalogCompanyLogos, eq(catalogCompanyLogos.companyId, catalogCompanies.id))
+      .where(where)
+      .$dynamic();
+    if (options.order) query = query.orderBy(asc(options.order), asc(catalogCompanyCities.id));
+    if (options.limit !== undefined) query = query.limit(options.limit);
+    return query;
+  }
+  type DepotRow = Awaited<ReturnType<typeof fetchDepots>>[number];
+  function depotDto(row: DepotRow, locale: Locale): S["CatalogDepot"] {
+    return {
+      id: row.id,
+      game: row.game,
+      hidden: row.hidden,
+      dlcId: row.dlcId,
+      dlc:
+        row.dlcId && row.dlcEn !== null
+          ? label(row.dlcId, row.dlcEn, row.dlcRu, row.dlcHidden === true, locale)
+          : null,
+      company: {
+        id: row.companyId,
+        code: row.companyCode.toString(),
+        label: label(row.companyId, row.companyEn, row.companyRu, row.companyHidden, locale),
+        logo: logoOf(row.logoSha, row.logoBytes),
+      },
+      city: {
+        id: row.cityId,
+        code: row.cityCode.toString(),
+        label: label(row.cityId, row.cityEn, row.cityRu, row.cityHidden, locale, row.cityNative),
+      },
+    };
+  }
+  async function depotById(tx: TxContext, id: string, locale: Locale) {
+    const [row] = await fetchDepots(tx, eq(catalogCompanyCities.id, id));
+    if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+    return depotDto(row, locale);
+  }
+  /** A company or city a new depot may name: same game and not hidden. */
+  async function depotParent(
+    tx: TxContext,
+    table: typeof catalogCompanies | typeof catalogCities,
+    game: Game,
+    id: string,
+  ) {
+    const [row] = await c(tx)
+      .select({ id: table.id, hidden: table.hidden })
+      .from(table)
+      .where(and(eq(table.id, applicationId(id)), eq(table.game, game)))
+      .for("share");
+    if (!row || row.hidden) throw catalogError(422, "CATALOG_PARENT_INVALID");
+  }
+
+  // ---- Company logos ----
+  const sha256Of = (bytes: Buffer) => createHash("sha256").update(bytes).digest();
+  const logoReason = (error: unknown) => (error instanceof PngError ? error.reason : "corrupt");
+  async function lockCompany(tx: TxContext, id: string) {
+    const [row] = await c(tx)
+      .select({ id: catalogCompanies.id })
+      .from(catalogCompanies)
+      .where(eq(catalogCompanies.id, applicationId(id)))
+      .for("update");
+    if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+    return row.id;
+  }
+  /** The company row is already locked, which serializes writers of its logo. */
+  async function saveLogo(tx: TxContext, companyId: string, bytes: Buffer) {
+    const digest = sha256Of(bytes);
+    const [current] = await c(tx)
+      .select({ sha: catalogCompanyLogos.sha256 })
+      .from(catalogCompanyLogos)
+      .where(eq(catalogCompanyLogos.companyId, companyId));
+    if (current && Buffer.from(current.sha).equals(digest)) return;
+    const values = {
+      png: bytes,
+      byteLength: bytes.length,
+      sha256: digest,
+      updatedAt: now().toISOString(),
+    };
+    if (!current)
+      await c(tx)
+        .insert(catalogCompanyLogos)
+        .values({ companyId, ...values });
+    else
+      await c(tx)
+        .update(catalogCompanyLogos)
+        .set(values)
+        .where(eq(catalogCompanyLogos.companyId, companyId));
+  }
+  /** The manifest a dry-run token binds: sorted (file name, content hash) pairs. */
+  const manifestOf = (files: readonly LogoFile[]) =>
+    createHash("sha256")
+      .update(
+        ordered(
+          files
+            .map((file) => [file.name, sha256Of(file.bytes).toString("hex")])
+            .sort((a, b) => (`${a[0]}\0${a[1]}` < `${b[0]}\0${b[1]}` ? -1 : 1)),
+        ),
+      )
+      .digest("hex");
+  async function computeLogos(
+    tx: TxContext,
+    game: Game,
+    files: readonly LogoFile[],
+    lock: boolean,
+  ) {
+    const prepared = files.map((file, index) => {
+      const issues: S["CatalogImportIssue"][] = [];
+      const code = logoCodeFromName(file.name);
+      if (code === null) issues.push({ field: "file", reason: "bad_name" });
+      if (file.truncated) issues.push({ field: "file", reason: "too_large" });
+      else {
+        try {
+          inspectPng(file.bytes);
+        } catch (error) {
+          issues.push({ field: "file", reason: logoReason(error) });
+        }
+      }
+      return { line: index + 1, code, issues, bytes: file.bytes };
+    });
+    const wanted = [
+      ...new Set(prepared.flatMap((file) => (file.code === null ? [] : [file.code]))),
+    ];
+    const companies = new Map<string, string>();
+    for (let i = 0; i < wanted.length; i += 200) {
+      const query = c(tx)
+        .select({ id: catalogCompanies.id, code: catalogCompanies.code })
+        .from(catalogCompanies)
+        .where(
+          and(
+            eq(catalogCompanies.game, game),
+            inArray(
+              catalogCompanies.code,
+              wanted.slice(i, i + 200).map((code) => Buffer.from(code)),
+            ),
+          ),
+        )
+        .orderBy(asc(catalogCompanies.id));
+      for (const row of await (lock ? query.for("update") : query))
+        companies.set(row.code.toString(), row.id);
+    }
+    const stored = new Map<string, Buffer>();
+    const ids = [...companies.values()];
+    for (let i = 0; i < ids.length; i += 200)
+      for (const row of await c(tx)
+        .select({ id: catalogCompanyLogos.companyId, sha: catalogCompanyLogos.sha256 })
+        .from(catalogCompanyLogos)
+        .where(inArray(catalogCompanyLogos.companyId, ids.slice(i, i + 200))))
+        stored.set(row.id, Buffer.from(row.sha));
+    const seen = new Set<string>();
+    const writes: { companyId: string; bytes: Buffer }[] = [];
+    const lines: S["CatalogImportLine"][] = [];
+    let added = 0,
+      changed = 0,
+      unchanged = 0,
+      errors = 0;
+    for (const file of prepared) {
+      const issues = [...file.issues];
+      const companyId = file.code === null ? undefined : companies.get(file.code);
+      if (file.code !== null) {
+        if (!companyId) issues.push({ field: "code", reason: "unknown_reference" });
+        if (seen.has(file.code)) issues.push({ field: "file", reason: "duplicate_in_file" });
+        seen.add(file.code);
+      }
+      if (issues.length || !companyId) {
+        errors++;
+        lines.push({
+          line: file.line,
+          code: file.code,
+          status: "error",
+          issues: issues.slice(0, 16),
+          changedFields: [],
+        });
+        continue;
+      }
+      const before = stored.get(companyId);
+      if (before?.equals(sha256Of(file.bytes))) {
+        unchanged++;
+        continue;
+      }
+      writes.push({ companyId, bytes: file.bytes });
+      if (before) {
+        changed++;
+        lines.push({
+          line: file.line,
+          code: file.code,
+          status: "changed",
+          issues: [],
+          changedFields: ["logo"],
+        });
+      } else added++;
+    }
+    return { writes, lines, added, changed, unchanged, errors };
+  }
+  const logoTokenBinding = (game: Game, manifest: string, actor: Actor) =>
+    ["catalog-logos", game, manifest, actor.userId] as const;
 
   return {
     config,
@@ -536,6 +928,14 @@ export function createCatalogs(
           const count = (flag: boolean) => Number(rows.find((r) => r.hidden === flag)?.count ?? 0);
           lists[list] = { visible: count(false), hidden: count(true) };
         }
+        const depots = await c(tx)
+          .select({ hidden: catalogCompanyCities.hidden, count: sql<number | string>`COUNT(*)` })
+          .from(catalogCompanyCities)
+          .where(eq(catalogCompanyCities.game, game))
+          .groupBy(catalogCompanyCities.hidden);
+        const depotCount = (flag: boolean) =>
+          Number(depots.find((r) => r.hidden === flag)?.count ?? 0);
+        lists.depots = { visible: depotCount(false), hidden: depotCount(true) };
         return { game, lists };
       });
     },
@@ -746,12 +1146,12 @@ export function createCatalogs(
         return saved.item as S["CatalogItem"];
       });
     },
-    async previewImport(actor: Actor, list: CatalogList, bytes: Buffer) {
+    async previewImport(actor: Actor, list: ImportList, bytes: Buffer) {
       const fileSha256 = sha(bytes);
       const rows = parseFile(list, bytes);
       return run(async (tx): Promise<S["CatalogImportPreview"]> => {
         await authority(tx, actor, true);
-        const plan = await computeImport(tx, list, rows, false);
+        const plan = await computePlan(tx, list, rows, false);
         const { lines, truncated } = previewLines(plan.lines);
         return {
           fileSha256,
@@ -773,7 +1173,7 @@ export function createCatalogs(
     },
     async applyImport(
       actor: Actor,
-      list: CatalogList,
+      list: ImportList,
       bytes: Buffer,
       key: string,
       token: string,
@@ -797,10 +1197,10 @@ export function createCatalogs(
             if (!(new Date(expiresAt).getTime() > now().getTime()))
               throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
             const rows = parseFile(list, bytes);
-            const plan = await computeImport(tx, list, rows, true);
+            const plan = await computePlan(tx, list, rows, true);
             if (plan.errors)
               throw importInvalid(plan.lines.filter((line) => line.status === "error"));
-            const table = tables[list] as Common;
+            const table = (list === "depots" ? catalogCompanyCities : tables[list]) as Common;
             for (let i = 0; i < plan.inserts.length; i += 200) {
               try {
                 await c(tx)
@@ -821,6 +1221,354 @@ export function createCatalogs(
             return {
               importId,
               rows: rows.length,
+              added: plan.added,
+              changed: plan.changed,
+              unchanged: plan.unchanged,
+            };
+          },
+        );
+        return result as unknown as S["CatalogImportResult"];
+      });
+    },
+    async listDepots(
+      actor: Actor,
+      query: {
+        game: Game;
+        companyId?: string;
+        cityId?: string;
+        search?: string;
+        dlc?: string;
+        includeHidden?: boolean;
+        locale?: Locale;
+        limit?: number;
+        cursor?: string;
+      },
+    ): Promise<S["CatalogDepotList"]> {
+      return run(async (tx) => {
+        await authority(tx, actor, false);
+        const limit = query.limit ?? 25,
+          locale = query.locale ?? "en";
+        if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+        const binding = [
+          actor.userId,
+          actor.sessionId,
+          actor.accessEpoch,
+          "depots",
+          query.game,
+          query.companyId ?? null,
+          query.cityId ?? null,
+          query.search ?? null,
+          query.dlc ?? null,
+          query.includeHidden ?? false,
+          locale,
+        ];
+        let after: [string, string] | null = null;
+        if (query.cursor) {
+          try {
+            after = JSON.parse(codec.read(binding, query.cursor));
+          } catch {
+            throw identityError(409, "VERSION_CONFLICT");
+          }
+        }
+        // Cities of one company read by city name; every other view reads by company name.
+        const byCity = query.companyId !== undefined;
+        const [en, ru] = byCity
+          ? [catalogCities.nameEn, catalogCities.nameRu]
+          : [catalogCompanies.nameEn, catalogCompanies.nameRu];
+        const display = locale === "ru" ? sql`COALESCE(${ru}, ${en})` : sql`${en}`;
+        const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
+        const like = `%${escaped}%`;
+        const filter = and(
+          eq(catalogCompanyCities.game, query.game),
+          query.includeHidden
+            ? undefined
+            : and(
+                eq(catalogCompanyCities.hidden, false),
+                eq(catalogCompanies.hidden, false),
+                eq(catalogCities.hidden, false),
+              ),
+          query.companyId
+            ? eq(catalogCompanyCities.companyId, applicationId(query.companyId))
+            : undefined,
+          query.cityId ? eq(catalogCompanyCities.cityId, applicationId(query.cityId)) : undefined,
+          query.dlc === "base" ? sql`${catalogCompanyCities.dlcId} IS NULL` : undefined,
+          query.dlc && query.dlc !== "base"
+            ? eq(catalogCompanyCities.dlcId, applicationId(query.dlc))
+            : undefined,
+          escaped
+            ? or(
+                sql`${catalogCompanies.nameEn} LIKE ${like}`,
+                sql`${catalogCompanies.nameRu} LIKE ${like}`,
+                sql`CONVERT(${catalogCompanies.code} USING utf8mb4) LIKE ${like}`,
+                sql`${catalogCities.nameEn} LIKE ${like}`,
+                sql`${catalogCities.nameRu} LIKE ${like}`,
+                sql`${catalogCities.nameNative} LIKE ${like}`,
+                sql`CONVERT(${catalogCities.code} USING utf8mb4) LIKE ${like}`,
+              )
+            : undefined,
+        );
+        const [total] = await c(tx)
+          .select({ count: sql<number | string>`COUNT(*)` })
+          .from(catalogCompanyCities)
+          .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+          .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+          .where(filter);
+        const page = await fetchDepots(
+          tx,
+          and(
+            filter,
+            after
+              ? or(
+                  sql`${display} > ${after[0]}`,
+                  and(sql`${display} = ${after[0]}`, gt(catalogCompanyCities.id, after[1])),
+                )
+              : undefined,
+          ),
+          { limit: limit + 1, order: display },
+        );
+        const visible = page.slice(0, limit);
+        const last = visible[visible.length - 1];
+        const lastName = last
+          ? byCity
+            ? locale === "ru" && last.cityRu !== null
+              ? last.cityRu
+              : last.cityEn
+            : locale === "ru" && last.companyRu !== null
+              ? last.companyRu
+              : last.companyEn
+          : null;
+        return {
+          items: visible.map((row) => depotDto(row, locale)),
+          total: Number(total?.count ?? 0),
+          nextCursor:
+            page.length > limit && last && lastName !== null
+              ? codec.write(binding, JSON.stringify([lastName, last.id]))
+              : null,
+        };
+      });
+    },
+    async createDepot(
+      actor: Actor,
+      key: string,
+      input: S["CatalogDepotInput"],
+    ): Promise<S["CatalogDepot"]> {
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:create:depots`,
+          key,
+          { input },
+          async () => {
+            await depotParent(tx, catalogCompanies, input.game, input.companyId);
+            await depotParent(tx, catalogCities, input.game, input.cityId);
+            await parent(tx, "dlc", input.game, input.dlcId ?? null);
+            const id = newId();
+            try {
+              await c(tx)
+                .insert(catalogCompanyCities)
+                .values({
+                  id,
+                  game: input.game,
+                  companyId: input.companyId,
+                  cityId: input.cityId,
+                  dlcId: input.dlcId ?? null,
+                  hidden: false,
+                });
+            } catch (error) {
+              if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
+              throw error;
+            }
+            await recordAudit(tx, actor, "catalog.changed", id);
+            return { item: await depotById(tx, id, "en") };
+          },
+        );
+        return saved.item as S["CatalogDepot"];
+      });
+    },
+    async patchDepot(
+      actor: Actor,
+      id: string,
+      key: string,
+      input: S["CatalogDepotPatch"],
+    ): Promise<S["CatalogDepot"]> {
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:patch:depots:${applicationId(id)}`,
+          key,
+          { id, input },
+          async () => {
+            const [row] = await c(tx)
+              .select({
+                id: catalogCompanyCities.id,
+                game: catalogCompanyCities.game,
+                dlcId: catalogCompanyCities.dlcId,
+              })
+              .from(catalogCompanyCities)
+              .where(eq(catalogCompanyCities.id, id))
+              .for("update");
+            if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+            if ("dlcId" in input) await parent(tx, "dlc", row.game, input.dlcId, row.dlcId);
+            const fields = {
+              ...("dlcId" in input ? { dlcId: input.dlcId ?? null } : {}),
+              ...("hidden" in input ? { hidden: input.hidden } : {}),
+            };
+            if (Object.keys(fields).length)
+              await c(tx)
+                .update(catalogCompanyCities)
+                .set(fields)
+                .where(eq(catalogCompanyCities.id, row.id));
+            await recordAudit(tx, actor, "catalog.changed", row.id);
+            return { item: await depotById(tx, row.id, "en") };
+          },
+        );
+        return saved.item as S["CatalogDepot"];
+      });
+    },
+    /** Stores one validated PNG for a company, replacing the current one. */
+    async setLogo(
+      actor: Actor,
+      companyId: string,
+      key: string,
+      bytes: Buffer,
+    ): Promise<S["CatalogItem"]> {
+      try {
+        inspectPng(bytes);
+      } catch (error) {
+        if (error instanceof PngError && error.reason === "too_large")
+          throw catalogError(413, "CATALOG_FILE_TOO_LARGE");
+        throw catalogError(422, "CATALOG_FILE_INVALID");
+      }
+      const digest = sha256Of(bytes).toString("hex");
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:logo:set:${applicationId(companyId)}`,
+          key,
+          { companyId, sha256: digest },
+          async () => {
+            const id = await lockCompany(tx, companyId);
+            await saveLogo(tx, id, bytes);
+            await recordAudit(tx, actor, "catalog.changed", id);
+            return { item: await itemById(tx, "companies", id, "en") };
+          },
+        );
+        return saved.item as S["CatalogItem"];
+      });
+    },
+    /** Removing a logo that is not there changes nothing and writes no audit entry. */
+    async removeLogo(actor: Actor, companyId: string, key: string): Promise<S["CatalogItem"]> {
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const saved = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:logo:remove:${applicationId(companyId)}`,
+          key,
+          { companyId },
+          async () => {
+            const id = await lockCompany(tx, companyId);
+            const [current] = await c(tx)
+              .select({ sha: catalogCompanyLogos.sha256 })
+              .from(catalogCompanyLogos)
+              .where(eq(catalogCompanyLogos.companyId, id));
+            if (current) {
+              await c(tx).delete(catalogCompanyLogos).where(eq(catalogCompanyLogos.companyId, id));
+              await recordAudit(tx, actor, "catalog.changed", id);
+            }
+            return { item: await itemById(tx, "companies", id, "en") };
+          },
+        );
+        return saved.item as S["CatalogItem"];
+      });
+    },
+    /** The image for `company.read` holders. `matches` lets the caller skip the bytes on a 304. */
+    async readLogo(actor: Actor, companyId: string, matches: (etag: string) => boolean) {
+      return run(async (tx) => {
+        await authority(tx, actor, false);
+        const [meta] = await c(tx)
+          .select({ sha: catalogCompanyLogos.sha256, length: catalogCompanyLogos.byteLength })
+          .from(catalogCompanyLogos)
+          .where(eq(catalogCompanyLogos.companyId, applicationId(companyId)));
+        if (!meta) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+        const etag = Buffer.from(meta.sha).toString("hex");
+        if (matches(etag)) return { etag, version: etag.slice(0, 16), png: null };
+        const [row] = await c(tx)
+          .select({ png: catalogCompanyLogos.png })
+          .from(catalogCompanyLogos)
+          .where(eq(catalogCompanyLogos.companyId, applicationId(companyId)));
+        if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
+        return { etag, version: etag.slice(0, 16), png: Buffer.from(row.png) };
+      });
+    },
+    async previewLogos(
+      actor: Actor,
+      game: Game,
+      files: readonly LogoFile[],
+    ): Promise<S["CatalogImportPreview"]> {
+      if (!files.length || files.length > CATALOG_LOGO_BULK_MAX_FILES)
+        throw catalogError(422, "CATALOG_FILE_INVALID");
+      const manifest = manifestOf(files);
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const plan = await computeLogos(tx, game, files, false);
+        const { lines, truncated } = previewLines(plan.lines);
+        return {
+          fileSha256: manifest,
+          token: plan.errors
+            ? null
+            : codec.write(
+                logoTokenBinding(game, manifest, actor),
+                new Date(now().getTime() + CATALOG_IMPORT_TOKEN_TTL_MS).toISOString(),
+              ),
+          rows: files.length,
+          added: plan.added,
+          changed: plan.changed,
+          unchanged: plan.unchanged,
+          errors: plan.errors,
+          lines,
+          truncated,
+        };
+      });
+    },
+    async applyLogos(
+      actor: Actor,
+      game: Game,
+      files: readonly LogoFile[],
+      key: string,
+      token: string,
+    ): Promise<S["CatalogImportResult"]> {
+      if (!files.length || files.length > CATALOG_LOGO_BULK_MAX_FILES)
+        throw catalogError(422, "CATALOG_FILE_INVALID");
+      const manifest = manifestOf(files);
+      return run(async (tx) => {
+        await authority(tx, actor, true);
+        const result = await ports.identity.externalCommand(
+          tx,
+          `${actor.userId}:catalog:logos:${game}`,
+          key,
+          { game, manifest },
+          async () => {
+            let expiresAt: string;
+            try {
+              expiresAt = codec.read(logoTokenBinding(game, manifest, actor), token);
+            } catch {
+              throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+            }
+            if (!(new Date(expiresAt).getTime() > now().getTime()))
+              throw catalogError(412, "CATALOG_IMPORT_TOKEN_INVALID");
+            // Every file is checked again inside the transaction: all logos are stored or none.
+            const plan = await computeLogos(tx, game, files, true);
+            if (plan.errors)
+              throw importInvalid(plan.lines.filter((line) => line.status === "error"));
+            for (const write of plan.writes) await saveLogo(tx, write.companyId, write.bytes);
+            const importId = newId();
+            await recordAudit(tx, actor, "catalog.imported", importId);
+            return {
+              importId,
+              rows: files.length,
               added: plan.added,
               changed: plan.changed,
               unchanged: plan.unchanged,

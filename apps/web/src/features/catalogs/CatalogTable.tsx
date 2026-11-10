@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/contracts.js";
 import { Button, Table } from "../../shared/ui/primitives.js";
+import { CompanyLogo } from "./CompanyLogo.js";
 
 export const adrText = (t: TFunction<"catalogs">, item: CatalogItem) =>
   item.adrClass ? t("adrClass", { class: item.adrClass }) : t("nonHazardous");
@@ -34,7 +35,7 @@ export function CatalogTable({
   const { t } = useTranslation("catalogs");
   return (
     <div className="catalog-table-wrap">
-      <Table className="catalog-table" data-testid="catalog-table">
+      <Table className="catalog-table" data-testid="catalog-table" data-list={list}>
         <thead>
           <tr>
             <th>{t("colName")}</th>
@@ -52,7 +53,18 @@ export function CatalogTable({
           {items.map((item) => (
             <tr key={item.id} data-hidden={item.hidden}>
               <td className="catalog-name">
-                {item.nameEn} <RowBadges item={item} />
+                {list === "companies" ? (
+                  <span className="catalog-company">
+                    <CompanyLogo companyId={item.id} logo={item.logo} />
+                    <span>
+                      {item.nameEn} <RowBadges item={item} />
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    {item.nameEn} <RowBadges item={item} />
+                  </>
+                )}
               </td>
               <td>{item.nameRu ?? "—"}</td>
               {list === "cities" && <td>{item.nameNative ?? "—"}</td>}

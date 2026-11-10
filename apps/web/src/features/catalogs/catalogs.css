@@ -1,4 +1,4 @@
-/* Game catalogs: five editable lists. Page rules are scoped to .catalog-page and built from shared
+/* Game catalogs: editable lists and depots. Page rules are scoped to .catalog-page and built from shared
    tokens; the dialog rules are portaled outside the page. */
 .catalog-page {
   display: flex;
@@ -284,6 +284,89 @@
 }
 .catalog-dialog .catalog-applied strong {
   color: var(--accepted);
+}
+/* Company logos sit on a fixed light plate: artwork is drawn for unknown backgrounds, and the
+   page is dark. The company name is always shown next to it. */
+.company-logo {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 128px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: #e9edf3;
+  color: #6b7686;
+}
+.company-logo img {
+  display: block;
+  width: 128px;
+  height: 32px;
+  object-fit: contain;
+}
+.catalog-page .catalog-company,
+.catalog-dialog .catalog-company {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+/* The logo plate needs room: columns size to their content and text may wrap instead of clipping. */
+.catalog-page .catalog-table[data-list="companies"],
+.catalog-page .catalog-table[data-list="depots"] {
+  table-layout: auto;
+}
+.catalog-page .catalog-table[data-list="companies"] td,
+.catalog-page .catalog-table[data-list="depots"] td {
+  height: 44px;
+  vertical-align: middle;
+  white-space: normal;
+}
+.catalog-page .catalog-table[data-list="companies"] td.catalog-name,
+.catalog-page .catalog-table[data-list="depots"] td.catalog-name {
+  max-width: none;
+  min-width: 260px;
+  overflow: visible;
+}
+.catalog-page .catalog-table[data-list="companies"] td:last-child,
+.catalog-page .catalog-table[data-list="depots"] td:last-child {
+  white-space: nowrap;
+}
+.catalog-page .catalog-toolbar .catalog-selector {
+  flex: 1 1 200px;
+  min-width: 180px;
+}
+.catalog-dialog .catalog-field-label {
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.catalog-dialog .catalog-logo-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  min-width: 0;
+}
+.catalog-dialog .catalog-logo-section legend {
+  padding: 0 4px;
+  font-size: var(--font-small);
+}
+.catalog-dialog .catalog-logo-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.catalog-dialog .catalog-logo-actions {
+  justify-content: flex-start;
+}
+.catalog-dialog .catalog-lines {
+  overflow-x: auto;
 }
 @media (max-width: 759.98px) {
   .catalog-page .catalog-actions {

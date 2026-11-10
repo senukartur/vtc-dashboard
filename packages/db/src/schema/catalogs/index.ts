@@ -2,14 +2,16 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  customType,
   foreignKey,
+  index,
   int,
   mysqlEnum,
   mysqlTable,
   uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
-import { idColumn, opaqueColumn } from "../../core/values.js";
+import { idColumn, opaqueColumn, utcColumn } from "../../core/values.js";
 
 export { and, asc, desc, eq, gt, inArray, lt, lte, or, sql } from "drizzle-orm";
 
@@ -18,6 +20,8 @@ export type AdrClass = (typeof adrClasses)[number];
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const code = (name: string) => opaqueColumn(name, { length: 128 });
 const name = (column: string) => varchar(column, { length: 256 });
+const logoBlob = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "blob" });
+const digest = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "binary(32)" });
 
 export const catalogDlcs = mysqlTable(
   "catalog_dlcs",
@@ -157,5 +161,82 @@ export const catalogTrailers = mysqlTable(
       columns: [t.dlcId, t.game],
       foreignColumns: [catalogDlcs.id, catalogDlcs.game],
     }).onDelete("restrict"),
+  ],
+);
+
+export const catalogCompanies = mysqlTable(
+  "catalog_companies",
+  {
+    id: idColumn("id").primaryKey(),
+    game: game("game").notNull(),
+    code: code("code").notNull(),
+    nameEn: name("name_en").notNull(),
+    nameRu: name("name_ru"),
+    dlcId: idColumn("dlc_id"),
+    hidden: boolean("hidden").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("catalog_company_game_code").on(t.game, t.code),
+    uniqueIndex("catalog_company_id_game").on(t.id, t.game),
+    check("catalog_company_code_nonempty", sql`octet_length(${t.code}) > 0`),
+    check(
+      "catalog_company_name_ru_nonempty",
+      sql`${t.nameRu} IS NULL OR char_length(${t.nameRu}) > 0`,
+    ),
+    foreignKey({
+      name: "catalog_company_dlc_fk",
+      columns: [t.dlcId, t.game],
+      foreignColumns: [catalogDlcs.id, catalogDlcs.game],
+    }).onDelete("restrict"),
+  ],
+);
+
+/** One depot: a company that operates in a city. The composite keys keep both in the depot's game. */
+export const catalogCompanyCities = mysqlTable(
+  "catalog_company_cities",
+  {
+    id: idColumn("id").primaryKey(),
+    game: game("game").notNull(),
+    companyId: idColumn("company_id").notNull(),
+    cityId: idColumn("city_id").notNull(),
+    dlcId: idColumn("dlc_id"),
+    hidden: boolean("hidden").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("catalog_company_city_pair").on(t.companyId, t.cityId),
+    index("catalog_company_city_by_city").on(t.cityId, t.companyId),
+    foreignKey({
+      name: "catalog_company_city_company_fk",
+      columns: [t.companyId, t.game],
+      foreignColumns: [catalogCompanies.id, catalogCompanies.game],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "catalog_company_city_city_fk",
+      columns: [t.cityId, t.game],
+      foreignColumns: [catalogCities.id, catalogCities.game],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "catalog_company_city_dlc_fk",
+      columns: [t.dlcId, t.game],
+      foreignColumns: [catalogDlcs.id, catalogDlcs.game],
+    }).onDelete("restrict"),
+  ],
+);
+
+/** The uploaded PNG of a company. No row means no logo; removing a logo deletes the row. */
+export const catalogCompanyLogos = mysqlTable(
+  "catalog_company_logos",
+  {
+    companyId: idColumn("company_id")
+      .primaryKey()
+      .references(() => catalogCompanies.id, { onDelete: "restrict" }),
+    png: logoBlob("png").notNull(),
+    byteLength: int("byte_length", { unsigned: true }).notNull(),
+    sha256: digest("sha256").notNull(),
+    updatedAt: utcColumn("updated_at").notNull(),
+  },
+  (t) => [
+    check("catalog_company_logo_size", sql`${t.byteLength} BETWEEN 1 AND 32768`),
+    check("catalog_company_logo_length", sql`octet_length(${t.png}) = ${t.byteLength}`),
   ],
 );

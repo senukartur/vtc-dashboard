@@ -4,6 +4,7 @@ import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/co
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { adrText, RowBadges } from "./CatalogTable.js";
+import { CompanyLogo } from "./CompanyLogo.js";
 
 /** Phone list: same rows as the table, with actions behind one 40px button. */
 export function CatalogCards({
@@ -28,6 +29,7 @@ export function CatalogCards({
       {items.map((item) => (
         <div className="catalog-card-row" key={item.id} data-hidden={item.hidden}>
           <div className="catalog-card-body">
+            {list === "companies" && <CompanyLogo companyId={item.id} logo={item.logo} />}
             <div className="catalog-card-title">
               <span>{item.display.label}</span> <RowBadges item={item} />
             </div>

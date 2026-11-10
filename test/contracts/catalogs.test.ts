@@ -129,3 +129,130 @@ test("import results are closed and a preview with errors withholds its token", 
     false,
   );
 });
+
+const companyId = "30000000-0000-4000-8000-000000000001";
+const company = {
+  id: companyId,
+  game: "ets2",
+  code: "fictional_freight",
+  nameEn: "Fictional Freight",
+  nameRu: null,
+  hidden: false,
+  display: { ...label, entityId: companyId, label: "Fictional Freight" },
+  dlcId: null,
+  dlc: null,
+};
+
+test("a company row has an optional logo reference and never carries image bytes", () => {
+  const validItem = validate("CatalogItem");
+  const logo = { version: "0123456789abcdef", byteLength: 2048 };
+  expect(validItem(company)).toBe(true);
+  expect(validItem({ ...company, logo })).toBe(true);
+  expect(validItem({ ...company, logo: null })).toBe(true);
+  for (const bad of [
+    { ...logo, png: "AAAA" },
+    { ...logo, sha256: "a".repeat(64) },
+    { version: "0123", byteLength: 2048 },
+    { version: "0123456789ABCDEF", byteLength: 2048 },
+    { version: logo.version, byteLength: 0 },
+    { version: logo.version, byteLength: 32769 },
+    { byteLength: 2048 },
+  ])
+    expect(validItem({ ...company, logo: bad }), JSON.stringify(bad)).toBe(false);
+  expect(validate("CatalogLogo")(logo)).toBe(true);
+});
+
+test("company input and patch follow the plain-list shape", () => {
+  const base = { game: "ets2", code: "fictional_freight", nameEn: "Fictional Freight" };
+  const input = validate("CatalogCompanyInput");
+  expect(input(base)).toBe(true);
+  expect(input({ ...base, nameRu: null, dlcId: id })).toBe(true);
+  for (const extra of [{ regionId }, { adrClass: "3" }, { nameNative: "x" }, { logo: null }])
+    expect(input({ ...base, ...extra })).toBe(false);
+  expect(input({ ...base, code: "a b" })).toBe(false);
+  expect(input({ game: "ets2", code: "fictional_freight" })).toBe(false);
+  expect(validate("CatalogItemPatch")({ dlcId: null, hidden: true })).toBe(true);
+});
+
+test("summary counts include companies and depots", () => {
+  const count = { visible: 3, hidden: 1 };
+  const lists = {
+    dlcs: count,
+    regions: count,
+    cities: count,
+    companies: count,
+    depots: count,
+    cargoes: count,
+    trailers: count,
+  };
+  expect(validate("CatalogSummary")({ game: "ets2", lists })).toBe(true);
+  const { depots: _depots, ...withoutDepots } = lists;
+  expect(validate("CatalogSummary")({ game: "ets2", lists: withoutDepots })).toBe(false);
+  expect(validate("CatalogSummary")({ game: "ets2", lists: { ...lists, other: count } })).toBe(
+    false,
+  );
+});
+
+test("a depot names its company, city and source and is closed to extra fields", () => {
+  const depot = {
+    id,
+    game: "ets2",
+    hidden: false,
+    dlcId: null,
+    dlc: null,
+    company: {
+      id: companyId,
+      code: "fictional_freight",
+      label: { ...label, entityId: companyId },
+      logo: null,
+    },
+    city: { id: regionId, code: "_fixture__city", label: { ...label, entityId: regionId } },
+  };
+  const valid = validate("CatalogDepot");
+  expect(valid(depot)).toBe(true);
+  expect(
+    valid({
+      ...depot,
+      company: { ...depot.company, logo: { version: "0123456789abcdef", byteLength: 10 } },
+    }),
+  ).toBe(true);
+  expect(valid({ ...depot, extra: true })).toBe(false);
+  expect(valid({ ...depot, company: { ...depot.company, nameEn: "x" } })).toBe(false);
+  expect(valid({ ...depot, city: { ...depot.city, logo: null } })).toBe(false);
+  const { company: _company, ...withoutCompany } = depot;
+  expect(valid(withoutCompany)).toBe(false);
+  expect(validate("CatalogDepotList")({ items: [depot], nextCursor: null, total: 1 })).toBe(true);
+  expect(
+    validate("CatalogDepotList")({ items: Array(101).fill(depot), nextCursor: null, total: 101 }),
+  ).toBe(false);
+});
+
+test("depot input and patch keep the game, company and city fixed once created", () => {
+  const input = validate("CatalogDepotInput"),
+    patch = validate("CatalogDepotPatch");
+  const base = { game: "ats", companyId, cityId: regionId };
+  expect(input(base)).toBe(true);
+  expect(input({ ...base, dlcId: id })).toBe(true);
+  expect(input({ ...base, dlcId: null })).toBe(true);
+  for (const bad of [
+    { ...base, extra: 1 },
+    { ...base, game: "eu" },
+    { ...base, companyId: "not-a-uuid" },
+    { game: "ats", companyId },
+    { game: "ats", cityId: regionId },
+  ])
+    expect(input(bad), JSON.stringify(bad)).toBe(false);
+  expect(patch({ hidden: true })).toBe(true);
+  expect(patch({ dlcId: null })).toBe(true);
+  for (const bad of [{}, { companyId }, { cityId: regionId }, { game: "ets2" }, { hidden: "yes" }])
+    expect(patch(bad), JSON.stringify(bad)).toBe(false);
+});
+
+test("a logo batch is a closed list of at most 500 files", () => {
+  const batch = validate("CatalogLogoBatchInput");
+  expect(batch({ file: ["a.png"] })).toBe(true);
+  expect(batch({ file: [] })).toBe(false);
+  expect(batch({ file: Array(501).fill("a.png") })).toBe(false);
+  expect(batch({ file: ["a.png"], note: "x" })).toBe(false);
+  expect(validate("EnvelopeCatalogDepot")({ data: undefined, meta: {} })).toBe(false);
+});

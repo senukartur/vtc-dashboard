@@ -4,14 +4,16 @@ import { z } from "zod";
 export type CatalogDTO = components["schemas"];
 export type CatalogItem = CatalogDTO["CatalogItem"];
 export type Game = CatalogItem["game"];
-export type Kind = "city" | "cargo" | "trailer";
-export type CatalogList = "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+export type Kind = "city" | "cargo" | "trailer" | "company";
+export type CatalogList = "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
+export type CatalogLogo = NonNullable<CatalogItem["logo"]>;
 export const adrClasses = ["1", "2", "3", "4", "6", "8"] as const;
 export type AdrClass = (typeof adrClasses)[number];
 export const listOfKind: Record<Kind, CatalogList> = {
   city: "cities",
   cargo: "cargoes",
   trailer: "trailers",
+  company: "companies",
 };
 export const uuid = z.uuidv4();
 const text = z.string().min(1);
@@ -25,6 +27,10 @@ export const labelSchema: z.ZodType<CatalogDTO["CatalogLabel"]> = z.strictObject
   englishFallback: z.boolean(),
   hidden: z.boolean(),
   nameNative: text.max(256).exactOptional(),
+});
+export const logoSchema: z.ZodType<CatalogDTO["CatalogLogo"]> = z.strictObject({
+  version: z.string().regex(/^[0-9a-f]{16}$/),
+  byteLength: z.number().int().min(1).max(32768),
 });
 export const itemSchema = z.strictObject({
   id: uuid,
@@ -41,6 +47,7 @@ export const itemSchema = z.strictObject({
   regionId: uuid.nullable().optional(),
   region: labelSchema.nullable().optional(),
   adrClass: z.enum(adrClasses).nullable().optional(),
+  logo: logoSchema.nullable().optional(),
 }) as unknown as z.ZodType<CatalogItem>;
 export const envelope = <T extends z.ZodType>(
   data: T,

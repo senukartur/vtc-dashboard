@@ -341,3 +341,57 @@ test("only the allowlisted public summary route keeps its short public cache on 
     await app.close();
   }
 });
+
+test("only the company logo route keeps its private cache on 200 and 304", async (t) => {
+  t.mock.method(console, "error", () => {});
+  const app = await createApp({ checkReadiness: async () => true });
+  let status = 200;
+  let policy = "private, max-age=86400";
+  const send = async (
+    _request: unknown,
+    reply: {
+      code: (n: number) => unknown;
+      header: (k: string, v: string) => unknown;
+      send: (v?: unknown) => unknown;
+    },
+  ) => {
+    reply.header("Cache-Control", policy);
+    reply.code(status);
+    return reply.send(status === 304 ? undefined : { ok: true });
+  };
+  app.get("/api/v1/catalogs/companies/:id/logo", send);
+  app.get("/api/v1/catalogs/companies/:id/other", send);
+  app.get("/api/v1/catalogs/cities/:id/logo", send);
+  try {
+    const url = "/api/v1/catalogs/companies/00000000-0000-4000-8000-000000000001";
+    for (const value of ["private, max-age=86400", "private, no-cache"]) {
+      policy = value;
+      status = 200;
+      assert.equal((await app.inject(`${url}/logo`)).headers["cache-control"], value);
+      status = 304;
+      assert.equal((await app.inject(`${url}/logo`)).headers["cache-control"], value);
+    }
+    // Errors, other statuses, other routes and any other policy value stay uncached.
+    policy = "private, no-cache";
+    for (const code of [201, 404, 500]) {
+      status = code;
+      assert.equal(
+        (await app.inject(`${url}/logo`)).headers["cache-control"],
+        "no-store",
+        String(code),
+      );
+    }
+    status = 200;
+    for (const other of [
+      `${url}/other`,
+      "/api/v1/catalogs/cities/00000000-0000-4000-8000-000000000001/logo",
+    ])
+      assert.equal((await app.inject(other)).headers["cache-control"], "no-store", other);
+    for (const value of ["public, max-age=86400", "private, max-age=31536000", "private"]) {
+      policy = value;
+      assert.equal((await app.inject(`${url}/logo`)).headers["cache-control"], "no-store", value);
+    }
+  } finally {
+    await app.close();
+  }
+});

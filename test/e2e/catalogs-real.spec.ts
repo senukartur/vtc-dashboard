@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import { resetAccountLimits, staffContext } from "./support/account.ts";
+import { rgbaLogo } from "../fixtures/catalogs/logos.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -128,6 +129,84 @@ test(
           await expect(page.getByText(code, { exact: true }).first()).toBeVisible();
         }
       }
+    } finally {
+      await staff.dispose();
+    }
+  },
+);
+
+test(
+  "staff import a company, upload a drawn logo that renders from the authenticated route, then remove it",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(90000);
+    let phase = "START";
+    const c = catalogTranslations.en;
+    const unique = randomUUID().slice(0, 8),
+      code = `logo_co_${unique}`,
+      name = `Fictional Haulage ${unique}`;
+    const staff = await staffContext();
+    const narrow = () => (page.viewportSize()?.width ?? 1280) < 760;
+    const row = () =>
+      narrow()
+        ? page.locator(".catalog-card-row").filter({ hasText: name })
+        : page.getByTestId("catalog-table").getByRole("row").filter({ hasText: name });
+    const edit = async () => {
+      if (narrow()) {
+        await page.getByRole("button", { name: `Actions for ${name}`, exact: true }).click();
+        await page.getByRole("dialog").getByRole("button", { name: c.edit, exact: true }).click();
+      } else await row().getByRole("button", { name: c.edit, exact: true }).click();
+    };
+    try {
+      await resetAccountLimits();
+      await context.addCookies((await staff.storageState()).cookies);
+      phase = "IMPORT";
+      await page.goto(`/account/catalogs?game=ats&tab=companies&q=${unique}`);
+      await catalogLanguage(page);
+      await page.getByRole("button", { name: c.importButton, exact: true }).first().click();
+      const dialog = page.getByRole("dialog");
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name: "synthetic-companies.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(`game,code,name_en,name_ru,dlc_code\nats,${code},${name},,\n`),
+      });
+      await expect(dialog.getByRole("button", { name: c.apply, exact: true })).toBeEnabled();
+      await dialog.getByRole("button", { name: c.apply, exact: true }).click();
+      await expect(dialog.getByText(c.appliedTitle, { exact: true })).toBeVisible();
+      await dialog.getByRole("button", { name: c.done, exact: true }).click();
+      await expect(row()).toBeVisible();
+      await expect(row().locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+
+      phase = "UPLOAD";
+      await edit();
+      const form = page.getByRole("dialog");
+      await form.locator('input[type="file"]').setInputFiles({
+        name: `${code}.png`,
+        mimeType: "image/png",
+        buffer: rgbaLogo(2),
+      });
+      await expect(form.getByText(c.logoCurrent, { exact: true })).toBeVisible();
+      await form.getByRole("button", { name: c.cancel, exact: true }).click();
+      await expect(form).toHaveCount(0);
+
+      phase = "RENDER";
+      const plate = row().locator(".company-logo");
+      await expect(plate).toHaveAttribute("data-logo", "image");
+      await expect
+        .poll(() => plate.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+        .toBeGreaterThan(0);
+      await page.reload();
+      await expect(plate).toHaveAttribute("data-logo", "image");
+
+      phase = "REMOVE";
+      await edit();
+      await form.getByRole("button", { name: c.logoRemove, exact: true }).click();
+      await expect(form.getByText(c.logoNone, { exact: true })).toBeVisible();
+      await form.getByRole("button", { name: c.cancel, exact: true }).click();
+      await expect(plate).toHaveAttribute("data-logo", "placeholder");
+      await expect(plate.locator("img")).toHaveCount(0);
+    } catch {
+      throw new Error(`CATALOG_REAL_LOGO_${phase}_FAILED`);
     } finally {
       await staff.dispose();
     }

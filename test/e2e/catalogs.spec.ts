@@ -7,14 +7,19 @@ import {
   catalogList,
   chooseCatalogRow,
   cargoRowId,
+  companyRowId,
+  depotRow,
+  depotRowId,
   dlcId,
   defaultRows,
   entityId,
   envelope,
+  logoRef,
   mockCatalogs,
   regionId,
   trailerRowId,
 } from "./support/catalogs.ts";
+import { rgbaLogo } from "../fixtures/catalogs/logos.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
@@ -1110,3 +1115,481 @@ for (const locale of ["en", "ru"] as const)
       ).toHaveCount(locale === "ru" ? 1 : 0);
     },
   );
+
+// ---- Companies, depots and logos (VTC-091) ----
+const freight = { id: companyRowId, name: "Fictional Freight Co" };
+const plainCo = { id: "66000000-0000-4000-8000-000000000032", name: "Fictional Plain Co" };
+const brokenCo = { id: "66000000-0000-4000-8000-000000000033", name: "Fictional Broken Co" };
+const northCity = { id: entityId, name: "Fictional north city" };
+const southCity = { id: "63000000-0000-4000-8000-000000000040", name: "Fictional south city" };
+const companyRow = (
+  co: { id: string; name: string },
+  locale: "en" | "ru" = "en",
+  logo: ReturnType<typeof logoRef> | null = null,
+) => catalogItem(co.id, co.name, locale, { logo });
+const plate = (page: Page, text: string) => rowOf(page, text).locator(".company-logo");
+const png = (seed: number, width = 128, height = 32) => rgbaLogo(seed, width, height);
+
+for (const locale of ["en", "ru"] as const) {
+  test(
+    `${locale} companies show the logo on a plate and a placeholder when there is none or it fails`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      const { requests } = await mockCatalogs(page, true, {
+        rows: {
+          ets2: {
+            ...defaultRows(locale),
+            companies: [
+              companyRow(freight, locale, logoRef(3)),
+              companyRow(plainCo, locale, null),
+              companyRow(brokenCo, locale, logoRef(4)),
+            ],
+          },
+        },
+        brokenLogos: [brokenCo.id],
+      });
+      await open(page, locale, "?tab=companies");
+      await expect(tab(page, c.tabCompanies)).toHaveAttribute("aria-selected", "true");
+      await expect(tab(page, c.tabDepots)).toBeVisible();
+
+      const loaded = plate(page, freight.name);
+      await expect(loaded).toHaveAttribute("data-logo", "image");
+      await expect
+        .poll(() => loaded.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+        .toBeGreaterThan(0);
+      const box = await loaded.boundingBox();
+      expect([box?.width, box?.height]).toEqual([128, 32]);
+      // The name stays beside the logo, so the image itself carries no text alternative.
+      await expect(loaded.locator("img")).toHaveAttribute("alt", "");
+      await expect(rowOf(page, freight.name)).toContainText(freight.name);
+
+      await expect(plate(page, plainCo.name)).toHaveAttribute("data-logo", "placeholder");
+      await expect(plate(page, plainCo.name).locator("img")).toHaveCount(0);
+      await expect(plate(page, brokenCo.name)).toHaveAttribute("data-logo", "placeholder");
+      await expect(plate(page, brokenCo.name).locator("img")).toHaveCount(0);
+
+      // A company without a logo is never asked for an image; the others name their version.
+      const images = requests.filter((url) => url.pathname.endsWith("/logo"));
+      expect(images.some((url) => url.pathname.includes(plainCo.id))).toBe(false);
+      expect(images.find((url) => url.pathname.includes(freight.id))?.search).toBe(
+        `?v=${logoRef(3).version}`,
+      );
+      if (locale === "ru")
+        await expect(rowOf(page, freight.name).getByText(c.rowFallback)).toBeVisible();
+      await capture(page, info, `companies-${locale}`);
+    },
+  );
+
+  test(
+    `${locale} depots show the company with its logo, the city and the source at every width`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      await mockCatalogs(page, true, {
+        rows: {
+          ets2: { ...defaultRows(locale), companies: [companyRow(freight, locale, logoRef(3))] },
+        },
+        depots: {
+          ets2: [
+            depotRow(
+              depotRowId,
+              { ...freight, logo: logoRef(3) },
+              { ...northCity, name: "Fictional north city with a very long canonical name" },
+              {},
+              locale,
+            ),
+            depotRow(
+              "67000000-0000-4000-8000-000000000021",
+              plainCo,
+              southCity,
+              { hidden: true },
+              locale,
+            ),
+          ],
+        },
+      });
+      await open(page, locale, "?tab=depots");
+      await expect(tab(page, c.tabDepots)).toHaveAttribute("aria-selected", "true");
+      // The tab strip scrolls on a phone; the chosen tab is brought into view.
+      await expect(tab(page, c.tabDepots)).toBeInViewport();
+      await expect(rowOf(page, freight.name)).toContainText(
+        "Fictional north city with a very long",
+      );
+      await expect(plate(page, freight.name)).toHaveAttribute("data-logo", "image");
+      await expect(rowOf(page, plainCo.name)).toHaveCount(0);
+      await page.getByRole("checkbox", { name: c.showHidden }).click();
+      await expect(plate(page, plainCo.name)).toHaveAttribute("data-logo", "placeholder");
+      await expect(rowOf(page, plainCo.name).getByText(c.hidden, { exact: true })).toBeVisible();
+      await capture(page, info, `depots-${locale}`);
+    },
+  );
+}
+
+test(
+  "depots filter by company and city, add a depot, report a duplicate and hide one",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const posts: unknown[] = [];
+    const patches: { path: string; body: unknown }[] = [];
+    let conflict = true;
+    const created = depotRow("67000000-0000-4000-8000-000000000022", plainCo, northCity);
+    await mockCatalogs(page, true, {
+      rows: {
+        ets2: {
+          ...defaultRows("en"),
+          companies: [companyRow(freight, "en", logoRef(3)), companyRow(plainCo)],
+          cities: [
+            catalogItem(northCity.id, northCity.name),
+            catalogItem(southCity.id, southCity.name),
+          ],
+        },
+      },
+      depots: {
+        ets2: [
+          depotRow(depotRowId, { ...freight, logo: logoRef(3) }, northCity),
+          depotRow("67000000-0000-4000-8000-000000000023", plainCo, southCity),
+        ],
+      },
+      writes: ({ method, path, body }) => {
+        if (method === "POST" && path === "/admin/catalogs/depots") {
+          posts.push(JSON.parse(String(body)));
+          return conflict
+            ? { status: 409, json: { error: { code: "CATALOG_CODE_CONFLICT" } } }
+            : { status: 201, json: envelope(created) };
+        }
+        if (method === "PATCH" && path.startsWith("/admin/catalogs/depots/")) {
+          patches.push({ path, body: JSON.parse(String(body)) });
+          return { status: 200, json: envelope({ ...created, hidden: true }) };
+        }
+        return null;
+      },
+    });
+    await open(page, "en", "?tab=depots");
+    await expect(rowOf(page, freight.name)).toContainText(northCity.name);
+    await expect(rowOf(page, plainCo.name)).toContainText(southCity.name);
+
+    // The company and city filters live in the URL and narrow the list.
+    await chooseCatalogRow(page, c.companyFilter, plainCo.name);
+    await expect(page).toHaveURL(new RegExp(`company=${plainCo.id}`));
+    await expect(rowOf(page, freight.name)).toHaveCount(0);
+    await expect(rowOf(page, plainCo.name)).toContainText(southCity.name);
+    await page.getByRole("button", { name: `Clear selection: ${c.companyFilter}` }).click();
+    await expect(page).not.toHaveURL(/company=/);
+    await chooseCatalogRow(page, c.cityFilter, northCity.name);
+    await expect(page).toHaveURL(new RegExp(`city=${northCity.id}`));
+    await expect(rowOf(page, plainCo.name)).toHaveCount(0);
+    await expect(rowOf(page, freight.name)).toBeVisible();
+    await page.getByRole("button", { name: `Clear selection: ${c.cityFilter}` }).click();
+
+    await page.getByRole("button", { name: c.addDepots, exact: true }).last().click();
+    const form = page.getByRole("dialog");
+    await form.getByRole("button", { name: c.save, exact: true }).click();
+    await expect(form.getByText(c.errorDepotRequired, { exact: true })).toBeVisible();
+    expect(posts).toEqual([]);
+    await chooseCatalogRow(form, c.fieldCompany, plainCo.name);
+    await chooseCatalogRow(form, c.fieldCity, northCity.name);
+    await form.getByRole("button", { name: c.save, exact: true }).click();
+    await expect(form.getByText(c.errorDepotExists, { exact: true })).toBeVisible();
+    await expect(form).toBeVisible();
+    conflict = false;
+    await form.getByRole("button", { name: c.save, exact: true }).click();
+    await expect(form).toHaveCount(0);
+    const body = { game: "ets2", companyId: plainCo.id, cityId: northCity.id, dlcId: null };
+    expect(posts).toEqual([body, body]);
+
+    // Hide the first depot: only the hidden flag is sent.
+    if (phone(page)) {
+      await page
+        .getByRole("button", {
+          name: `Actions for ${freight.name} · ${northCity.name}`,
+          exact: true,
+        })
+        .click();
+      await page.getByRole("dialog").getByRole("button", { name: c.hide, exact: true }).click();
+    } else
+      await rowOf(page, freight.name).getByRole("button", { name: c.hide, exact: true }).click();
+    await expect.poll(() => patches.length).toBe(1);
+    expect(patches[0]).toEqual({
+      path: `/admin/catalogs/depots/${depotRowId}`,
+      body: { hidden: true },
+    });
+  },
+);
+
+test(
+  "a staff member uploads, replaces and removes one company logo from its edit form",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const calls: {
+      method: string;
+      type?: string | undefined;
+      key?: string | undefined;
+      csrf?: string | undefined;
+    }[] = [];
+    let mode: "ok" | "reject" | "large" = "ok";
+    await mockCatalogs(page, true, {
+      rows: { ets2: { ...defaultRows("en"), companies: [companyRow(freight, "en", null)] } },
+      writes: ({ method, path, headers }) => {
+        if (path !== `/admin/catalogs/companies/${freight.id}/logo`) return null;
+        calls.push({
+          method,
+          type: headers["content-type"],
+          key: headers["idempotency-key"],
+          csrf: headers["x-csrf-token"],
+        });
+        if (mode === "reject")
+          return { status: 422, json: { error: { code: "CATALOG_FILE_INVALID" } } };
+        return {
+          status: 200,
+          json: envelope(companyRow(freight, "en", method === "DELETE" ? null : logoRef(5))),
+        };
+      },
+    });
+    await open(page, "en", "?tab=companies");
+    await rowAction(page, freight.name, c.edit);
+    const form = page.getByRole("dialog");
+    await expect(form.getByText(c.logoNone, { exact: true })).toBeVisible();
+    await expect(form.getByRole("button", { name: c.logoRemove, exact: true })).toHaveCount(0);
+    await expect(form.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+    const input = form.locator('input[type="file"]');
+    await expect(input).toHaveAttribute("accept", /png/);
+
+    // An empty or oversized file is stopped in the browser before any request.
+    await input.setInputFiles({
+      name: "big.png",
+      mimeType: "image/png",
+      buffer: Buffer.alloc(40000),
+    });
+    await expect(form.getByText(c.logoTooLarge, { exact: true })).toBeVisible();
+    expect(calls).toEqual([]);
+
+    await input.setInputFiles({ name: "freight.png", mimeType: "image/png", buffer: png(5) });
+    await expect(form.getByText(c.logoCurrent, { exact: true })).toBeVisible();
+    await expect(form.locator(".company-logo")).toHaveAttribute("data-logo", "image");
+    await expect(form.getByText(c.logoReplace, { exact: true })).toBeVisible();
+    expect(calls[0]).toMatchObject({ method: "PUT", csrf: "NONFUNCTIONAL_FIXTURE" });
+    expect(calls[0]?.type).toMatch(/^multipart\/form-data/);
+
+    // The server's refusal of a replacement keeps the current logo and says why.
+    mode = "reject";
+    await input.setInputFiles({ name: "wrong.png", mimeType: "image/png", buffer: png(6) });
+    await expect(form.getByText(c.logoRejected, { exact: true })).toBeVisible();
+    await expect(form.locator(".company-logo")).toHaveAttribute("data-logo", "image");
+
+    mode = "ok";
+    await form.getByRole("button", { name: c.logoRemove, exact: true }).click();
+    await expect(form.getByText(c.logoNone, { exact: true })).toBeVisible();
+    await expect(form.locator(".company-logo")).toHaveAttribute("data-logo", "placeholder");
+    const removal = calls.at(-1);
+    expect(removal).toMatchObject({ method: "DELETE" });
+    // Removal carries no body and so no content type; it still carries the session's CSRF token.
+    expect(removal?.type).toBeUndefined();
+    expect(removal?.csrf).toBe("NONFUNCTIONAL_FIXTURE");
+    expect(new Set(calls.map((call) => call.key)).size).toBe(calls.length);
+  },
+);
+
+test(
+  "a bulk logo upload dry-runs the files, lists bad names and unknown codes, then applies with the token",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const calls: {
+      path: string;
+      search: string;
+      ifMatch?: string | undefined;
+      key?: string | undefined;
+      parts: number;
+    }[] = [];
+    const preview = (over: object) => ({
+      fileSha256: "b".repeat(64),
+      token: "signed-logo-token",
+      rows: 3,
+      added: 2,
+      changed: 1,
+      unchanged: 0,
+      errors: 0,
+      lines: [
+        {
+          line: 2,
+          code: "fictional_plain_co",
+          status: "changed",
+          issues: [],
+          changedFields: ["logo"],
+        },
+      ],
+      truncated: false,
+      ...over,
+    });
+    let response = envelope(
+      preview({
+        token: null,
+        errors: 2,
+        lines: [
+          {
+            line: 2,
+            code: "unknown_co",
+            status: "error",
+            issues: [{ field: "code", reason: "unknown_reference" }],
+            changedFields: [],
+          },
+          {
+            line: 3,
+            code: null,
+            status: "error",
+            issues: [
+              { field: "file", reason: "bad_name" },
+              { field: "file", reason: "not_png" },
+            ],
+            changedFields: [],
+          },
+        ],
+      }),
+    );
+    await mockCatalogs(page, true, {
+      rows: {
+        ets2: {
+          ...defaultRows("en"),
+          companies: [companyRow(freight, "en", null), companyRow(plainCo, "en", logoRef(2))],
+        },
+      },
+      writes: ({ method, path, search, headers, body }) => {
+        if (method !== "POST" || !path.startsWith("/admin/catalogs/companies/logo-")) return null;
+        calls.push({
+          path,
+          search,
+          ifMatch: headers["if-match"],
+          key: headers["idempotency-key"],
+          parts: String(body).split('name="file"').length - 1,
+        });
+        if (path.endsWith("/logo-previews")) return { status: 200, json: response };
+        return {
+          status: 200,
+          json: envelope({ importId: entityId, rows: 3, added: 2, changed: 1, unchanged: 0 }),
+        };
+      },
+    });
+    await open(page, "en", "?tab=companies");
+    await page
+      .getByRole("button", { name: phone(page) ? c.logoUploadShort : c.logoUploadAll, exact: true })
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText(c.logoBulkNote, { exact: true })).toBeVisible();
+    const picker = dialog.locator('input[type="file"]');
+    await expect(picker).toHaveAttribute("multiple", "");
+    await picker.setInputFiles([
+      { name: "fictional_freight_co.png", mimeType: "image/png", buffer: png(1) },
+      { name: "unknown_co.png", mimeType: "image/png", buffer: png(2) },
+      { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not an image") },
+    ]);
+    // Bad files and unknown codes are listed by file name, and nothing can be applied yet.
+    await expect(dialog.getByText("unknown_co.png", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("notes.txt", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(c.issueUnknownCompany, { exact: false })).toBeVisible();
+    await expect(dialog.getByText(c.issueBadName, { exact: false })).toBeVisible();
+    await expect(dialog.getByText(c.issueNotPng, { exact: false })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: c.logoBulkApply, exact: true })).toBeDisabled();
+    await expect(dialog.getByRole("alert").filter({ hasText: "2" })).toBeVisible();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      path: "/admin/catalogs/companies/logo-previews",
+      search: "?game=ets2",
+      parts: 3,
+    });
+
+    await dialog.getByRole("button", { name: c.logoOtherFiles, exact: true }).click();
+    response = envelope(preview({}));
+    await dialog.locator('input[type="file"]').setInputFiles([
+      { name: "fictional_freight_co.png", mimeType: "image/png", buffer: png(1) },
+      { name: "fictional_plain_co.png", mimeType: "image/png", buffer: png(4) },
+      { name: "third_co.png", mimeType: "image/png", buffer: png(5) },
+    ]);
+    await expect(dialog.getByText(c.logoWillReplace, { exact: true })).toBeVisible();
+    await expect(dialog.getByText("fictional_plain_co.png", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Changed fields: Logo", { exact: false })).toBeVisible();
+    await dialog.getByRole("button", { name: c.logoBulkApply, exact: true }).click();
+    await expect(dialog.getByText(c.logoBulkApplied, { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText("2 added, 1 replaced, 0 unchanged", { exact: true }),
+    ).toBeVisible();
+    const apply = calls.at(-1);
+    expect(apply).toMatchObject({
+      path: "/admin/catalogs/companies/logo-imports",
+      search: "?game=ets2",
+      ifMatch: '"signed-logo-token"',
+      parts: 3,
+    });
+    expect(apply?.key).toEqual(expect.any(String));
+    await dialog.getByRole("button", { name: c.done, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // More than 500 files, or an unreadable total, is refused in the browser.
+    const before = calls.length;
+    await page
+      .getByRole("button", { name: phone(page) ? c.logoUploadShort : c.logoUploadAll, exact: true })
+      .click();
+    await page
+      .getByRole("dialog")
+      .locator('input[type="file"]')
+      .setInputFiles(
+        Array.from({ length: 501 }, (_, n) => ({
+          name: `c${n}.png`,
+          mimeType: "image/png",
+          buffer: Buffer.from("x"),
+        })),
+      );
+    await expect(
+      page.getByRole("dialog").getByText(c.logoBulkInvalid, { exact: true }),
+    ).toBeVisible();
+    expect(calls).toHaveLength(before);
+  },
+);
+
+test(
+  "the depot import dialog shows the depot columns and templates",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    await mockCatalogs(page, true, {});
+    await open(page, "en", "?tab=depots");
+    await page.getByRole("button", { name: c.importButton, exact: true }).last().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.locator("code").first()).toHaveText(
+      "game, company_code, city_code, dlc_code",
+    );
+    await expect(dialog.getByRole("button", { name: c.templateCsv, exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: c.templateJson, exact: true })).toBeVisible();
+  },
+);
+
+test(
+  "members without manage rights see logos and depots but get no logo, depot or import actions",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const { requests } = await mockCatalogs(page, false, {
+      capabilities: ["account.self", "company.read"],
+      rows: { ets2: { ...defaultRows("en"), companies: [companyRow(freight, "en", logoRef(3))] } },
+      depots: { ets2: [depotRow(depotRowId, { ...freight, logo: logoRef(3) }, northCity)] },
+    });
+    await open(page, "en", "?tab=companies");
+    await expect(plate(page, freight.name)).toHaveAttribute("data-logo", "image");
+    await open(page, "en", "?tab=depots");
+    await expect(rowOf(page, freight.name)).toContainText(northCity.name);
+    for (const name of [
+      c.logoUploadAll,
+      c.logoUploadShort,
+      c.addDepots,
+      c.addCompanies,
+      c.importButton,
+      c.importShort,
+      c.edit,
+      c.hide,
+    ])
+      await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+    expect(requests.filter((url) => url.pathname.startsWith("/api/v1/admin/"))).toEqual([]);
+  },
+);

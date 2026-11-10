@@ -4,15 +4,61 @@ import type { Locator, Page } from "@playwright/test";
 import { expect } from "./fixtures.ts";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
+import { rgbaLogo } from "../../fixtures/catalogs/logos.ts";
 
 type S = components["schemas"];
-export type CatalogListName = "dlcs" | "regions" | "cities" | "cargoes" | "trailers";
+export type CatalogListName = "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
+export type CatalogDepotRow = S["CatalogDepot"];
 export type CatalogGame = S["CatalogItem"]["game"];
 export const entityId = "63000000-0000-4000-8000-000000000020",
   regionId = "64000000-0000-4000-8000-000000000020",
   cargoRowId = "63000000-0000-4000-8000-000000000021",
   trailerRowId = "63000000-0000-4000-8000-000000000022",
-  dlcId = "65000000-0000-4000-8000-000000000020";
+  dlcId = "65000000-0000-4000-8000-000000000020",
+  companyRowId = "66000000-0000-4000-8000-000000000020",
+  depotRowId = "67000000-0000-4000-8000-000000000020";
+/** A fictional logo, drawn at test time; the mock serves these bytes for every logo request. */
+export const mockLogo = rgbaLogo(3);
+export const logoRef = (seed = 3) => ({
+  version: `${seed.toString(16).padStart(2, "0")}${"0123456789abcdef".slice(0, 14)}`,
+  byteLength: rgbaLogo(seed).length,
+});
+/** A depot row in the shape the depot route returns. */
+export function depotRow(
+  id: string,
+  company: { id: string; name: string; logo?: S["CatalogLogo"] | null },
+  city: { id: string; name: string },
+  overrides: Partial<CatalogDepotRow> = {},
+  locale: "ru" | "en" = "en",
+): CatalogDepotRow {
+  const label = (entityId: string, text: string) => ({
+    entityId,
+    label: text,
+    requestedLocale: locale,
+    renderedLocale: "en" as const,
+    englishFallback: locale === "ru",
+    hidden: false,
+  });
+  return {
+    id,
+    game: "ets2",
+    hidden: false,
+    dlcId: null,
+    dlc: null,
+    company: {
+      id: company.id,
+      code: company.name.toLowerCase().replaceAll(" ", "_"),
+      label: label(company.id, company.name),
+      logo: company.logo ?? null,
+    },
+    city: {
+      id: city.id,
+      code: city.name.toLowerCase().replaceAll(" ", "_"),
+      label: label(city.id, city.name),
+    },
+    ...overrides,
+  };
+}
 export const envelope = (data: unknown) => ({
   data,
   meta: { requestId: "synthetic-catalog-request" },
@@ -80,6 +126,7 @@ export const defaultRows = (locale: "ru" | "en"): Record<CatalogListName, S["Cat
   dlcs: [catalogItem(dlcId, "Fictional base pack", locale, { steamAppId: 1 })],
   regions: [catalogItem(regionId, "Fictional region", locale)],
   cities: [catalogItem(entityId, "Fictional city", locale, { regionId })],
+  companies: [],
   cargoes: [catalogItem(cargoRowId, "Fictional cargo", locale)],
   trailers: [catalogItem(trailerRowId, "Fictional trailer", locale)],
 });
@@ -97,10 +144,16 @@ export type CatalogMockOptions = {
   gate?: Promise<void>;
   /** Rows per list and game; other lists keep the defaults for that game. */
   rows?: Partial<Record<CatalogGame, Partial<Record<CatalogListName, S["CatalogItem"][]>>>>;
+  /** Depots per game. */
+  depots?: Partial<Record<CatalogGame, CatalogDepotRow[]>>;
+  /** Company ids whose logo image answers with an error, so the placeholder shows. */
+  brokenLogos?: string[];
   /** Answers for writes; each receives the request and returns a status with a JSON body. */
   writes?: (request: {
     method: string;
     path: string;
+    /** The query string including its leading "?", or an empty string. */
+    search: string;
     body: unknown;
     headers: Record<string, string>;
   }) => { status: number; json: unknown } | null;
@@ -139,6 +192,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       const response = options.writes?.({
         method: route.request().method(),
         path: path.slice("/api/v1".length),
+        search: url.search,
         body: route.request().postDataBuffer(),
         headers: route.request().headers(),
       });
@@ -149,17 +203,55 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       if (options.gate) await options.gate;
       const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2",
         rows = { ...defaultRows(locale), ...options.rows?.[game] };
+      const depots = options.depots?.[game] ?? [];
       return json(
         envelope({
           game,
-          lists: Object.fromEntries(
-            (Object.keys(rows) as CatalogListName[]).map((name) => [name, summaryOf(rows[name])]),
-          ),
+          lists: {
+            ...Object.fromEntries(
+              (Object.keys(rows) as CatalogListName[]).map((name) => [name, summaryOf(rows[name])]),
+            ),
+            depots: {
+              visible: depots.filter((r) => !r.hidden).length,
+              hidden: depots.filter((r) => r.hidden).length,
+            },
+          },
         }),
       );
     }
+    const logo = /^\/api\/v1\/catalogs\/companies\/([^/]+)\/logo$/.exec(path);
+    if (logo) {
+      if (options.brokenLogos?.includes(logo[1] as string))
+        return route.fulfill({ status: 500, json: { error: { code: "PRIVATE_SENTINEL" } } });
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        headers: { "cache-control": "no-store" },
+        body: mockLogo,
+      });
+    }
+    if (path === "/api/v1/catalogs/depots") {
+      if (options.gate) await options.gate;
+      const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2",
+        company = url.searchParams.get("companyId"),
+        city = url.searchParams.get("cityId"),
+        includeHidden = url.searchParams.get("includeHidden") === "true",
+        search = url.searchParams.get("search")?.toLowerCase();
+      const visible = (options.depots?.[game] ?? []).filter(
+        (r) =>
+          (includeHidden || (!r.hidden && !r.company.label.hidden && !r.city.label.hidden)) &&
+          (!company || r.company.id === company) &&
+          (!city || r.city.id === city) &&
+          (!search ||
+            r.company.label.label.toLowerCase().includes(search) ||
+            r.city.label.label.toLowerCase().includes(search)),
+      );
+      return json(catalogList(visible));
+    }
     const match =
-      /^\/api\/v1\/catalogs\/(dlcs|regions|cities|cargoes|trailers)(?:\/([^/]+))?$/.exec(path);
+      /^\/api\/v1\/catalogs\/(dlcs|regions|cities|companies|cargoes|trailers)(?:\/([^/]+))?$/.exec(
+        path,
+      );
     if (match) {
       if (options.gate) await options.gate;
       const name = match[1] as CatalogListName,

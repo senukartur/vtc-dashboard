@@ -8820,6 +8820,16 @@
               "type": "null"
             }
           ]
+        },
+        "logo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLogo"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -8834,7 +8844,27 @@
         "dlc"
       ],
       "additionalProperties": false,
-      "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes. On the trailers list, code is the telemetry body type."
+      "description": "One row of a catalog list. steamAppId is present only on dlcs, regionId and region only on cities, adrClass only on cargoes, logo (null without an uploaded image) only on companies. On the trailers list, code is the telemetry body type."
+    },
+    "CatalogLogo": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32768
+        }
+      },
+      "required": [
+        "version",
+        "byteLength"
+      ],
+      "additionalProperties": false,
+      "description": "Present only when the company has a logo. version changes whenever the stored image changes and is passed as ?v= to the logo route."
     },
     "CatalogItemList": {
       "type": "object",
@@ -8944,6 +8974,46 @@
               ],
               "additionalProperties": false
             },
+            "companies": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
+            "depots": {
+              "type": "object",
+              "properties": {
+                "visible": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "hidden": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "visible",
+                "hidden"
+              ],
+              "additionalProperties": false
+            },
             "cargoes": {
               "type": "object",
               "properties": {
@@ -8989,6 +9059,8 @@
             "dlcs",
             "regions",
             "cities",
+            "companies",
+            "depots",
             "cargoes",
             "trailers"
           ],
@@ -9312,6 +9384,60 @@
       ],
       "additionalProperties": false
     },
+    "CatalogCompanyInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "nameEn": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "nameRu": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "code",
+        "nameEn"
+      ],
+      "additionalProperties": false
+    },
     "CatalogItemPatch": {
       "type": "object",
       "properties": {
@@ -9411,6 +9537,245 @@
       "minProperties": 1,
       "additionalProperties": false,
       "description": "Partial edit of one row. game is immutable. A field that does not exist on the list is rejected. Hide and restore are `{hidden}`."
+    },
+    "CatalogDepotCompany": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "label": {
+          "$ref": "#/$defs/CatalogLabel"
+        },
+        "logo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLogo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "label",
+        "logo"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogDepotCity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$",
+          "description": "Opaque per-game telemetry code; compared byte-exact and never rewritten."
+        },
+        "label": {
+          "$ref": "#/$defs/CatalogLabel"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogDepot": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dlc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "company": {
+          "$ref": "#/$defs/CatalogDepotCompany"
+        },
+        "city": {
+          "$ref": "#/$defs/CatalogDepotCity"
+        }
+      },
+      "required": [
+        "id",
+        "game",
+        "hidden",
+        "dlcId",
+        "dlc",
+        "company",
+        "city"
+      ],
+      "additionalProperties": false,
+      "description": "A company operating in a city. hidden is the depot's own flag; the company and city labels carry theirs. A depot is listed by default only when all three are visible."
+    },
+    "CatalogDepotList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CatalogDepot"
+          },
+          "maxItems": 100
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "total"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogDepotInput": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "companyId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "cityId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "game",
+        "companyId",
+        "cityId"
+      ],
+      "additionalProperties": false
+    },
+    "CatalogDepotPatch": {
+      "type": "object",
+      "properties": {
+        "dlcId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hidden": {
+          "type": "boolean"
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "Partial edit of one depot. game, company and city are immutable."
+    },
+    "CatalogLogoBatchInput": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "binary"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false,
+      "description": "Up to 500 PNG files named <company code>.png; each is checked on its own."
     },
     "CatalogImportIssue": {
       "type": "object",
@@ -9663,6 +10028,38 @@
       "properties": {
         "data": {
           "$ref": "#/$defs/CatalogImportResult"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogDepot": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogDepot"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeCatalogDepotList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/CatalogDepotList"
         },
         "meta": {
           "$ref": "#/$defs/Meta"

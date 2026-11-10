@@ -12,9 +12,11 @@ import { useCatalogPages } from "../../shared/catalog-selectors/queries.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
+import { LogoSection } from "./LogoUpload.js";
+import { tabLabels } from "./model.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 
-function ParentSelect({
+export function ParentSelect({
   list,
   game,
   id,
@@ -73,10 +75,13 @@ export function CatalogForm({
   target,
   onClose,
   onSaved,
+  onLogoChanged,
 }: {
   target: FormTarget;
   onClose: () => void;
   onSaved: () => void;
+  /** A logo change commits on its own, so the lists behind the form refresh without closing it. */
+  onLogoChanged: () => void;
 }) {
   const { t } = useTranslation("catalogs");
   const id = useId();
@@ -117,16 +122,7 @@ export function CatalogForm({
     if (result) onSaved();
   }
   const codeError = command.errorCode === "CATALOG_CODE_CONFLICT" ? t("errorCodeTaken") : undefined;
-  const tabLabel =
-    list === "dlcs"
-      ? "tabDlcs"
-      : list === "regions"
-        ? "tabRegions"
-        : list === "cities"
-          ? "tabCities"
-          : list === "cargoes"
-            ? "tabCargoes"
-            : "tabTrailers";
+  const tabLabel = tabLabels[list];
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="catalog-dialog">
@@ -245,6 +241,7 @@ export function CatalogForm({
             />
           </div>
         )}
+        {list === "companies" && item && <LogoSection item={item} onChanged={onLogoChanged} />}
         {showRequired && !canSave && (
           <p role="alert" className="field-error">
             {t("errorRequired")}

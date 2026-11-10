@@ -54,6 +54,14 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `PATCH /api/v1/admin/catalogs/{list}/{id}` | `updateCatalogItem` | `qualifications.manage` | VTC-084 |
 | `POST /api/v1/admin/catalogs/{list}/import-previews` | `previewCatalogImport` | `qualifications.manage` | VTC-084 |
 | `POST /api/v1/admin/catalogs/{list}/imports` | `applyCatalogImport` | `qualifications.manage` | VTC-084 |
+| `GET /api/v1/catalogs/depots` | `listCatalogDepots` | `company.read` | VTC-091 |
+| `POST /api/v1/admin/catalogs/depots` | `createCatalogDepot` | `qualifications.manage` | VTC-091 |
+| `PATCH /api/v1/admin/catalogs/depots/{id}` | `updateCatalogDepot` | `qualifications.manage` | VTC-091 |
+| `GET /api/v1/catalogs/companies/{id}/logo` | `getCatalogCompanyLogo` | `company.read` | VTC-091 |
+| `PUT /api/v1/admin/catalogs/companies/{id}/logo` | `uploadCatalogCompanyLogo` | `qualifications.manage` | VTC-091 |
+| `DELETE /api/v1/admin/catalogs/companies/{id}/logo` | `removeCatalogCompanyLogo` | `qualifications.manage` | VTC-091 |
+| `POST /api/v1/admin/catalogs/companies/logo-previews` | `previewCatalogLogos` | `qualifications.manage` | VTC-091 |
+| `POST /api/v1/admin/catalogs/companies/logo-imports` | `applyCatalogLogos` | `qualifications.manage` | VTC-091 |
 | `GET /api/v1/me/telemetry-tokens` | `listTelemetryTokens` | `trips.submit_own` | VTC-023 |
 | `POST /api/v1/me/telemetry-tokens` | `issueTelemetryToken` | `trips.submit_own` | VTC-023 |
 | `DELETE /api/v1/me/telemetry-tokens/{tokenId}` | `revokeTelemetryToken` | `trips.submit_own` | VTC-023 |

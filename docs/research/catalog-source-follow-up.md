@@ -40,7 +40,7 @@ For SCS, if clarification is required:
 
 1. May a small community dashboard use a versioned, derived catalog of internal city/cargo/trailer identifiers, city-region relationships, body/chain types, ADR classification and unit mass, generated from an authorized game/DLC installation?
 2. Are storing that normalized catalog on a VTC server, serving selector/validation responses to members and publishing a reusable derived JSON dataset treated differently? Our proposed public repository contains importer code and synthetic fixtures, not original definition files or assets.
-3. What attribution and redistribution restrictions apply? The plan excludes models, textures, logos, map geometry and extracted localization dictionaries; display translations are project-maintained.
+3. What attribution and redistribution restrictions apply? The plan excludes models, textures, logos, map geometry and extracted localization dictionaries; display translations are project-maintained. This is the 2026-10 plan; company logos shown to members are covered by the later decision in the [policies](../product/mvp-policies.md#catalog-source-use-basis).
 4. Is there a recommended supported metadata source or update mechanism for official DLCs and game builds?
 
 For Trucky, only if a production city-data import is selected:
