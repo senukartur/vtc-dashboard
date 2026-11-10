@@ -222,11 +222,16 @@ function manifests(game, dir, raw) {
     const file = join(dest, `${archive}.manifest.sii`);
     const unit = existsSync(file) ? parseUnits(file).find((u) => u.type === "dlc_package") : null;
     const m = unit?.fields ?? {};
+    // Without a manifest id there is no reliable code; never guess one.
+    if (!m.id || !validCode(m.id)) {
+      console.error(`skipped ${archive}: no dlc_package unit with a valid id in its manifest`);
+      continue;
+    }
     // Packages bundled with the game carry no app id or the game's own; they are supplemental.<id>.
     const steam = ["", "0", GAMES[game].steam].includes(m.steam_app_id ?? "") ? "" : m.steam_app_id;
     out.push({
       archive,
-      id: m.id ?? "",
+      id: m.id,
       display: (m.display_name ?? "").replace(/^DLC\s*-\s*/, ""),
       steam,
       code: steam ? `dlc.${steam}` : `supplemental.${m.id}`,
