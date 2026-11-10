@@ -1248,6 +1248,52 @@ for (const locale of ["en", "ru"] as const) {
 }
 
 test(
+  "a page of company logos loads a few at a time and retries busy answers instead of showing placeholders",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const companies = Array.from({ length: 24 }, (_, i) => ({
+      id: `66000000-0000-4000-8000-${(100 + i).toString().padStart(12, "0")}`,
+      name: `Fictional Busy Co ${String(i + 1).padStart(2, "0")}`,
+    }));
+    const { logos } = await mockCatalogs(page, true, {
+      rows: {
+        ets2: {
+          ...defaultRows("en"),
+          companies: companies.map((co) => companyRow(co, "en", logoRef(3))),
+        },
+      },
+      busyLogoTries: 1,
+      logoDelayMs: 40,
+    });
+    await open(page, "en", "?tab=companies");
+    await expect(tab(page, c.tabCompanies)).toHaveAttribute("aria-selected", "true");
+    // Every visible row gets its logo although each first answer was 503.
+    const first = plate(page, companies[0]?.name ?? "");
+    await expect(first).toHaveAttribute("data-logo", "image");
+    await expect
+      .poll(() => first.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0);
+    const visible = page.locator(".company-logo").filter({ visible: true });
+    await expect
+      .poll(async () => {
+        const modes = await visible.evaluateAll((plates) =>
+          plates
+            .filter((p) => p.getBoundingClientRect().top < window.innerHeight)
+            .map((p) => p.getAttribute("data-logo")),
+        );
+        return modes.length > 0 && modes.every((mode) => mode === "image");
+      })
+      .toBe(true);
+    await expect(page.locator('.company-logo[data-logo="placeholder"]')).toHaveCount(0);
+    // The API's pool holds five connections; logos never take more than three of them.
+    expect(logos.maxInFlight).toBeGreaterThan(0);
+    expect(logos.maxInFlight).toBeLessThanOrEqual(3);
+    expect([...logos.tries.values()].every((tries) => tries <= 2)).toBe(true);
+  },
+);
+
+test(
   "depots filter by company and city, add a depot, report a duplicate and hide one",
   browserCase(["@functional"]),
   async ({ page }) => {
