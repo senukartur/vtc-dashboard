@@ -191,6 +191,80 @@ describe("hero video crossfade loop", () => {
     expect(blocked.a.calls.filter((call) => call === "a.play")).toHaveLength(1);
   });
 
+  test("primes the hidden layer before the first swap without revealing it", async () => {
+    const { a, b, clock, loop } = setup();
+    // Like iOS Safari: the second layer has no decoded frame until it has played once.
+    b.playResult = () => {
+      b.readyState = 4;
+      return Promise.resolve();
+    };
+    loop.setRunning(true);
+    a.duration = b.duration = 7.917;
+    expect(b.readyState).toBeLessThan(2);
+    loop.prime();
+    expect(b.calls).toEqual(["b.play"]);
+    await settle();
+    expect(b.calls).toEqual(["b.play", "b.pause", `b.seek(${loopStart})`]);
+    expect(b.active).toBeUndefined();
+    loop.prime();
+    expect(b.calls).toHaveLength(3);
+    a.currentTime = 7.5;
+    a.calls.length = 0;
+    clock.frame();
+    // A real crossfade, not the restart of the visible layer.
+    expect(b.calls.slice(3)).toEqual([`b.seek(${loopStart})`, "b.play"]);
+    expect(b.active).toBe(true);
+    expect(a.active).toBe(false);
+  });
+
+  test("priming waits while paused and retries after an interrupted attempt", async () => {
+    const { b, clock, loop } = setup();
+    loop.prime();
+    expect(b.calls).toEqual([]);
+    b.playResult = () =>
+      Promise.reject(Object.assign(new Error("interrupted"), { name: "AbortError" }));
+    loop.setRunning(true);
+    expect(b.calls).toEqual(["b.play"]);
+    loop.setRunning(false);
+    await settle();
+    expect(b.calls).toEqual(["b.play", "b.pause"]);
+    b.playResult = () => Promise.resolve();
+    loop.setRunning(true);
+    await settle();
+    expect(b.calls).toEqual(["b.play", "b.pause", "b.play", "b.pause", `b.seek(${loopStart})`]);
+    expect(b.active).toBeUndefined();
+    expect(clock.timers.size).toBe(0);
+  });
+
+  test("a failed prime leaves the restart fallback and teardown ignores a late prime", async () => {
+    const blocked = setup();
+    blocked.b.playResult = () =>
+      Promise.reject(Object.assign(new Error("low power"), { name: "NotAllowedError" }));
+    blocked.loop.setRunning(true);
+    blocked.loop.prime();
+    await settle();
+    expect(blocked.onFailure).not.toHaveBeenCalled();
+    blocked.a.duration = 7.917;
+    blocked.a.currentTime = 7.5;
+    blocked.a.calls.length = 0;
+    blocked.clock.frame();
+    expect(blocked.a.calls).toEqual([`a.seek(${loopStart})`]);
+
+    const late = setup();
+    let resolvePlay = () => {};
+    late.b.playResult = () =>
+      new Promise<void>((done) => {
+        resolvePlay = done;
+      });
+    late.loop.setRunning(true);
+    late.loop.prime();
+    late.loop.destroy();
+    late.b.calls.length = 0;
+    resolvePlay();
+    await settle();
+    expect(late.b.calls).toEqual([]);
+  });
+
   test("destroy is idempotent and leaves nothing scheduled", () => {
     const { a, b, clock, loop, onFailure } = setup();
     loop.setRunning(true);

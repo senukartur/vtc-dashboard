@@ -1,4 +1,4 @@
-import { type MouseEvent, type ReactNode, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -41,6 +41,17 @@ export function LandingMenu({
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const pendingSection = useRef<LandingSectionId | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    // The sheet has no trigger above the menu breakpoint, so widening the window closes it.
+    const wide = window.matchMedia("(min-width: 1051px)");
+    const close = () => {
+      if (wide.matches) setOpen(false);
+    };
+    close();
+    wide.addEventListener("change", close);
+    return () => wide.removeEventListener("change", close);
+  }, [open]);
   const selectSection = (section: LandingSectionId) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (isPlainClick(event)) pendingSection.current = section;
     setOpen(false);

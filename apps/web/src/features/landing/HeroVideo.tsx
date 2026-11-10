@@ -74,8 +74,10 @@ function HeroLayers({ paused, onFailure }: { paused: boolean; onFailure: () => v
       if (revealed) return;
       revealed = true;
       first.dataset.active = "true";
-      // The second layer only downloads once the first one actually plays.
+      // The second layer only downloads once the first one actually plays, then buffers a
+      // hidden frame so the first crossfade does not fall back to a jump.
       second.src = url;
+      loop.prime();
     };
     first.addEventListener("loadedmetadata", onMetadata);
     first.addEventListener("playing", onPlaying);
@@ -118,6 +120,7 @@ function HeroLayers({ paused, onFailure }: { paused: boolean; onFailure: () => v
         tabIndex={-1}
         loop
         playsInline
+        preload="auto"
         disablePictureInPicture
       />
       {/* biome-ignore lint/a11y/useMediaCaption: silent decorative clip without an audio track; the still carries the alt text. */}
@@ -128,6 +131,7 @@ function HeroLayers({ paused, onFailure }: { paused: boolean; onFailure: () => v
         tabIndex={-1}
         loop
         playsInline
+        preload="auto"
         disablePictureInPicture
       />
     </div>

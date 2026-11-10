@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
 import { eventTranslations } from "../../apps/web/src/features/events/translations.ts";
@@ -966,12 +966,15 @@ type MediaProbe = {
 };
 const probe = (page: Page) =>
   page.evaluate(() => (window as unknown as { __media: MediaProbe }).__media.log.slice());
-/** Replaces media loading with a recorder, so no file is fetched and `playing` fires on demand. */
+/**
+ * Replaces media loading with a recorder, so no file is fetched and `playing` fires on demand.
+ * Like iOS Safari, a layer has metadata only (HAVE_METADATA) until it has played once.
+ */
 function stubMedia() {
   const log: string[] = [];
-  const state = new WeakMap<HTMLMediaElement, { src: string; time: number }>();
+  const state = new WeakMap<HTMLMediaElement, { src: string; time: number; ready: number }>();
   const own = (element: HTMLMediaElement) => {
-    const value = state.get(element) ?? { src: "", time: 0 };
+    const value = state.get(element) ?? { src: "", time: 0, ready: 0 };
     state.set(element, value);
     return value;
   };
@@ -985,8 +988,13 @@ function stubMedia() {
     },
     set(value: string) {
       own(this).src = value;
+      own(this).ready = 1;
       this.setAttribute("data-stub-src", value);
       log.push(`src${at(this)}`);
+      // Muting and preload must already be in place when the source is assigned.
+      log.push(
+        `flags${at(this)}:${this.muted}:${this.hasAttribute("muted")}:${this.getAttribute("preload")}`,
+      );
     },
   });
   Object.defineProperty(proto, "currentTime", {
@@ -1000,9 +1008,17 @@ function stubMedia() {
     },
   });
   Object.defineProperty(proto, "duration", { configurable: true, get: () => 7.917 });
-  Object.defineProperty(proto, "readyState", { configurable: true, get: () => 4 });
+  Object.defineProperty(proto, "readyState", {
+    configurable: true,
+    get() {
+      return own(this).ready;
+    },
+  });
   proto.play = function () {
     log.push(`play${at(this)}`);
+    const media = own(this);
+    if (media.ready < 2) log.push(`rise${at(this)}:${media.ready}`);
+    media.ready = 4;
     return Promise.resolve();
   };
   proto.pause = function () {
@@ -1105,6 +1121,7 @@ test(
     await expect(first).toHaveAttribute("data-stub-src", source);
     for (const video of [first, second]) {
       await expect(video).toHaveAttribute("muted", "");
+      await expect(video).toHaveAttribute("preload", "auto");
       await expect(video).toHaveAttribute("aria-hidden", "true");
       await expect(video).toHaveAttribute("tabindex", "-1");
       expect(await video.evaluate((node: HTMLVideoElement) => node.muted && node.playsInline)).toBe(
@@ -1122,6 +1139,19 @@ test(
     await page.evaluate(() => (window as unknown as { __media: MediaProbe }).__media.firePlaying());
     await expect(first).toHaveAttribute("data-active", "true");
     await expect(second).toHaveAttribute("data-stub-src", source);
+    // The hidden layer is primed (muted play, pause, back to 1 s) from below HAVE_CURRENT_DATA.
+    await expect
+      .poll(() => probe(page))
+      .toEqual(expect.arrayContaining(["rise1:1", "pause1", "seek1:1"]));
+    const primed = await probe(page);
+    expect(primed).toEqual(
+      expect.arrayContaining(["flags0:true:true:auto", "flags1:true:true:auto"]),
+    );
+    expect(primed.indexOf("src1")).toBeLessThan(primed.indexOf("play1"));
+    expect(primed.indexOf("play1")).toBeLessThan(primed.indexOf("pause1"));
+    expect(primed.indexOf("pause1")).toBeLessThan(primed.lastIndexOf("seek1:1"));
+    await expect(second).not.toHaveAttribute("data-active", "true");
+    expect(await second.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
     await page.clock.runFor(1200);
     await expect.poll(() => first.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
 
@@ -1144,6 +1174,19 @@ test(
       (window as unknown as { __media: MediaProbe }).__media.setHidden(false),
     );
     await expect.poll(() => count("play0")).toBeGreaterThan(visiblePlays);
+
+    // Near the end the primed layer fades in instead of the visible one jumping back.
+    const beforeSwap = (await probe(page)).length;
+    await first.evaluate((node: HTMLVideoElement) => {
+      node.currentTime = 7.5;
+    });
+    await page.clock.runFor(100);
+    await expect(second).toHaveAttribute("data-active", "true");
+    await expect(first).toHaveAttribute("data-active", "false");
+    const swap = (await probe(page)).slice(beforeSwap);
+    expect(swap).toEqual(expect.arrayContaining(["seek1:1", "play1"]));
+    expect(swap.slice(0, swap.indexOf("play1"))).not.toContain("seek0:1");
+    expect(swap).not.toContain("rise1:1");
 
     await page.getByRole("main").getByRole("link", { name: c.allEvents, exact: true }).click();
     await expect(videos).toHaveCount(0);
@@ -1242,6 +1285,12 @@ test(
     await expect(page.locator("#ranks")).toBeInViewport();
     expect(new URL(page.url()).hash).toBe("#ranks");
     expect(await noOverflow(page)).toBe(true);
+    // Widening past the menu breakpoint closes an open sheet, whose trigger is gone there.
+    await trigger.click();
+    await expect(dialog).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeHidden();
   },
 );
 
@@ -1340,7 +1389,7 @@ test(
   "throttled phone profile loads only the small still and video, after the page",
   browserCase(["@layout", "@viewport-mobile"]),
   async ({ page }, info) => {
-    test.setTimeout(90000);
+    test.setTimeout(150000);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Network.enable");
     await cdp.send("Network.emulateNetworkConditions", {
@@ -1370,39 +1419,95 @@ test(
     await expect(page.getByRole("button", { name: "Отправить заявку", exact: true })).toBeEnabled({
       timeout: 30000,
     });
+    // The expected variants below are for this project's 390px viewport at 1x density.
+    expect(await page.evaluate(() => [innerWidth, devicePixelRatio])).toEqual([390, 1]);
     const media = () =>
       [...requests.values()]
         .filter((entry) => /\/assets\/[^/?#]+\.(webp|mp4)/.test(entry.url))
-        .map((entry) => ({ ...entry, name: new URL(entry.url).pathname.split("/").pop() ?? "" }));
+        .map((entry) => ({
+          ...entry,
+          name: new URL(entry.url).pathname.split("/").pop() ?? "",
+          plain: (new URL(entry.url).pathname.split("/").pop() ?? "").replace(
+            /-[\w-]{8}\.(webp|mp4)$/,
+            ".$1",
+          ),
+        }));
     await expect
-      .poll(() => media().some((entry) => entry.name.endsWith(".mp4")), { timeout: 30000 })
+      .poll(() => media().some((entry) => entry.plain.endsWith(".mp4")), { timeout: 30000 })
+      .toBe(true);
+    // Bring the lazy images into range, then let every media request settle.
+    const lazy = [
+      { selector: ".landing-cab-image", variant: "cab-828.webp" },
+      { selector: ".landing-photo-main img", variant: "about-parking-480.webp" },
+      { selector: ".landing-photo-inset img", variant: "about-convoy-320.webp" },
+    ];
+    for (const { selector } of lazy) {
+      const image = page.locator(selector);
+      await image.scrollIntoViewIfNeeded();
+      await expect
+        .poll(
+          () => image.evaluate((node: HTMLImageElement) => node.complete && node.naturalWidth),
+          {
+            timeout: 30000,
+          },
+        )
+        .toBeGreaterThan(0);
+    }
+    await expect
+      .poll(() => media().every((entry) => entry.bytes !== undefined || entry.failed), {
+        timeout: 60000,
+      })
       .toBe(true);
     const loaded = media();
-    const names = loaded.map((entry) => entry.name.replace(/-[\w-]{8}\.(webp|mp4)$/, ".$1"));
+    const names = loaded.map((entry) => entry.plain);
     expect(names).toContain("hero-still-854.webp");
     expect(names).toContain("hero-854.mp4");
-    for (const absent of [
-      "hero-still-1280.webp",
-      "hero-1280.mp4",
-      "cab-2000.webp",
-      "cab-1280.webp",
-    ])
+    for (const { selector, variant } of lazy) {
+      const chosen = await page
+        .locator(selector)
+        .evaluate((node: HTMLImageElement) => new URL(node.currentSrc).pathname.split("/").pop());
+      expect(chosen?.replace(/-[\w-]{8}\.webp$/, ".webp"), selector).toBe(variant);
+      const family = variant.replace(/-\d+\.webp$/, "-");
+      // Exactly the chosen variant of each image family was requested, and it finished.
+      expect(
+        names.filter((name) => name.startsWith(family)),
+        family,
+      ).toEqual([variant]);
+      expect(loaded.find((entry) => entry.plain === variant)?.bytes, variant).toBeDefined();
+    }
+    for (const absent of ["hero-still-1280.webp", "hero-1280.mp4"])
       expect(names).not.toContain(absent);
-    const still = loaded.find((entry) => entry.name.startsWith("hero-still-854"));
-    const video = loaded.find((entry) => entry.name.startsWith("hero-854"));
+    const still = loaded.find((entry) => entry.plain === "hero-still-854.webp");
+    const video = loaded.find((entry) => entry.plain === "hero-854.mp4");
+    expect(still?.bytes, "hero still finished").toBeDefined();
     expect(still?.start ?? Number.POSITIVE_INFINITY).toBeLessThan(video?.start ?? 0);
-    // Encoded lengths include response headers; allow 2 KB for them per file.
+    // Encoded lengths include response headers; allow 2 KB for them per file. Video requests
+    // may be cancelled and resumed as ranges by the media pipeline; they must still settle.
     for (const entry of loaded) {
-      if (entry.bytes === undefined) continue;
+      if (entry.plain.endsWith(".webp"))
+        expect(entry.bytes, `${entry.name} finished`).toBeDefined();
+      if (entry.bytes === undefined) {
+        expect(entry.failed, `${entry.name} settled`).toBe(true);
+        continue;
+      }
       const prepared = builtAsset(new RegExp(`^${entry.name.replace(/[.]/g, "\\.")}$`)).bytes;
       expect(entry.bytes, entry.name).toBeLessThanOrEqual(prepared + 2048);
     }
-    await info.attach("landing-mobile-media.json", {
-      body: JSON.stringify(
-        loaded.map(({ name, bytes, failed }) => ({ name, bytes: bytes ?? null, failed: !!failed })),
+    const report = info.outputPath("landing-mobile-media.json");
+    writeFileSync(
+      report,
+      JSON.stringify(
+        loaded.map(({ name, bytes, failed }) => ({
+          name,
+          encodedDataLength: bytes ?? null,
+          failed: !!failed,
+        })),
         null,
         2,
       ),
+    );
+    await info.attach("landing-mobile-media.json", {
+      path: report,
       contentType: "application/json",
     });
   },

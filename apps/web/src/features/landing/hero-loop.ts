@@ -25,8 +25,16 @@ export interface LoopScheduler {
 }
 export interface HeroLoop {
   setRunning(running: boolean): void;
+  /**
+   * Buffers a frame on the hidden layer once it has a source: a muted play() and then pause()
+   * at the start point, so the first crossfade has a picture (iOS Safari only decodes media
+   * that has played). Waits while paused, retries after an interrupted attempt, never reveals.
+   */
+  prime(): void;
   destroy(): void;
 }
+/** Fallback wait when an old engine's play() returns no promise. */
+export const primeFallbackMs = 250;
 
 const browserScheduler: LoopScheduler = {
   requestFrame: (callback) => window.requestAnimationFrame(callback),
@@ -52,6 +60,9 @@ export function createHeroLoop(
   let destroyed = false;
   let frame: number | undefined;
   let swap: { timer: number; layer: LoopLayer } | undefined;
+  let primeState: "idle" | "pending" | "priming" | "done" = "idle";
+  let primeTimer: number | undefined;
+  let primeAttempt = 0;
 
   function fail() {
     if (destroyed) return;
@@ -107,6 +118,45 @@ export function createHeroLoop(
     scheduler.cancelFrame(frame);
     frame = undefined;
   }
+  function startPrime() {
+    primeState = "priming";
+    const attempt = ++primeAttempt;
+    const layer = next;
+    const live = () => !destroyed && primeState === "priming" && attempt === primeAttempt;
+    const finish = () => {
+      primeTimer = undefined;
+      if (!live()) return;
+      primeState = "done";
+      // A fade may already have made this layer the visible one; then it must keep playing.
+      if (layer !== next) return;
+      layer.pause();
+      layer.seek(loopStart);
+    };
+    const interrupted = (error: unknown) => {
+      if (!live()) return;
+      // An interrupted attempt waits for the next resume. Other rejections leave the layer
+      // unprimed, and the loop then restarts the visible layer instead of fading.
+      primeState = (error as { name?: unknown } | null)?.name === "AbortError" ? "pending" : "done";
+    };
+    try {
+      const result = layer.play();
+      if (result) result.then(finish, interrupted);
+      else primeTimer = scheduler.setTimer(finish, primeFallbackMs);
+    } catch {
+      primeState = "done";
+    }
+  }
+  function prime() {
+    if (destroyed || primeState !== "idle") return;
+    primeState = "pending";
+    if (running) startPrime();
+  }
+  function stopPrime() {
+    if (primeTimer !== undefined) scheduler.clearTimer(primeTimer);
+    primeTimer = undefined;
+    primeAttempt += 1;
+    if (primeState === "priming") primeState = "pending";
+  }
   function setRunning(value: boolean) {
     if (destroyed || value === running) return;
     running = value;
@@ -116,10 +166,12 @@ export function createHeroLoop(
         if (current.currentTime < loopStart) current.seek(loopStart);
       }
       play(current);
+      if (primeState === "pending") startPrime();
       frame = scheduler.requestFrame(tick);
     } else {
       cancelFrame();
       settleSwap();
+      stopPrime();
       first.pause();
       second.pause();
     }
@@ -131,8 +183,9 @@ export function createHeroLoop(
     cancelFrame();
     if (swap) scheduler.clearTimer(swap.timer);
     swap = undefined;
+    stopPrime();
     first.pause();
     second.pause();
   }
-  return { setRunning, destroy };
+  return { setRunning, prime, destroy };
 }
