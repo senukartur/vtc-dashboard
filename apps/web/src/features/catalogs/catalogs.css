@@ -189,6 +189,13 @@
   gap: 4px;
   font-weight: 500;
 }
+/* The company code under its name in depot rows and the depot form. */
+.catalog-page .catalog-depot-code,
+.catalog-dialog .catalog-depot-code {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
 .catalog-page .catalog-card-meta {
   color: var(--muted);
   font-size: var(--font-small);
