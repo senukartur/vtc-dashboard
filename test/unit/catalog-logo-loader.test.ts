@@ -146,6 +146,72 @@ test("a queued logo nobody waits for any more is never requested", async () => {
   expect(f.calls).toHaveLength(4);
 });
 
+test("one of two rows leaving does not cancel a shared queued logo", async () => {
+  const f = controlledFetch();
+  const logos = loader(f.fetch);
+  for (let i = 0; i < 3; i += 1) logos.request(`/logo/${i}?v=a`);
+  const leaving = logos.request("/logo/shared?v=a");
+  const staying = logos.request("/logo/shared?v=a");
+  leaving.release();
+  leaving.release();
+  while (f.pending.length > 0 || f.calls.length < 4) {
+    await flush();
+    f.pending.shift()?.answer(png());
+  }
+  await expect(staying.promise).resolves.toMatch(/^blob:/);
+  expect(f.calls.filter((u) => u.includes("shared"))).toHaveLength(1);
+});
+
+test("releasing a started request keeps its slot accounting, so later logos still start", async () => {
+  const f = controlledFetch();
+  const logos = loader(f.fetch);
+  const started = Array.from({ length: 3 }, (_, i) => logos.request(`/logo/${i}?v=a`));
+  await flush();
+  for (const request of started) {
+    request.release();
+    request.release();
+  }
+  const later = logos.request("/logo/later?v=a");
+  await flush();
+  expect(f.calls).toHaveLength(3);
+  for (const pending of f.pending.splice(0)) pending.answer(png());
+  await flush();
+  f.pending.shift()?.answer(png());
+  await expect(later.promise).resolves.toMatch(/^blob:/);
+  expect(f.calls).toEqual(["/logo/0?v=a", "/logo/1?v=a", "/logo/2?v=a", "/logo/later?v=a"]);
+});
+
+test("a cancelled logo is requested afresh by the next row that needs it", async () => {
+  const f = controlledFetch();
+  const logos = loader(f.fetch);
+  for (let i = 0; i < 3; i += 1) logos.request(`/logo/${i}?v=a`);
+  const cancelled = logos.request("/logo/x?v=a");
+  cancelled.release();
+  await expect(cancelled.promise).rejects.toBeInstanceOf(LogoUnavailable);
+  const fresh = logos.request("/logo/x?v=a");
+  while (f.pending.length > 0 || f.calls.length < 4) {
+    await flush();
+    f.pending.shift()?.answer(png());
+  }
+  await expect(fresh.promise).resolves.toMatch(/^blob:/);
+  expect(f.calls.filter((u) => u.includes("/x"))).toHaveLength(1);
+});
+
+test("a body that breaks off while reading is retried", async () => {
+  const f = controlledFetch();
+  const waits: number[] = [];
+  const request = loader(f.fetch, waits).request("/logo/a?v=1");
+  await flush();
+  const broken = png();
+  broken.blob = () => Promise.reject(new TypeError("body"));
+  f.pending.shift()?.answer(broken);
+  await flush();
+  f.pending.shift()?.answer(png());
+  await expect(request.promise).resolves.toMatch(/^blob:/);
+  expect(f.calls).toHaveLength(2);
+  expect(waits).toEqual([500]);
+});
+
 test("a logo that failed is fetched again when it is asked for later", async () => {
   const f = controlledFetch();
   const logos = loader(f.fetch);

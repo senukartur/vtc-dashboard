@@ -6,8 +6,10 @@
  * after the server's hint, and a request nobody waits for any more never starts.
  *
  * `fetch` keeps the browser HTTP cache, so a versioned logo URL is still read from the cache for
- * the server's max-age. Loaded logos stay as object URLs for the page's lifetime; at most a few
- * hundred small PNGs exist per game, so they are not revoked.
+ * the server's max-age. Loaded logos stay as object URLs for the page's lifetime and are not
+ * revoked: a few hundred small PNGs exist per game, and a replaced version adds at most one more
+ * file of up to 32 KiB. The server authorizes every request it receives; a logo already loaded
+ * in this tab is reused without asking again, as the browser cache would.
  */
 
 export type LogoLoaderOptions = {
@@ -70,12 +72,15 @@ export function createLogoLoader(options: LogoLoaderOptions) {
   async function download(url: string): Promise<string> {
     for (let attempt = 0; ; attempt += 1) {
       let response: Response | null = null;
+      let body: Blob | null = null;
       try {
         response = await options.fetch(url);
+        if (response.ok) body = await response.blob();
       } catch {
-        // A network failure is retried like a busy answer.
+        // A network failure, also while reading the body, is retried like a busy answer.
+        response = null;
       }
-      if (response?.ok) return toObjectUrl(await response.blob());
+      if (body) return toObjectUrl(body);
       const retryable = response === null || busy(response.status);
       if (!retryable || attempt + 1 >= attempts)
         throw new LogoUnavailable(response?.status ?? null);
