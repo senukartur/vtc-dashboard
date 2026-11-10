@@ -1,10 +1,10 @@
-import { inertNotifications } from "./notifications.ts";
-import { switchLanguage } from "./locale.ts";
 import type { Locator, Page } from "@playwright/test";
-import { expect } from "./fixtures.ts";
 import type { components } from "@vtc/contracts";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
 import { rgbaLogo } from "../../fixtures/catalogs/logos.ts";
+import { expect } from "./fixtures.ts";
+import { switchLanguage } from "./locale.ts";
+import { inertNotifications } from "./notifications.ts";
 
 type S = components["schemas"];
 export type CatalogListName = "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
@@ -148,6 +148,10 @@ export type CatalogMockOptions = {
   depots?: Partial<Record<CatalogGame, CatalogDepotRow[]>>;
   /** Company ids whose logo image answers with an error, so the placeholder shows. */
   brokenLogos?: string[];
+  /** The first tries of every logo answer 503 like the API's busy database pool. */
+  busyLogoTries?: number;
+  /** Holds each logo answer this long, so overlapping requests can be counted. */
+  logoDelayMs?: number;
   /** Answers for writes; each receives the request and returns a status with a JSON body. */
   writes?: (request: {
     method: string;
@@ -160,6 +164,7 @@ export type CatalogMockOptions = {
 };
 export async function mockCatalogs(page: Page, staff = true, options: CatalogMockOptions = {}) {
   const requests: URL[] = [];
+  const logos = { inFlight: 0, maxInFlight: 0, tries: new Map<string, number>() };
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.pathname.startsWith("/api/v1/")) requests.push(url);
@@ -221,14 +226,33 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
     }
     const logo = /^\/api\/v1\/catalogs\/companies\/([^/]+)\/logo$/.exec(path);
     if (logo) {
-      if (options.brokenLogos?.includes(logo[1] as string))
-        return route.fulfill({ status: 500, json: { error: { code: "PRIVATE_SENTINEL" } } });
-      return route.fulfill({
-        status: 200,
-        contentType: "image/png",
-        headers: { "cache-control": "no-store" },
-        body: mockLogo,
-      });
+      const id = logo[1] as string;
+      logos.inFlight += 1;
+      logos.maxInFlight = Math.max(logos.maxInFlight, logos.inFlight);
+      try {
+        if (options.logoDelayMs) await new Promise((r) => setTimeout(r, options.logoDelayMs));
+        const tries = (logos.tries.get(id) ?? 0) + 1;
+        logos.tries.set(id, tries);
+        if (options.brokenLogos?.includes(id))
+          return await route.fulfill({
+            status: 500,
+            json: { error: { code: "PRIVATE_SENTINEL" } },
+          });
+        if (tries <= (options.busyLogoTries ?? 0))
+          return await route.fulfill({
+            status: 503,
+            headers: { "retry-after": "0" },
+            json: { error: { code: "SERVICE_UNAVAILABLE", retryable: true } },
+          });
+        return await route.fulfill({
+          status: 200,
+          contentType: "image/png",
+          headers: { "cache-control": "no-store" },
+          body: mockLogo,
+        });
+      } finally {
+        logos.inFlight -= 1;
+      }
     }
     if (path === "/api/v1/catalogs/depots") {
       if (options.gate) await options.gate;
@@ -290,5 +314,5 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
     }
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });
-  return { requests };
+  return { requests, logos };
 }
