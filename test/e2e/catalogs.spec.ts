@@ -1372,7 +1372,7 @@ test(
     if (phone(page)) {
       await page
         .getByRole("button", {
-          name: `Actions for ${freight.name} · ${northCity.name}`,
+          name: `Actions for ${freight.name} (fictional_freight_co) · ${northCity.name}`,
           exact: true,
         })
         .click();

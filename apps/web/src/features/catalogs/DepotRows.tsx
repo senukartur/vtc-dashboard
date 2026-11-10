@@ -91,7 +91,9 @@ export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowA
 export function DepotCards({ depots, staff, busy, onEdit, onToggleHidden }: RowActions) {
   const { t } = useTranslation("catalogs");
   const [sheet, setSheet] = useState<Depot | null>(null);
-  const name = (depot: Depot) => `${depot.company.label.label} · ${depot.city.label.label}`;
+  // The code keeps two companies of one brand in one city apart for the actions button and sheet.
+  const name = (depot: Depot) =>
+    `${depot.company.label.label} (${depot.company.code}) · ${depot.city.label.label}`;
   return (
     <div className="catalog-cards" data-testid="catalog-cards">
       {depots.map((depot) => (
