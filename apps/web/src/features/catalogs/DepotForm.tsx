@@ -65,7 +65,10 @@ export function DepotForm({
               <span className="catalog-field-label">{t("fieldCompany")}</span>
               <span className="catalog-company">
                 <CompanyLogo companyId={depot.company.id} logo={depot.company.logo} />
-                <span>{depot.company.label.label}</span>
+                <span>
+                  {depot.company.label.label}
+                  <code className="catalog-depot-code">{depot.company.code}</code>
+                </span>
               </span>
             </div>
             <div className="catalog-field">

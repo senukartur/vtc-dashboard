@@ -1217,6 +1217,8 @@ for (const locale of ["en", "ru"] as const) {
         "Fictional north city with a very long",
       );
       await expect(plate(page, freight.name)).toHaveAttribute("data-logo", "image");
+      // Brands repeat across companies, so the row names the company code too.
+      await expect(rowOf(page, freight.name).locator("code")).toHaveText("fictional_freight_co");
       // Filters: like the search and source fields, the company and city selectors show their
       // name only as the placeholder (the label stays for assistive technology). Each input fills
       // its field, so the chevron sits inside it, and shares the search box's row edges.
@@ -1370,7 +1372,7 @@ test(
     if (phone(page)) {
       await page
         .getByRole("button", {
-          name: `Actions for ${freight.name} · ${northCity.name}`,
+          name: `Actions for ${freight.name} (fictional_freight_co) · ${northCity.name}`,
           exact: true,
         })
         .click();

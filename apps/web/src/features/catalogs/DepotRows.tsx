@@ -52,6 +52,8 @@ export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowA
                   <CompanyLogo companyId={depot.company.id} logo={depot.company.logo} />
                   <span>
                     {depot.company.label.label} <DepotBadges depot={depot} />
+                    {/* One brand can be several companies (one per facility type); the code tells them apart. */}
+                    <code className="catalog-depot-code">{depot.company.code}</code>
                   </span>
                 </span>
               </td>
@@ -89,7 +91,9 @@ export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowA
 export function DepotCards({ depots, staff, busy, onEdit, onToggleHidden }: RowActions) {
   const { t } = useTranslation("catalogs");
   const [sheet, setSheet] = useState<Depot | null>(null);
-  const name = (depot: Depot) => `${depot.company.label.label} · ${depot.city.label.label}`;
+  // The code keeps two companies of one brand in one city apart for the actions button and sheet.
+  const name = (depot: Depot) =>
+    `${depot.company.label.label} (${depot.company.code}) · ${depot.city.label.label}`;
   return (
     <div className="catalog-cards" data-testid="catalog-cards">
       {depots.map((depot) => (
@@ -100,6 +104,8 @@ export function DepotCards({ depots, staff, busy, onEdit, onToggleHidden }: RowA
               <span>{depot.company.label.label}</span> <DepotBadges depot={depot} />
             </div>
             <span className="catalog-card-meta">
+              <code>{depot.company.code}</code>
+              {" · "}
               {depot.city.label.label}
               <CatalogNativeName value={depot.city.label} />
               {` · ${depot.dlc?.label ?? t("baseGame")}`}
