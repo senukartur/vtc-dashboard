@@ -9,7 +9,7 @@ Turns one installed ETS2/ATS DLC into the import files described in the [catalog
 
 ## Rules
 
-- The output is game-derived. Write it only under `.local/catalogs/` (ignored by Git). Never commit it, attach it to a PR or issue, or put it in fixtures or the web bundle. See the [agent rules](../../../docs/development/agent-rules.md) on game data.
+- The output is game-derived. Write it only under `.local/catalogs/` (ignored by Git). The script refuses an `--out` or `--cache` inside the repository that Git would track. Never commit it, attach it to a PR or issue, or put it in fixtures or the web bundle. See the [agent rules](../../../docs/development/agent-rules.md) on game data.
 - Building the files changes nothing anywhere. Importing them into a host is a separate step. Each host import needs the owner's approval, and the owner or an agent with the owner's go-ahead does it through the catalog page.
 - Codes come only from installed archives. Wikis, the SCS blog and store pages give names, never codes. If the DLC is not installed, ask the owner to install it and wait.
 - Don't download the extractor or anything else without the owner's approval.

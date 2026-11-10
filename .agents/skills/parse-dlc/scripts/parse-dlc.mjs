@@ -448,7 +448,21 @@ function listCommand() {
 
 // Extracted archives, reused across runs and DLCs; --fresh re-extracts after a game update.
 const cacheDir = (game) =>
-  resolve(opts.cache ?? join(".local", "catalogs", "parse-dlc-cache", game));
+  privatePath(
+    resolve(opts.cache ?? join(".local", "catalogs", "parse-dlc-cache", game)),
+    "--cache",
+  );
+
+// Game-derived files must never land where Git would track them: inside a work tree,
+// a path is accepted only when Git ignores it. Paths outside any repository are fine.
+function privatePath(path, option) {
+  let probe = path;
+  while (!existsSync(probe) && dirname(probe) !== probe) probe = dirname(probe);
+  const git = (args) => spawnSync("git", ["-C", probe, ...args], { encoding: "utf8" });
+  if (git(["rev-parse", "--is-inside-work-tree"]).stdout.trim() !== "true") return path;
+  if (git(["check-ignore", "-q", "--no-index", path]).status === 0) return path;
+  throw new UsageError(`${option} ${path} is not ignored by Git; use a folder under .local/`);
+}
 
 function requireGame() {
   if (!GAMES[opts.game]) throw new UsageError("--game must be ets2 or ats");
@@ -458,7 +472,7 @@ function requireGame() {
 function buildCommand() {
   const game = requireGame();
   if (!opts.dlc || !opts.out) throw new UsageError("build needs --dlc and --out");
-  const out = resolve(opts.out);
+  const out = privatePath(resolve(opts.out), "--out");
   const raw = cacheDir(game);
   const importDir = join(out, "import");
   const dir = gameDir(game);
