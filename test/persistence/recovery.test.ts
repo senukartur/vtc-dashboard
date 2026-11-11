@@ -19,6 +19,7 @@ import {
   manualPriorFolder,
   notificationMaterialPriorFolder,
   notificationsPriorFolder,
+  qualificationRuleEditingPriorFolder,
   reconciliationPriorFolder,
   reset,
   reviewQueuePriorFolder,
@@ -124,7 +125,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 24);
+      assert.equal(await runMigrations(settings), 25);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -181,7 +182,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 24);
+      assert.equal(await runMigrations(settings), 25);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -356,7 +357,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 24);
+      assert.equal(await runMigrations(guardedSettings()), 25);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -451,7 +452,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 24);
+        assert.equal(await runMigrations(settings), 25);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -509,7 +510,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 24);
+      assert.equal(await runMigrations(guardedSettings()), 25);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -564,7 +565,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 24);
+      assert.equal(await runMigrations(guardedSettings()), 25);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -618,7 +619,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 24);
+      assert.equal(await runMigrations(guardedSettings()), 25);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -701,7 +702,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 24);
+      assert.equal(await runMigrations(settings), 25);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1145,7 +1146,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 5);
+      assert.equal(await runMigrations(settings), 6);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1228,7 +1229,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 24);
+      assert.equal(history.length, 25);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -1439,8 +1440,13 @@ await recoveryTest(
       const [prefix] = await connection.query<RowDataPacket[]>(
         "SELECT version,hash FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      const catalogTimestamps = await qualificationRuleEditingPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder: catalogTimestamps }), 1);
+        assert.equal(await runMigrations(settings, { folder: catalogTimestamps }), 0);
+      } finally {
+        await rm(catalogTimestamps, { recursive: true });
+      }
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
       );
@@ -1468,6 +1474,159 @@ await recoveryTest(
       const insertEnd = await serverUtc();
       for (const [index, row] of (await readRows(200)).entries())
         assert.ok(row.updated_at >= insertStart && row.updated_at <= insertEnd, tables[index]);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "qualification rule editing upgrades the populated 0023 prefix and preserves historical proof",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    const fixtureId = (n: number) => "09400000-0000-4000-8000-" + String(n).padStart(12, "0");
+    const member = fixtureId(301);
+    const source = fixtureId(302);
+    const target = fixtureId(303);
+    const rule = fixtureId(304);
+    const promotion = fixtureId(305);
+    const newRule = fixtureId(306);
+    const nextAssignment = fixtureId(307);
+    const newPromotion = fixtureId(308);
+
+    async function rows(sql: string, values: string[] = []) {
+      const [result] = await connection.execute<RowDataPacket[]>(sql, values);
+      return result;
+    }
+
+    async function schema() {
+      const promotions = (await rows("SHOW CREATE TABLE qualification_promotions"))[0];
+      const rules = (await rows("SHOW CREATE TABLE qualification_rule_versions"))[0];
+      assert.ok(promotions && rules);
+      return {
+        promotions: String(promotions["Create Table"]),
+        rules: String(rules["Create Table"]),
+      };
+    }
+
+    async function history() {
+      return {
+        rules: await rows("SELECT * FROM qualification_rule_versions WHERE id=?", [rule]),
+        promotions: await rows("SELECT * FROM qualification_promotions WHERE id=?", [promotion]),
+        reviews: await rows("SELECT * FROM qualification_promotion_reviews WHERE promotion_id=?", [
+          promotion,
+        ]),
+      };
+    }
+
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await qualificationRuleEditingPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 24);
+      const levels = await rows(
+        "SELECT code,id FROM qualification_levels WHERE game='ets2' AND code IN ('trainee','driver_iii','driver_ii')",
+      );
+      const level = (code: string) => {
+        const id = levels.find((row) => row.code === code)?.id;
+        assert.ok(Buffer.isBuffer(id), code);
+        return id.toString("ascii");
+      };
+      const initial = "2026-01-01 00:00:00.000";
+      const promoted = "2026-01-02 00:00:00.000";
+      const next = "2026-01-03 00:00:00.000";
+      await connection.execute(
+        "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Synthetic member','qualification-upgrade@example.invalid',?,?)",
+        [member, initial, initial],
+      );
+      await connection.execute(
+        "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+        [member],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,ended_at,purpose,actor_id,reason) VALUES (?,?,'ets2',?,?,?,'initial',?,'Synthetic initial assignment'),(?,?,'ets2',?,?,NULL,'promotion',?,'Synthetic promotion assignment')",
+        [
+          source,
+          member,
+          level("trainee"),
+          initial,
+          promoted,
+          member,
+          target,
+          member,
+          level("driver_iii"),
+          promoted,
+          member,
+        ],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_rule_versions (id,level_id,published_at,effective_at,rules,required_trips,required_distance_m,actor_id,reason) VALUES (?,?,?,?,JSON_ARRAY(),2,'12345.000000000000000001',?,'Synthetic published reason')",
+        [rule, level("trainee"), initial, initial, member],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_promotions (id,source_assignment_id,target_assignment_id,rule_version_id,required_trips,required_distance_m,accepted_trips,actual_distance_m,period_revision,confirmed_at,actor_id,reason) VALUES (?,?,?,?,2,'12345.000000000000000001',3,'12346.000000000000000002',3,?,?,'Synthetic promotion proof')",
+        [promotion, source, target, rule, promoted, member],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_promotion_reviews (promotion_id,review_required,version,checked_revision,checked_at) VALUES (?,1,2,4,?)",
+        [promotion, promoted],
+      );
+      const beforeSchema = await schema();
+      const beforeHistory = await history();
+      for (const records of Object.values(beforeHistory)) assert.equal(records.length, 1);
+      const ledgerSql = "SELECT version,hash,state FROM _vtc_migrations ORDER BY version";
+      const prefix = await rows(ledgerSql);
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      const ledger = await rows(ledgerSql);
+      assert.deepEqual(ledger.slice(0, -1), prefix);
+      assert.equal(ledger.at(-1)?.state, "applied");
+      assert.deepEqual(await history(), beforeHistory);
+      assert.deepEqual(await schema(), {
+        promotions: beforeSchema.promotions
+          .replace(
+            "`required_trips` int unsigned NOT NULL",
+            "`required_trips` int unsigned DEFAULT NULL",
+          )
+          .replace(
+            "`required_distance_m` decimal(38,18) NOT NULL",
+            "`required_distance_m` decimal(38,18) DEFAULT NULL",
+          ),
+        rules: beforeSchema.rules.replace(
+          "`reason` varchar(2048) NOT NULL",
+          "`reason` varchar(2048) DEFAULT NULL",
+        ),
+      });
+
+      await connection.execute(
+        "INSERT INTO qualification_rule_versions (id,level_id,published_at,effective_at,rules,required_trips,required_distance_m,actor_id) VALUES (?,?,?,?,JSON_ARRAY(),NULL,NULL,?)",
+        [newRule, level("driver_iii"), next, next, member],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_assignments (id,user_id,game,level_id,assigned_at,purpose,actor_id,reason) VALUES (?,?,'ets2',?,?,'promotion',?,'Synthetic promotion assignment')",
+        [nextAssignment, member, level("driver_ii"), next, member],
+      );
+      await connection.execute(
+        "INSERT INTO qualification_promotions (id,source_assignment_id,target_assignment_id,rule_version_id,required_trips,required_distance_m,accepted_trips,actual_distance_m,period_revision,confirmed_at,actor_id,reason) VALUES (?,?,?,?,NULL,NULL,0,0,1,?,?,'Synthetic promotion proof')",
+        [newPromotion, target, nextAssignment, newRule, next, member],
+      );
+      assert.deepEqual(
+        (await rows("SELECT reason FROM qualification_rule_versions WHERE id=?", [newRule]))[0],
+        { reason: null },
+      );
+      assert.deepEqual(
+        (
+          await rows(
+            "SELECT required_trips,required_distance_m FROM qualification_promotions WHERE id=?",
+            [newPromotion],
+          )
+        )[0],
+        { required_trips: null, required_distance_m: null },
+      );
+      assert.deepEqual(await history(), beforeHistory);
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });
