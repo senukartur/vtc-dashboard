@@ -110,10 +110,10 @@ test("trip summaries retain legacy payloads and keep event and game mode out of 
   for (const result of [stageFixture("listTrips:success").response.data, company, own, review]) {
     expect(validate("ListTripSummary", result)).toBe(true);
   }
-  expect(company.total).toBe(2);
+  expect(company.total).toBe(1);
   expect(company.items).toHaveLength(1);
-  expect(company.nextCursor).toBe("synthetic-company-trip-cursor");
-  expect(trip).toMatchObject({ number: 42, decision: "accepted" });
+  expect(company.nextCursor).toBeNull();
+  expect(trip).toMatchObject({ number: 42, decision: "accepted", submittedAt: null });
   expect(trip).not.toHaveProperty("event");
   expect(trip).not.toHaveProperty("gameMode");
   expect(own.items[0]).toMatchObject({
@@ -121,7 +121,11 @@ test("trip summaries retain legacy payloads and keep event and game mode out of 
     gameMode: "haulmp",
   });
   expect(own.items[0].submittedAt).toBeNull();
-  expect(review.items[0]).toMatchObject({ event: null, gameMode: "unknown" });
+  const reviewed = review.items[0];
+  expect(reviewed).toMatchObject({ event: null, gameMode: "unknown" });
+  expect(reviewed.createdAt).toBe(reviewed.review.createdAt);
+  expect(reviewed.submittedAt).toBe(reviewed.review.manualRevision.submittedAt);
+  expect(Date.parse(reviewed.createdAt)).toBeLessThanOrEqual(Date.parse(reviewed.submittedAt));
   for (const changes of [
     { number: 0 },
     { number: Number.MAX_SAFE_INTEGER + 1 },
@@ -137,6 +141,9 @@ test("trip summaries retain legacy payloads and keep event and game mode out of 
   const profile = stageFixture("getMember:all-game-lifetime-totals").response.data;
   expect(ownTotals.query).toEqual({ game: "ets2" });
   expect(validate("OwnTripStatusSummary", ownTotals.response.data)).toBe(true);
+  expect(ownTotals.response.data.counts.accepted).toBe(
+    ownTotals.response.data.lifetimeTotals.acceptedTrips,
+  );
   expect(validate("MemberProfile", profile)).toBe(true);
   expect(profile.lifetimeTotals).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
   expect(validate("LifetimeTripTotals", { acceptedTrips: 1, actualDistanceM: 3.5 })).toBe(false);

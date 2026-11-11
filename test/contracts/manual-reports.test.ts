@@ -19,7 +19,7 @@ const examples = contractFile("examples.json") as {
     query?: Record<string, unknown>;
     headers?: Record<string, string>;
     responseHeaders?: Record<string, string>;
-    response: { data?: unknown; error?: { code: string } };
+    response: { data?: unknown; error?: { code: string }; meta: { requestId: string } };
   }[];
 };
 const fixture = (id: string) => {
@@ -368,8 +368,19 @@ test("editing filter and count are optional and draft deletion is bodyless, guar
   const success = fixture("deleteManualDraft:success");
   const replay = fixture("deleteManualDraft:exact-replay");
   expect(replay.headers).toEqual(success.headers);
+  expect(replay.operationId).toBe(success.operationId);
   expect(replay.path).toEqual(success.path);
-  expect(replay.response).toEqual(success.response);
+  expect(replay.response.data).toEqual(success.response.data);
+  expect(replay.response.meta.requestId).not.toBe(success.response.meta.requestId);
+  const stale = fixture("deleteManualDraft:version-conflict");
+  const submitted = fixture("deleteManualDraft:already-submitted");
+  const requestKeys = [success, stale, submitted].map(
+    (example) => example.headers?.["Idempotency-Key"],
+  );
+  expect(new Set(requestKeys).size).toBe(3);
+  const changed = fixture("deleteManualDraft:changed-retry");
+  expect(changed.headers?.["Idempotency-Key"]).toBe(success.headers?.["Idempotency-Key"]);
+  expect(changed.headers?.["If-Match"]).not.toBe(success.headers?.["If-Match"]);
   expect(valid("EnvelopeCommandResult", success.response)).toBe(true);
   expect(success.response.data).toMatchObject({ id: success.path?.draftId });
 

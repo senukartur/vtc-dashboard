@@ -1896,7 +1896,7 @@
               "type": "null"
             }
           ],
-          "description": "UTC submission instant, or null if no submission is known."
+          "description": "UTC submission instant of the current manual revision, or null when there is no current manual revision."
         },
         "event": {
           "anyOf": [
@@ -10411,7 +10411,7 @@
             "oldestAgeSeconds"
           ],
           "additionalProperties": false,
-          "description": "Requires trips.review. Use the existing review queue predicate and exclude the caller's own trips. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+          "description": "Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
         },
         "newApplicationsCount": {
           "type": "integer",

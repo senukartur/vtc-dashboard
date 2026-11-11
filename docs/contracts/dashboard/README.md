@@ -13,7 +13,7 @@ The OpenAPI operations marked `x-contract-stage: VTC-123 Step 1` describe the st
 - `tripsNeedingFixes` requires `trips.read_own_private`. Include the caller's trips requiring a driver fix and the latest author-visible return explanation, or null when there is no displayable text.
 - `unfinishedManualDrafts` requires `trips.submit_own` and includes only the caller's editing drafts.
 - `unansweredUpcomingEvents` requires `events.respond` and includes only upcoming events the caller can see and respond to, with no response by the caller.
-- `reviewQueue` requires `trips.review`. Apply the existing review queue predicate and exclude the caller's own trips. Measure `oldestAgeSeconds` at `computedAt` from the oldest eligible queue entry's `createdAt`, or return null when empty.
+- `reviewQueue` requires `trips.review`. Apply current review visibility and the Awaiting decision predicate (`scope=review&hold=true`). Exclude the caller's own trips before computing both count and age. Measure `oldestAgeSeconds` at `computedAt` from the oldest eligible queue entry's `createdAt`, or return null when empty.
 - `newApplicationsCount` requires `applications.manage` and counts submitted applications.
 
 Omit unauthorized sections. Return zero for visible empty counts and an empty array for a visible empty preview. Promotion counts belong to a later stage.
@@ -26,7 +26,7 @@ The application and member admin lists can add `statusCounts` before cursor pagi
 
 Sort options `asc` and `desc` use `createdAt` then `id` in every scope, with `desc` the default. `completion_asc` and `completion_desc` use known effective actual completion with missing completion last and a stable ID tie-breaker. `hold` is review-only. Apply all filters before the cursor and optional `total`. Cursors bind the normalized filters, search locale and sort, and a mismatch returns `409 VERSION_CONFLICT`.
 
-`TripSummary` can add a positive safe canonical `number`, UTC `createdAt`, and nullable UTC `submittedAt`. Only authorized author and reviewer projections can include `event` (a visible event ID and title, or null) and `gameMode` (`single-player`, `truckersmp`, `haulmp`, or `unknown`). Company-scope summaries omit both fields. The own trip status summary and member profile can include `lifetimeTotals` from accepted canonical trips, with `acceptedTrips` and exact `actualDistanceM` as a decimal metre string. The own summary applies its optional game filter and the member profile covers all games.
+`TripSummary` can add a positive safe canonical `number`, UTC `createdAt`, and UTC `submittedAt` from the current manual revision, or null when there is no current manual revision. Only authorized author and reviewer projections can include `event` (a visible event ID and title, or null) and `gameMode` (`single-player`, `truckersmp`, `haulmp`, or `unknown`). Company-scope summaries omit both fields. The own trip status summary and member profile can include `lifetimeTotals` from accepted canonical trips, with `acceptedTrips` and exact `actualDistanceM` as a decimal metre string. The own summary applies its optional game filter and the member profile covers all games.
 
 ### Manual drafts and reports (VTC-116 and VTC-117)
 

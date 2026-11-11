@@ -347,8 +347,16 @@ test("catalog row timestamps and summary counters are additive and bounded", () 
       expect(row).not.toHaveProperty("depotCount");
     }
   }
-  const [depot] = stageFixture("listCatalogDepots:hidden-untranslated").response.data.items;
+  const example = stageFixture("listCatalogDepots:hidden-untranslated");
+  const [depot] = example.response.data.items;
   expect(validate("CatalogDepot")(depot)).toBe(true);
+  for (const label of [depot.company.label, depot.city.label]) {
+    expect(label).toMatchObject({
+      requestedLocale: example.query.locale,
+      renderedLocale: "en",
+      englishFallback: true,
+    });
+  }
   expect(depot.updatedAt).toMatch(/\.\d{3}Z$/);
   expect(validate("CatalogDepot")({ ...depot, updatedAt: "2026-10-21T12:00:00.000+00:00" })).toBe(
     false,

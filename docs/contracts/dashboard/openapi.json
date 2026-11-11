@@ -8604,7 +8604,7 @@
         "x-contract-stage": "VTC-123 Step 1",
         "responses": {
           "200": {
-            "description": "The editing draft was deleted, or the caller is authorized to replay the same committed result.",
+            "description": "Committed draft deletion result, including an authorized exact replay of the same command data.",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -8673,7 +8673,7 @@
             "$ref": "#/components/parameters/IdempotencyKey"
           }
         ],
-        "description": "Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored result for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store."
+        "description": "Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored command data with the current HTTP request ID for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store."
       }
     },
     "/api/v1/me/manual-drafts/{draftId}/submission": {
@@ -11888,7 +11888,7 @@
                 "type": "null"
               }
             ],
-            "description": "UTC submission instant, or null if no submission is known."
+            "description": "UTC submission instant of the current manual revision, or null when there is no current manual revision."
           },
           "event": {
             "anyOf": [
@@ -20403,7 +20403,7 @@
               "oldestAgeSeconds"
             ],
             "additionalProperties": false,
-            "description": "Requires trips.review. Use the existing review queue predicate and exclude the caller's own trips. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+            "description": "Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
           },
           "newApplicationsCount": {
             "type": "integer",

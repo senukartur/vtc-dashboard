@@ -1560,7 +1560,7 @@ export interface paths {
         post?: never;
         /**
          * Delete an editing manual draft
-         * @description Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored result for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store.
+         * @description Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored command data with the current HTTP request ID for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store.
          */
         delete: operations["deleteManualDraft"];
         options?: never;
@@ -4695,7 +4695,7 @@ export interface components {
             reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
             review?: components["schemas"]["TripReviewQueueEntry"];
             sourceKinds: ("ets2telemetry" | "manual")[];
-            /** @description UTC submission instant, or null if no submission is known. */
+            /** @description UTC submission instant of the current manual revision, or null when there is no current manual revision. */
             submittedAt?: components["schemas"]["Timestamp"] | null;
             version: number;
             /** @constant */
@@ -4719,7 +4719,7 @@ export interface components {
             computedAt: components["schemas"]["Timestamp"];
             /** @description Requires applications.manage. Count submitted applications. */
             newApplicationsCount?: number;
-            /** @description Requires trips.review. Use the existing review queue predicate and exclude the caller's own trips. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue. */
+            /** @description Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue. */
             reviewQueue?: {
                 count: number;
                 oldestAgeSeconds: number | null;
@@ -7559,7 +7559,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The editing draft was deleted, or the caller is authorized to replay the same committed result. */
+            /** @description Committed draft deletion result, including an authorized exact replay of the same command data. */
             200: {
                 headers: {
                     /** @description Private response; never cache. */

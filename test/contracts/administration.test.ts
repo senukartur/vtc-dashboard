@@ -129,7 +129,11 @@ const stageFixture = (id: string) =>
   stageFixtures.cases.find((item: { id: string }) => item.id === id);
 
 test("workspace summary exposes bounded typed previews and distinguishes omitted from zero", () => {
-  const operation = dashboardContract("openapi.json").paths["/api/v1/me/workspace-summary"].get;
+  const spec = dashboardContract("openapi.json");
+  const operation = spec.paths["/api/v1/me/workspace-summary"].get;
+  expect(spec.components.schemas.WorkspaceSummary.properties.reviewQueue.description).toContain(
+    "Awaiting decision predicate (scope=review&hold=true)",
+  );
   expect(operation).toMatchObject({
     operationId: "getMyWorkspaceSummary",
     security: [{ sessionCookie: [] }],

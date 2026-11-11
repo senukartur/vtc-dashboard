@@ -6611,11 +6611,11 @@
               "number": 42,
               "reportingBasis": "actual_completion",
               "createdAt": "2026-10-20T12:00:00.000Z",
-              "submittedAt": "2026-10-20T12:00:00.000Z"
+              "submittedAt": null
             }
           ],
-          "nextCursor": "synthetic-company-trip-cursor",
-          "total": 2
+          "nextCursor": null,
+          "total": 1
         },
         "meta": {
           "requestId": "synthetic-stage-one"
@@ -6725,7 +6725,7 @@
                 }
               },
               "number": 43,
-              "createdAt": "2026-10-20T12:00:00.000Z",
+              "createdAt": "2026-10-17T12:00:00.000Z",
               "submittedAt": "2026-10-17T12:00:00.000Z",
               "event": null,
               "gameMode": "unknown"
@@ -6774,7 +6774,7 @@
           "counts": {
             "unassessed": 1,
             "pendingReview": 1,
-            "accepted": 1,
+            "accepted": 4,
             "rejected": 1
           },
           "activeTrips": 1,
@@ -7578,7 +7578,7 @@
           "version": 2
         },
         "meta": {
-          "requestId": "synthetic-stage-one"
+          "requestId": "synthetic-draft-delete-replay"
         }
       }
     },
@@ -7620,7 +7620,7 @@
         "Origin": "https://dashboard.example.invalid",
         "X-CSRF-Token": "synthetic-csrf-placeholder",
         "If-Match": "\"v1\"",
-        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000009"
       },
       "responseHeaders": {
         "Cache-Control": "no-store"
@@ -7646,8 +7646,8 @@
       "headers": {
         "Origin": "https://dashboard.example.invalid",
         "X-CSRF-Token": "synthetic-csrf-placeholder",
-        "If-Match": "\"v1\"",
-        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+        "If-Match": "\"v2\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000010"
       },
       "responseHeaders": {
         "Cache-Control": "no-store"
@@ -8068,9 +8068,9 @@
                 "label": {
                   "entityId": "41000000-0000-4000-8000-000000000001",
                   "label": "Synthetic City",
-                  "requestedLocale": "en",
+                  "requestedLocale": "ru",
                   "renderedLocale": "en",
-                  "englishFallback": false,
+                  "englishFallback": true,
                   "hidden": false
                 }
               },
@@ -8092,12 +8092,12 @@
       "response": {
         "data": {
           "id": "41000000-0000-4000-8000-000000000001",
-          "version": 1,
+          "version": 2,
           "game": "ets2",
           "code": "trainee",
           "name": "synthetic-example",
-          "ruleVersionId": null,
-          "configured": false,
+          "ruleVersionId": "54000000-0000-4000-8000-000000000011",
+          "configured": true,
           "requiredTrips": null,
           "requiredDistanceM": null
         },

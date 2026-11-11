@@ -120,7 +120,14 @@ test("staged qualification publication accepts an optional nonempty reason and k
 
   const fixtures = read("examples.json").cases;
   const fixture = (id: string) => fixtures.find((example: { id: string }) => example.id === id);
-  const without = fixture("publishQualificationRules:without-reason").request;
+  const immediate = fixture("publishQualificationRules:without-reason");
+  const without = immediate.request;
+  expect(immediate.status).toBe(201);
+  expect(immediate.response.data).toMatchObject({
+    configured: true,
+    version: 2,
+    ruleVersionId: expect.any(String),
+  });
   const withReason = fixture("publishQualificationRules:success").request;
   const publication = valid("QualificationRulePublicationInput");
   const live = valid("RulesInput");
