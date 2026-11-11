@@ -18,7 +18,7 @@ import {
   or,
   sql,
 } from "@vtc/db/catalogs-schema";
-import type { SQL } from "drizzle-orm";
+import { exists, type SQL, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { retryTransaction } from "../../platform/jobs/queue.js";
 import { duplicateKey } from "../../platform/outbox/events.js";
@@ -1583,6 +1583,29 @@ export function createCatalogs(
     async cargoAdrInTransaction(tx: TxContext, cargoId: string) {
       return (await selectionsInTransaction(tx, [{ kind: "cargo", id: cargoId }])).get(cargoId)
         ?.adrClass;
+    },
+    /** Correlated search over the displayed labels of a trip's effective fact. */
+    labelSearchCondition(
+      tx: TxContext,
+      refs: { origin: SQLWrapper; destination: SQLWrapper; cargo: SQLWrapper },
+      locale: Locale,
+      term: string,
+    ) {
+      const pattern = `%${term.replace(/[!%_]/g, "!$&")}%`;
+      const matches = (table: typeof catalogCities | typeof catalogCargoes, ref: SQL) => {
+        const display =
+          locale === "ru" ? sql`COALESCE(${table.nameRu}, ${table.nameEn})` : table.nameEn;
+        return exists(
+          c(tx)
+            .select({ one: sql`1` })
+            .from(table)
+            .where(and(ref, sql`${display} LIKE ${pattern} ESCAPE '!'`)),
+        );
+      };
+      return or(
+        matches(catalogCities, sql`${catalogCities.id} IN (${refs.origin}, ${refs.destination})`),
+        matches(catalogCargoes, eq(catalogCargoes.id, refs.cargo)),
+      );
     },
     /** Current labels; names follow the live row, including hidden rows. */
     async labelsInTransaction(

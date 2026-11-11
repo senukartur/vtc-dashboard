@@ -269,6 +269,7 @@ beforeAll(async () => {
       manualEvidence: (tx, owner, payload, tripId) =>
         manual.validateSourceInTransaction(tx, owner, payload, tripId),
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
+      manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
     },
     now,
   );
@@ -407,6 +408,13 @@ test("same-ETag revisions race safely, rejected edits retain history, and accept
       fields: { ...fields(image.id), actualDistanceM: "20" },
       expectedTripVersion: report.tripVersion,
     };
+  const [first] = (await tripService.list(owner, { scope: "mine" })).items;
+  expect(first).toMatchObject({
+    id: report.tripId,
+    submittedAt: report.currentRevision.submittedAt,
+    gameMode: "unknown",
+  });
+  instant += 1;
   const edits = await Promise.allSettled([
     manual.reviseReport(owner, report.id, newId(), report.version, value),
     manual.reviseReport(owner, report.id, newId(), report.version, value),
@@ -415,6 +423,15 @@ test("same-ETag revisions race safely, rejected edits retain history, and accept
   expect(edits.filter((r) => r.status === "rejected")).toHaveLength(1);
   const revised = await manual.getReport(owner, report.id);
   expect(revised.currentRevision.number).toBe(2);
+  expect(revised.currentRevision.submittedAt).not.toBe(report.currentRevision.submittedAt);
+  const [reviewed] = (await tripService.list(reviewer, { scope: "review" })).items;
+  expect(reviewed).toMatchObject({
+    id: report.tripId,
+    number: first?.number,
+    createdAt: first?.createdAt,
+    submittedAt: revised.currentRevision.submittedAt,
+    review: { manualRevision: { number: 2, submittedAt: revised.currentRevision.submittedAt } },
+  });
   expect(await submit(image.id, key)).toEqual(report);
   const history = await manual.revisions(owner, report.id);
   expect(history).toHaveProperty("items");
@@ -487,8 +504,10 @@ test("current private permissions protect unattached uploads, report history and
   await expect(manual.getReport(other, report.id)).rejects.toMatchObject({ statusCode: 404 });
   await terminal(report);
   const view = await tripService.detail(other, report.tripId);
-  expect(view.view).toBe("summary");
+  expect(view).toMatchObject({ view: "summary", submittedAt: report.currentRevision.submittedAt });
   expect(view).not.toHaveProperty("evidence");
+  expect(view).not.toHaveProperty("event");
+  expect(view).not.toHaveProperty("gameMode");
   const own = await tripService.detail(owner, report.tripId);
   expect(own).toMatchObject({
     view: "private",

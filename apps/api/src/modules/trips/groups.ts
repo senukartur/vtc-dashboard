@@ -19,17 +19,16 @@ export function createTripGroups(unit: UnitOfWork) {
       throw new Error("TRIP_GROUP_INVALID");
     return root;
   }
-  async function members(tx: TxContext, ids: string[], lock: boolean | "share" = false) {
-    const roots = new Set<string>();
-    for (const id of [...new Set(ids)].sort()) roots.add((await resolve(tx, id, lock)).id);
-    if (!roots.size) return [];
+  async function membersOfRoots(tx: TxContext, roots: string[], lock: boolean | "share" = false) {
+    if (!roots.length) return [];
     const query = c(tx)
       .select()
       .from(trips)
-      .where(or(inArray(trips.id, [...roots]), inArray(trips.aliasOf, [...roots])))
+      .where(or(inArray(trips.id, roots), inArray(trips.aliasOf, roots)))
       .orderBy(trips.id);
     const rows = await (lock ? query.for(lock === "share" ? "share" : "update") : query);
     const rootRows = new Map(rows.filter((t) => !t.aliasOf).map((t) => [t.id, t]));
+    if (roots.some((id) => !rootRows.has(id))) throw new Error("TRIP_GROUP_INVALID");
     for (const row of rows) {
       const root = rootRows.get(row.aliasOf ?? row.id);
       if (!root || root.ownerId !== row.ownerId || root.game !== row.game)
@@ -39,7 +38,12 @@ export function createTripGroups(unit: UnitOfWork) {
   }
   return {
     resolve,
-    members,
+    membersOfRoots,
+    async members(tx: TxContext, ids: string[], lock: boolean | "share" = false) {
+      const roots = new Set<string>();
+      for (const id of [...new Set(ids)].sort()) roots.add((await resolve(tx, id, lock)).id);
+      return membersOfRoots(tx, [...roots], lock);
+    },
     async contains(tx: TxContext, rootId: string, originalId: string, current = false) {
       const root = await resolve(tx, originalId, current ? "share" : false);
       return root.id === rootId;

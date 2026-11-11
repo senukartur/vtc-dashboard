@@ -154,6 +154,8 @@ beforeAll(async () => {
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
       manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
       decisionProjection: (tx, id, actor) => service.privateProjectionInTransaction(tx, id, actor),
+      eventTitles: (tx, ids, actor) => events.tripTitlesInTransaction(tx, ids, actor),
+      eventAssociations: (tx, ids) => service.eventAssociationsInTransaction(tx, ids),
       correctionRequested: (tx, id, requestId, actor, reason) =>
         service.correctionRequestedInTransaction(tx, id, requestId, actor, reason),
     },
@@ -1269,6 +1271,10 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
         { eventId },
       ),
       stale = await service.getProposal(dispatcher, r.tripId, rsvp.data.id);
+    expect((await tripsService.list(who, { scope: "mine" })).items[0]).toMatchObject({
+      id: r.tripId,
+      event: null,
+    });
     instant += 3600000;
     await events.setAttendance(director, eventId, newId(), 1, {
       members: [{ memberId: who.userId, attendance: "attended", note: null }],
@@ -1309,6 +1315,18 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
     expect(accepted.data.reasonCodes).not.toContain("accepted_over_limits");
     expect(accepted.data.basis.eventId).toBe(eventId);
     expect((await credit(r.tripId))?.credited).toBe(true);
+    expect((await tripsService.list(who, { scope: "mine" })).items[0]).toMatchObject({
+      id: r.tripId,
+      event: { id: eventId, title: eventInput.title },
+    });
+    expect(await tripsService.detail(dispatcher, r.tripId)).toMatchObject({
+      summary: { event: { id: eventId, title: eventInput.title } },
+    });
+    const publicRead = (await tripsService.list(who, { scope: "company", ownerId: who.userId }))
+      .items[0];
+    expect(publicRead?.id).toBe(r.tripId);
+    expect(publicRead).not.toHaveProperty("event");
+    expect(publicRead).not.toHaveProperty("gameMode");
     const mismatch = payload();
     if (mismatch.snapshot.job.cargoMass.available) mismatch.snapshot.job.cargoMass.value = 22000;
     const other = await receive(mismatch, who),
@@ -1335,9 +1353,16 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
     expect(rejected.data.outcome).toBe("rejected");
     expect((await credit(other.tripId))?.credited).toBe(false);
     const before = await credit(r.tripId);
+    const renamed = "Fictional updated convoy title";
     await events.update(director, eventId, newId(), 1, {
       ...eventInput,
+      title: renamed,
       prescribedMassKg: "22000",
+    });
+    const ownerTrips = await tripsService.list(who, { scope: "mine" });
+    expect(ownerTrips.items.find((item) => item.id === r.tripId)?.event).toEqual({
+      id: eventId,
+      title: renamed,
     });
     await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
     expect(await credit(r.tripId)).toEqual(before);

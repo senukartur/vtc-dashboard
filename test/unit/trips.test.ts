@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { newId, type TxContext } from "@vtc/db";
 import { expect, test } from "vitest";
@@ -17,8 +18,65 @@ import {
   type Telemetry,
   telemetryAdapter,
 } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
+import {
+  normalizeListOptions,
+  tripListCursor,
+} from "../../apps/api/src/modules/trips/list-query.ts";
 import { tripEvent } from "../../apps/api/src/platform/outbox/events.ts";
 import { telemetryFixture } from "../support/builders.ts";
+
+test("trip cursors reject legacy signatures and bind normalized filters to the effective locale", () => {
+  const actor = {
+    userId: newId(),
+    sessionId: newId(),
+    accessEpoch: 1,
+    credentialEpoch: 1,
+    capabilities: [],
+  };
+  const key = "a".repeat(64);
+  const position = { id: newId(), createdAt: "2026-11-10T00:00:00.000Z", actualEnd: null };
+  const options = normalizeListOptions({ scope: "mine", order: "completion_asc", q: " #0042 " });
+  const cursor = tripListCursor(key, actor, options, "ru").write(position);
+  const continued = normalizeListOptions({
+    scope: "mine",
+    order: "completion_asc",
+    q: "42",
+    locale: "ru",
+    limit: 10,
+    cursor,
+  });
+  expect(tripListCursor(key, actor, continued, "ru").read()).toEqual({
+    instant: null,
+    id: position.id,
+  });
+  expect(() => tripListCursor(key, actor, continued, "en").read()).toThrow(
+    expect.objectContaining({ statusCode: 409, publicCode: "VERSION_CONFLICT" }),
+  );
+  expect(() =>
+    tripListCursor(key, { ...actor, sessionId: newId() }, continued, "ru").read(),
+  ).toThrow(expect.objectContaining({ statusCode: 409 }));
+
+  const binding = [
+    actor.userId,
+    actor.sessionId,
+    actor.accessEpoch,
+    "mine",
+    null,
+    null,
+    "createdAt/id:desc",
+  ];
+  const body = Buffer.from(
+    JSON.stringify({ binding, id: position.id, createdAt: position.createdAt }),
+  ).toString("base64url");
+  const mac = createHmac("sha256", Buffer.from(key, "hex"))
+    .update("trips/cursor/v1\0")
+    .update(body)
+    .digest("base64url");
+  const legacy = normalizeListOptions({ scope: "mine", cursor: `${body}.${mac}` });
+  expect(() => tripListCursor(key, actor, legacy, "ru").read()).toThrow(
+    expect.objectContaining({ statusCode: 409, publicCode: "VERSION_CONFLICT" }),
+  );
+});
 
 const context = (): AdapterContext => ({
   tx: {} as TxContext,

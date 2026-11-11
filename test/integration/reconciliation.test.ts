@@ -1145,15 +1145,23 @@ test("reviewed merge resolves aliases, preserves immutable identities/evidence/p
     t = await receive(p),
     r = await report(),
     before = await state(t.tripId),
+    secondaryNumber = (await state(r.tripId))?.number,
     merged = await merge(t.tripId, r.tripId);
+  expect(secondaryNumber).toBeGreaterThan(0);
   expect((await state(r.tripId))?.aliasOf).toBe(t.tripId);
+  expect((await state(r.tripId))?.number).toBe(secondaryNumber);
+  expect((await tripService.list(owner, { scope: "mine", q: String(secondaryNumber) })).total).toBe(
+    0,
+  );
   expect((await tripService.detail(owner, r.tripId)).view).toBe("private");
   const detail = await tripService.detail(owner, t.tripId);
   if (detail.view !== "private") throw new Error("SYNTHETIC_PRIVATE_EXPECTED");
   expect(detail.evidence).toHaveLength(1);
   expect(detail.manualRevision).not.toBeNull();
   expect(detail.summary.sourceKinds.sort()).toEqual(["ets2telemetry", "manual"]);
-  expect((await tripService.list(owner, { scope: "mine" })).items).toHaveLength(1);
+  expect((await tripService.list(owner, { scope: "mine" })).items).toMatchObject([
+    { id: t.tripId, number: before?.number },
+  ]);
   expect((await tripService.status(owner)).counts.unassessed).toBe(1);
   await expect(tripService.detail(other, r.tripId)).rejects.toMatchObject({ statusCode: 404 });
   expect((await receive(p)).duplicate).toBe(true);
@@ -1172,6 +1180,9 @@ test("reviewed merge resolves aliases, preserves immutable identities/evidence/p
   expect((await state(r.tripId))?.aliasOf).toBeNull();
   expect((await state(t.tripId))?.version).toBeGreaterThan(before?.version ?? 0);
   expect((await tripService.list(owner, { scope: "mine" })).items).toHaveLength(2);
+  expect(
+    (await tripService.list(owner, { scope: "mine", q: String(secondaryNumber) })).items,
+  ).toMatchObject([{ id: r.tripId, number: secondaryNumber }]);
   expect((await receive(p)).duplicate).toBe(true);
   expect(await corrections()).toBe(2);
 });

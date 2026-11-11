@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { components } from "@vtc/contracts";
 import {
   applicationId,
@@ -10,14 +9,9 @@ import {
 } from "@vtc/db";
 import {
   and,
-  asc,
-  desc,
   eq,
-  gt,
   inArray,
   isNull,
-  lt,
-  or,
   sourceMessages,
   sourcePayloads,
   sourceTrips,
@@ -26,11 +20,10 @@ import {
   tripHistory,
   trips,
 } from "@vtc/db/trips-schema";
-import { exists, type SQL } from "drizzle-orm";
-import { alias } from "drizzle-orm/mysql-core";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { createOutbox, type TripEvent } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
+import type { Events } from "../events/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import { selectQuality } from "../reconciliation/quality.js";
 import { canonicalJson, contentHash, decimal, sourceKey } from "../sources/contracts/canonical.js";
@@ -43,12 +36,32 @@ import { manualAdapter } from "../sources/contracts/manual.js";
 import { telemetryAdapter } from "../sources/contracts/telemetry.js";
 import { createTripAdjudication } from "./adjudication.js";
 import { createContributionRegister } from "./contributions.js";
-import { createFactRepository } from "./facts.js";
+import { createFactRepository, effectiveGameMode } from "./facts.js";
 import { createTripGroups } from "./groups.js";
+import {
+  type ListOptions,
+  normalizeListOptions,
+  tripListCursor,
+  tripListQuery,
+  tripSearchCondition,
+} from "./list-query.js";
 import { createTripReconciliation } from "./reconciliation.js";
+
+export { type ListOptions, type TripSource, tripListQuery, tripSources } from "./list-query.js";
 
 type S = components["schemas"];
 type Trip = typeof trips.$inferSelect;
+type ManualRevisionSummary = { number: number; submittedAt: string; eventId?: string | null };
+type ManualProjection = {
+  manualRevision: S["ManualRevisionRead"] | null;
+  evidence: S["Evidence"][];
+  eventId?: string | null;
+};
+type SummaryRead = {
+  manual: ReadonlyMap<string, ManualRevisionSummary>;
+  privateViewer?: Actor;
+};
+
 export interface TripsConfig {
   cursorKey: string;
 }
@@ -73,7 +86,10 @@ export interface TripsPorts {
   catalogs?: Pick<
     Catalogs,
     "resolveInTransaction" | "selectionsInTransaction" | "labelsInTransaction"
-  >;
+  > &
+    Partial<Pick<Catalogs, "labelSearchCondition">>;
+  eventTitles?: Events["tripTitlesInTransaction"];
+  eventAssociations?: (tx: TxContext, tripIds: string[]) => Promise<Map<string, string>>;
   // VTC-025 supplies a caller-transaction check of immutable validated evidence references.
   manualEvidence?: (
     tx: TxContext,
@@ -81,17 +97,12 @@ export interface TripsPorts {
     payload: unknown,
     tripId: string,
   ) => Promise<void>;
-  manualProjection?: (
-    tx: TxContext,
-    tripIds: string[],
-  ) => Promise<
-    Map<string, { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }>
-  >;
-  // Review queue only: current manual revision number/time per trip, without evidence reads.
+  manualProjection?: (tx: TxContext, tripIds: string[]) => Promise<Map<string, ManualProjection>>;
+  // Current manual revision metadata per canonical root, without evidence reads.
   manualRevisions?: (
     tx: TxContext,
     tripIds: string[],
-  ) => Promise<Map<string, { number: number; submittedAt: string }>>;
+  ) => Promise<Map<string, ManualRevisionSummary>>;
   events?: Pick<ReturnType<typeof createOutbox>, "append">;
 }
 export interface SourceContext {
@@ -100,92 +111,27 @@ export interface SourceContext {
   // Explicit trusted coordinator selection; never copied from source payloads or inferred.
   canonical?: { tripId: string; expectedVersion: number };
 }
-export type TripSource = S["TripSummary"]["sourceKinds"][number];
-// The route schema uses this list too, so the contract parity test catches a missing value.
-export const tripSources = ["ets2telemetry", "manual"] as const satisfies readonly TripSource[];
-export interface ListOptions {
-  scope?: "company" | "mine" | "review";
-  game?: "ets2" | "ats";
-  decision?: Trip["decision"];
-  // Every scope: the canonical group (root and alias members) has a source of this kind.
-  source?: TripSource;
-  // Review queue only (scope=review).
-  hold?: boolean;
-  order?: "asc" | "desc";
-  cursor?: string;
-  limit?: number;
+function tripCount(value: number | string) {
+  const count = typeof value === "number" || /^(0|[1-9]\d*)$/.test(value) ? Number(value) : NaN;
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error("TRIP_COUNT_RANGE");
+  return count;
 }
-const sourceMember = alias(trips, "source_member");
-/**
- * Root trips whose canonical group has a source of the given kind, matching the summary's
- * sourceKinds derivation (root plus alias members). Two correlated EXISTS probes keep the
- * outer page index and probe source_canonical / trip_group_members per candidate row.
- */
-function tripSourceCondition(db: ReturnType<UnitOfWork["client"]>, source: TripSource): SQL {
-  return or(
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sourceTrips)
-        .where(and(eq(sourceTrips.canonicalTripId, trips.id), eq(sourceTrips.provider, source))),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sourceMember)
-        .innerJoin(sourceTrips, eq(sourceTrips.canonicalTripId, sourceMember.id))
-        .where(and(eq(sourceMember.aliasOf, trips.id), eq(sourceTrips.provider, source))),
-    ),
-  ) as SQL;
+
+function lifetimeTotals(
+  accepted: number | string,
+  distance: string | null,
+): S["LifetimeTripTotals"] {
+  if (
+    distance !== null &&
+    (typeof distance !== "string" || !/^(0|[1-9]\d*)(\.\d+)?$/.test(distance))
+  )
+    throw new Error("TRIP_DISTANCE_SUM_INVALID");
+  const actualDistanceM = distance?.includes(".")
+    ? distance.replace(/0+$/, "").replace(/\.$/, "")
+    : (distance ?? "0");
+  return { acceptedTrips: tripCount(accepted), actualDistanceM };
 }
-export interface TripListFilter {
-  scope: "company" | "mine" | "review";
-  /** The viewer; scope=mine lists their trips. */
-  viewerId: string;
-  game?: "ets2" | "ats" | undefined;
-  decision?: Trip["decision"] | undefined;
-  hold?: boolean | undefined;
-  source?: TripSource | undefined;
-  order?: "asc" | "desc" | undefined;
-  /** Verified keyset cursor position. */
-  after?: { createdAt: string; id: string } | null | undefined;
-}
-/** The list's outer predicate and keyset order; list() and the EXPLAIN plan guard share it. */
-export function tripListQuery(
-  db: ReturnType<UnitOfWork["client"]>,
-  filter: TripListFilter,
-): { where: SQL | undefined; orderBy: SQL[] } {
-  const ascending = filter.order === "asc",
-    after = filter.after;
-  return {
-    where: and(
-      isNull(trips.aliasOf),
-      filter.scope === "company"
-        ? eq(trips.decision, "accepted")
-        : filter.scope === "mine"
-          ? eq(trips.ownerId, filter.viewerId)
-          : undefined,
-      filter.game ? eq(trips.game, filter.game) : undefined,
-      filter.decision ? eq(trips.decision, filter.decision) : undefined,
-      filter.hold === undefined ? undefined : eq(trips.reviewHold, filter.hold),
-      filter.source ? tripSourceCondition(db, filter.source) : undefined,
-      after
-        ? ascending
-          ? or(
-              gt(trips.createdAt, after.createdAt),
-              and(eq(trips.createdAt, after.createdAt), gt(trips.id, after.id)),
-            )
-          : or(
-              lt(trips.createdAt, after.createdAt),
-              and(eq(trips.createdAt, after.createdAt), lt(trips.id, after.id)),
-            )
-        : undefined,
-    ),
-    orderBy: ascending
-      ? [asc(trips.createdAt), asc(trips.id)]
-      : [desc(trips.createdAt), desc(trips.id)],
-  };
-}
+
 function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidence): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
@@ -652,24 +598,20 @@ export function createTrips(
     tx: TxContext,
     rows: Trip[],
     locale: "en" | "ru",
+    read?: SummaryRead,
   ): Promise<S["TripSummary"][]> {
+    if (!rows.length) return [];
+    const ids = rows.map((row) => row.id);
     const members = await ports.identity.memberSummariesInTransaction(
       tx,
       rows.map((row) => row.ownerId),
     );
-    if (!rows.length) return [];
     const facts = await factsRepository.read(
       tx,
       rows.flatMap((row) => (row.currentFactId ? [row.currentFactId] : [])),
       true,
     );
-    const membership = rows.length
-      ? await groups.members(
-          tx,
-          rows.map((row) => row.id),
-          "share",
-        )
-      : [];
+    const membership = await groups.membersOfRoots(tx, ids, "share");
     const sources = await c(tx)
       .select({ tripId: sourceTrips.canonicalTripId, provider: sourceTrips.provider })
       .from(sourceTrips)
@@ -695,6 +637,18 @@ export function createTrips(
       labels = await ports.catalogs.labelsInTransaction(tx, refs, locale);
     }
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
+    const associations = new Map<string, string>();
+    const privateViewer = read?.privateViewer;
+    let events: Map<string, { id: string; title: string }> | undefined;
+    if (privateViewer && ports.eventTitles) {
+      const saved = await ports.eventAssociations?.(tx, ids);
+      for (const id of ids) {
+        const eventId = saved?.get(id) ?? read.manual.get(id)?.eventId;
+        if (eventId) associations.set(id, eventId);
+      }
+      if (associations.size)
+        events = await ports.eventTitles(tx, [...new Set(associations.values())], privateViewer);
+    }
     return rows.map((row) => {
       const owner = members.get(row.ownerId);
       if (!owner) throw new Error("TRIP_OWNER_MISSING");
@@ -702,6 +656,7 @@ export function createTrips(
       if (row.currentFactId && (!saved || factMembers.get(saved.tripId) !== row.id))
         throw new Error("TRIP_FACT_POINTER_INVALID");
       const f = saved?.evidence;
+      const eventId = associations.get(row.id);
       const label = (value: NormalizedTripEvidence["origin"] | undefined) =>
         value?.status === "known" ? (labels.get(value.value.entityId) ?? null) : null;
       return {
@@ -730,62 +685,36 @@ export function createTrips(
             sources.filter((s) => factMembers.get(s.tripId) === row.id).map((s) => s.provider),
           ),
         ],
+        ...(read && {
+          number: row.number,
+          createdAt: row.createdAt,
+          submittedAt: read.manual.get(row.id)?.submittedAt ?? null,
+        }),
+        ...(privateViewer && {
+          event: eventId ? (events?.get(eventId) ?? null) : null,
+          gameMode: effectiveGameMode(f),
+        }),
       };
     });
   }
-  function signature(value: string) {
-    return createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
-      .update("trips/cursor/v1\0")
-      .update(value)
-      .digest();
+  async function manualMetadata(tx: TxContext, ids: string[]) {
+    return (ids.length ? await ports.manualRevisions?.(tx, ids) : undefined) ?? new Map();
   }
-  function cursorBinding(actor: Actor, options: ListOptions) {
-    return [
-      actor.userId,
-      actor.sessionId,
-      actor.accessEpoch,
-      options.scope ?? "company",
-      options.game ?? null,
-      options.decision ?? null,
-      options.order === "asc" ? "createdAt/id:asc" : "createdAt/id:desc",
-      // Optional filters are appended only when set, so cursors issued before the review
-      // filters (hold) and the source filter stay valid while omitted.
-      ...(options.hold === undefined ? [] : [`hold:${options.hold}`]),
-      ...(options.source === undefined ? [] : [`source:${options.source}`]),
-    ];
-  }
-  function readCursor(
-    actor: Actor,
-    options: ListOptions,
-  ): { createdAt: string; id: string } | null {
-    if (!options.cursor) return null;
-    try {
-      if (options.cursor.length > 2048) throw new Error();
-      const [body = "", mac = "", extra] = options.cursor.split(".");
-      if (!/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]{43}$/.test(mac)) throw new Error();
-      const actual = Buffer.from(mac, "base64url"),
-        expected = signature(body);
-      if (
-        extra !== undefined ||
-        actual.toString("base64url") !== mac ||
-        Buffer.from(body, "base64url").toString("base64url") !== body ||
-        actual.length !== expected.length ||
-        !timingSafeEqual(actual, expected)
-      )
-        throw new Error();
-      const parsed = JSON.parse(Buffer.from(body, "base64url").toString()) as {
-        binding: unknown;
-        createdAt: string;
-        id: string;
-      };
-      if (canonicalJson(parsed.binding) !== canonicalJson(cursorBinding(actor, options)))
-        throw new Error();
-      applicationId(parsed.id);
-      utcDateTime(parsed.createdAt);
-      return parsed;
-    } catch {
-      throw identityError(409, "VERSION_CONFLICT");
-    }
+  function projectedRevision(
+    id: string,
+    revision: S["ManualRevisionRead"],
+    eventId = revision.fields.eventId ?? null,
+  ) {
+    return new Map([
+      [
+        id,
+        {
+          number: revision.number,
+          submittedAt: revision.submittedAt,
+          eventId,
+        },
+      ],
+    ]);
   }
   return {
     config,
@@ -811,6 +740,26 @@ export function createTrips(
       const row = await groups.resolve(tx, tripId, "share");
       if (!row) throw identityError(404);
       const [result] = await summaries(tx, [row], locale);
+      if (!result) throw new Error("TRIP_SUMMARY_MISSING");
+      return result;
+    },
+    async privateSummaryInTransaction(
+      tx: TxContext,
+      id: string,
+      actor: Actor,
+      projection?: Pick<ManualProjection, "manualRevision" | "eventId">,
+    ) {
+      const current = await authority(tx, actor);
+      const row = await groups.resolve(tx, id, "share");
+      if (row.ownerId !== current.userId && !current.capabilities.includes("trips.review"))
+        throw identityError(404);
+      const manual = projection?.manualRevision
+        ? projectedRevision(row.id, projection.manualRevision, projection.eventId)
+        : await manualMetadata(tx, [row.id]);
+      const [result] = await summaries(tx, [row], current.locale, {
+        manual,
+        privateViewer: current,
+      });
       if (!result) throw new Error("TRIP_SUMMARY_MISSING");
       return result;
     },
@@ -996,64 +945,60 @@ export function createTrips(
         ? ((await factsRepository.read(tx, [row.id])).get(row.id)?.evidence ?? null)
         : null;
     },
-    async list(actor: Actor, options: ListOptions = {}) {
-      const limit = options.limit ?? 25,
-        scope = options.scope ?? "company";
-      if (
-        !Number.isInteger(limit) ||
-        limit < 1 ||
-        limit > 100 ||
-        !["company", "mine", "review"].includes(scope) ||
-        (options.hold !== undefined && typeof options.hold !== "boolean") ||
-        (options.order !== undefined && !["asc", "desc"].includes(options.order)) ||
-        (options.source !== undefined && !tripSources.includes(options.source)) ||
-        (scope !== "review" && (options.hold !== undefined || options.order !== undefined))
-      )
-        throw identityError(422);
+    async list(actor: Actor, input: ListOptions = {}): Promise<S["ListTripSummary"]> {
+      const options = normalizeListOptions(input);
+      const { scope, limit } = options;
       return run(async (tx) => {
+        // Identity takes the company lock before the first snapshot read. Canonical-group
+        // writers hold the same lock, so subsequent shared projection reads see those roots.
         const current = await authority(tx, actor, scope === "review");
+        const locale = options.locale ?? current.locale;
+        const cursor = tripListCursor(config.cursorKey, current, options, locale);
+        const after = cursor.read();
+        const labelSearchCondition = ports.catalogs?.labelSearchCondition;
         const query = tripListQuery(c(tx), {
-          scope,
-          viewerId: actor.userId,
-          game: options.game,
-          decision: options.decision,
-          hold: options.hold,
-          source: options.source,
-          order: options.order,
-          after: readCursor(actor, options),
+          ...options,
+          viewerId: current.userId,
+          searchCondition: tripSearchCondition(
+            unit,
+            tx,
+            labelSearchCondition,
+            options.search,
+            locale,
+          ),
+          after,
         });
+        let total: number | undefined;
+        if (scope !== "review") {
+          const [count] = await c(tx)
+            .select({ total: sql<string>`COUNT(*)` })
+            .from(trips)
+            .where(query.filtered);
+          if (!count) throw new Error("TRIP_LIST_COUNT_MISSING");
+          total = tripCount(count.total);
+        }
         const rows = await c(tx)
           .select()
           .from(trips)
           .where(query.where)
           .orderBy(...query.orderBy)
           .limit(limit + 1);
-        const page = rows.slice(0, limit),
-          last = page.at(-1);
-        let nextCursor: string | null = null;
-        if (rows.length > limit && last) {
-          const body = Buffer.from(
-            JSON.stringify({
-              binding: cursorBinding(actor, options),
-              createdAt: last.createdAt,
-              id: last.id,
-            }),
-          ).toString("base64url");
-          nextCursor = `${body}.${signature(body).toString("base64url")}`;
-        }
-        const items = await summaries(tx, page, current.locale);
-        if (scope !== "review") return { items, nextCursor };
-        // One batched revision read per page (at most 100 trips), never one read per row.
-        const manual = page.length
-          ? await ports.manualRevisions?.(
-              tx,
-              page.map((row) => row.id),
-            )
-          : undefined;
+        const page = rows.slice(0, limit);
+        const last = page.at(-1);
+        const nextCursor = rows.length > limit && last ? cursor.write(last) : null;
+        const manual = await manualMetadata(
+          tx,
+          page.map((row) => row.id),
+        );
+        const items = await summaries(tx, page, locale, {
+          manual,
+          ...(scope !== "company" && { privateViewer: current }),
+        });
+        if (total !== undefined) return { items, nextCursor, total };
         return {
           items: items.map((item, index) => {
-            const row = page[index] as Trip,
-              revision = manual?.get(row.id) ?? null;
+            const row = page[index] as Trip;
+            const revision = manual.get(row.id);
             return {
               ...item,
               review: {
@@ -1078,13 +1023,19 @@ export function createTrips(
         const privateRead =
           row && (row.ownerId === actor.userId || current.capabilities.includes("trips.review"));
         if (!row || (!privateRead && row.decision !== "accepted")) throw identityError(404);
-        const [summary] = await summaries(tx, [row], current.locale);
-        if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
         if (privateRead && ports.decisionProjection)
           return ports.decisionProjection(tx, row.id, actor);
         const projection = privateRead
           ? (await ports.manualProjection?.(tx, [row.id]))?.get(row.id)
           : undefined;
+        const manual = projection?.manualRevision
+          ? projectedRevision(row.id, projection.manualRevision, projection.eventId)
+          : await manualMetadata(tx, [row.id]);
+        const [summary] = await summaries(tx, [row], current.locale, {
+          manual,
+          ...(privateRead && { privateViewer: current }),
+        });
+        if (!summary) throw new Error("TRIP_SUMMARY_MISSING");
         // summaries already checked the selected fact against the locked group membership.
         const savedFact =
           privateRead && row.currentFactId
@@ -1106,17 +1057,40 @@ export function createTrips(
           : summary;
       });
     },
+    async lifetimeTotalsInTransaction(
+      tx: TxContext,
+      ownerId: string,
+    ): Promise<S["LifetimeTripTotals"]> {
+      const [row] = await c(tx)
+        .select({
+          accepted: sql<string>`COUNT(*)`,
+          distance: sql<string | null>`SUM(${trips.actualDistanceM})`,
+        })
+        .from(trips)
+        .where(
+          and(
+            isNull(trips.aliasOf),
+            eq(trips.ownerId, applicationId(ownerId)),
+            eq(trips.decision, "accepted"),
+          ),
+        );
+      if (!row) throw new Error("TRIP_LIFETIME_TOTALS_MISSING");
+      return lifetimeTotals(row.accepted, row.distance);
+    },
     async status(actor: Actor, game?: "ets2" | "ats"): Promise<S["OwnTripStatusSummary"]> {
       return run(async (tx) => {
         await authority(tx, actor);
         const [row] = await c(tx)
           .select({
-            unassessed: sql<number>`COALESCE(SUM(${trips.decision} = 'unassessed'),0)`,
-            pendingReview: sql<number>`COALESCE(SUM(${trips.decision} = 'pending_review'),0)`,
-            accepted: sql<number>`COALESCE(SUM(${trips.decision} = 'accepted'),0)`,
-            rejected: sql<number>`COALESCE(SUM(${trips.decision} = 'rejected'),0)`,
-            activeTrips: sql<number>`COALESCE(SUM(${trips.outcome} = 'open'),0)`,
-            correctionPending: sql<number>`COALESCE(SUM(${trips.correctionPending}),0)`,
+            unassessed: sql<string>`COALESCE(SUM(${trips.decision} = 'unassessed'),0)`,
+            pendingReview: sql<string>`COALESCE(SUM(${trips.decision} = 'pending_review'),0)`,
+            accepted: sql<string>`COALESCE(SUM(${trips.decision} = 'accepted'),0)`,
+            rejected: sql<string>`COALESCE(SUM(${trips.decision} = 'rejected'),0)`,
+            activeTrips: sql<string>`COALESCE(SUM(${trips.outcome} = 'open'),0)`,
+            correctionPending: sql<string>`COALESCE(SUM(${trips.correctionPending}),0)`,
+            acceptedDistance: sql<
+              string | null
+            >`SUM(CASE WHEN ${trips.decision} = 'accepted' THEN ${trips.actualDistanceM} END)`,
           })
           .from(trips)
           .where(
@@ -1127,20 +1101,17 @@ export function createTrips(
             ),
           );
         if (!row) throw new Error("TRIP_STATUS_MISSING");
-        const count = (n: unknown) => {
-          const value = Number(n);
-          if (!Number.isSafeInteger(value) || value < 0) throw new Error("TRIP_COUNT_RANGE");
-          return value;
-        };
+        const totals = lifetimeTotals(row.accepted, row.acceptedDistance);
         return {
           counts: {
-            unassessed: count(row.unassessed),
-            pendingReview: count(row.pendingReview),
-            accepted: count(row.accepted),
-            rejected: count(row.rejected),
+            unassessed: tripCount(row.unassessed),
+            pendingReview: tripCount(row.pendingReview),
+            accepted: totals.acceptedTrips,
+            rejected: tripCount(row.rejected),
           },
-          activeTrips: count(row.activeTrips),
-          correctionPending: count(row.correctionPending),
+          activeTrips: tripCount(row.activeTrips),
+          correctionPending: tripCount(row.correctionPending),
+          lifetimeTotals: totals,
         };
       });
     },

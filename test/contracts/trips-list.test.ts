@@ -64,7 +64,8 @@ test("staged trip query supports both independent UTC bounds, bounded search and
       "urn:vtc:browser:v1#/$defs/",
     ),
   );
-  const validate = createSchemaValidator().compile(schema);
+  expect(listTripsQuerystring).toEqual(schema);
+  const validate = createSchemaValidator("array").compile(listTripsQuerystring);
   const company = stageFixture("listTrips:filtered-company");
   const own = stageFixture("listTrips:filtered-own");
   const review = stageFixture("listTrips:completion-review");
