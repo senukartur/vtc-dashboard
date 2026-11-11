@@ -34,11 +34,13 @@ export const qualificationTranslations = {
     progress: "Accepted progress",
     trips: "Accepted trips",
     distance: "Actual distance",
-    requiredTrips: "Required trips (blank = unset)",
-    requiredDistance: "Required distance, m (blank = unset)",
+    requiredTrips: "Minimum trips",
+    requiredDistance: "Minimum actual distance (km)",
     unset: "Unset",
-    eligible: "Both thresholds are met. Staff confirmation is required.",
-    ineligible: "Both configured thresholds must be met before confirmation.",
+    noMinimum: "No minimum",
+    progressUnconfigured: "Publish an effective rule version to configure promotion.",
+    eligible: "Promotion requirements are met. Staff confirmation is required.",
+    ineligible: "Meet the configured minimums before staff can confirm promotion.",
     terminal: "Driver I is the terminal qualification. No further promotion is available.",
     review:
       "Earlier promotion requirements are no longer met. The assigned qualification is retained for staff review.",
@@ -81,8 +83,9 @@ export const qualificationTranslations = {
     catalogMissing:
       "No published catalog revision is available for this game. Catalog choices are unavailable.",
     limits:
-      "Exact values support up to 20 integer and 18 fractional digits. Trip counts are whole numbers up to 2147483647. Blank thresholds remain unset.",
+      "Leave either minimum blank to disable it. Enter distance in kilometres using a comma or decimal point.",
     reason: "Reason",
+    publicationReason: "Publication reason (optional)",
     effectiveMode: "Publication time",
     immediate: "Immediately (server time)",
     schedule: "Schedule in UTC",
@@ -90,8 +93,7 @@ export const qualificationTranslations = {
     effectiveHelp:
       "Scheduled times use UTC. Immediate publication uses the server instant. Existing historical decisions are preserved.",
     sample: "Hypothetical sample",
-    sampleHelp:
-      "This checks qualification rules only. It does not accept a trip, apply an event exception, or publish the draft. Canonical references are checked again on publication.",
+    sampleHelp: "Optionally test how the draft restrictions apply to a hypothetical load.",
     sampleMass: "Sample mass, kg (blank = unknown)",
     sampleTrailer: "Sample trailer type",
     sampleAdr: "Sample ADR category",
@@ -104,7 +106,7 @@ export const qualificationTranslations = {
     addUnknown: "Add unknown trailer",
     noTrailers: "No trailer facts added.",
     preview: "Evaluate sample",
-    previewRequired: "Evaluate the current draft and sample before publication.",
+    previewStale: "The draft or sample changed. Evaluate again to see the current result.",
     baselineChanged:
       "This level changed while your draft was open. Review the latest stored context before applying your retained inputs. Resolve an uncertain previous action first.",
     baselineUnavailable: "The latest rule version is not available for review yet.",
@@ -114,7 +116,17 @@ export const qualificationTranslations = {
     pass: "Pass",
     fail: "Fail",
     publish: "Publish rule version",
-    invalid: "Check the entered values, required fields, and supported precision.",
+    required: "required",
+    nameRequired: "Enter a level name.",
+    massInvalid: "Enter a mass in kg with up to 20 integer and 18 fractional digits.",
+    tripsInvalid: "Enter a whole number from 0 to 2,147,483,647.",
+    distanceInvalid:
+      "Enter a non-negative distance in km with up to 17 integer and 21 fractional digits.",
+    timeInvalid: "Enter a valid date and time in UTC.",
+    sampleMassInvalid:
+      "Enter a mass in kg with up to 20 integer and 18 fractional digits, or leave it blank.",
+    sampleAdrSelect: "Select an ADR category",
+    sampleAdrRequired: "Select the known ADR category for the sample.",
     success: "The server confirmed the change.",
     recoverCommand: "Check the previous action",
     assign: "Assign qualification",
@@ -196,11 +208,13 @@ export const qualificationTranslations = {
     progress: "Зачтённый прогресс",
     trips: "Зачтённые рейсы",
     distance: "Фактическое расстояние",
-    requiredTrips: "Требуется рейсов (пусто = не задано)",
-    requiredDistance: "Требуется расстояние, м (пусто = не задано)",
+    requiredTrips: "Минимум рейсов",
+    requiredDistance: "Минимальное фактическое расстояние (км)",
     unset: "Не задано",
-    eligible: "Оба порога достигнуты. Необходимо подтверждение руководства.",
-    ineligible: "Для подтверждения нужно достичь обоих настроенных порогов.",
+    noMinimum: "Без минимума",
+    progressUnconfigured: "Опубликуйте действующую версию правил, чтобы настроить повышение.",
+    eligible: "Требования для повышения выполнены. Необходимо подтверждение руководства.",
+    ineligible: "Для подтверждения повышения нужно достичь заданных минимумов.",
     terminal: "Водитель I — высшая квалификация. Дальнейших повышений нет.",
     review:
       "Требования прошлого повышения больше не выполнены. Квалификация сохранена до проверки руководством.",
@@ -243,8 +257,9 @@ export const qualificationTranslations = {
     catalogMissing:
       "Для этой игры нет опубликованной версии каталога. Выбор из каталога недоступен.",
     limits:
-      "Точные значения: до 20 цифр целой и 18 дробной части. Количество рейсов — целое число до 2147483647. Пустые пороги остаются незаданными.",
+      "Чтобы отключить минимум, оставьте поле пустым. Расстояние вводится в километрах с запятой или точкой.",
     reason: "Причина",
+    publicationReason: "Причина публикации (необязательно)",
     effectiveMode: "Время публикации",
     immediate: "Сразу (время сервера)",
     schedule: "Запланировать в UTC",
@@ -252,8 +267,7 @@ export const qualificationTranslations = {
     effectiveHelp:
       "Запланированное время указано в UTC. Немедленная публикация использует время сервера. Исторические решения сохраняются.",
     sample: "Условный пример",
-    sampleHelp:
-      "Проверяются только правила квалификации. Это не принимает рейс, не применяет исключение события и не публикует проект. При публикации ссылки каталога проверяются повторно.",
+    sampleHelp: "Здесь можно проверить, как ограничения проекта применяются к условному грузу.",
     sampleMass: "Масса в примере, кг (пусто = неизвестно)",
     sampleTrailer: "Тип прицепа в примере",
     sampleAdr: "Категория ADR в примере",
@@ -266,7 +280,8 @@ export const qualificationTranslations = {
     addUnknown: "Добавить неизвестный прицеп",
     noTrailers: "Данные прицепов не добавлены.",
     preview: "Проверить пример",
-    previewRequired: "Перед публикацией проверьте текущий проект и пример.",
+    previewStale:
+      "Проект или пример изменился. Повторите проверку, чтобы увидеть актуальный результат.",
     baselineChanged:
       "Уровень изменился, пока проект был открыт. Проверьте актуальные сохранённые данные перед применением введённых значений. Сначала уточните результат предыдущей операции, если он неизвестен.",
     baselineUnavailable: "Актуальная версия правил пока недоступна для проверки.",
@@ -276,7 +291,17 @@ export const qualificationTranslations = {
     pass: "Соответствует",
     fail: "Не соответствует",
     publish: "Опубликовать версию правил",
-    invalid: "Проверьте значения, обязательные поля и допустимую точность.",
+    required: "обязательно",
+    nameRequired: "Укажите название уровня.",
+    massInvalid: "Введите массу в кг: до 20 цифр в целой части и до 18 в дробной.",
+    tripsInvalid: "Введите целое число от 0 до 2 147 483 647.",
+    distanceInvalid:
+      "Введите неотрицательное расстояние в км: до 17 цифр в целой части и до 21 в дробной.",
+    timeInvalid: "Укажите корректные дату и время в UTC.",
+    sampleMassInvalid:
+      "Введите массу в кг (до 20 цифр в целой части и до 18 в дробной) или оставьте поле пустым.",
+    sampleAdrSelect: "Выберите категорию ADR",
+    sampleAdrRequired: "Выберите известную категорию ADR для примера.",
     success: "Сервер подтвердил изменение.",
     recoverCommand: "Проверить предыдущую операцию",
     assign: "Назначить квалификацию",

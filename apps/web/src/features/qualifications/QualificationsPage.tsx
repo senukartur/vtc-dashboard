@@ -234,6 +234,7 @@ function MemberQualification({
       levels.length > 0 &&
       progress.error instanceof QualificationFailure &&
       progress.error.setupRequired;
+  const absentMinimum = t(level?.ruleVersionId ? "noMinimum" : "unset");
   const currentRules = useQualificationQuery(
     `/qualification-levels/${level?.id}/rule-versions/${level?.ruleVersionId}`,
     "EnvelopeQualificationRuleVersion",
@@ -280,14 +281,14 @@ function MemberQualification({
                     p.requiredTrips === null ? null : String(p.requiredTrips),
                   )}
                 >
-                  {p.acceptedTrips} / {p.requiredTrips ?? t("unset")}
+                  {p.acceptedTrips} / {p.requiredTrips ?? absentMinimum}
                 </ProgressValue>
               </Fact>
               <Fact label={t("distance")}>
                 <ProgressValue percent={progressPercent(p.actualDistanceM, p.requiredDistanceM)}>
                   {formatQuantity(p.actualDistanceM, "km", locale)} /{" "}
                   {p.requiredDistanceM === null
-                    ? t("unset")
+                    ? absentMinimum
                     : formatQuantity(p.requiredDistanceM, "km", locale)}
                 </ProgressValue>
               </Fact>
@@ -298,7 +299,9 @@ function MemberQualification({
                   ? "terminal"
                   : p.eligibleForConfirmation
                     ? "eligible"
-                    : "ineligible",
+                    : level && !level.ruleVersionId
+                      ? "progressUnconfigured"
+                      : "ineligible",
               )}
             </p>
             <h3>{t("restrictions")}</h3>

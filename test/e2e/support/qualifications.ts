@@ -48,7 +48,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     ruleGate: null as Promise<void> | null,
     renamePointer: null as string | null,
     scheduledPointer: null as string | null,
-    publications: [] as S["RulesInput"][],
+    publications: [] as S["QualificationRulePublicationInput"][],
     deferNext: [] as ("levels" | "progress" | "history")[],
     heldStarted: [] as string[],
     heldFinished: [] as string[],
@@ -184,9 +184,9 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           },
           acceptedTrips: 2,
           actualDistanceM: "100.000000000000000001",
-          requiredTrips: state.unset ? null : 2,
-          requiredDistanceM: state.unset ? null : "100",
-          eligibleForConfirmation: !state.unset && state.eligible,
+          requiredTrips: state.unset || state.unconfigured ? null : 2,
+          requiredDistanceM: state.unset || state.unconfigured ? null : "100",
+          eligibleForConfirmation: !state.unconfigured && state.currentRank < 3 && state.eligible,
           reviewRequired: state.review,
           computedAt: "2026-10-25T12:00:00.000Z",
           projectionVersion: 99,
@@ -261,14 +261,10 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           levels(game).map((l) => ({
             ...l,
             version: state.version,
-            ruleVersionId: state.rulePointer,
-            ...(state.unconfigured
-              ? {
-                  ruleVersionId: null,
-                  configured: false,
-                  requiredTrips: null,
-                  requiredDistanceM: null,
-                }
+            ruleVersionId: state.unconfigured ? null : state.rulePointer,
+            configured: !state.unconfigured,
+            ...(state.unconfigured || state.unset
+              ? { requiredTrips: null, requiredDistanceM: null }
               : {}),
           })),
         ),
@@ -300,8 +296,8 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           rules: [
             { type: "max_mass", maxKg: state.ruleMasses[path.split("/").at(-1) ?? ""] ?? "10" },
           ],
-          requiredTrips: 2,
-          requiredDistanceM: "100",
+          requiredTrips: state.unset ? null : 2,
+          requiredDistanceM: state.unset ? null : "100",
           ...(path.includes("/admin/")
             ? { publisher: { id: memberId, nickname: "Fictional current publisher" } }
             : {}),
@@ -359,7 +355,7 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
     }
     if (path.startsWith("/api/v1/admin/qualification-levels/")) {
       if (request.method() === "POST")
-        state.publications.push(request.postDataJSON() as S["RulesInput"]);
+        state.publications.push(request.postDataJSON() as S["QualificationRulePublicationInput"]);
       const key = request.headers()["idempotency-key"] ?? "";
       state.keys.push(key);
       state.etags.push(request.headers()["if-match"] ?? "");

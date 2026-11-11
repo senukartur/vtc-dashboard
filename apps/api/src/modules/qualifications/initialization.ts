@@ -104,12 +104,7 @@ export function createQualificationInitialization(
           .orderBy(desc(qualificationRules.effectiveAt))
           .limit(1)
           .for("share");
-        if (
-          !rule ||
-          (level.code !== "driver_i" &&
-            (rule.requiredTrips === null || rule.requiredDistanceM === null))
-        )
-          return false;
+        if (!rule) return false;
       }
       return true;
     },

@@ -12,6 +12,122 @@ import { levels, mockQualifications, ruleId } from "./support/qualifications.ts"
 const trailerId = (i: number) => `63100000-0000-4000-8000-${i.toString().padStart(12, "0")}`;
 for (const locale of ["en", "ru"] as const) {
   test(
+    `controlled qualification ${locale} publishes an exact 20 km minimum without a reason or sample`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const state = await mockQualifications(page, locale);
+      await page.goto("/account/qualifications");
+      await catalogLanguage(page, locale);
+      const card = page
+        .getByRole("heading", { name: "Fictional trainee · ETS2", exact: true })
+        .locator("..");
+      await card
+        .getByRole("button", {
+          name: locale === "en" ? "Edit rules" : "Редактировать правила",
+          exact: true,
+        })
+        .click();
+      const editor = card.locator("section").last(),
+        publish = editor.getByRole("button", {
+          name: locale === "en" ? "Publish rule version" : "Опубликовать версию правил",
+          exact: true,
+        }),
+        preview = editor.getByRole("button", {
+          name: locale === "en" ? "Evaluate sample" : "Проверить пример",
+          exact: true,
+        }),
+        confirm = page.getByRole("dialog").getByRole("button", {
+          name: locale === "en" ? "Confirm" : "Подтвердить",
+          exact: true,
+        }),
+        field = (name: string) => editor.locator(`:is(input, select)[id^="${name}-"]`),
+        required = locale === "en" ? "(required)" : "(обязательно)";
+      for (const [fieldName, label] of [
+        ["level-name", locale === "en" ? "Level name" : "Название уровня"],
+        ["mass", locale === "en" ? "Maximum cargo mass (kg)" : "Максимальная масса груза (кг)"],
+      ] as const) {
+        await expect(field(fieldName)).toHaveJSProperty("required", true);
+        await expect(editor.getByText(`${label} ${required}`, { exact: true })).toBeVisible();
+      }
+      for (const optional of ["count", "distance", "reason", "sample-mass"])
+        await expect(field(optional)).toHaveJSProperty("required", false);
+      await expect(field("distance")).toHaveValue(locale === "en" ? "0.1" : "0,1");
+      await field("count").fill("");
+      await field("distance").fill("100000000000000000");
+      await expect(field("distance")).toHaveAttribute("aria-invalid", "true");
+      await expect(field("distance")).toHaveAccessibleDescription(
+        locale === "en"
+          ? "Enter a non-negative distance in km with up to 17 integer and 21 fractional digits."
+          : "Введите неотрицательное расстояние в км: до 17 цифр в целой части и до 21 в дробной.",
+      );
+      await expect(publish).toBeDisabled();
+      await field("distance").fill("20");
+      await field("mode").selectOption("schedule");
+      await expect(field("effective")).toHaveJSProperty("required", true);
+      await expect(
+        editor.getByText(
+          `${locale === "en" ? "Effective time (UTC)" : "Начало действия (UTC)"} ${required}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(field("effective")).toHaveAttribute("aria-invalid", "true");
+      await expect(publish).toBeDisabled();
+      await field("mode").selectOption("immediate");
+      await expect(field("effective")).toHaveCount(0);
+      await expect(field("reason")).toHaveValue("");
+      await expect(field("sample-mass")).toHaveValue("");
+      await publish.click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toContainText(
+        locale === "en" ? "Trips: No minimum · 20 km" : "Рейсы: Без минимума · 20 км",
+      );
+      expect(state.publications).toEqual([]);
+      await dialog.screenshot({
+        path: info.outputPath(`qualification-distance-confirm-${locale}.png`),
+      });
+      await confirm.click();
+      await expect(dialog).toHaveCount(0);
+      expect(state.publications).toEqual([
+        {
+          rules: [{ type: "max_mass", maxKg: "10" }],
+          requiredTrips: null,
+          requiredDistanceM: "20000",
+        },
+      ]);
+      expect(state.previewInputs).toEqual([]);
+
+      // Optional evaluation is available, but a stale or incomplete sample leaves publication usable.
+      await field("sample-mass").fill("10");
+      await preview.click();
+      await expect(
+        editor.getByRole("heading", {
+          name: locale === "en" ? "Sample outcome: Pass" : "Результат примера: Соответствует",
+        }),
+      ).toBeVisible();
+      await field("adr-status").selectOption("known");
+      await expect(field("adr-class")).toHaveJSProperty("required", true);
+      await expect(
+        editor.getByText(
+          `${locale === "en" ? "Sample ADR category" : "Категория ADR в примере"} ${required}`,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(field("adr-class")).toHaveAttribute("aria-invalid", "true");
+      await expect(preview).toBeDisabled();
+      await expect(
+        editor.getByRole("heading", { name: /Sample outcome|Результат примера/ }),
+      ).toHaveCount(0);
+      await field("distance").fill(locale === "en" ? "20.125" : "20,125");
+      await publish.click();
+      await expect(dialog).toContainText(locale === "en" ? "20.125 km" : "20,125 км");
+      await confirm.click();
+      await expect(dialog).toHaveCount(0);
+      expect(state.publications.at(-1)?.requiredDistanceM).toBe("20125");
+      expect(state.previewInputs).toHaveLength(1);
+    },
+  );
+
+  test(
     `controlled qualification ${locale} retained draft trailer labels are bounded, named and keep the sample to one trailer`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
@@ -204,11 +320,14 @@ for (const locale of ["en", "ru"] as const) {
         0,
       );
       await expect(
+        editor.getByRole("heading", { name: /Sample outcome|Результат примера/ }),
+      ).toHaveCount(0);
+      await expect(
         editor.getByRole("button", {
           name: locale === "en" ? "Publish rule version" : "Опубликовать версию правил",
           exact: true,
         }),
-      ).toBeDisabled();
+      ).toBeEnabled();
       expect(state.previewInputs.at(-1)?.sample.trailerTypeIds).toEqual([trailerId(27)]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,

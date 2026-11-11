@@ -1,6 +1,7 @@
 import type { components } from "@vtc/contracts";
 import { browserSchemaDocument } from "@vtc/contracts/runtime";
 import { z } from "zod";
+import { decimalShift, type Locale } from "../../shared/formatting.js";
 import { withReadSlot } from "../../shared/read-scheduler.js";
 import { AccountFailure } from "../account/transport.js";
 import { retryDelay } from "../admissions/transport.js";
@@ -94,6 +95,22 @@ export function exactInput(value: string): string | undefined {
   if ((whole?.length ?? 0) > 20 || fraction.length > 18) return undefined;
   return clean.includes(".") ? clean.replace(/0+$/, "").replace(/\.$/, "") : clean;
 }
+export function distanceInput(value: string): string | null | undefined {
+  const clean = value.trim().replace(",", ".");
+  if (clean === "") return null;
+  if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(clean)) return undefined;
+  const [whole = "0", fraction = ""] = clean.split(".");
+  const metres = (whole + fraction.slice(0, 3).padEnd(3, "0")).replace(/^0+(?=\d)/, "");
+  const decimals = fraction.slice(3).replace(/0+$/, "");
+  return exactInput(decimals ? `${metres}.${decimals}` : metres);
+}
+
+export function distanceForEditor(metres: string | null, locale: Locale): string {
+  if (metres === null) return "";
+  const km = decimalShift(metres, 3);
+  return locale === "ru" ? km.replace(".", ",") : km;
+}
+
 export function countInput(value: string): number | null | undefined {
   if (value.trim() === "") return null;
   if (!/^(0|[1-9]\d*)$/.test(value)) return undefined;

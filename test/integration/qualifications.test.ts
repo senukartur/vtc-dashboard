@@ -70,6 +70,7 @@ let director: Actor,
   deputy: Actor,
   observer: Actor,
   ownerCookie: string,
+  deputyCookie: string,
   directorCookie: string;
 const origin = "http://127.0.0.1:4173",
   password = "Fictional-qualification-passphrase-42";
@@ -360,6 +361,7 @@ beforeEach(async () => {
   owner = a.actor;
   ownerCookie = a.cookie;
   deputy = b.actor;
+  deputyCookie = b.cookie;
   observer = d.actor;
 });
 afterAll(async () => {
@@ -762,7 +764,7 @@ test("one hundred distinct recorded actors use one facade batch and leave the lo
   expect(calls[1]).toEqual([ids[0]]);
 });
 
-test("structural levels have no launch defaults; unset either threshold stays ineligible", async () => {
+test("structural levels have no launch defaults; a trips-only rule enables promotion after the required count", async () => {
   const levels = await service.levels(owner, "ets2");
   expect(levels.items.map((v) => v.code)).toEqual([
     "trainee",
@@ -776,16 +778,172 @@ test("structural levels have no launch defaults; unset either threshold stays in
     ),
   ).toBe(true);
   expect((await progress()).data.eligibleForConfirmation).toBe(false);
+  await expect(promote()).rejects.toMatchObject({ statusCode: 409 });
   await publish("ets2", 0, 1, null);
+  expect((await progress()).data).toMatchObject({
+    requiredTrips: 1,
+    requiredDistanceM: null,
+    eligibleForConfirmation: false,
+  });
+  await expect(promote()).rejects.toMatchObject({ statusCode: 409 });
   tick();
   const f = await fixture();
   await replace([f.change]);
-  expect((await progress()).data.eligibleForConfirmation).toBe(false);
+  expect((await progress()).data.eligibleForConfirmation).toBe(true);
+  await promote();
+  const [proof] = await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions));
+  expect(proof).toMatchObject({
+    requiredTrips: 1,
+    requiredDistanceM: null,
+    acceptedTrips: 1,
+    actualDistanceM: "100.000000000000000000",
+  });
+});
+test("distance-only progress and notification agree just below and at 20 km; corrections use the nullable proof", async () => {
+  await publish("ets2", 0, null, "20000");
+  const ruleVersionId = (await service.levels(director, "ets2")).items.find(
+    (level) => level.id === structuralLevels.ets2[0],
+  )?.ruleVersionId;
+  expect(ruleVersionId).toEqual(expect.any(String));
+  tick();
+  const below = "19999.999999999999999999",
+    f = await fixture({ distance: below });
+  await replace([f.change]);
+  const initial = (await progress()).data;
+  const notification = () =>
+    unit.run(async (tx) => {
+      await identity.qualificationContextInTransaction(tx, [owner.userId]);
+      return service.notificationAssignmentInTransaction(tx, initial.assignment.id);
+    });
+  expect(initial).toMatchObject({
+    acceptedTrips: 1,
+    actualDistanceM: below,
+    requiredTrips: null,
+    requiredDistanceM: "20000",
+    eligibleForConfirmation: false,
+  });
+  expect((await notification()).eligible).toBe(false);
+  await expect(promote("ets2", owner, deputy)).rejects.toMatchObject({ statusCode: 409 });
+  await correction(f, 2, "accepted", "20000");
+  expect((await progress()).data).toMatchObject({
+    assignment: initial.assignment,
+    acceptedTrips: 1,
+    actualDistanceM: "20000",
+    eligibleForConfirmation: true,
+  });
+  expect((await notification()).eligible).toBe(true);
+  expect((await identity.current(owner)).data.member.roles).toEqual(["trainee"]);
+  const result = await promote("ets2", owner, deputy);
+  const next = (await progress()).data.assignment;
+  expect(result).toMatchObject({ data: { id: next.id, levelId: structuralLevels.ets2[1] } });
+  expect((await notification()).eligible).toBe(false);
+  const proofs = () => unit.run((tx) => unit.client(tx).select().from(qualificationPromotions));
+  const [proof] = await proofs();
+  expect(proof).toMatchObject({
+    sourceAssignmentId: initial.assignment.id,
+    targetAssignmentId: next.id,
+    ruleVersionId,
+    requiredTrips: null,
+    requiredDistanceM: "20000.000000000000000000",
+    acceptedTrips: 1,
+    actualDistanceM: "20000.000000000000000000",
+  });
+  tick();
+  await publish("ets2", 0, null, null);
+  await correction(f, 3, "accepted", below);
+  expect((await progress()).data).toMatchObject({
+    assignment: { levelId: structuralLevels.ets2[1] },
+    reviewRequired: true,
+    reviewReasonCodes: ["promotion_requirements_no_longer_met"],
+  });
+  expect(await proofs()).toEqual([proof]);
+  expect((await identity.current(owner)).data.member.roles).toEqual(["driver"]);
+});
+
+test("readiness needs eight effective versions; null and explicit zero work until the terminal level", async () => {
+  const initialization = createQualificationInitialization(unit),
+    ready = () => unit.run((tx) => initialization.administrationReadiness(tx, iso()));
+  expect(await ready()).toBe(false);
+  const effectiveAt = new Date(instant + 1000).toISOString();
+  await publish("ets2", 0, null, null, { effectiveAt });
+  await publish("ets2", 1, 0, null);
+  await publish("ets2", 2, null, "0");
+  await publish("ets2", 3, null, null);
+  for (let rank = 0; rank < 4; rank++) await publish("ats", rank, null, null);
+  const notification = (assignmentId: string) =>
+    unit.run(async (tx) => {
+      await identity.qualificationContextInTransaction(tx, [owner.userId]);
+      return service.notificationAssignmentInTransaction(tx, assignmentId);
+    });
+  const trainee = (await progress()).data;
+  expect(trainee.eligibleForConfirmation).toBe(false);
+  expect((await notification(trainee.assignment.id)).eligible).toBe(false);
+  expect(await ready()).toBe(false);
   await expect(promote()).rejects.toMatchObject({ statusCode: 409 });
   tick();
-  await publish("ets2", 0, null, "1");
-  expect((await progress()).data.eligibleForConfirmation).toBe(false);
+  expect(await ready()).toBe(true);
+  expect((await progress()).data).toMatchObject({
+    requiredTrips: null,
+    requiredDistanceM: null,
+    acceptedTrips: 0,
+    actualDistanceM: "0",
+    eligibleForConfirmation: true,
+  });
+  expect((await notification(trainee.assignment.id)).eligible).toBe(true);
+  await promote();
+  tick();
+  const driverIII = (await progress()).data;
+  expect(driverIII).toMatchObject({
+    requiredTrips: 0,
+    requiredDistanceM: null,
+    eligibleForConfirmation: true,
+  });
+  await promote();
+  tick();
+  const driverII = (await progress()).data;
+  expect(driverII).toMatchObject({
+    requiredTrips: null,
+    requiredDistanceM: "0",
+    eligibleForConfirmation: true,
+  });
+  await promote();
+  const terminal = await progress();
+  expect(terminal.data).toMatchObject({
+    assignment: { levelId: structuralLevels.ets2[3] },
+    eligibleForConfirmation: false,
+  });
+  expect((await notification(terminal.data.assignment.id)).eligible).toBe(false);
+  await expect(
+    service.promote(director, owner.userId, newId(), terminal.version, {
+      game: "ets2",
+      assignmentId: terminal.data.assignment.id,
+      targetLevelId: structuralLevels.ets2[3],
+      reason: "Fictional attempted promotion after Driver I",
+    }),
+  ).rejects.toMatchObject({ statusCode: 409 });
+  const proofs = await unit.run((tx) => unit.client(tx).select().from(qualificationPromotions));
+  expect(proofs).toHaveLength(3);
+  expect(proofs).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        sourceAssignmentId: trainee.assignment.id,
+        requiredTrips: null,
+        requiredDistanceM: null,
+      }),
+      expect.objectContaining({
+        sourceAssignmentId: driverIII.assignment.id,
+        requiredTrips: 0,
+        requiredDistanceM: null,
+      }),
+      expect.objectContaining({
+        sourceAssignmentId: driverII.assignment.id,
+        requiredTrips: null,
+        requiredDistanceM: "0.000000000000000000",
+      }),
+    ]),
+  );
 });
+
 test("both count AND exact actual distance are required and thresholds never promote automatically", async () => {
   await publish("ets2", 0, 2, "200.000000000000000001");
   tick();
@@ -1293,6 +1451,118 @@ test("HTTP routes enforce CSRF, strict inputs, ETags, scoped cursors, private DT
         })
       ).statusCode,
     ).toBe(404);
+  } finally {
+    await app.close();
+  }
+});
+
+test("publication HTTP preserves closed inputs, optional reason, staff authority and exact idempotent replay", async () => {
+  // Exercise every admission case in a separate synthetic minute from the other HTTP tests.
+  tick(60000);
+  const app = await createApp({
+    identity,
+    qualifications: service,
+    checkReadiness: async () => true,
+  });
+  try {
+    const headersFor = async (cookie: string, version = 1) => {
+      const csrf = await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie } });
+      expect(csrf.statusCode).toBe(200);
+      return {
+        cookie,
+        origin,
+        "x-csrf-token": csrf.json().data.token as string,
+        "idempotency-key": newId(),
+        "if-match": `"v${version}"`,
+      };
+    };
+    const levelId = structuralLevels.ets2[0],
+      url = `/api/v1/admin/qualification-levels/${levelId}/rule-versions`,
+      headers = await headersFor(directorCookie),
+      payload = { rules: [], requiredTrips: null, requiredDistanceM: "20000" };
+    expect(
+      (await app.inject({ method: "POST", url, headers: { cookie: directorCookie }, payload }))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: "POST", url, headers: await headersFor(ownerCookie), payload }))
+        .statusCode,
+    ).toBe(403);
+    for (const invalid of [
+      { ...payload, reason: "" },
+      { ...payload, reason: "   " },
+      { ...payload, reason: null },
+      { ...payload, reason: "x".repeat(2049) },
+      { ...payload, sample: {} },
+      { rules: [], requiredDistanceM: "20000" },
+      { rules: [], requiredTrips: null },
+    ])
+      expect(
+        (await app.inject({ method: "POST", url, headers, payload: invalid })).statusCode,
+      ).toBe(422);
+    const responses = await Promise.all([
+      app.inject({ method: "POST", url, headers, payload }),
+      app.inject({ method: "POST", url, headers, payload }),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([201, 201]);
+    expect(responses.map((response) => response.headers.etag)).toEqual(['"v2"', '"v2"']);
+    const first = responses[0].json().data;
+    expect(responses[1].json().data).toEqual(first);
+    expect(first).toMatchObject({
+      configured: true,
+      requiredTrips: null,
+      requiredDistanceM: "20000",
+    });
+    const readRules = () =>
+      unit.run((tx) =>
+        unit
+          .client(tx)
+          .select()
+          .from(qualificationRules)
+          .where(eq(qualificationRules.levelId, levelId)),
+      );
+    expect(await readRules()).toEqual([
+      expect.objectContaining({ id: first.ruleVersionId, reason: null }),
+    ]);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url,
+          headers,
+          payload: { ...payload, reason: "Fictional changed intent" },
+        })
+      ).json().error.code,
+    ).toBe("IDEMPOTENCY_CONFLICT");
+    tick();
+    const legacy = { ...payload, reason: "Fictional retained explanation" },
+      deputyHeaders = await headersFor(deputyCookie, 2),
+      published = await app.inject({
+        method: "POST",
+        url,
+        headers: deputyHeaders,
+        payload: legacy,
+      });
+    expect(published.statusCode).toBe(201);
+    expect(published.headers.etag).toBe('"v3"');
+    const recorded = published.json().data;
+    const rules = await readRules();
+    expect(rules).toHaveLength(2);
+    expect(rules.find((rule) => rule.id === recorded.ruleVersionId)).toMatchObject({
+      actorId: deputy.userId,
+      reason: legacy.reason,
+    });
+    expect(recorded).not.toHaveProperty("reason");
+    const replay = await app.inject({
+      method: "POST",
+      url,
+      headers: deputyHeaders,
+      payload: legacy,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.headers.etag).toBe('"v3"');
+    expect(replay.json().data).toEqual(recorded);
+    expect(await readRules()).toHaveLength(2);
   } finally {
     await app.close();
   }
