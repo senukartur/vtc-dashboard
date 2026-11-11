@@ -32,6 +32,7 @@ import {
   manualReviewGates,
   manualRevisions,
   or,
+  sql,
 } from "@vtc/db/manual-reports-schema";
 import {
   type BlobConfig,
@@ -58,6 +59,7 @@ import { parseManualSource } from "../sources/contracts/manual.js";
 import type { Trips } from "../trips/service.js";
 
 type S = components["schemas"];
+type Draft = typeof manualDrafts.$inferSelect;
 type Evidence = typeof manualEvidence.$inferSelect;
 type Report = typeof manualReports.$inferSelect;
 type Revision = typeof manualRevisions.$inferSelect;
@@ -107,6 +109,12 @@ function input<T>(name: string, value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 type Page = { limit?: number; cursor?: string };
+type DraftPage = Page & { state?: "editing" };
+const draftLabelFields = [
+  ["origin", "city"],
+  ["destination", "city"],
+  ["cargo", "cargo"],
+] as const;
 type Receipt =
   | {
       kind: "report";
@@ -118,6 +126,7 @@ type Receipt =
       legacyReviewReasons?: S["TripPrivate"]["reviewReasonCodes"];
     }
   | { kind: "draft"; id: string; version: number }
+  | { kind: "discard"; id: string; version: number }
   | { kind: "correction"; id: string; version: number };
 export function createManualReports(
   unit: UnitOfWork,
@@ -298,7 +307,8 @@ export function createManualReports(
       };
     });
   }
-  function draftDto(row: typeof manualDrafts.$inferSelect): S["ManualDraft"] {
+  function draftDto(row: Draft): S["ManualDraft"] {
+    if (row.state === "discarded") throw new Error("MANUAL_DRAFT_NOT_VISIBLE");
     return {
       id: row.id,
       version: row.version,
@@ -309,6 +319,39 @@ export function createManualReports(
       updatedAt: row.updatedAt,
       submittedReportId: row.submittedReportId,
     };
+  }
+  async function labeledDrafts(tx: TxContext, rows: Draft[], locale: "ru" | "en") {
+    const drafts = rows.map(draftDto);
+    const refs = drafts.flatMap(({ fields }) =>
+      draftLabelFields.flatMap(([field, kind]) => {
+        const selection = fields[field];
+        return fields.game && selection?.status === "resolved"
+          ? [{ id: selection.entityId, kind }]
+          : [];
+      }),
+    );
+    // Catalog maps use IDs as keys, so query each kind separately.
+    async function forKind(kind: "city" | "cargo") {
+      const matching = refs.filter((ref) => ref.kind === kind);
+      if (!matching.length) return undefined;
+      return {
+        selections: await ports.catalogs.selectionsInTransaction(tx, matching),
+        labels: await ports.catalogs.labelsInTransaction(tx, matching, locale),
+      };
+    }
+    const cities = await forKind("city"),
+      cargoes = await forKind("cargo");
+    return drafts.map((draft): S["ManualDraft"] => {
+      const labels: S["ManualDraftLabels"] = { origin: null, destination: null, cargo: null };
+      for (const [field, kind] of draftLabelFields) {
+        const selection = draft.fields[field];
+        if (!draft.fields.game || selection?.status !== "resolved") continue;
+        const lookup = kind === "city" ? cities : cargoes;
+        if (lookup?.selections.get(selection.entityId)?.game === draft.fields.game)
+          labels[field] = lookup.labels.get(selection.entityId) ?? null;
+      }
+      return { ...draft, labels };
+    });
   }
   async function privateTrip(tx: TxContext, actor: Actor, id: string) {
     const current = await authority(tx, actor);
@@ -326,17 +369,18 @@ export function createManualReports(
     await privateTrip(tx, actor, row.tripId);
     return row;
   }
-  async function ownerDraft(tx: TxContext, actor: Actor, id: string) {
-    await authority(tx, actor, true);
+  async function ownerDraft(tx: TxContext, actor: Actor, id: string, includeDiscarded = false) {
+    const current = await authority(tx, actor, true);
     const [row] = await c(tx)
       .select()
       .from(manualDrafts)
       .where(eq(manualDrafts.id, applicationId(id)))
       .for("update");
-    if (!row || row.ownerId !== actor.userId) throw manualError(404);
-    return row;
+    if (!row || row.ownerId !== actor.userId || (row.state === "discarded" && !includeDiscarded))
+      throw manualError(404);
+    return { row, locale: current.locale };
   }
-  async function rememberDraft(tx: TxContext, row: typeof manualDrafts.$inferSelect) {
+  async function rememberDraft(tx: TxContext, row: Draft) {
     await c(tx)
       .insert(manualDraftHistory)
       .values({ draftId: row.id, version: row.version, snapshot: draftDto(row) });
@@ -405,7 +449,7 @@ export function createManualReports(
   }
   async function renderDraft(tx: TxContext, actor: Actor, receipt: Receipt) {
     if (receipt.kind !== "draft") throw new Error("MANUAL_RECEIPT_INVALID");
-    await ownerDraft(tx, actor, receipt.id);
+    await ownerDraft(tx, actor, receipt.id, true);
     const [row] = await c(tx)
       .select()
       .from(manualDraftHistory)
@@ -417,6 +461,15 @@ export function createManualReports(
       );
     if (!row) throw new Error("MANUAL_DRAFT_HISTORY_MISSING");
     return row.snapshot as S["ManualDraft"];
+  }
+  async function renderDiscard(
+    tx: TxContext,
+    actor: Actor,
+    receipt: Receipt,
+  ): Promise<S["CommandResult"]> {
+    if (receipt.kind !== "discard") throw new Error("MANUAL_RECEIPT_INVALID");
+    await ownerDraft(tx, actor, receipt.id, true);
+    return { id: receipt.id, version: receipt.version };
   }
   async function evidenceGate(tx: TxContext, ownerId: string, ids: string[], ready: boolean) {
     if (ids.length > config.maxFilesPerReport) throw manualError(422);
@@ -1140,7 +1193,7 @@ export function createManualReports(
         `draft/${applicationId(id)}/replace`,
         { expected, ...value, targetTrip: value.targetTrip ?? null },
         async (tx) => {
-          const row = await ownerDraft(tx, actor, id);
+          const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
           await draftReferences(tx, actor, id, value.fields);
@@ -1158,20 +1211,58 @@ export function createManualReports(
         (tx, r) => renderDraft(tx, actor, r),
       );
     },
-    getDraft(actor: Actor, id: string) {
-      return run(async (tx) => draftDto(await ownerDraft(tx, actor, id)));
+    deleteDraft(actor: Actor, id: string, key: string, expected: number) {
+      if (!Number.isSafeInteger(expected) || expected < 1) throw manualError(422);
+      return command(
+        actor,
+        key,
+        `draft/${applicationId(id)}/delete`,
+        { expected },
+        async (tx) => {
+          const { row } = await ownerDraft(tx, actor, id);
+          if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
+          if (row.state !== "editing") throw manualError(409);
+          const version = row.version + 1;
+          const marker = { id, version, state: "discarded" as const, updatedAt: at() };
+          await c(tx)
+            .update(manualDrafts)
+            .set({ version, state: marker.state, updatedAt: marker.updatedAt })
+            .where(eq(manualDrafts.id, id));
+          await c(tx).insert(manualDraftHistory).values({ draftId: id, version, snapshot: marker });
+          await c(tx).delete(manualDraftEvidence).where(eq(manualDraftEvidence.draftId, id));
+          return { kind: "discard", id, version };
+        },
+        (tx, r) => renderDiscard(tx, actor, r),
+      );
     },
-    listDrafts(actor: Actor, page: Page = {}) {
+    getDraft(actor: Actor, id: string) {
       return run(async (tx) => {
-        await authority(tx, actor, true);
-        const scope = "drafts",
+        const { row, locale } = await ownerDraft(tx, actor, id);
+        const [draft] = await labeledDrafts(tx, [row], locale);
+        if (!draft) throw new Error("MANUAL_DRAFT_PROJECTION_MISSING");
+        return draft;
+      });
+    },
+    listDrafts(actor: Actor, page: DraftPage = {}) {
+      return run(async (tx) => {
+        const { locale } = await authority(tx, actor, true);
+        const scope = page.state === "editing" ? "drafts/editing" : "drafts",
           { limit, after } = pageCursor(actor, scope, page);
+        const owner = eq(manualDrafts.ownerId, actor.userId);
+        const editing = eq(manualDrafts.state, "editing");
+        const [count] = await c(tx)
+          .select({ total: sql<number | string>`count(*)` })
+          .from(manualDrafts)
+          .where(and(owner, editing));
         const rows = await c(tx)
           .select()
           .from(manualDrafts)
           .where(
             and(
-              eq(manualDrafts.ownerId, actor.userId),
+              owner,
+              page.state === "editing"
+                ? editing
+                : inArray(manualDrafts.state, ["editing", "submitted"]),
               after
                 ? or(
                     lt(manualDrafts.createdAt, after.time),
@@ -1186,7 +1277,11 @@ export function createManualReports(
           id: row.id,
           time: row.createdAt,
         }));
-        return { ...result, items: result.items.map(draftDto) };
+        return {
+          ...result,
+          items: await labeledDrafts(tx, result.items, locale),
+          editingCount: Number(count?.total ?? 0),
+        };
       });
     },
     submitDraft(
@@ -1204,7 +1299,7 @@ export function createManualReports(
         `draft/${applicationId(id)}/submit`,
         { expected, fields },
         async (tx) => {
-          const row = await ownerDraft(tx, actor, id);
+          const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
           const receipt = await submit(
