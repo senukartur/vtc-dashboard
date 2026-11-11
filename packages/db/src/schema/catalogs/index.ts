@@ -20,6 +20,7 @@ export type AdrClass = (typeof adrClasses)[number];
 const game = (name: string) => mysqlEnum(name, ["ets2", "ats"]);
 const code = (name: string) => opaqueColumn(name, { length: 128 });
 const name = (column: string) => varchar(column, { length: 256 });
+const updatedAt = () => utcColumn("updated_at").notNull().default(sql`(UTC_TIMESTAMP(3))`);
 const logoBlob = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "blob" });
 const digest = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "binary(32)" });
 
@@ -33,6 +34,7 @@ export const catalogDlcs = mysqlTable(
     nameRu: name("name_ru"),
     steamAppId: int("steam_app_id", { unsigned: true }),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_dlc_game_code").on(t.game, t.code),
@@ -53,6 +55,7 @@ export const catalogRegions = mysqlTable(
     nameRu: name("name_ru"),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_region_game_code").on(t.game, t.code),
@@ -83,6 +86,7 @@ export const catalogCities = mysqlTable(
     regionId: idColumn("region_id"),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_city_game_code").on(t.game, t.code),
@@ -120,6 +124,7 @@ export const catalogCargoes = mysqlTable(
     adrClass: mysqlEnum("adr_class", adrClasses),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_cargo_game_code").on(t.game, t.code),
@@ -147,6 +152,7 @@ export const catalogTrailers = mysqlTable(
     nameRu: name("name_ru"),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_trailer_game_code").on(t.game, t.code),
@@ -174,6 +180,7 @@ export const catalogCompanies = mysqlTable(
     nameRu: name("name_ru"),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_company_game_code").on(t.game, t.code),
@@ -201,6 +208,7 @@ export const catalogCompanyCities = mysqlTable(
     cityId: idColumn("city_id").notNull(),
     dlcId: idColumn("dlc_id"),
     hidden: boolean("hidden").notNull().default(false),
+    updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("catalog_company_city_pair").on(t.companyId, t.cityId),
