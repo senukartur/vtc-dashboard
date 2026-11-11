@@ -338,14 +338,154 @@ test("a depot is listed by default only when the depot, company and city are all
   await catalogs.patch(director, "cities", k.id, newId(), { hidden: false });
   expect(await ids()).toEqual([d.id]);
   const summary = await catalogs.summary(director, "ets2");
-  expect(summary.lists.depots).toEqual({ visible: 1, hidden: 0 });
-  expect(summary.lists.companies).toEqual({ visible: 1, hidden: 0 });
+  expect(summary.lists.depots).toEqual({ visible: 1, hidden: 0, untranslated: 1 });
+  expect(summary.lists.companies).toEqual({
+    visible: 1,
+    hidden: 0,
+    untranslated: 1,
+    missingLogo: 1,
+  });
   await catalogs.patchDepot(director, d.id, newId(), { hidden: true });
   expect((await catalogs.summary(director, "ets2")).lists.depots).toEqual({
     visible: 0,
     hidden: 1,
+    untranslated: 0,
   });
-  expect((await catalogs.summary(director, "ats")).lists.depots).toEqual({ visible: 0, hidden: 0 });
+  const empty = (await catalogs.summary(director, "ats")).lists;
+  expect(empty.depots).toEqual({ visible: 0, hidden: 0, untranslated: 0 });
+  expect(empty.companies).toEqual({ visible: 0, hidden: 0, untranslated: 0, missingLogo: 0 });
+});
+
+test("company logo filters combine before paging and follow changes to visible companies", async () => {
+  const first = await company("filter_a"),
+    second = await company("filter_b"),
+    withLogo = await company("filter_c"),
+    hidden = await company("filter_hidden"),
+    ats = await company("filter_a", "ats");
+  await company("filter_d", "ets2", { nameRu: "Пример" });
+  await catalogs.setLogo(director, withLogo.id, newId(), rgbaLogo(2));
+  await catalogs.patch(director, "companies", hidden.id, newId(), { hidden: true });
+
+  const query = {
+    game: "ets2",
+    locale: "ru",
+    logo: "missing",
+    untranslated: true,
+    search: "filter_",
+    dlc: "base",
+    limit: 1,
+  } as const;
+  const page = await catalogs.list(driver, "companies", query);
+  expect(page).toMatchObject({
+    items: [{ id: first.id, logo: null, depotCount: 0, display: { englishFallback: true } }],
+    total: 2,
+    nextCursor: expect.any(String),
+  });
+  const cursor = page.nextCursor as string;
+  expect(await catalogs.list(driver, "companies", { ...query, cursor })).toMatchObject({
+    items: [{ id: second.id }],
+    total: 2,
+    nextCursor: null,
+  });
+  const { logo: _logo, ...withoutLogo } = query;
+  await expect(
+    catalogs.list(driver, "companies", { ...withoutLogo, cursor }),
+  ).rejects.toMatchObject({
+    statusCode: 409,
+    publicCode: "VERSION_CONFLICT",
+  });
+  expect(
+    (await catalogs.list(driver, "companies", { ...query, hidden: "only", includeHidden: true }))
+      .items,
+  ).toMatchObject([{ id: hidden.id }]);
+  expect((await catalogs.list(driver, "companies", { ...query, game: "ats" })).items).toMatchObject(
+    [{ id: ats.id }],
+  );
+
+  const counts = async () => (await catalogs.summary(driver, "ets2")).lists.companies;
+  expect(await counts()).toEqual({ visible: 4, hidden: 1, untranslated: 3, missingLogo: 3 });
+  instant += 123;
+  const logo = await catalogs.setLogo(director, first.id, newId(), rgbaLogo(1));
+  expect(logo.updatedAt).toBe(first.updatedAt);
+  expect((await catalogs.list(driver, "companies", query)).items).toMatchObject([
+    { id: second.id },
+  ]);
+  expect(await counts()).toMatchObject({ missingLogo: 2 });
+  instant += 123;
+  const removed = await catalogs.removeLogo(director, first.id, newId());
+  expect(removed).toMatchObject({ logo: null, updatedAt: first.updatedAt });
+  expect(await counts()).toMatchObject({ missingLogo: 3 });
+});
+
+test("depot filters use both parent names, default visibility and the depot's own hidden flag", async () => {
+  const a = await company("maintenance_a"),
+    b = await company("maintenance_b", "ets2", { nameRu: "Вторая" }),
+    c = await company("maintenance_c", "ets2", { nameRu: "Третья" }),
+    parentHidden = await company("maintenance_d");
+  const cityMissing = await city("missing_label"),
+    cityTranslated = await city("translated_label", "ets2", { nameRu: "Пример" }),
+    cityHidden = await city("hidden_label");
+  instant += 123;
+  const defaultA = await depot(a.id, cityTranslated.id);
+  const defaultB = await depot(b.id, cityMissing.id);
+  await depot(c.id, cityTranslated.id);
+  const depotHidden = await depot(a.id, cityMissing.id);
+  const hiddenByCity = await depot(a.id, cityHidden.id);
+  const hiddenByCompany = await depot(parentHidden.id, cityTranslated.id);
+  instant += 123;
+  await catalogs.patchDepot(director, depotHidden.id, newId(), { hidden: true });
+  await catalogs.patch(director, "cities", cityHidden.id, newId(), { hidden: true });
+  await catalogs.patch(director, "companies", parentHidden.id, newId(), { hidden: true });
+  const ats = await company("maintenance_a", "ats");
+  const atsCity = await city("missing_label", "ats");
+  const atsDepot = await depot(ats.id, atsCity.id, "ats");
+
+  const query = { game: "ets2", untranslated: true, search: "maintenance", dlc: "base" } as const;
+  const ids = (result: Awaited<ReturnType<Catalogs["listDepots"]>>) =>
+    result.items.map((row) => row.id);
+  for (const locale of ["en", "ru"] as const) {
+    const scoped = { ...query, locale, limit: 1 };
+    const first = await catalogs.listDepots(driver, scoped);
+    expect(first.total).toBe(2);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const cursor = first.nextCursor as string;
+    const second = await catalogs.listDepots(driver, { ...scoped, cursor });
+    expect(second.total).toBe(2);
+    expect(second.nextCursor).toBeNull();
+    expect([...ids(first), ...ids(second)].sort()).toEqual([defaultA.id, defaultB.id].sort());
+    await expect(
+      catalogs.listDepots(driver, { ...scoped, untranslated: false, cursor }),
+    ).rejects.toMatchObject({ statusCode: 409, publicCode: "VERSION_CONFLICT" });
+  }
+  const hiddenOnly = { ...query, hidden: "only", includeHidden: true } as const;
+  expect(ids(await catalogs.listDepots(driver, hiddenOnly))).toEqual([depotHidden.id]);
+  const only = await catalogs.listDepots(driver, {
+    ...hiddenOnly,
+    companyId: a.id,
+    cityId: cityMissing.id,
+  });
+  expect(ids(only)).toEqual([depotHidden.id]);
+  expect(only.total).toBe(1);
+  const all = await catalogs.listDepots(driver, { ...query, includeHidden: true });
+  expect(ids(all).sort()).toEqual(
+    [defaultA.id, defaultB.id, depotHidden.id, hiddenByCity.id, hiddenByCompany.id].sort(),
+  );
+  expect(ids(await catalogs.listDepots(driver, { ...query, game: "ats" }))).toEqual([atsDepot.id]);
+  expect((await catalogs.summary(driver, "ets2")).lists.depots).toEqual({
+    visible: 5,
+    hidden: 1,
+    untranslated: 2,
+  });
+  const companies = await catalogs.list(driver, "companies", { game: "ets2", includeHidden: true });
+  expect(companies.items.map((row) => [row.id, row.depotCount])).toEqual([
+    [a.id, 3],
+    [b.id, 1],
+    [c.id, 1],
+    [parentHidden.id, 1],
+  ]);
+  expect((await catalogs.get(driver, "companies", a.id)).depotCount).toBe(3);
+  expect((await catalogs.get(driver, "companies", ats.id)).depotCount).toBe(1);
+  expect((await catalogs.get(driver, "companies", a.id)).updatedAt).toBe(a.updatedAt);
 });
 
 test("companies are listed per locale with English fallback, stable ties and keyset paging", async () => {
@@ -690,6 +830,71 @@ test("a depot file reports unknown and hidden references and duplicates by line"
     errors: 0,
     unchanged: 1,
   });
+});
+
+test("depot timestamps follow its own edits and one instant per import", async () => {
+  const { c1, k1, k2 } = await depotFixtures();
+  const pack = await dlc("timestamp_pack");
+  instant += 123;
+  const row = await depot(c1.id, k1.id);
+  expect(row.updatedAt).toBe(now().toISOString());
+  instant += 123;
+  await catalogs.patch(director, "companies", c1.id, newId(), { nameRu: "Пример" });
+  const listed = async () =>
+    (await catalogs.listDepots(driver, { game: "ets2", includeHidden: true })).items;
+  expect((await listed())[0]?.updatedAt).toBe(row.updatedAt);
+  const unchanged = await catalogs.patchDepot(director, row.id, newId(), {
+    hidden: false,
+    dlcId: null,
+  });
+  expect(unchanged.updatedAt).toBe(row.updatedAt);
+  const patchKey = newId();
+  const patch = { hidden: true };
+  const hidden = await catalogs.patchDepot(director, row.id, patchKey, patch);
+  expect(hidden.updatedAt).toBe(now().toISOString());
+  expect(hidden.updatedAt).not.toBe(row.updatedAt);
+  instant += 123;
+  const file = csv(
+    depotHeader,
+    "ets2,imp_co_one,imp_city_one,timestamp_pack",
+    "ets2,imp_co_one,imp_city_two,timestamp_pack",
+  );
+  const preview = await catalogs.previewImport(director, "depots", file);
+  expect(preview).toMatchObject({ added: 1, changed: 1, errors: 0 });
+  expect((await listed())[0]?.updatedAt).toBe(hidden.updatedAt);
+  instant += 123;
+  const key = newId();
+  const applied = await catalogs.applyImport(
+    director,
+    "depots",
+    file,
+    key,
+    preview.token as string,
+  );
+  const rows = (await listed()).sort((left, right) =>
+    left.city.code.localeCompare(right.city.code),
+  );
+  expect(rows).toMatchObject([
+    {
+      id: row.id,
+      city: { id: k1.id },
+      dlcId: pack.id,
+      hidden: true,
+      updatedAt: now().toISOString(),
+    },
+    { city: { id: k2.id }, dlcId: pack.id, hidden: false, updatedAt: now().toISOString() },
+  ]);
+  instant += 123;
+  await expect(catalogs.patchDepot(director, row.id, patchKey, patch)).resolves.toEqual(hidden);
+  await expect(
+    catalogs.applyImport(director, "depots", file, key, preview.token as string),
+  ).resolves.toEqual(applied);
+  const sameFile = await catalogs.previewImport(director, "depots", file);
+  expect(sameFile).toMatchObject({ added: 0, changed: 0, unchanged: 2, errors: 0 });
+  await catalogs.applyImport(director, "depots", file, newId(), sameFile.token as string);
+  expect(
+    (await listed()).sort((left, right) => left.city.code.localeCompare(right.city.code)),
+  ).toEqual(rows);
 });
 
 test("a depot apply is all-or-nothing and replays by key without a second effect", async () => {

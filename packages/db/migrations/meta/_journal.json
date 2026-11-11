@@ -162,6 +162,13 @@
       "when": 1794311853737,
       "tag": "0022_busy_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1794426510511,
+      "tag": "0023_curly_captain_flint",
+      "breakpoints": true
     }
   ]
 }

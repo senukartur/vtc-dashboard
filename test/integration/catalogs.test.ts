@@ -10,7 +10,11 @@ import {
   beforeAll as vitestBeforeAll,
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
-import { CATALOG_IMPORT_MAX_BYTES } from "../../apps/api/src/modules/catalogs/config.ts";
+import {
+  CATALOG_IMPORT_MAX_BYTES,
+  catalogLists,
+} from "../../apps/api/src/modules/catalogs/config.ts";
+import { cursorCodec } from "../../apps/api/src/modules/catalogs/cursor.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
@@ -34,6 +38,7 @@ const origin = "http://127.0.0.1:4173",
   password = "Fictional-catalog-passphrase-42",
   boundary = "vtc-catalog-boundary";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
+const catalogSettings = catalogConfig();
 let instant = Date.parse("2026-10-30T12:00:00.000Z");
 const now = () => new Date(instant);
 let control: Connection,
@@ -69,7 +74,7 @@ beforeAll(async () => {
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
-  catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  catalogs = createCatalogs(unit, catalogSettings, { identity }, now);
   await identity.bootstrap({
     email: "catalog-director@example.invalid",
     name: "Fictional Director",
@@ -252,10 +257,214 @@ test("keyset pages keep a stable order across duplicate names and hidden rows fi
   expect((await catalogs.summary(director, "ets2")).lists.cities).toEqual({
     visible: 5,
     hidden: 1,
+    untranslated: 5,
   });
   await expect(
     catalogs.list(director, "cities", { game: "ets2", cursor: "tampered" }),
   ).rejects.toMatchObject({ statusCode: 409 });
+});
+
+test.each(catalogLists)(
+  "%s filters hidden and untranslated independently of the requested language",
+  async (list) => {
+    const create = (code: string, game: "ets2" | "ats", nameRu: string | null = null) =>
+      catalogs.create(director, list, newId(), { code, game, nameEn: `Fictional ${code}`, nameRu });
+    const visible = await create("visible", "ets2");
+    for (const row of [
+      await create("missing", "ets2"),
+      await create("translated", "ets2", "Пример"),
+      await create("missing", "ats"),
+    ])
+      await catalogs.patch(director, list, row.id, newId(), { hidden: true });
+
+    for (const locale of ["en", "ru"] as const) {
+      const common = { untranslated: true, locale } as const;
+      const only = { ...common, hidden: "only", includeHidden: true } as const;
+      const normal = await catalogs.list(driver, list, { ...common, game: "ets2" });
+      expect(normal.items.map((row) => row.id)).toEqual([visible.id]);
+      expect(normal.items[0]?.display.englishFallback).toBe(locale === "ru");
+      for (const game of ["ets2", "ats"] as const) {
+        const hidden = await catalogs.list(driver, list, { ...only, game });
+        expect(hidden.total).toBe(1);
+        expect(hidden.items.map((row) => [row.game, row.code, row.hidden])).toEqual([
+          [game, "missing", true],
+        ]);
+      }
+    }
+    expect((await catalogs.summary(driver, "ets2")).lists[list]).toMatchObject({
+      visible: 1,
+      hidden: 2,
+      untranslated: 1,
+    });
+    expect((await catalogs.summary(driver, "ats")).lists[list]).toMatchObject({
+      visible: 0,
+      hidden: 1,
+      untranslated: 0,
+    });
+  },
+);
+
+test("city filters narrow the total before paging and bind the effective visibility and translation filters", async () => {
+  const pack = await catalogs.create(director, "dlcs", newId(), {
+    game: "ets2",
+    code: "fixture_pack",
+    nameEn: "Fictional pack",
+  });
+  const region = await catalogs.create(director, "regions", newId(), {
+    game: "ets2",
+    code: "fixture_region",
+    nameEn: "Fictional region",
+  });
+  for (const code of ["match_a", "match_b", "match_base", "match_other", "outside"]) {
+    const row = await city(code, "ets2", {
+      dlcId: code === "match_base" ? null : pack.id,
+      regionId: code === "match_other" ? null : region.id,
+    });
+    await catalogs.patch(director, "cities", row.id, newId(), { hidden: true });
+  }
+  const query = {
+    game: "ets2",
+    hidden: "only",
+    untranslated: true,
+    dlc: pack.id,
+    regionId: region.id,
+    search: "match",
+    limit: 1,
+  } as const;
+  const first = await catalogs.list(driver, "cities", query);
+  expect(first).toMatchObject({
+    items: [{ code: "match_a" }],
+    total: 2,
+    nextCursor: expect.any(String),
+  });
+  const cursor = first.nextCursor as string;
+  const second = await catalogs.list(driver, "cities", { ...query, includeHidden: true, cursor });
+  expect(second).toMatchObject({ items: [{ code: "match_b" }], total: 2, nextCursor: null });
+  const { hidden: _hidden, ...withoutHidden } = query;
+  for (const changed of [
+    { ...query, untranslated: false },
+    withoutHidden,
+    { ...query, dlc: "base" },
+  ])
+    await expect(catalogs.list(driver, "cities", { ...changed, cursor })).rejects.toMatchObject({
+      statusCode: 409,
+      publicCode: "VERSION_CONFLICT",
+    });
+
+  const legacyBinding = [
+    driver.userId,
+    driver.sessionId,
+    driver.accessEpoch,
+    "cities",
+    "ets2",
+    null,
+    true,
+    null,
+    null,
+    "en",
+  ];
+  const item = first.items[0];
+  if (!item) throw new Error("MISSING_SYNTHETIC_CATALOG_ITEM");
+  const legacyCursor = cursorCodec(catalogSettings.cursorKey).write(
+    legacyBinding,
+    JSON.stringify([item.nameEn, item.id]),
+  );
+  const legacyPage = await catalogs.list(driver, "cities", {
+    game: "ets2",
+    includeHidden: true,
+    limit: 1,
+    cursor: legacyCursor,
+  });
+  expect(legacyPage).toMatchObject({ items: [{ code: "match_b" }], total: 5 });
+});
+
+test.each(catalogLists)("%s records the UTC time of actual row changes", async (list) => {
+  const input = { game: "ets2", code: "edit_row", nameEn: "Before edit" } as const;
+  const createKey = newId();
+  instant += 123;
+  const created = await catalogs.create(director, list, createKey, input);
+  expect(created.updatedAt).toBe(now().toISOString());
+  instant += 123;
+  const noOp = await catalogs.patch(director, list, created.id, newId(), {
+    code: input.code,
+    nameEn: input.nameEn,
+    nameRu: null,
+    hidden: false,
+  });
+  expect(noOp.updatedAt).toBe(created.updatedAt);
+  const patch = { nameEn: "After edit" };
+  const editKey = newId();
+  const edited = await catalogs.patch(director, list, created.id, editKey, patch);
+  expect(edited.updatedAt).toBe(now().toISOString());
+  expect(edited.updatedAt).not.toBe(created.updatedAt);
+  const unchanged = await catalogs.create(director, list, newId(), {
+    game: "ets2",
+    code: "same_row",
+    nameEn: "Same name",
+  });
+  const file = Buffer.from(
+    JSON.stringify([
+      { game: "ets2", code: created.code, name_en: "After import" },
+      { game: "ets2", code: "fresh_row", name_en: "Fresh name" },
+      { game: "ets2", code: unchanged.code, name_en: unchanged.nameEn },
+    ]),
+  );
+  instant += 123;
+  const preview = await catalogs.previewImport(director, list, file);
+  expect(preview).toMatchObject({ added: 1, changed: 1, unchanged: 1, errors: 0 });
+  expect((await catalogs.get(director, list, created.id)).updatedAt).toBe(edited.updatedAt);
+  instant += 123;
+  const importKey = newId();
+  const applied = await catalogs.applyImport(
+    director,
+    list,
+    file,
+    importKey,
+    preview.token as string,
+  );
+  const rows = (await catalogs.list(director, list, { game: "ets2" })).items;
+  expect(rows.find((row) => row.code === created.code)?.updatedAt).toBe(now().toISOString());
+  expect(rows.find((row) => row.code === "fresh_row")?.updatedAt).toBe(now().toISOString());
+  expect(rows.find((row) => row.code === unchanged.code)?.updatedAt).toBe(unchanged.updatedAt);
+
+  instant += 123;
+  await expect(catalogs.create(director, list, createKey, input)).resolves.toEqual(created);
+  await expect(catalogs.patch(director, list, created.id, editKey, patch)).resolves.toEqual(edited);
+  await expect(
+    catalogs.applyImport(director, list, file, importKey, preview.token as string),
+  ).resolves.toEqual(applied);
+  expect((await catalogs.list(director, list, { game: "ets2" })).items).toEqual(rows);
+});
+
+test("an import rolls back timestamps and rows when audit recording fails after writes", async () => {
+  const row = await city("rollback_row");
+  const failing = createCatalogs(
+    unit,
+    catalogSettings,
+    {
+      identity: {
+        ...identity,
+        onboardingCompany: async () => {
+          throw new Error("SYNTHETIC_CATALOG_AUDIT_FAILURE");
+        },
+      },
+    },
+    now,
+  );
+  const file = csv(cityHeader, cityRow(row.code, "Changed name"), cityRow("rolled_back_insert"));
+  const preview = await catalogs.previewImport(director, "cities", file);
+  expect(preview).toMatchObject({ added: 1, changed: 1, errors: 0 });
+  const key = newId();
+  instant += 123;
+  await expect(
+    failing.applyImport(director, "cities", file, key, preview.token as string),
+  ).rejects.toThrow("SYNTHETIC_CATALOG_AUDIT_FAILURE");
+  expect((await catalogs.list(director, "cities", { game: "ets2" })).items).toEqual([row]);
+  expect(await auditCount("catalog.imported")).toBe(0);
+  await expect(
+    catalogs.applyImport(director, "cities", file, key, preview.token as string),
+  ).resolves.toMatchObject({ added: 1, changed: 1 });
+  expect((await catalogs.get(director, "cities", row.id)).updatedAt).toBe(now().toISOString());
 });
 
 test("import preview writes nothing and reports added, changed, unchanged and line issues", async () => {
@@ -728,7 +937,36 @@ test("HTTP enforces read permission, staff writes, CSRF and import size", async 
       payload: body,
     });
     expect(created.statusCode).toBe(201);
-    expect(created.json().data.code).toBe("http_city");
+    expect(created.json().data).toMatchObject({
+      code: "http_city",
+      updatedAt: now().toISOString(),
+    });
+    const cityId = created.json().data.id as string;
+    instant += 123;
+    await catalogs.patch(director, "cities", cityId, newId(), { hidden: true });
+    const filtered = await app.inject({
+      url: "/api/v1/catalogs/cities?game=ets2&hidden=only&untranslated=true&locale=ru",
+      headers: { cookie: driverCookie },
+    });
+    expect(filtered.statusCode).toBe(200);
+    expect(filtered.json().data).toMatchObject({
+      items: [
+        {
+          id: cityId,
+          hidden: true,
+          display: { englishFallback: true },
+          updatedAt: now().toISOString(),
+        },
+      ],
+      total: 1,
+      nextCursor: null,
+    });
+    const summary = await app.inject({
+      url: "/api/v1/catalogs/summary?game=ets2",
+      headers: { cookie: driverCookie },
+    });
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json().data.lists.cities).toEqual({ visible: 0, hidden: 1, untranslated: 0 });
 
     const headers = {
       cookie: directorCookie,
