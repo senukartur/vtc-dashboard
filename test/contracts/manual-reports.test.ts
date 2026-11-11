@@ -30,7 +30,16 @@ const fixture = (id: string) => {
 const validator = createSchemaValidator();
 const valid = (name: keyof S, value: unknown) =>
   validator.compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` })(value);
-const request = fixture("submitManualReport:success").request as S["ManualReportInput"];
+function withoutReferenceDates(fields: S["ManualDatedSubmissionFields"]) {
+  const { startedAt: _startedAt, completedAt: _completedAt, ...legacy } = fields;
+  return legacy;
+}
+const stagedRequest = fixture("submitManualReport:success")
+  .request as S["ManualReportCreationInput"];
+const request: S["ManualReportInput"] = {
+  ...stagedRequest,
+  fields: withoutReferenceDates(stagedRequest.fields),
+};
 
 test("published legacy manual schema objects remain unchanged from the contract-stage base", () => {
   const spec = contractFile("openapi.json");
@@ -200,7 +209,7 @@ test("all new read DTOs reject private storage fields and correction requests re
   expect(valid("Evidence", { ...(evidence as object), state: "deleting" })).toBe(false);
 });
 
-test("staged manual requests retain closed legacy wire bodies and require complete dated submissions", () => {
+test("staged final submissions require both dates and live schemas retain the undated body", () => {
   const spec = contractFile("openapi.json");
   const dated = fixture("submitManualReport:dated").request as S["ManualReportCreationInput"];
   const datedFields = dated.fields as S["ManualDatedSubmissionFields"];
@@ -229,23 +238,22 @@ test("staged manual requests retain closed legacy wire bodies and require comple
     expect(post.requestBody.content["application/json"].schema.$ref).toBe(
       `#/components/schemas/${staged}`,
     );
-    const old = fixture(`${operation}:success`).request;
-    const next = fixture(`${operation}:dated`).request as {
-      fields: Partial<S["ManualDatedSubmissionFields"]>;
+    const minimal = fixture(`${operation}:success`).request as {
+      fields: S["ManualDatedSubmissionFields"];
     };
+    const old = { ...minimal, fields: withoutReferenceDates(minimal.fields) };
+    const next = fixture(`${operation}:dated`).request as typeof minimal;
     expect(valid(live, old)).toBe(true);
-    expect(valid(staged, old)).toBe(true);
+    expect(valid(staged, old)).toBe(false);
+    expect(valid(staged, minimal)).toBe(true);
+    expect(valid(live, minimal)).toBe(false);
     expect(valid(staged, next)).toBe(true);
     expect(valid(live, next)).toBe(false);
     for (const requiredDate of ["startedAt", "completedAt"] as const) {
-      const incomplete = structuredClone(next);
-      delete incomplete.fields[requiredDate];
-      expect(valid(staged, incomplete)).toBe(false);
+      const fields: Partial<S["ManualDatedSubmissionFields"]> = { ...minimal.fields };
+      delete fields[requiredDate];
+      expect(valid(staged, { ...minimal, fields })).toBe(false);
     }
-    const withoutDates = structuredClone(next);
-    delete withoutDates.fields.startedAt;
-    delete withoutDates.fields.completedAt;
-    expect(valid(staged, withoutDates)).toBe(false);
     for (const invalid of [
       { startedAt: "2026-02-30T12:00:00.000Z" },
       { completedAt: "2026-10-20T10:00:00+01:00" },

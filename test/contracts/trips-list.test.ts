@@ -69,6 +69,12 @@ test("staged trip query supports both independent UTC bounds, bounded search and
   const own = stageFixture("listTrips:filtered-own");
   const review = stageFixture("listTrips:completion-review");
   const mismatch = stageFixture("listTrips:filter-cursor-mismatch");
+  const empty = stageFixture("listTrips:empty-owner");
+  const locale = operation.parameters.find((p: { name?: string }) => p.name === "locale");
+  expect(locale).toMatchObject({ required: false, schema: { enum: ["en", "ru"] } });
+  expect(locale.schema).not.toHaveProperty("default");
+  expect(locale.description).toContain("saved locale");
+  expect(operation.responses[409].description).toContain("effective locale");
   expect(company.query).toMatchObject({ scope: "company", q: "#42", order: "completion_desc" });
   expect(own.query).toMatchObject({ scope: "mine", q: "Fictional Harbor", order: "asc" });
   expect(review.query).toMatchObject({ scope: "review", hold: true, order: "completion_asc" });
@@ -77,8 +83,26 @@ test("staged trip query supports both independent UTC bounds, bounded search and
     response: { error: { code: "VERSION_CONFLICT" } },
   });
   expect(operation.responses[409].description).toMatch(/cursor/);
-  for (const fixture of [company, own, review, mismatch])
+  for (const fixture of [company, own, review, mismatch, empty])
     expect(validate(fixture.query)).toBe(true);
+  expect(empty.query).toEqual({ ownerId: company.query.ownerId, q: "#404" });
+  expect(company.response.data.items[0].origin).toMatchObject({
+    requestedLocale: company.query.locale,
+    renderedLocale: "en",
+    englishFallback: true,
+  });
+  expect(own.response.data.items[0].origin).toMatchObject({
+    requestedLocale: "ru",
+    renderedLocale: "en",
+    englishFallback: true,
+    label: own.query.q,
+  });
+  expect(review.response.data.items[0].cargo).toMatchObject({
+    requestedLocale: "ru",
+    renderedLocale: "ru",
+    englishFallback: false,
+    label: review.query.q,
+  });
   expect(validate({ from: company.query.from })).toBe(true);
   expect(validate({ toExclusive: company.query.toExclusive })).toBe(true);
   for (const query of [
@@ -110,7 +134,11 @@ test("trip summaries retain legacy payloads and keep event and game mode out of 
   for (const result of [stageFixture("listTrips:success").response.data, company, own, review]) {
     expect(validate("ListTripSummary", result)).toBe(true);
   }
+  const empty = stageFixture("listTrips:empty-owner").response.data;
+  expect(validate("ListTripSummary", empty)).toBe(true);
+  expect(empty).toEqual({ items: [], nextCursor: null, total: 0 });
   expect(company.total).toBe(1);
+  expect(own.total).toBe(1);
   expect(company.items).toHaveLength(1);
   expect(company.nextCursor).toBeNull();
   expect(trip).toMatchObject({ number: 42, decision: "accepted", submittedAt: null });

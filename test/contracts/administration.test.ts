@@ -146,12 +146,30 @@ test("workspace summary exposes bounded typed previews and distinguishes omitted
   const visible = stageFixture("getMyWorkspaceSummary:mixed-capabilities").response.data;
   const empty = stageFixture("getMyWorkspaceSummary:authorized-empty").response.data;
   const limited = stageFixture("getMyWorkspaceSummary:limited-capabilities").response.data;
-  for (const name of ["mixed-capabilities", "authorized-empty", "limited-capabilities"]) {
+  for (const name of [
+    "mixed-capabilities",
+    "after-resubmission",
+    "authorized-empty",
+    "limited-capabilities",
+  ]) {
     const fixture = stageFixture(`getMyWorkspaceSummary:${name}`);
     expect(fixture.responseHeaders).toEqual({ "Cache-Control": "no-store" });
     expect(valid("EnvelopeWorkspaceSummary")(fixture.response)).toBe(true);
   }
-  expect(limited).toEqual({ computedAt: empty.computedAt });
+  expect(limited).toEqual({
+    computedAt: empty.computedAt,
+    tripsNeedingFixes: { count: 0, items: [] },
+    reviewQueue: { count: 0, oldestAgeSeconds: null },
+  });
+  const after = stageFixture("getMyWorkspaceSummary:after-resubmission").response.data;
+  expect(visible.tripsNeedingFixes.count).toBe(2);
+  expect(visible.tripsNeedingFixes.items[0].latestReturnReason).toBe(
+    "Please attach a clear delivery screenshot.",
+  );
+  expect(after.tripsNeedingFixes).toEqual({
+    count: 1,
+    items: [visible.tripsNeedingFixes.items[1]],
+  });
   expect(empty).toMatchObject({
     tripsNeedingFixes: { count: 0, items: [] },
     unfinishedManualDrafts: { count: 0, items: [] },
@@ -211,7 +229,24 @@ test("administration counters are optional and invitation counts require a separ
     droveLast30Days: 3,
   });
   expect(valid("EnvelopeListMemberAdmin")(members.response)).toBe(true);
-  const restricted = stageFixture("listAdminMembers:without-invitation-authority").response;
+  const restricted = stageFixture("listAdminMembers:admissions-disabled").response;
+  const noActivity = stageFixture("listAdminMembers:trips-disabled");
+  expect(noActivity.query).toEqual({ status: "inactive" });
+  expect(noActivity.response.data.statusCounts).toEqual({ inCompany: 8, left: 0, invited: 1 });
+  expect(valid("EnvelopeListMemberAdmin")(noActivity.response)).toBe(true);
+  expect(valid("AdminMemberStatusCounts")({ inCompany: 0, left: 0 })).toBe(true);
+  const combined = stageFixture("listAdminMembers:inactive-driver-nickname");
+  expect(combined.query).toEqual({
+    status: "inactive",
+    role: "driver",
+    search: "  Fictional Alex  ",
+  });
+  expect(combined.response.data).toEqual({
+    items: [],
+    nextCursor: null,
+    statusCounts: { inCompany: 1, left: 0, invited: 0, droveLast30Days: 0 },
+  });
+  expect(valid("EnvelopeListMemberAdmin")(combined.response)).toBe(true);
   expect(restricted.data.statusCounts).toEqual({ inCompany: 0, left: 0, droveLast30Days: 0 });
   expect(valid("EnvelopeListMemberAdmin")(restricted)).toBe(true);
   expect(valid("EnvelopeListMemberAdmin")(stageFixture("listAdminMembers:empty").response)).toBe(

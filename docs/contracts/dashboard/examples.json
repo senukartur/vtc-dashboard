@@ -4012,7 +4012,9 @@
           "actualDistanceM": "12500.5",
           "evidenceIds": [
             "51000000-0000-4000-8000-000000000006"
-          ]
+          ],
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z"
         }
       }
     },
@@ -4166,7 +4168,9 @@
           "actualDistanceM": "12500.5",
           "evidenceIds": [
             "51000000-0000-4000-8000-000000000006"
-          ]
+          ],
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z"
         },
         "targetTrip": {
           "tripId": "51000000-0000-4000-8000-000000000007",
@@ -4444,7 +4448,9 @@
             "51000000-0000-4000-8000-000000000006"
           ],
           "eventId": null,
-          "comment": null
+          "comment": null,
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z"
         },
         "expectedTripVersion": 3
       }
@@ -6387,11 +6393,11 @@
             "count": 2,
             "items": [
               {
-                "tripId": "54000000-0000-4000-8000-000000000001",
+                "tripId": "54000000-0000-4000-8000-000000000101",
                 "latestReturnReason": "Please attach a clear delivery screenshot."
               },
               {
-                "tripId": "54000000-0000-4000-8000-000000000002",
+                "tripId": "54000000-0000-4000-8000-000000000102",
                 "latestReturnReason": null
               }
             ]
@@ -6423,6 +6429,55 @@
         },
         "meta": {
           "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:after-resubmission",
+      "operationId": "getMyWorkspaceSummary",
+      "status": 200,
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-10-21T12:15:00.000Z",
+          "tripsNeedingFixes": {
+            "count": 1,
+            "items": [
+              {
+                "tripId": "54000000-0000-4000-8000-000000000102",
+                "latestReturnReason": null
+              }
+            ]
+          },
+          "unfinishedManualDrafts": {
+            "count": 1,
+            "items": [
+              {
+                "draftId": "51000000-0000-4000-8000-000000000010",
+                "updatedAt": "2026-10-20T12:00:00.000Z"
+              }
+            ]
+          },
+          "unansweredUpcomingEvents": {
+            "count": 1,
+            "items": [
+              {
+                "eventId": "54000000-0000-4000-8000-000000000003",
+                "title": "Fictional evening convoy",
+                "startsAt": "2026-10-22T18:00:00.000Z"
+              }
+            ]
+          },
+          "reviewQueue": {
+            "count": 1,
+            "oldestAgeSeconds": 6300
+          },
+          "newApplicationsCount": 2
+        },
+        "meta": {
+          "requestId": "synthetic-workspace-after-resubmission"
         }
       }
     },
@@ -6468,7 +6523,15 @@
       },
       "response": {
         "data": {
-          "computedAt": "2026-10-21T12:00:00.000Z"
+          "computedAt": "2026-10-21T12:00:00.000Z",
+          "tripsNeedingFixes": {
+            "count": 0,
+            "items": []
+          },
+          "reviewQueue": {
+            "count": 0,
+            "oldestAgeSeconds": null
+          }
         },
         "meta": {
           "requestId": "synthetic-stage-one"
@@ -6541,7 +6604,7 @@
       }
     },
     {
-      "id": "listAdminMembers:without-invitation-authority",
+      "id": "listAdminMembers:admissions-disabled",
       "operationId": "listAdminMembers",
       "status": 200,
       "response": {
@@ -6560,6 +6623,53 @@
       },
       "query": {
         "search": "Fictional absent driver"
+      }
+    },
+    {
+      "id": "listAdminMembers:trips-disabled",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "statusCounts": {
+            "inCompany": 8,
+            "left": 0,
+            "invited": 1
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-trips-disabled"
+        }
+      },
+      "query": {
+        "status": "inactive"
+      }
+    },
+    {
+      "id": "listAdminMembers:inactive-driver-nickname",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "statusCounts": {
+            "inCompany": 1,
+            "left": 0,
+            "invited": 0,
+            "droveLast30Days": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-member-filters"
+        }
+      },
+      "query": {
+        "status": "inactive",
+        "role": "driver",
+        "search": "  Fictional Alex  "
       }
     },
     {
@@ -6596,9 +6706,9 @@
               "origin": {
                 "entityId": "54000000-0000-4000-8000-000000000004",
                 "label": "Fictional Harbor",
-                "requestedLocale": "en",
+                "requestedLocale": "ru",
                 "renderedLocale": "en",
-                "englishFallback": false,
+                "englishFallback": true,
                 "hidden": false
               },
               "destination": null,
@@ -6619,6 +6729,25 @@
         },
         "meta": {
           "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listTrips:empty-owner",
+      "operationId": "listTrips",
+      "status": 200,
+      "query": {
+        "ownerId": "41000000-0000-4000-8000-000000000001",
+        "q": "#404"
+      },
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "total": 0
+        },
+        "meta": {
+          "requestId": "synthetic-empty-owner-trips"
         }
       }
     },
@@ -6705,7 +6834,14 @@
               "decision": "pending_review",
               "origin": null,
               "destination": null,
-              "cargo": null,
+              "cargo": {
+                "entityId": "54000000-0000-4000-8000-000000000103",
+                "label": "Вымышленный груз",
+                "requestedLocale": "ru",
+                "renderedLocale": "ru",
+                "englishFallback": false,
+                "hidden": false
+              },
               "actualDistanceM": "123400",
               "reportingAt": null,
               "sourceKinds": [
@@ -6742,7 +6878,8 @@
         "scope": "review",
         "hold": true,
         "order": "completion_asc",
-        "locale": "en"
+        "locale": "ru",
+        "q": "Вымышленный груз"
       }
     },
     {

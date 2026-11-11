@@ -5542,7 +5542,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Authorized filtered trip count before cursor pagination."
+          "description": "Authorized filtered trip count before cursor and limit. After VTC-115 activation, present on every successful mine and company page (including the default company scope and ownerId filters), and zero for an empty filtered set. Optional in review scope and in this shared schema for compatibility."
         }
       },
       "required": [
@@ -10305,7 +10305,7 @@
             "items"
           ],
           "additionalProperties": false,
-          "description": "Requires trips.read_own_private. Current own trips requiring a driver fix. Return the latest author-visible return explanation, or null if no displayable text is available."
+          "description": "Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available."
         },
         "unfinishedManualDrafts": {
           "type": "object",
@@ -10341,7 +10341,7 @@
             "items"
           ],
           "additionalProperties": false,
-          "description": "Requires trips.submit_own. Current own editing drafts."
+          "description": "Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC."
         },
         "unansweredUpcomingEvents": {
           "type": "object",
@@ -10383,7 +10383,7 @@
             "items"
           ],
           "additionalProperties": false,
-          "description": "Requires events.respond. Upcoming events the caller can see and respond to, for which they have no response."
+          "description": "Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC."
         },
         "reviewQueue": {
           "type": "object",
@@ -10411,20 +10411,20 @@
             "oldestAgeSeconds"
           ],
           "additionalProperties": false,
-          "description": "Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+          "description": "Requires trips.review and enabled Trips reads. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
         },
         "newApplicationsCount": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Requires applications.manage. Count submitted applications."
+          "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
         }
       },
       "required": [
         "computedAt"
       ],
       "additionalProperties": false,
-      "description": "Current permission-filtered workspace snapshot. Omit unauthorized sections. Include zero for visible empty counts and an empty items array for an empty preview."
+      "description": "Current permission-filtered workspace snapshot. Omit each section independently if its source is configured off or current authority is missing. An available empty section has count zero and an empty preview where applicable. Transient read failures follow the standard error policy."
     },
     "EnvelopeWorkspaceSummary": {
       "type": "object",
@@ -10522,33 +10522,33 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Members currently in the company."
+          "description": "Active members matching the supplied role and nickname search, replacing any supplied status filter with active."
         },
         "left": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Former members."
+          "description": "Inactive members matching the supplied role and nickname search, replacing any supplied status filter with inactive."
         },
         "invited": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Outstanding unexpired, unused invitation generations. Omit without current applications.manage authority."
+          "description": "Requires applications.manage and enabled Admissions reads. Count each approved application's current usable, active and unused invitation generation when its expiry is after the count snapshot time. Apply the same trimmed case-insensitive nickname substring search to the application nickname independently of the member status filter. A supplied role filter yields zero because unredeemed invitations have no current member role."
         },
         "droveLast30Days": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "Distinct members with accepted canonical trip activity in the rolling 30 days, using the canonical reporting instant."
+          "description": "Requires enabled Trips activity reads and current authority to read that activity. Count distinct members matching the supplied status, role and nickname search with accepted canonical trip reportingAt in the inclusive interval from the count snapshot time minus 30 days through the snapshot time. Consider both statuses when the status filter is omitted."
         }
       },
       "required": [
         "inCompany",
-        "left",
-        "droveLast30Days"
+        "left"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Counts use current authorized populations before cursor and limit. Identity counts are available independently of optional sources. Omit each source-dependent count independently when its source is configured off or read authority is absent. Return zero for available empty counts. Transient read failures follow the standard error policy."
     },
     "LifetimeTripTotals": {
       "type": "object",
@@ -10754,17 +10754,6 @@
       ],
       "additionalProperties": false,
       "description": "Complete dated manual submission. At submission both instants must be nonfuture, and startedAt must be strictly earlier than completedAt. The dates are reference facts only. Reporting, qualification and progress continue to use staff confirmation."
-    },
-    "ManualFinalSubmissionFields": {
-      "oneOf": [
-        {
-          "$ref": "#/$defs/ManualSubmissionFields"
-        },
-        {
-          "$ref": "#/$defs/ManualDatedSubmissionFields"
-        }
-      ],
-      "description": "The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates."
     },
     "ManualReportReadFields": {
       "oneOf": [
@@ -11030,7 +11019,7 @@
       "type": "object",
       "properties": {
         "fields": {
-          "$ref": "#/$defs/ManualFinalSubmissionFields"
+          "$ref": "#/$defs/ManualDatedSubmissionFields"
         }
       },
       "required": [
@@ -11043,7 +11032,7 @@
       "type": "object",
       "properties": {
         "fields": {
-          "$ref": "#/$defs/ManualFinalSubmissionFields"
+          "$ref": "#/$defs/ManualDatedSubmissionFields"
         },
         "targetTrip": {
           "anyOf": [
@@ -11065,7 +11054,7 @@
       "type": "object",
       "properties": {
         "fields": {
-          "$ref": "#/$defs/ManualFinalSubmissionFields"
+          "$ref": "#/$defs/ManualDatedSubmissionFields"
         },
         "expectedTripVersion": {
           "type": "integer",

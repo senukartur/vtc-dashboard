@@ -475,7 +475,7 @@ export interface paths {
         };
         /**
          * listAdminMembers
-         * @description Optional statusCounts use the authorized populations and each bucket's own predicate with other applicable filters before pagination. The invited bucket also requires current admissions authority.
+         * @description Optional statusCounts are calculated before cursor and limit. Use the per-counter status, role, search and source rules. Omit each unavailable source-dependent count independently.
          */
         get: operations["listAdminMembers"];
         put?: never;
@@ -1843,7 +1843,7 @@ export interface paths {
         };
         /**
          * Get the current member's workspace summary
-         * @description Evaluate the source operations' current capabilities, visibility, and ownership. Each count covers the full eligible population before the preview limit. Use computedAt as the UTC snapshot time. All responses use Cache-Control: no-store.
+         * @description Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store.
          */
         get: operations["getMyWorkspaceSummary"];
         put?: never;
@@ -2223,7 +2223,7 @@ export interface paths {
         };
         /**
          * listTrips
-         * @description Apply authorized visibility and all supplied filters before the cursor and optional total. When filtering for another owner, return only accepted trips within the caller's authorized scope. Signed cursors bind the normalized filter set, search locale, and order; a mismatch returns 409 VERSION_CONFLICT.
+         * @description Apply authorized visibility and all supplied filters before counting or paging. When filtering for another owner, return only accepted trips within the caller's authorized scope. After VTC-115 activation, every successful mine or company page includes total for the authorized filtered set before cursor and limit, including with ownerId. The default scope is company. An empty filtered set has total 0. Review pages may omit total. Signed cursors bind the normalized filters, effective locale and order; a mismatch returns 409 VERSION_CONFLICT.
          */
         get: operations["listTrips"];
         put?: never;
@@ -2525,14 +2525,15 @@ export interface components {
             rejected: number;
             submitted: number;
         };
+        /** @description Counts use current authorized populations before cursor and limit. Identity counts are available independently of optional sources. Omit each source-dependent count independently when its source is configured off or read authority is absent. Return zero for available empty counts. Transient read failures follow the standard error policy. */
         AdminMemberStatusCounts: {
-            /** @description Distinct members with accepted canonical trip activity in the rolling 30 days, using the canonical reporting instant. */
-            droveLast30Days: number;
-            /** @description Members currently in the company. */
+            /** @description Requires enabled Trips activity reads and current authority to read that activity. Count distinct members matching the supplied status, role and nickname search with accepted canonical trip reportingAt in the inclusive interval from the count snapshot time minus 30 days through the snapshot time. Consider both statuses when the status filter is omitted. */
+            droveLast30Days?: number;
+            /** @description Active members matching the supplied role and nickname search, replacing any supplied status filter with active. */
             inCompany: number;
-            /** @description Outstanding unexpired, unused invitation generations. Omit without current applications.manage authority. */
+            /** @description Requires applications.manage and enabled Admissions reads. Count each approved application's current usable, active and unused invitation generation when its expiry is after the count snapshot time. Apply the same trimmed case-insensitive nickname substring search to the application nickname independently of the member status filter. A supplied role filter yields zero because unredeemed invitations have no current member role. */
             invited?: number;
-            /** @description Former members. */
+            /** @description Inactive members matching the supplied role and nickname search, replacing any supplied status filter with inactive. */
             left: number;
         };
         Analytics: {
@@ -3706,7 +3707,7 @@ export interface components {
         ListTripSummary: {
             items: components["schemas"]["TripSummary"][];
             nextCursor: string | null;
-            /** @description Authorized filtered trip count before cursor pagination. */
+            /** @description Authorized filtered trip count before cursor and limit. After VTC-115 activation, present on every successful mine and company page (including the default company scope and ownerId filters), and zero for an empty filtered set. Optional in review scope and in this shared schema for compatibility. */
             total?: number;
         };
         LoginInput: {
@@ -3836,7 +3837,7 @@ export interface components {
         };
         /** @description Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target. */
         ManualDraftFinalSubmissionInput: {
-            fields: components["schemas"]["ManualFinalSubmissionFields"];
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
         };
         ManualDraftInput: {
             fields: components["schemas"]["ManualDraftFields"];
@@ -3855,8 +3856,6 @@ export interface components {
             fields: components["schemas"]["ManualDraftEditableFields"];
             targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
-        /** @description The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates. */
-        ManualFinalSubmissionFields: components["schemas"]["ManualSubmissionFields"] | components["schemas"]["ManualDatedSubmissionFields"];
         ManualInput: {
             actualDistanceM: string;
             /** Format: uuid */
@@ -3887,7 +3886,7 @@ export interface components {
             version: number;
         };
         ManualReportCreationInput: {
-            fields: components["schemas"]["ManualFinalSubmissionFields"];
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
             targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
         /** @description Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs. */
@@ -3952,7 +3951,7 @@ export interface components {
         };
         ManualReportResubmissionInput: {
             expectedTripVersion: number;
-            fields: components["schemas"]["ManualFinalSubmissionFields"];
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
         };
         ManualReportRevision: {
             fields: components["schemas"]["ManualReportReadFields"];
@@ -4733,17 +4732,17 @@ export interface components {
             maxFilesPerReport: number | null;
             policyRevision: number;
         };
-        /** @description Current permission-filtered workspace snapshot. Omit unauthorized sections. Include zero for visible empty counts and an empty items array for an empty preview. */
+        /** @description Current permission-filtered workspace snapshot. Omit each section independently if its source is configured off or current authority is missing. An available empty section has count zero and an empty preview where applicable. Transient read failures follow the standard error policy. */
         WorkspaceSummary: {
             computedAt: components["schemas"]["Timestamp"];
-            /** @description Requires applications.manage. Count submitted applications. */
+            /** @description Requires applications.manage and enabled Admissions reads. Count submitted applications. */
             newApplicationsCount?: number;
-            /** @description Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue. */
+            /** @description Requires trips.review and enabled Trips reads. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue. */
             reviewQueue?: {
                 count: number;
                 oldestAgeSeconds: number | null;
             };
-            /** @description Requires trips.read_own_private. Current own trips requiring a driver fix. Return the latest author-visible return explanation, or null if no displayable text is available. */
+            /** @description Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available. */
             tripsNeedingFixes?: {
                 count: number;
                 items: {
@@ -4751,7 +4750,7 @@ export interface components {
                     tripId: components["schemas"]["Id"];
                 }[];
             };
-            /** @description Requires events.respond. Upcoming events the caller can see and respond to, for which they have no response. */
+            /** @description Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC. */
             unansweredUpcomingEvents?: {
                 count: number;
                 items: {
@@ -4760,7 +4759,7 @@ export interface components {
                     title: string;
                 }[];
             };
-            /** @description Requires trips.submit_own. Current own editing drafts. */
+            /** @description Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC. */
             unfinishedManualDrafts?: {
                 count: number;
                 items: {
@@ -8618,13 +8617,13 @@ export interface operations {
                 /** @description Review queue only (scope=review): filter by the trip review hold. 422 otherwise. */
                 hold?: boolean;
                 limit?: components["parameters"]["Limit"];
-                /** @description Locale used for matching city and cargo labels, with English fallback. */
+                /** @description Optional override of the authenticated viewer's saved locale. Use the effective locale for city and cargo search and returned labels, with English fallback for each missing translation. Bind the effective locale into the cursor. */
                 locale?: "en" | "ru";
                 /** @description Available in every scope. asc/desc sort by createdAt then id in the selected direction. completion_asc/completion_desc sort by known effective actual completion in the selected direction, with missing completion last and id as a stable tie-breaker. */
                 order?: "asc" | "desc" | "completion_asc" | "completion_desc";
                 /** @description Restrict to the canonical trip owner within authorized visibility. For another owner, only accepted trips can match. */
                 ownerId?: components["schemas"]["Id"];
-                /** @description Trim surrounding whitespace. Match a localized origin city, destination city or cargo label with English fallback, or match the exact canonical number for an all-digit term with an optional leading #. */
+                /** @description Trim surrounding whitespace. Match the localized origin city, destination city or cargo label using the effective locale and per-label English fallback. An all-digit term with an optional leading # matches the exact canonical trip number independently of locale. */
                 q?: string;
                 scope?: "company" | "mine" | "review";
                 /** @description Optional source-kind filter for every scope, using the TripSummary.sourceKinds vocabulary: a trip matches when its canonical group has a source of that kind (a trip with telemetry and a manual report matches both; a trip without sources matches neither). Applied server-side with the scope's visibility rules before keyset paging and bound into the signed cursor. Omitted: no source filter. */
@@ -8647,7 +8646,7 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeListTripSummary"];
                 };
             };
-            /** @description VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, search locale or order. */
+            /** @description VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, effective locale or order. */
             409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };

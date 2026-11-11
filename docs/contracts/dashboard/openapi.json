@@ -1282,7 +1282,7 @@
           }
         ],
         "x-contract-stage": "VTC-123 Step 1",
-        "description": "Optional statusCounts use the authorized populations and each bucket's own predicate with other applicable filters before pagination. The invited bucket also requires current admissions authority."
+        "description": "Optional statusCounts are calculated before cursor and limit. Use the per-counter status, role, search and source rules. Omit each unavailable source-dependent count independently."
       }
     },
     "/api/v1/admin/members/{memberId}": {
@@ -3951,7 +3951,7 @@
           },
           "409": {
             "$ref": "#/components/responses/Error",
-            "description": "VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, search locale or order."
+            "description": "VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, effective locale or order."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -4069,7 +4069,7 @@
               "maxLength": 128,
               "pattern": "\\S"
             },
-            "description": "Trim surrounding whitespace. Match a localized origin city, destination city or cargo label with English fallback, or match the exact canonical number for an all-digit term with an optional leading #."
+            "description": "Trim surrounding whitespace. Match the localized origin city, destination city or cargo label using the effective locale and per-label English fallback. An all-digit term with an optional leading # matches the exact canonical trip number independently of locale."
           },
           {
             "name": "locale",
@@ -4080,10 +4080,9 @@
               "enum": [
                 "en",
                 "ru"
-              ],
-              "default": "en"
+              ]
             },
-            "description": "Locale used for matching city and cargo labels, with English fallback."
+            "description": "Optional override of the authenticated viewer's saved locale. Use the effective locale for city and cargo search and returned labels, with English fallback for each missing translation. Bind the effective locale into the cursor."
           },
           {
             "name": "ownerId",
@@ -4096,7 +4095,7 @@
           }
         ],
         "x-contract-stage": "VTC-123 Step 1",
-        "description": "Apply authorized visibility and all supplied filters before the cursor and optional total. When filtering for another owner, return only accepted trips within the caller's authorized scope. Signed cursors bind the normalized filter set, search locale, and order; a mismatch returns 409 VERSION_CONFLICT."
+        "description": "Apply authorized visibility and all supplied filters before counting or paging. When filtering for another owner, return only accepted trips within the caller's authorized scope. After VTC-115 activation, every successful mine or company page includes total for the authorized filtered set before cursor and limit, including with ownerId. The default scope is company. An empty filtered set has total 0. Review pages may omit total. Signed cursors bind the normalized filters, effective locale and order; a mismatch returns 409 VERSION_CONFLICT."
       }
     },
     "/api/v1/trips/{tripId}": {
@@ -9988,7 +9987,7 @@
             "$ref": "#/components/responses/PrivateNoStoreError"
           }
         },
-        "description": "Evaluate the source operations' current capabilities, visibility, and ownership. Each count covers the full eligible population before the preview limit. Use computedAt as the UTC snapshot time. All responses use Cache-Control: no-store."
+        "description": "Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store."
       }
     }
   },
@@ -15534,7 +15533,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Authorized filtered trip count before cursor pagination."
+            "description": "Authorized filtered trip count before cursor and limit. After VTC-115 activation, present on every successful mine and company page (including the default company scope and ownerId filters), and zero for an empty filtered set. Optional in review scope and in this shared schema for compatibility."
           }
         },
         "required": [
@@ -20297,7 +20296,7 @@
               "items"
             ],
             "additionalProperties": false,
-            "description": "Requires trips.read_own_private. Current own trips requiring a driver fix. Return the latest author-visible return explanation, or null if no displayable text is available."
+            "description": "Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available."
           },
           "unfinishedManualDrafts": {
             "type": "object",
@@ -20333,7 +20332,7 @@
               "items"
             ],
             "additionalProperties": false,
-            "description": "Requires trips.submit_own. Current own editing drafts."
+            "description": "Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC."
           },
           "unansweredUpcomingEvents": {
             "type": "object",
@@ -20375,7 +20374,7 @@
               "items"
             ],
             "additionalProperties": false,
-            "description": "Requires events.respond. Upcoming events the caller can see and respond to, for which they have no response."
+            "description": "Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC."
           },
           "reviewQueue": {
             "type": "object",
@@ -20403,20 +20402,20 @@
               "oldestAgeSeconds"
             ],
             "additionalProperties": false,
-            "description": "Requires trips.review. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+            "description": "Requires trips.review and enabled Trips reads. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
           },
           "newApplicationsCount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Requires applications.manage. Count submitted applications."
+            "description": "Requires applications.manage and enabled Admissions reads. Count submitted applications."
           }
         },
         "required": [
           "computedAt"
         ],
         "additionalProperties": false,
-        "description": "Current permission-filtered workspace snapshot. Omit unauthorized sections. Include zero for visible empty counts and an empty items array for an empty preview."
+        "description": "Current permission-filtered workspace snapshot. Omit each section independently if its source is configured off or current authority is missing. An available empty section has count zero and an empty preview where applicable. Transient read failures follow the standard error policy."
       },
       "EnvelopeWorkspaceSummary": {
         "type": "object",
@@ -20514,33 +20513,33 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Members currently in the company."
+            "description": "Active members matching the supplied role and nickname search, replacing any supplied status filter with active."
           },
           "left": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Former members."
+            "description": "Inactive members matching the supplied role and nickname search, replacing any supplied status filter with inactive."
           },
           "invited": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Outstanding unexpired, unused invitation generations. Omit without current applications.manage authority."
+            "description": "Requires applications.manage and enabled Admissions reads. Count each approved application's current usable, active and unused invitation generation when its expiry is after the count snapshot time. Apply the same trimmed case-insensitive nickname substring search to the application nickname independently of the member status filter. A supplied role filter yields zero because unredeemed invitations have no current member role."
           },
           "droveLast30Days": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991,
-            "description": "Distinct members with accepted canonical trip activity in the rolling 30 days, using the canonical reporting instant."
+            "description": "Requires enabled Trips activity reads and current authority to read that activity. Count distinct members matching the supplied status, role and nickname search with accepted canonical trip reportingAt in the inclusive interval from the count snapshot time minus 30 days through the snapshot time. Consider both statuses when the status filter is omitted."
           }
         },
         "required": [
           "inCompany",
-          "left",
-          "droveLast30Days"
+          "left"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Counts use current authorized populations before cursor and limit. Identity counts are available independently of optional sources. Omit each source-dependent count independently when its source is configured off or read authority is absent. Return zero for available empty counts. Transient read failures follow the standard error policy."
       },
       "LifetimeTripTotals": {
         "type": "object",
@@ -20746,17 +20745,6 @@
         ],
         "additionalProperties": false,
         "description": "Complete dated manual submission. At submission both instants must be nonfuture, and startedAt must be strictly earlier than completedAt. The dates are reference facts only. Reporting, qualification and progress continue to use staff confirmation."
-      },
-      "ManualFinalSubmissionFields": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/ManualSubmissionFields"
-          },
-          {
-            "$ref": "#/components/schemas/ManualDatedSubmissionFields"
-          }
-        ],
-        "description": "The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates."
       },
       "ManualReportReadFields": {
         "oneOf": [
@@ -21022,7 +21010,7 @@
         "type": "object",
         "properties": {
           "fields": {
-            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+            "$ref": "#/components/schemas/ManualDatedSubmissionFields"
           }
         },
         "required": [
@@ -21035,7 +21023,7 @@
         "type": "object",
         "properties": {
           "fields": {
-            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+            "$ref": "#/components/schemas/ManualDatedSubmissionFields"
           },
           "targetTrip": {
             "anyOf": [
@@ -21057,7 +21045,7 @@
         "type": "object",
         "properties": {
           "fields": {
-            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+            "$ref": "#/components/schemas/ManualDatedSubmissionFields"
           },
           "expectedTripVersion": {
             "type": "integer",
