@@ -3014,7 +3014,12 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
     });
     expect(queue.statusCode).toBe(200);
     for (const item of queue.json().data.items) expect(item.review.hold).toBe(true);
-    for (const query of ["scope=company&hold=true", "scope=review&hold=maybe", "order=asc"])
+    const company = await app.inject({
+      url: "/api/v1/trips?order=asc",
+      headers: { cookie: directorCookie },
+    });
+    expect(company.statusCode).toBe(200);
+    for (const query of ["scope=company&hold=true", "scope=review&hold=maybe", "order=ascending"])
       expect(
         (await app.inject({ url: `/api/v1/trips?${query}`, headers: { cookie: directorCookie } }))
           .statusCode,
