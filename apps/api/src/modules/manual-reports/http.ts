@@ -88,6 +88,9 @@ export async function registerManualRoutes(
           (r.headers["content-length"] !== undefined && r.headers["content-length"] !== "0")
         )
           throw manualError(422);
+        // Fastify uses Content-Type to select a parser even when Content-Length is zero.
+        if (r.headers["content-type"] !== undefined)
+          r.headers = { ...r.headers, "content-type": undefined };
       } else if (r.routeOptions.url === "/api/v1/evidence") {
         if (
           r.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "multipart/form-data"

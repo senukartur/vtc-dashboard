@@ -325,9 +325,7 @@ export function createManualReports(
     const refs = drafts.flatMap(({ fields }) =>
       draftLabelFields.flatMap(([field, kind]) => {
         const selection = fields[field];
-        return fields.game && selection?.status === "resolved"
-          ? [{ id: selection.entityId, kind }]
-          : [];
+        return selection?.status === "resolved" ? [{ id: selection.entityId, kind }] : [];
       }),
     );
     // Catalog maps use IDs as keys, so query each kind separately.
@@ -345,9 +343,11 @@ export function createManualReports(
       const labels: S["ManualDraftLabels"] = { origin: null, destination: null, cargo: null };
       for (const [field, kind] of draftLabelFields) {
         const selection = draft.fields[field];
-        if (!draft.fields.game || selection?.status !== "resolved") continue;
+        if (selection?.status !== "resolved") continue;
         const lookup = kind === "city" ? cities : cargoes;
-        if (lookup?.selections.get(selection.entityId)?.game === draft.fields.game)
+        if (!lookup) continue;
+        const row = lookup.selections.get(selection.entityId);
+        if (row && (!draft.fields.game || row.game === draft.fields.game))
           labels[field] = lookup.labels.get(selection.entityId) ?? null;
       }
       return { ...draft, labels };

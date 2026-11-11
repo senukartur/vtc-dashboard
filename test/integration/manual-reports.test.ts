@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -683,6 +683,8 @@ test("HTTP enforces CSRF/Origin, closed bodies, ETags, multipart limits and priv
   }
 });
 
+const emptyJsonHeaders = { "content-type": "application/json", "content-length": "0" };
+
 test("bodyless draft deletion enforces current session, capability, ownership, Origin, CSRF and command headers", async () => {
   const draft = await manual.createDraft(owner, newId(), { fields: {} });
   const app = await createApp({
@@ -699,6 +701,19 @@ test("bodyless draft deletion enforces current session, capability, ownership, O
     "if-match": '"v1"',
   };
   const url = `/api/v1/me/manual-drafts/${draft.id}`;
+  // The identity and manual reports hooks both charge the source bucket.
+  const sources = new Map<number, string>();
+  for (let host = 1; host <= 254; host++) {
+    const source = `192.0.2.${host}`;
+    const bucket = createHmac("sha256", identityConfig.secret).update(source).digest().readUInt8(0);
+    sources.set(bucket, source);
+  }
+  const sourceBuckets = sources.values();
+  function nextSource() {
+    const source = sourceBuckets.next();
+    if (source.done) throw Error("SYNTHETIC_RATE_LIMIT_SOURCE_REQUIRED");
+    return source.value;
+  }
   try {
     for (const [override, status, code, path] of [
       [{ cookie: undefined }, 401, "UNAUTHORIZED"],
@@ -710,6 +725,7 @@ test("bodyless draft deletion enforces current session, capability, ownership, O
       [{ "idempotency-key": undefined }, 422, "INVALID_PAYLOAD"],
       [{ "idempotency-key": "malformed-key" }, 422, "INVALID_PAYLOAD"],
       [{ "if-match": undefined }, 428, "PRECONDITION_REQUIRED"],
+      [{ ...emptyJsonHeaders, "if-match": undefined }, 428, "PRECONDITION_REQUIRED"],
       [{ "if-match": 'W/"v1"' }, 422, "INVALID_PAYLOAD"],
       [{ "if-match": "*" }, 422, "INVALID_PAYLOAD"],
       [{ "if-match": '"v1", "v2"' }, 422, "INVALID_PAYLOAD"],
@@ -719,6 +735,7 @@ test("bodyless draft deletion enforces current session, capability, ownership, O
       const reply = await app.inject({
         method: "DELETE",
         url: path ?? url,
+        remoteAddress: nextSource(),
         headers: Object.fromEntries(
           Object.entries({ ...headers, ...override }).filter(([, value]) => value !== undefined),
         ),
@@ -727,7 +744,13 @@ test("bodyless draft deletion enforces current session, capability, ownership, O
       expect(reply.headers["cache-control"]).toBe("no-store");
       expect(reply.json()).toMatchObject({ error: { code } });
     }
-    const payload = await app.inject({ method: "DELETE", url, headers, payload: { fields: {} } });
+    const payload = await app.inject({
+      method: "DELETE",
+      url,
+      headers,
+      payload: { fields: {} },
+      remoteAddress: nextSource(),
+    });
     expect(payload.statusCode).toBe(422);
     expect(payload.headers["cache-control"]).toBe("no-store");
     expect(payload.json()).toMatchObject({ error: { code: "INVALID_PAYLOAD" } });
@@ -743,6 +766,7 @@ test("bodyless draft deletion enforces current session, capability, ownership, O
     const lost = await app.inject({
       method: "DELETE",
       url: `/api/v1/me/manual-drafts/${own.id}`,
+      remoteAddress: nextSource(),
       headers: {
         ...headers,
         cookie: formerSubmitter.cookie,
@@ -892,7 +916,18 @@ async function raceDraftCommands(
   const settled = Promise.allSettled([first, second] as const);
   try {
     const firstId = await bounded(staged.promise, "stage_draft_command", 5000);
-    expect(await bounded(started.promise, "start_peer_draft_command", 5000)).not.toBe(firstId);
+    const secondId = await bounded(started.promise, "start_peer_draft_command", 5000);
+    expect(secondId).not.toBe(firstId);
+    // The winner holds the exclusive company gate until release. Observe the contender's
+    // actual locking SELECT at that gate, using only the fixture account's own connections.
+    await until(async () => {
+      const [rows] = await control.query<RowDataPacket[]>({
+        sql: "SELECT EXISTS(SELECT 1 FROM information_schema.PROCESSLIST WHERE ID=? AND USER=SUBSTRING_INDEX(CURRENT_USER(),'@',1) AND LOCATE('from `identity_company`',LOWER(INFO))>0 AND LOCATE('for update',LOWER(INFO))>0) AS at_gate",
+        values: [secondId],
+        timeout: 500,
+      });
+      return Number(rows[0]?.at_gate) === 1;
+    });
   } finally {
     release.resolve();
     await settled;
@@ -982,7 +1017,7 @@ test("draft deletion returns a private versioned receipt and preserves version-b
     checkReadiness: async () => true,
   });
   const key = newId();
-  async function remove(id: string, version: number, commandKey = key, explicitEmpty = false) {
+  async function remove(id: string, version: number, commandKey = key, typedEmpty = false) {
     const reply = await app.inject({
       method: "DELETE",
       url: `/api/v1/me/manual-drafts/${id}`,
@@ -992,7 +1027,7 @@ test("draft deletion returns a private versioned receipt and preserves version-b
         "x-csrf-token": csrfProtection(identityConfig).issue({}, owner).token,
         "idempotency-key": commandKey,
         "if-match": `"v${version}"`,
-        ...(explicitEmpty ? { "content-length": "0" } : {}),
+        ...(typedEmpty ? emptyJsonHeaders : {}),
       },
     });
     expect(reply.headers["cache-control"]).toBe("no-store");
@@ -1007,14 +1042,17 @@ test("draft deletion returns a private versioned receipt and preserves version-b
     expect(state.statusCode).toBe(409);
     expect(state.json()).toMatchObject({ error: { code: "STATE_CONFLICT" } });
 
-    const deleted = await remove(draft.id, draft.version);
+    const deleted = await remove(draft.id, draft.version, key, true);
     const replayed = await remove(draft.id, draft.version, key, true);
+    const untypedReplay = await remove(draft.id, draft.version);
     expect(deleted.statusCode).toBe(200);
     expect(replayed.statusCode).toBe(200);
+    expect(untypedReplay.statusCode).toBe(200);
     const result = deleted.json() as S["EnvelopeCommandResult"];
     const replay = replayed.json() as S["EnvelopeCommandResult"];
     expect(result.data).toEqual({ id: draft.id, version: 2 });
     expect(replay.data).toEqual(result.data);
+    expect(untypedReplay.json()).toMatchObject({ data: result.data });
     expect(replay.meta.requestId).not.toBe(result.meta.requestId);
     const changed = await remove(draft.id, 2);
     expect(changed.statusCode).toBe(409);
@@ -1513,7 +1551,10 @@ test("draft labels follow current member locale and only matching catalog game a
     },
   });
   expect((await manual.getDraft(owner, invalid.id)).labels).toEqual(emptyLabels);
-  expect((await manual.getDraft(owner, partial.id)).labels).toEqual(emptyLabels);
+  expect((await manual.getDraft(owner, partial.id)).labels).toEqual({
+    ...emptyLabels,
+    origin: russian.labels?.origin,
+  });
   const setLocale = (locale: "ru" | "en") =>
     unit.run((tx) =>
       unit.client(tx).update(membership).set({ locale }).where(eq(membership.userId, owner.userId)),
@@ -1548,7 +1589,10 @@ test("draft labels follow current member locale and only matching catalog game a
     const { items } = (list.json() as S["EnvelopeListManualDraft"]).data;
     expect(items.find(({ id }) => id === draft.id)).toEqual(current);
     expect(items.find(({ id }) => id === invalid.id)?.labels).toEqual(emptyLabels);
-    expect(items.find(({ id }) => id === partial.id)?.labels).toEqual(emptyLabels);
+    expect(items.find(({ id }) => id === partial.id)?.labels).toEqual({
+      ...emptyLabels,
+      origin: current.labels?.origin,
+    });
   } finally {
     await setLocale("ru");
     await app.close();
