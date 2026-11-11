@@ -1787,20 +1787,22 @@ test("internal contribution command refuses arbitrary acceptance flags and dupli
 });
 test("configuration audit traces changed level separately from actor and publication failure rolls back all records", async () => {
   const levelId = structuralLevels.ets2[0];
-  const [baseline] = await control.execute<RowDataPacket[]>(
-    "SELECT COUNT(*) n FROM audit_entries WHERE subject_kind='qualification' AND subject_id=?",
-    [levelId],
-  );
-  const priorCount = Number(baseline[0]?.n);
+  const readAudit = () =>
+    control.execute<RowDataPacket[]>(
+      "SELECT CAST(id AS CHAR) id,CAST(subject_id AS CHAR) subjectId,subject_kind subjectKind,CAST(actor_id AS CHAR) actorId FROM audit_entries WHERE subject_kind='qualification' AND subject_id=?",
+      [levelId],
+    );
+  const [baseline] = await readAudit();
+  const priorIds = new Set(baseline.map((row) => row.id)),
+    priorCount = baseline.length;
   await service.rename(director, levelId, newId(), 1, { name: "Fictional renamed trainee" });
   await publish();
-  const [audit] = await control.execute<RowDataPacket[]>(
-    "SELECT subject_kind subjectKind,CAST(subject_id AS CHAR) subjectId,CAST(actor_id AS CHAR) actorId FROM audit_entries WHERE subject_kind='qualification' AND subject_id=?",
-    [levelId],
-  );
+  const [audit] = await readAudit();
   expect(audit).toHaveLength(priorCount + 2);
+  const inserted = audit.filter((row) => !priorIds.has(row.id));
+  expect(inserted).toHaveLength(2);
   expect(
-    audit.every(
+    inserted.every(
       (row) =>
         row.subjectKind === "qualification" &&
         row.subjectId === levelId &&
