@@ -7,7 +7,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listApplications */
+        /**
+         * listApplications
+         * @description Optional statusCounts are calculated within the authorized population before pagination. Each bucket uses its own status predicate and the other applicable list filters.
+         */
         get: operations["listApplications"];
         put?: never;
         post?: never;
@@ -470,7 +473,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listAdminMembers */
+        /**
+         * listAdminMembers
+         * @description Optional statusCounts are calculated before cursor and limit. Use the per-counter status, role, search and source rules. Omit each unavailable source-dependent count independently.
+         */
         get: operations["listAdminMembers"];
         put?: never;
         post?: never;
@@ -729,7 +735,10 @@ export interface paths {
         /** Read staff-only immutable rule history with recorded publisher */
         get: operations["listQualificationRuleHistory"];
         put?: never;
-        /** publishQualificationRules */
+        /**
+         * publishQualificationRules
+         * @description VTC-094 stages an optional reason for later activation. The current implementation still validates RulesInput and requires a reason. Authorization, effective time, and immutable publication history remain as defined.
+         */
         post: operations["publishQualificationRules"];
         delete?: never;
         options?: never;
@@ -966,7 +975,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listCatalogItems */
+        /**
+         * listCatalogItems
+         * @description Apply visibility and filters before paging. The normalized filters are bound into the cursor.
+         */
         get: operations["listCatalogItems"];
         put?: never;
         post?: never;
@@ -1022,7 +1034,7 @@ export interface paths {
         };
         /**
          * listCatalogDepots
-         * @description Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true.
+         * @description Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.
          */
         get: operations["listCatalogDepots"];
         put?: never;
@@ -1258,7 +1270,7 @@ export interface paths {
         put?: never;
         /**
          * submitManualReport
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.
          */
         post: operations["submitManualReport"];
         delete?: never;
@@ -1302,7 +1314,7 @@ export interface paths {
         put?: never;
         /**
          * reviseManualReport
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.
          */
         post: operations["reviseManualReport"];
         delete?: never;
@@ -1513,13 +1525,13 @@ export interface paths {
         };
         /**
          * listMyManualDrafts
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination.
          */
         get: operations["listMyManualDrafts"];
         put?: never;
         /**
          * createManualDraft
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.
          */
         post: operations["createManualDraft"];
         delete?: never;
@@ -1542,11 +1554,15 @@ export interface paths {
         get: operations["getMyManualDraft"];
         /**
          * replaceManualDraft
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.
          */
         put: operations["replaceManualDraft"];
         post?: never;
-        delete?: never;
+        /**
+         * Delete an editing manual draft
+         * @description Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored command data with the current HTTP request ID for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store.
+         */
+        delete: operations["deleteManualDraft"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1563,7 +1579,7 @@ export interface paths {
         put?: never;
         /**
          * submitManualDraft
-         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
+         * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.
          */
         post: operations["submitManualDraft"];
         delete?: never;
@@ -1810,6 +1826,26 @@ export interface paths {
          * @description VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.
          */
         get: operations["getUploadPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/workspace-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the current member's workspace summary
+         * @description Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store.
+         */
+        get: operations["getMyWorkspaceSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2185,7 +2221,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** listTrips */
+        /**
+         * listTrips
+         * @description Apply authorized visibility and all supplied filters before counting or paging. When filtering for another owner, return only accepted trips within the caller's authorized scope. After VTC-115 activation, every successful mine or company page includes total for the authorized filtered set before cursor and limit, including with ownerId. The default scope is company. An empty filtered set has total 0. Review pages may omit total. Signed cursors bind the normalized filters, effective locale and order; a mismatch returns 409 VERSION_CONFLICT.
+         */
         get: operations["listTrips"];
         put?: never;
         post?: never;
@@ -2481,6 +2520,22 @@ export interface components {
             /** @constant */
             status: "received";
         };
+        AdminApplicationStatusCounts: {
+            approved: number;
+            rejected: number;
+            submitted: number;
+        };
+        /** @description Counts use current authorized populations before cursor and limit. Identity counts are available independently of optional sources. Omit each source-dependent count independently when its source is configured off or read authority is absent. Return zero for available empty counts. Transient read failures follow the standard error policy. */
+        AdminMemberStatusCounts: {
+            /** @description Requires enabled Trips activity reads and current authority to read that activity. Count distinct members matching the supplied status, role and nickname search with accepted canonical trip reportingAt in the inclusive interval from the count snapshot time minus 30 days through the snapshot time. Consider both statuses when the status filter is omitted. */
+            droveLast30Days?: number;
+            /** @description Active members matching the supplied role and nickname search, replacing any supplied status filter with active. */
+            inCompany: number;
+            /** @description Requires applications.manage and enabled Admissions reads. Count each approved application's current usable, active and unused invitation generation when its expiry is after the count snapshot time. Apply the same trimmed case-insensitive nickname substring search to the application nickname independently of the member status filter. A supplied role filter yields zero because unredeemed invitations have no current member role. */
+            invited?: number;
+            /** @description Inactive members matching the supplied role and nickname search, replacing any supplied status filter with inactive. */
+            left: number;
+        };
         Analytics: {
             acceptedTrips: number;
             actualDistanceM: string;
@@ -2657,6 +2712,8 @@ export interface components {
             hidden: boolean;
             /** Format: uuid */
             id: string;
+            /** @description Last update to the depot row itself. */
+            updatedAt?: components["schemas"]["Timestamp"];
         };
         CatalogDepotCity: {
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
@@ -2738,6 +2795,8 @@ export interface components {
             adrClass?: ("1" | "2" | "3" | "4" | "6" | "8") | null;
             /** @description Opaque per-game telemetry code; compared byte-exact and never rewritten. */
             code: string;
+            /** @description Companies list only. Count linked same-game depots. */
+            depotCount?: number;
             display: components["schemas"]["CatalogLabel"];
             dlc: components["schemas"]["CatalogLabel"] | null;
             dlcId: string | null;
@@ -2754,6 +2813,8 @@ export interface components {
             region?: components["schemas"]["CatalogLabel"] | null;
             regionId?: string | null;
             steamAppId?: number | null;
+            /** @description Last update to this catalog row. */
+            updatedAt?: components["schemas"]["Timestamp"];
         };
         CatalogItemList: {
             items: components["schemas"]["CatalogItem"][];
@@ -2810,30 +2871,46 @@ export interface components {
             lists: {
                 cargoes: {
                     hidden: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 cities: {
                     hidden: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 companies: {
                     hidden: number;
+                    /** @description Default-visible companies in this game without a logo. */
+                    missingLogo?: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 depots: {
                     hidden: number;
+                    /** @description Default-visible depots in this game whose company or city lacks a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 dlcs: {
                     hidden: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 regions: {
                     hidden: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
                 trailers: {
                     hidden: number;
+                    /** @description Default-visible rows in this game missing a Russian name. */
+                    untranslated?: number;
                     visible: number;
                 };
             };
@@ -3106,6 +3183,10 @@ export interface components {
             data: components["schemas"]["LeadershipChallengeState"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeListAdminApplication: {
+            data: components["schemas"]["ListAdminApplication"];
+            meta: components["schemas"]["Meta"];
+        };
         EnvelopeListApplication: {
             data: components["schemas"]["ListApplication"];
             meta: components["schemas"]["Meta"];
@@ -3335,6 +3416,10 @@ export interface components {
             data: components["schemas"]["UploadPolicy"];
             meta: components["schemas"]["Meta"];
         };
+        EnvelopeWorkspaceSummary: {
+            data: components["schemas"]["WorkspaceSummary"];
+            meta: components["schemas"]["Meta"];
+        };
         Error: {
             error: {
                 code: string;
@@ -3512,6 +3597,15 @@ export interface components {
         LevelInput: {
             name: string;
         };
+        LifetimeTripTotals: {
+            acceptedTrips: number;
+            actualDistanceM: components["schemas"]["Decimal"];
+        };
+        ListAdminApplication: {
+            items: components["schemas"]["Application"][];
+            nextCursor: string | null;
+            statusCounts?: components["schemas"]["AdminApplicationStatusCounts"];
+        };
         ListApplication: {
             items: components["schemas"]["Application"][];
             nextCursor: string | null;
@@ -3541,6 +3635,7 @@ export interface components {
             nextCursor: string | null;
         };
         ListManualDraft: {
+            editingCount?: number;
             items: components["schemas"]["ManualDraft"][];
             nextCursor: string | null;
         };
@@ -3555,6 +3650,7 @@ export interface components {
         ListMemberAdmin: {
             items: components["schemas"]["MemberAdmin"][];
             nextCursor: string | null;
+            statusCounts?: components["schemas"]["AdminMemberStatusCounts"];
         };
         ListMemberSummary: {
             items: components["schemas"]["MemberSummary"][];
@@ -3611,6 +3707,8 @@ export interface components {
         ListTripSummary: {
             items: components["schemas"]["TripSummary"][];
             nextCursor: string | null;
+            /** @description Authorized filtered trip count before cursor and limit. After VTC-115 activation, present on every successful mine and company page (including the default company scope and ownerId filters), and zero for an empty filtered set. Optional in review scope and in this shared schema for compatibility. */
+            total?: number;
         };
         LoginInput: {
             /** Format: email */
@@ -3661,13 +3759,38 @@ export interface components {
             /** @enum {string} */
             status: "pending" | "resolved" | "declined";
         };
+        /** @description Complete dated manual submission. At submission both instants must be nonfuture, and startedAt must be strictly earlier than completedAt. The dates are reference facts only. Reporting, qualification and progress continue to use staff confirmation. */
+        ManualDatedSubmissionFields: {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoDamagePercent?: number;
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment?: string | null;
+            /** @description Reference completion time supplied by the driver. */
+            completedAt: components["schemas"]["Timestamp"];
+            destination: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected destination city. */
+            destinationCompanyId?: components["schemas"]["Id"];
+            eventId?: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected origin city. */
+            originCompanyId?: components["schemas"]["Id"];
+            /** @description Reference start time supplied by the driver. */
+            startedAt: components["schemas"]["Timestamp"];
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        };
         /** @description Owner-only durable draft. No source/canonical trip exists before submission; a successful submission freezes this draft and retains a discoverable submittedReportId. */
         ManualDraft: {
             /** Format: date-time */
             createdAt: string;
-            fields: components["schemas"]["ManualDraftFields"];
+            fields: components["schemas"]["ManualDraftEditableFields"];
             /** Format: uuid */
             id: string;
+            /** @description Display labels for the current origin, destination and cargo selections. A missing label is null. */
+            readonly labels?: components["schemas"]["ManualDraftLabels"];
             /** @enum {string} */
             state: "editing" | "submitted";
             submittedReportId: string | null;
@@ -3675,6 +3798,29 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             version: number;
+        };
+        /** @description Partial draft fields, including independently optional reference dates. Read-only display labels are never write fields. */
+        ManualDraftEditableFields: {
+            actualDistanceM?: components["schemas"]["Decimal"];
+            cargo?: components["schemas"]["ManualCatalogSelection"];
+            cargoDamagePercent?: number;
+            cargoMassKg?: components["schemas"]["Decimal"];
+            comment?: string | null;
+            /** @description Reference completion time supplied by the driver. */
+            completedAt?: components["schemas"]["Timestamp"];
+            destination?: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected destination city. */
+            destinationCompanyId?: components["schemas"]["Id"];
+            eventId?: string | null;
+            evidenceIds?: string[];
+            /** @enum {string} */
+            game?: "ets2" | "ats";
+            origin?: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected origin city. */
+            originCompanyId?: components["schemas"]["Id"];
+            /** @description Reference start time supplied by the driver. */
+            startedAt?: components["schemas"]["Timestamp"];
+            trailerType?: components["schemas"]["ManualCatalogSelection"];
         };
         ManualDraftFields: {
             actualDistanceM?: components["schemas"]["Decimal"];
@@ -3689,13 +3835,26 @@ export interface components {
             origin?: components["schemas"]["ManualCatalogSelection"];
             trailerType?: components["schemas"]["ManualCatalogSelection"];
         };
+        /** @description Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target. */
+        ManualDraftFinalSubmissionInput: {
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
+        };
         ManualDraftInput: {
             fields: components["schemas"]["ManualDraftFields"];
             targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
+        ManualDraftLabels: {
+            cargo: components["schemas"]["CatalogLabel"] | null;
+            destination: components["schemas"]["CatalogLabel"] | null;
+            origin: components["schemas"]["CatalogLabel"] | null;
+        };
         /** @description Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target. */
         ManualDraftSubmission: {
             fields: components["schemas"]["ManualSubmissionFields"];
+        };
+        ManualDraftWriteInput: {
+            fields: components["schemas"]["ManualDraftEditableFields"];
+            targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
         ManualInput: {
             actualDistanceM: string;
@@ -3726,6 +3885,10 @@ export interface components {
             tripVersion: number;
             version: number;
         };
+        ManualReportCreationInput: {
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
+            targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
+        };
         /** @description Immutable submitted fields with omitted event/comment normalized to null. Resolved and unresolved selections retain their original values, never inferred catalog IDs. */
         ManualReportFields: {
             actualDistanceM: components["schemas"]["Decimal"];
@@ -3744,8 +3907,54 @@ export interface components {
             fields: components["schemas"]["ManualSubmissionFields"];
             targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
+        /** @description Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress. Reference dates appear together when present. */
+        ManualReportReadFields: {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoDamagePercent?: number;
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment: string | null;
+            completedAt?: never;
+            destination: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected destination city. */
+            destinationCompanyId?: components["schemas"]["Id"];
+            eventId: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected origin city. */
+            originCompanyId?: components["schemas"]["Id"];
+            startedAt?: never;
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        } | {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoDamagePercent?: number;
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment: string | null;
+            /** @description Reference completion time supplied by the driver. */
+            completedAt: components["schemas"]["Timestamp"];
+            destination: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected destination city. */
+            destinationCompanyId?: components["schemas"]["Id"];
+            eventId: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected origin city. */
+            originCompanyId?: components["schemas"]["Id"];
+            /** @description Reference start time supplied by the driver. */
+            startedAt: components["schemas"]["Timestamp"];
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        };
+        ManualReportResubmissionInput: {
+            expectedTripVersion: number;
+            fields: components["schemas"]["ManualDatedSubmissionFields"];
+        };
         ManualReportRevision: {
-            fields: components["schemas"]["ManualReportFields"];
+            fields: components["schemas"]["ManualReportReadFields"];
             /** Format: uuid */
             id: string;
             number: number;
@@ -3835,6 +4044,8 @@ export interface components {
             version: number;
         };
         MemberProfile: {
+            /** @description All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile. */
+            lifetimeTotals?: components["schemas"]["LifetimeTripTotals"];
             member: components["schemas"]["MemberSummary"];
             qualifications: components["schemas"]["Assignment"][];
         };
@@ -3925,6 +4136,8 @@ export interface components {
                 rejected: number;
                 unassessed: number;
             };
+            /** @description Lifetime accepted canonical trip count and exact actual distance in metres, restricted by the optional game filter when supplied. */
+            lifetimeTotals?: components["schemas"]["LifetimeTripTotals"];
         };
         Participant: {
             member: components["schemas"]["MemberSummary"];
@@ -4122,6 +4335,18 @@ export interface components {
             /** Format: date-time */
             publishedAt: string;
             publisher: components["schemas"]["QualificationActionActor"] | null;
+            requiredDistanceM: string | null;
+            requiredTrips: number | null;
+            rules: components["schemas"]["Rule"][];
+        };
+        /** @description Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample. */
+        QualificationRulePublicationInput: {
+            /**
+             * Format: date-time
+             * @description Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected.
+             */
+            effectiveAt?: string;
+            reason?: string;
             requiredDistanceM: string | null;
             requiredTrips: number | null;
             rules: components["schemas"]["Rule"][];
@@ -4453,13 +4678,27 @@ export interface components {
         TripSummary: {
             actualDistanceM: string | null;
             cargo: components["schemas"]["CatalogLabel"] | null;
+            /** @description UTC canonical trip creation instant. */
+            createdAt?: components["schemas"]["Timestamp"];
             /** @enum {string} */
             decision: "unassessed" | "pending_review" | "accepted" | "rejected";
             destination: components["schemas"]["CatalogLabel"] | null;
+            /** @description Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope. */
+            event?: {
+                id: components["schemas"]["Id"];
+                title: string;
+            } | null;
             /** @enum {string} */
             game: "ets2" | "ats";
+            /**
+             * @description Only in authorized author/reviewer projections. Omit entirely in company scope.
+             * @enum {string}
+             */
+            gameMode?: "single-player" | "truckersmp" | "haulmp" | "unknown";
             /** Format: uuid */
             id: string;
+            /** @description Stable canonical trip number when assigned. */
+            number?: number;
             origin: components["schemas"]["CatalogLabel"] | null;
             /** @enum {string} */
             outcome: "open" | "delivered" | "cancelled" | "none";
@@ -4474,6 +4713,8 @@ export interface components {
             reportingBasis?: "actual_completion" | "manual_confirmation" | "unknown";
             review?: components["schemas"]["TripReviewQueueEntry"];
             sourceKinds: ("ets2telemetry" | "manual")[];
+            /** @description UTC submission instant of the current manual revision, or null when there is no current manual revision. */
+            submittedAt?: components["schemas"]["Timestamp"] | null;
             version: number;
             /** @constant */
             view: "summary";
@@ -4491,11 +4732,58 @@ export interface components {
             maxFilesPerReport: number | null;
             policyRevision: number;
         };
+        /** @description Current permission-filtered workspace snapshot. Omit each section independently if its source is configured off or current authority is missing. An available empty section has count zero and an empty preview where applicable. Transient read failures follow the standard error policy. */
+        WorkspaceSummary: {
+            computedAt: components["schemas"]["Timestamp"];
+            /** @description Requires applications.manage and enabled Admissions reads. Count submitted applications. */
+            newApplicationsCount?: number;
+            /** @description Requires trips.review and enabled Trips reads. Apply current review visibility and the Awaiting decision predicate (scope=review&hold=true). Exclude the caller's own trips before computing both count and age. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue. */
+            reviewQueue?: {
+                count: number;
+                oldestAgeSeconds: number | null;
+            };
+            /** @description Requires trips.read_own_private and enabled Trips and Manual Reports reads, including effective rejection data. Include each owned canonical trip once when effectively rejected with an author-resubmittable current manual revision owned by the viewer. Use the latest applicable authoritative staff rejection of that revision in its canonical group. Exclude aliases as rows and ignore historical alias decisions without current effect, telemetry-only and proposal-only rejections, and pending or accepted revisions. A resubmitted pending revision leaves the list until rejected. Sort by applicable decidedAt DESC, then canonical trip ID DESC. Return the author-visible reason or null when no displayable text is available. */
+            tripsNeedingFixes?: {
+                count: number;
+                items: {
+                    latestReturnReason: string | null;
+                    tripId: components["schemas"]["Id"];
+                }[];
+            };
+            /** @description Requires events.respond and enabled Events reads. Include scheduled events the caller can see and respond to with startsAt strictly after computedAt and either no RSVP or a current unanswered RSVP. Sort by startsAt ASC, then event ID ASC. */
+            unansweredUpcomingEvents?: {
+                count: number;
+                items: {
+                    eventId: components["schemas"]["Id"];
+                    startsAt: components["schemas"]["Timestamp"];
+                    title: string;
+                }[];
+            };
+            /** @description Requires trips.submit_own and enabled Manual Reports reads. Include the caller's editing drafts, ordered by createdAt DESC, then draft ID DESC. */
+            unfinishedManualDrafts?: {
+                count: number;
+                items: {
+                    draftId: components["schemas"]["Id"];
+                    updatedAt: components["schemas"]["Timestamp"];
+                }[];
+            };
+        };
     };
     responses: {
         /** @description Safe application error; HTTP statuses, codes and retry semantics are defined in README.md. */
         Error: {
             headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Safe application error; HTTP statuses, codes and retry semantics are defined in README.md. */
+        PrivateNoStoreError: {
+            headers: {
+                /** @description Private response; never cache. */
+                "Cache-Control"?: "no-store";
                 [name: string]: unknown;
             };
             content: {
@@ -4534,7 +4822,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnvelopeListApplication"];
+                    "application/json": components["schemas"]["EnvelopeListAdminApplication"];
                 };
             };
             default: components["responses"]["Error"];
@@ -5821,7 +6109,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RulesInput"];
+                "application/json": components["schemas"]["QualificationRulePublicationInput"];
             };
         };
         responses: {
@@ -6192,11 +6480,17 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 dlc?: "base" | string;
                 game: "ets2" | "ats";
+                /** @description Select rows with their own hidden flag. Takes precedence over includeHidden. */
+                hidden?: "only";
                 includeHidden?: boolean;
                 limit?: components["parameters"]["Limit"];
                 locale?: "en" | "ru";
+                /** @description Companies list only. Select companies without an uploaded logo. */
+                logo?: "missing";
                 regionId?: string;
                 search?: string;
+                /** @description Select rows missing a Russian name. English remains required. */
+                untranslated?: true;
             };
             header?: never;
             path: {
@@ -6293,10 +6587,14 @@ export interface operations {
                 cursor?: components["parameters"]["Cursor"];
                 dlc?: "base" | string;
                 game: "ets2" | "ats";
+                /** @description Select rows with their own hidden flag. Takes precedence over includeHidden. */
+                hidden?: "only";
                 includeHidden?: boolean;
                 limit?: components["parameters"]["Limit"];
                 locale?: "en" | "ru";
                 search?: string;
+                /** @description Select depots whose linked company or city lacks a Russian name. */
+                untranslated?: true;
             };
             header?: never;
             path?: never;
@@ -6686,7 +6984,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualReportInput"];
+                "application/json": components["schemas"]["ManualReportCreationInput"];
             };
         };
         responses: {
@@ -6792,7 +7090,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualReportRevisionInput"];
+                "application/json": components["schemas"]["ManualReportResubmissionInput"];
             };
         };
         responses: {
@@ -7123,6 +7421,8 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 limit?: components["parameters"]["Limit"];
+                /** @description Limit the list to editing drafts. Omission preserves the existing list. */
+                state?: "editing";
             };
             header?: never;
             path?: never;
@@ -7159,7 +7459,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualDraftInput"];
+                "application/json": components["schemas"]["ManualDraftWriteInput"];
             };
         };
         responses: {
@@ -7233,7 +7533,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualDraftInput"];
+                "application/json": components["schemas"]["ManualDraftWriteInput"];
             };
         };
         responses: {
@@ -7263,6 +7563,46 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    deleteManualDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                draftId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Committed draft deletion result, including an authorized exact replay of the same command data. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeCommandResult"];
+                };
+            };
+            400: components["responses"]["PrivateNoStoreError"];
+            401: components["responses"]["PrivateNoStoreError"];
+            403: components["responses"]["PrivateNoStoreError"];
+            /** @description Missing or inaccessible draft. */
+            404: components["responses"]["PrivateNoStoreError"];
+            /** @description VERSION_CONFLICT for a stale version, STATE_CONFLICT for a submitted draft, or IDEMPOTENCY_CONFLICT for a changed retry. */
+            409: components["responses"]["PrivateNoStoreError"];
+            422: components["responses"]["PrivateNoStoreError"];
+            /** @description Required If-Match header was omitted. */
+            428: components["responses"]["PrivateNoStoreError"];
+            429: components["responses"]["PrivateNoStoreError"];
+            503: components["responses"]["PrivateNoStoreError"];
+            default: components["responses"]["PrivateNoStoreError"];
+        };
+    };
     submitManualDraft: {
         parameters: {
             query?: never;
@@ -7277,7 +7617,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ManualDraftSubmission"];
+                "application/json": components["schemas"]["ManualDraftFinalSubmissionInput"];
             };
         };
         responses: {
@@ -7703,6 +8043,32 @@ export interface operations {
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
             default: components["responses"]["Error"];
+        };
+    };
+    getMyWorkspaceSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current workspace counts and bounded previews. */
+            200: {
+                headers: {
+                    /** @description Private response; never cache. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvelopeWorkspaceSummary"];
+                };
+            };
+            401: components["responses"]["PrivateNoStoreError"];
+            403: components["responses"]["PrivateNoStoreError"];
+            503: components["responses"]["PrivateNoStoreError"];
+            default: components["responses"]["PrivateNoStoreError"];
         };
     };
     listMembers: {
@@ -8245,15 +8611,25 @@ export interface operations {
             query?: {
                 cursor?: components["parameters"]["Cursor"];
                 decision?: "unassessed" | "pending_review" | "accepted" | "rejected";
+                /** @description Inclusive UTC lower bound on reportingAt. Independent of toExclusive. Trips with unknown reportingAt are excluded whenever a bound is supplied. */
+                from?: components["schemas"]["Timestamp"];
                 game?: "ets2" | "ats";
                 /** @description Review queue only (scope=review): filter by the trip review hold. 422 otherwise. */
                 hold?: boolean;
                 limit?: components["parameters"]["Limit"];
-                /** @description Review queue only (scope=review): createdAt then id order; default desc. 422 otherwise. Cursors are bound to hold and order. */
-                order?: "asc" | "desc";
+                /** @description Optional override of the authenticated viewer's saved locale. Use the effective locale for city and cargo search and returned labels, with English fallback for each missing translation. Bind the effective locale into the cursor. */
+                locale?: "en" | "ru";
+                /** @description Available in every scope. asc/desc sort by createdAt then id in the selected direction. completion_asc/completion_desc sort by known effective actual completion in the selected direction, with missing completion last and id as a stable tie-breaker. */
+                order?: "asc" | "desc" | "completion_asc" | "completion_desc";
+                /** @description Restrict to the canonical trip owner within authorized visibility. For another owner, only accepted trips can match. */
+                ownerId?: components["schemas"]["Id"];
+                /** @description Trim surrounding whitespace. Match the localized origin city, destination city or cargo label using the effective locale and per-label English fallback. An all-digit term with an optional leading # matches the exact canonical trip number independently of locale. */
+                q?: string;
                 scope?: "company" | "mine" | "review";
                 /** @description Optional source-kind filter for every scope, using the TripSummary.sourceKinds vocabulary: a trip matches when its canonical group has a source of that kind (a trip with telemetry and a manual report matches both; a trip without sources matches neither). Applied server-side with the scope's visibility rules before keyset paging and bound into the signed cursor. Omitted: no source filter. */
                 source?: "ets2telemetry" | "manual";
+                /** @description Exclusive UTC upper bound on reportingAt. Independent of from. When both bounds are supplied, from must be earlier than toExclusive. */
+                toExclusive?: components["schemas"]["Timestamp"];
             };
             header?: never;
             path?: never;
@@ -8270,6 +8646,8 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeListTripSummary"];
                 };
             };
+            /** @description VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, effective locale or order. */
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

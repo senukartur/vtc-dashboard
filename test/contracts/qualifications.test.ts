@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 
@@ -99,4 +100,53 @@ test("staff action projections are additive and closed without extending existin
   expect(valid("QualificationRuleHistory")({ ...rule, publisher: actor, reason: "private" })).toBe(
     false,
   );
+});
+
+test("staged qualification publication accepts an optional nonempty reason and keeps preview separate", () => {
+  const read = (name: string) =>
+    JSON.parse(
+      readFileSync(new URL(`../../docs/contracts/dashboard/${name}`, import.meta.url), "utf8"),
+    );
+  const spec = read("openapi.json");
+  const operation = spec.paths["/api/v1/admin/qualification-levels/{levelId}/rule-versions"].post;
+  expect(operation.requestBody.content["application/json"].schema.$ref).toBe(
+    "#/components/schemas/QualificationRulePublicationInput",
+  );
+  expect(operation).toMatchObject({
+    "x-capability": "qualifications.manage",
+    "x-guards": expect.arrayContaining(["immutable_effective_versions"]),
+    security: [{ sessionCookie: [], csrfHeader: [] }],
+  });
+
+  const fixtures = read("examples.json").cases;
+  const fixture = (id: string) => fixtures.find((example: { id: string }) => example.id === id);
+  const immediate = fixture("publishQualificationRules:without-reason");
+  const without = immediate.request;
+  expect(immediate.status).toBe(201);
+  expect(immediate.response.data).toMatchObject({
+    configured: true,
+    version: 2,
+    ruleVersionId: expect.any(String),
+  });
+  const withReason = fixture("publishQualificationRules:success").request;
+  const publication = valid("QualificationRulePublicationInput");
+  const live = valid("RulesInput");
+  expect(without).toEqual({ rules: [], requiredTrips: null, requiredDistanceM: null });
+  expect(publication(without)).toBe(true);
+  expect(publication(withReason)).toBe(true);
+  expect(live(withReason)).toBe(true);
+  expect(live(without)).toBe(false);
+  for (const reason of ["", "   ", null, 1, "x".repeat(2049)]) {
+    expect(publication({ ...without, reason })).toBe(false);
+  }
+  for (const changes of [
+    { requiredTrips: undefined },
+    { requiredDistanceM: undefined },
+    { sample: sample.sample },
+    { publisherId: "private" },
+    { publishedAt: "2026-10-20T12:00:00.000Z" },
+    { effectiveAt: "2026-10-20T12:00:00.000+00:00" },
+  ]) {
+    expect(publication({ ...without, ...changes })).toBe(false);
+  }
 });

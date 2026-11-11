@@ -201,5 +201,9 @@ test("over-limit acceptance input, decision marker, review details and queue fil
       .map((p: { name: string; schema: unknown }) => [p.name, p.schema]),
   );
   expect(parameters.hold).toEqual({ type: "boolean" });
-  expect(parameters.order).toEqual({ type: "string", enum: ["asc", "desc"], default: "desc" });
+  expect(parameters.order).toEqual({
+    type: "string",
+    enum: ["asc", "desc", "completion_asc", "completion_desc"],
+    default: "desc",
+  });
 });

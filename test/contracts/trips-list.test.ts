@@ -39,3 +39,141 @@ test("the route query schema accepts both source kinds and rejects other spellin
   for (const source of ["telemetry", "", "MANUAL", "Manual", ["manual", "ets2telemetry"]])
     expect(validate({ source }), JSON.stringify(source)).toBe(false);
 });
+
+const stageFixtures = read("examples.json");
+const stageFixture = (id: string) =>
+  stageFixtures.cases.find((item: { id: string }) => item.id === id);
+
+test("staged trip query supports both independent UTC bounds, bounded search and new order values", () => {
+  const operation = spec.paths["/api/v1/trips"].get;
+  const parameters = operation.parameters.map(
+    (parameter: { $ref?: string; name?: string; schema?: object }) =>
+      parameter.$ref
+        ? spec.components.parameters[parameter.$ref.slice("#/components/parameters/".length)]
+        : parameter,
+  );
+  const properties = Object.fromEntries(
+    parameters.map((parameter: { name: string; schema: object }) => [
+      parameter.name,
+      parameter.schema,
+    ]),
+  );
+  const schema = JSON.parse(
+    JSON.stringify({ type: "object", properties, additionalProperties: false }).replaceAll(
+      "#/components/schemas/",
+      "urn:vtc:browser:v1#/$defs/",
+    ),
+  );
+  const validate = createSchemaValidator().compile(schema);
+  const company = stageFixture("listTrips:filtered-company");
+  const own = stageFixture("listTrips:filtered-own");
+  const review = stageFixture("listTrips:completion-review");
+  const mismatch = stageFixture("listTrips:filter-cursor-mismatch");
+  const empty = stageFixture("listTrips:empty-owner");
+  const locale = operation.parameters.find((p: { name?: string }) => p.name === "locale");
+  expect(locale).toMatchObject({ required: false, schema: { enum: ["en", "ru"] } });
+  expect(locale.schema).not.toHaveProperty("default");
+  expect(locale.description).toContain("saved locale");
+  expect(operation.responses[409].description).toContain("effective locale");
+  expect(company.query).toMatchObject({ scope: "company", q: "#42", order: "completion_desc" });
+  expect(own.query).toMatchObject({ scope: "mine", q: "Fictional Harbor", order: "asc" });
+  expect(review.query).toMatchObject({ scope: "review", hold: true, order: "completion_asc" });
+  expect(mismatch).toMatchObject({
+    status: 409,
+    response: { error: { code: "VERSION_CONFLICT" } },
+  });
+  expect(operation.responses[409].description).toMatch(/cursor/);
+  for (const fixture of [company, own, review, mismatch, empty])
+    expect(validate(fixture.query)).toBe(true);
+  expect(empty.query).toEqual({ ownerId: company.query.ownerId, q: "#404" });
+  expect(company.response.data.items[0].origin).toMatchObject({
+    requestedLocale: company.query.locale,
+    renderedLocale: "en",
+    englishFallback: true,
+  });
+  expect(own.response.data.items[0].origin).toMatchObject({
+    requestedLocale: "ru",
+    renderedLocale: "en",
+    englishFallback: true,
+    label: own.query.q,
+  });
+  expect(review.response.data.items[0].cargo).toMatchObject({
+    requestedLocale: "ru",
+    renderedLocale: "ru",
+    englishFallback: false,
+    label: review.query.q,
+  });
+  expect(validate({ from: company.query.from })).toBe(true);
+  expect(validate({ toExclusive: company.query.toExclusive })).toBe(true);
+  for (const query of [
+    { from: "2026-02-30T10:00:00.000Z" },
+    { toExclusive: "2026-10-20T10:00:00+01:00" },
+    { q: "" },
+    { q: "   " },
+    { q: "x".repeat(129) },
+    { locale: "fr" },
+    { ownerId: "not-an-id" },
+    { order: "completed" },
+    { extra: true },
+  ]) {
+    expect(validate(query), JSON.stringify(query)).toBe(false);
+  }
+  expect(
+    operation.parameters.find((p: { name?: string }) => p.name === "hold").description,
+  ).toMatch(/Review queue only/);
+});
+
+test("trip summaries retain legacy payloads and keep event and game mode out of company fixtures", () => {
+  const validator = createSchemaValidator();
+  const validate = (name: string, data: unknown) =>
+    validator.compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` })(data);
+  const company = stageFixture("listTrips:filtered-company").response.data;
+  const own = stageFixture("listTrips:filtered-own").response.data;
+  const review = stageFixture("listTrips:completion-review").response.data;
+  const trip = company.items[0];
+  for (const result of [stageFixture("listTrips:success").response.data, company, own, review]) {
+    expect(validate("ListTripSummary", result)).toBe(true);
+  }
+  const empty = stageFixture("listTrips:empty-owner").response.data;
+  expect(validate("ListTripSummary", empty)).toBe(true);
+  expect(empty).toEqual({ items: [], nextCursor: null, total: 0 });
+  expect(company.total).toBe(1);
+  expect(own.total).toBe(1);
+  expect(company.items).toHaveLength(1);
+  expect(company.nextCursor).toBeNull();
+  expect(trip).toMatchObject({ number: 42, decision: "accepted", submittedAt: null });
+  expect(trip).not.toHaveProperty("event");
+  expect(trip).not.toHaveProperty("gameMode");
+  expect(own.items[0]).toMatchObject({
+    event: { title: "Fictional evening convoy" },
+    gameMode: "haulmp",
+  });
+  expect(own.items[0].submittedAt).toBeNull();
+  const reviewed = review.items[0];
+  expect(reviewed).toMatchObject({ event: null, gameMode: "unknown" });
+  expect(reviewed.createdAt).toBe(reviewed.review.createdAt);
+  expect(reviewed.submittedAt).toBe(reviewed.review.manualRevision.submittedAt);
+  expect(Date.parse(reviewed.createdAt)).toBeLessThanOrEqual(Date.parse(reviewed.submittedAt));
+  for (const changes of [
+    { number: 0 },
+    { number: Number.MAX_SAFE_INTEGER + 1 },
+    { createdAt: "2026-10-20" },
+    { submittedAt: "2026-10-20T10:00:00.000+00:00" },
+    { gameMode: "convoy" },
+    { event: { ...own.items[0].event, declineReason: "private" } },
+    { sourcePayload: {} },
+  ]) {
+    expect(validate("TripSummary", { ...trip, ...changes })).toBe(false);
+  }
+  const ownTotals = stageFixture("getMyTripStatusSummary:game-lifetime-totals");
+  const profile = stageFixture("getMember:all-game-lifetime-totals").response.data;
+  expect(ownTotals.query).toEqual({ game: "ets2" });
+  expect(validate("OwnTripStatusSummary", ownTotals.response.data)).toBe(true);
+  expect(ownTotals.response.data.counts.accepted).toBe(
+    ownTotals.response.data.lifetimeTotals.acceptedTrips,
+  );
+  expect(validate("MemberProfile", profile)).toBe(true);
+  expect(profile.lifetimeTotals).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
+  expect(validate("LifetimeTripTotals", { acceptedTrips: 1, actualDistanceM: 3.5 })).toBe(false);
+  expect(validate("LifetimeTripTotals", { acceptedTrips: 1, actualDistanceM: "3.50" })).toBe(false);
+});

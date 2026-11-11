@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 
@@ -255,4 +256,112 @@ test("a logo batch is a closed list of at most 500 files", () => {
   expect(batch({ file: Array(501).fill("a.png") })).toBe(false);
   expect(batch({ file: ["a.png"], note: "x" })).toBe(false);
   expect(validate("EnvelopeCatalogDepot")({ data: undefined, meta: {} })).toBe(false);
+});
+
+const dashboardContract = (file: string) =>
+  JSON.parse(
+    readFileSync(new URL(`../../docs/contracts/dashboard/${file}`, import.meta.url), "utf8"),
+  );
+const stageFixtures = dashboardContract("examples.json");
+const stageFixture = (id: string) =>
+  stageFixtures.cases.find((item: { id: string }) => item.id === id);
+
+test("staged catalog filter examples follow the list-specific query parameters", () => {
+  const spec = dashboardContract("openapi.json");
+  const items = spec.paths["/api/v1/catalogs/{list}"].get;
+  const depots = spec.paths["/api/v1/catalogs/depots"].get;
+  const compileQuery = (operation: typeof items) => {
+    const properties = Object.fromEntries(
+      operation.parameters
+        .filter((p: { in?: string }) => p.in === "query")
+        .map((p: { name: string; schema: object }) => [p.name, p.schema]),
+    );
+    return createSchemaValidator().compile({
+      type: "object",
+      properties,
+      required: ["game"],
+      additionalProperties: false,
+    });
+  };
+  const itemQuery = compileQuery(items);
+  const depotQuery = compileQuery(depots);
+  const hidden = stageFixture("listCatalogItems:updated-dlcs");
+  const company = stageFixture("listCatalogItems:updated-companies");
+  const untranslated = stageFixture("listCatalogItems:updated-cities");
+  const depot = stageFixture("listCatalogDepots:hidden-untranslated");
+  expect(hidden.query).toEqual({ game: "ets2", hidden: "only", includeHidden: false });
+  expect(company).toMatchObject({ path: { list: "companies" }, query: { logo: "missing" } });
+  expect(untranslated.query).toEqual({ game: "ets2", untranslated: true });
+  expect(depot.query).toMatchObject({ hidden: "only", includeHidden: false, untranslated: true });
+  expect(itemQuery(hidden.query)).toBe(true);
+  expect(itemQuery(company.query)).toBe(true);
+  expect(itemQuery(untranslated.query)).toBe(true);
+  expect(depotQuery(depot.query)).toBe(true);
+  expect(depotQuery(company.query)).toBe(false);
+  for (const query of [
+    { hidden: "all" },
+    { untranslated: false },
+    { untranslated: "true" },
+    { logo: "present" },
+  ]) {
+    expect(itemQuery({ game: "ets2", ...query })).toBe(false);
+  }
+  expect(items.parameters.find((p: { name?: string }) => p.name === "logo").description).toMatch(
+    /Companies list only/,
+  );
+  expect(items.description).toMatch(/bound into the cursor/);
+  expect(depots.description).toMatch(/takes precedence over includeHidden/);
+});
+
+test("catalog row timestamps and summary counters are additive and bounded", () => {
+  const summary = stageFixture("getCatalogSummary:visible-filter-counts");
+  expect(summary.query).toEqual({ game: "ets2" });
+  const data = summary.response.data;
+  expect(validate("CatalogSummary")(data)).toBe(true);
+  expect(data.lists.trailers.untranslated).toBe(0);
+  expect(data.lists.companies.missingLogo).toBe(1);
+  expect(
+    validate("CatalogSummary")({
+      ...data,
+      lists: { ...data.lists, depots: { ...data.lists.depots, missingLogo: 1 } },
+    }),
+  ).toBe(false);
+  expect(
+    validate("CatalogSummary")({
+      ...data,
+      lists: { ...data.lists, cargoes: { ...data.lists.cargoes, untranslated: -1 } },
+    }),
+  ).toBe(false);
+  for (const kind of ["dlcs", "regions", "cities", "companies", "cargoes", "trailers"]) {
+    const fixture = stageFixture(`listCatalogItems:updated-${kind}`);
+    expect(fixture.path).toEqual({ list: kind });
+    const [row] = fixture.response.data.items;
+    expect(validate("CatalogItem")(row)).toBe(true);
+    expect(row.updatedAt).toMatch(/\.\d{3}Z$/);
+    expect(validate("CatalogItem")({ ...row, updatedAt: "2026-10-21" })).toBe(false);
+    if (kind === "companies") {
+      expect(row.depotCount).toBe(2);
+      expect(validate("CatalogItem")({ ...row, depotCount: 0 })).toBe(true);
+      expect(validate("CatalogItem")({ ...row, depotCount: -1 })).toBe(false);
+    } else {
+      expect(row).not.toHaveProperty("depotCount");
+    }
+  }
+  const example = stageFixture("listCatalogDepots:hidden-untranslated");
+  const [depot] = example.response.data.items;
+  expect(validate("CatalogDepot")(depot)).toBe(true);
+  for (const label of [depot.company.label, depot.city.label]) {
+    expect(label).toMatchObject({
+      requestedLocale: example.query.locale,
+      renderedLocale: "en",
+      englishFallback: true,
+    });
+  }
+  expect(depot.updatedAt).toMatch(/\.\d{3}Z$/);
+  expect(validate("CatalogDepot")({ ...depot, updatedAt: "2026-10-21T12:00:00.000+00:00" })).toBe(
+    false,
+  );
+  expect(validate("CatalogDepot")({ ...depot, depotCount: 1 })).toBe(false);
+  expect(validate("CatalogDepotPatch")({ hidden: true, updatedAt: depot.updatedAt })).toBe(false);
+  expect(validate("CatalogItemPatch")({ hidden: true, depotCount: 1 })).toBe(false);
 });
