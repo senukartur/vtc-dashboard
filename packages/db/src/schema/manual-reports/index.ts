@@ -160,7 +160,7 @@ export const manualDrafts = mysqlTable(
       .notNull()
       .references(() => membership.userId, { onDelete: "restrict" }),
     version: int("version", { unsigned: true }).notNull(),
-    state: mysqlEnum("state", ["editing", "submitted"]).notNull(),
+    state: mysqlEnum("state", ["editing", "submitted", "discarded"]).notNull(),
     fields: json("fields").$type<unknown>().notNull(),
     targetTrip: json("target_trip").$type<unknown>(),
     submittedReportId: idColumn("submitted_report_id").references(() => manualReports.id, {
@@ -169,7 +169,10 @@ export const manualDrafts = mysqlTable(
     createdAt: utcColumn("created_at").notNull(),
     updatedAt: utcColumn("updated_at").notNull(),
   },
-  (t) => [index("manual_draft_owner_page").on(t.ownerId, t.createdAt, t.id)],
+  (t) => [
+    index("manual_draft_owner_page").on(t.ownerId, t.createdAt, t.id),
+    index("manual_draft_owner_state_page").on(t.ownerId, t.state, t.createdAt, t.id),
+  ],
 );
 export const manualDraftEvidence = mysqlTable(
   "manual_draft_evidence",
