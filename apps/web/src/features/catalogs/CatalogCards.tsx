@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/contracts.js";
+import { formatDecimal } from "../../shared/formatting.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button } from "../../shared/ui/primitives.js";
+import { type CatalogRowFormat, CatalogUpdatedAt, MissingMetadata } from "./CatalogRowMetadata.js";
 import { adrText, RowBadges } from "./CatalogTable.js";
 import { CompanyLogo } from "./CompanyLogo.js";
 
@@ -10,11 +12,13 @@ import { CompanyLogo } from "./CompanyLogo.js";
 export function CatalogCards({
   list,
   items,
+  locale,
+  timezone,
   staff,
   busy,
   onEdit,
   onToggleHidden,
-}: {
+}: CatalogRowFormat & {
   list: CatalogList;
   items: CatalogItem[];
   staff: boolean;
@@ -39,6 +43,24 @@ export function CatalogCards({
               {list !== "dlcs" ? ` · ${item.dlc?.label ?? t("baseGame")}` : ""}
               {list === "cities" && item.region ? ` · ${item.region.label}` : ""}
               {list === "cargoes" ? ` · ${adrText(t, item)}` : ""}
+            </span>
+            {list === "companies" && (
+              <span className="catalog-card-meta">
+                {item.depotCount === undefined ? (
+                  <>
+                    {t("colDepotCount")} <MissingMetadata />
+                  </>
+                ) : (
+                  t("depotCount", {
+                    count: item.depotCount,
+                    value: formatDecimal(String(item.depotCount), locale),
+                  })
+                )}
+              </span>
+            )}
+            <span className="catalog-card-meta">
+              {t("colUpdatedAt")}{" "}
+              <CatalogUpdatedAt value={item.updatedAt} locale={locale} timezone={timezone} />
             </span>
           </div>
           {staff && (

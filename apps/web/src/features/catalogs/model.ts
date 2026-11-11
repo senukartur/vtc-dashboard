@@ -37,6 +37,7 @@ export const addLabels: Record<CatalogTab, string> = {
   cargoes: "addCargoes",
   trailers: "addTrailers",
 };
+export type MaintenanceMode = "all" | "hidden" | "untranslated" | "missingLogo";
 export interface CatalogFilters {
   game: Game;
   tab: CatalogTab;
@@ -47,16 +48,22 @@ export interface CatalogFilters {
   company: string;
   /** Depots only: show the companies in this city. */
   city: string;
-  hidden: boolean;
+  maintenance: MaintenanceMode | null;
 }
 /** The authenticated logo image of a company; the version busts the cache when it changes. */
 export const logoSrc = (companyId: string, logo: CatalogLogo) =>
   `/api/v1/catalogs/companies/${companyId}/logo?v=${logo.version}`;
 export function parseFilters(params: URLSearchParams): CatalogFilters {
-  const tab = params.get("tab");
+  const requestedTab = params.get("tab");
+  const tab = catalogTabs.find((value) => value === requestedTab) ?? "cities";
+  let maintenance: MaintenanceMode | null = null;
+  if (params.get("hidden") === "only") maintenance = "hidden";
+  else if (tab === "companies" && params.get("logo") === "missing") maintenance = "missingLogo";
+  else if (params.get("untranslated") === "true") maintenance = "untranslated";
+  else if (params.get("hidden") === "true") maintenance = "all";
   return {
     game: params.get("game") === "ats" ? "ats" : "ets2",
-    tab: (catalogTabs as readonly string[]).includes(tab ?? "") ? (tab as CatalogTab) : "cities",
+    tab,
     q: (params.get("q") ?? "").slice(0, 128),
     dlc:
       params.get("dlc") === "base" || uuid.safeParse(params.get("dlc")).success
@@ -65,7 +72,7 @@ export function parseFilters(params: URLSearchParams): CatalogFilters {
     region: uuid.safeParse(params.get("region")).success ? (params.get("region") as string) : "",
     company: uuid.safeParse(params.get("company")).success ? (params.get("company") as string) : "",
     city: uuid.safeParse(params.get("city")).success ? (params.get("city") as string) : "",
-    hidden: params.get("hidden") === "true",
+    maintenance,
   };
 }
 /** URL params carrying only non-default filters, in a stable order. */
@@ -78,9 +85,32 @@ export function filterParams(filters: CatalogFilters): URLSearchParams {
   if (filters.tab === "cities" && filters.region) next.set("region", filters.region);
   if (filters.tab === "depots" && filters.company) next.set("company", filters.company);
   if (filters.tab === "depots" && filters.city) next.set("city", filters.city);
-  if (filters.hidden) next.set("hidden", "true");
+  if (filters.maintenance === "all") next.set("hidden", "true");
+  if (filters.maintenance === "hidden") next.set("hidden", "only");
+  if (filters.maintenance === "untranslated") next.set("untranslated", "true");
+  if (filters.maintenance === "missingLogo" && filters.tab === "companies")
+    next.set("logo", "missing");
   return next;
 }
+/** Effective request arguments also identify the cursor stack for the current endpoint. */
+export function catalogListParams(filters: CatalogFilters, locale: "ru" | "en") {
+  const { game, tab, q, dlc, region, company, city, maintenance } = filters;
+  return {
+    game,
+    search: q || undefined,
+    includeHidden: maintenance === "all" ? "true" : undefined,
+    hidden: maintenance === "hidden" ? "only" : undefined,
+    untranslated: maintenance === "untranslated" ? "true" : undefined,
+    logo: maintenance === "missingLogo" && tab === "companies" ? "missing" : undefined,
+    dlc: tab !== "dlcs" ? dlc || undefined : undefined,
+    regionId: tab === "cities" ? region || undefined : undefined,
+    companyId: tab === "depots" ? company || undefined : undefined,
+    cityId: tab === "depots" ? city || undefined : undefined,
+    locale,
+    limit: 25,
+  };
+}
+
 export const fallbackBadge = (item: CatalogItem) => item.display.englishFallback;
 
 const importFieldKeys = new Map([

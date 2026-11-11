@@ -4,9 +4,17 @@
 
 ## Layout
 
-The page follows the approved board for this screen: a table on desktop and tablet (name, Russian name, code, source, then region, ADR or Steam app ID per list, and row actions for staff) and a card list below 760px with actions behind one 40px button that opens a sheet. Staff add and import actions stay in the header on wide screens and move to a bottom bar on a phone. The trailers tab keeps the name "Trailers"; its form hint says the code is the telemetry body type and that a coupling counts as its first trailer's type.
+The desktop and tablet table shows the name, Russian name, code, source, list-specific columns, and row actions for staff. It supports keyboard scrolling when the columns exceed the available width. Below 760px, cards put row actions behind a 40px button that opens a sheet. Staff add and import actions stay in the header on wide screens and move to a bottom bar on a phone. The trailers tab keeps the name "Trailers"; its form hint says the code is the telemetry body type and that a coupling counts as its first trailer's type.
 
-Rows with no Russian name show the `EN · no translation` badge; hidden rows show a badge and leave the default view unless "Show hidden" is on. Without `company.read` the page renders only its heading and a notice and sends no catalog request. Without `qualifications.manage` every action is absent and no write route is called.
+Rows with no Russian name show the English fallback badge in Russian. Hidden rows show a badge and leave the default view. Without `company.read` the page renders only its heading and a notice and sends no catalog request. Without `qualifications.manage` every action is absent and no write route is called.
+
+## Maintenance filters and row metadata
+
+The **Hidden only**, **Untranslated** and company-only **No logo** chips use the selected game's summary counts for the current list. Missing counts have a localized unavailable label, and an available zero remains visible. Search and relation filters narrow the rows and the pager total. Changing an effective filter, game, tab or locale restarts pagination.
+
+One maintenance mode is active at a time. The chips write `hidden=only`, `untranslated=true` or `logo=missing` to the URL and list request. The existing **Show hidden** checkbox still uses `hidden=true` in the URL and `includeHidden=true` on the wire. When a shared link contains more than one mode, the page keeps Hidden only, then No logo on Companies, then Untranslated, then Show hidden, in that order. Leaving Companies clears No logo. Selecting the pressed chip again restores the default view.
+
+Tables and phone cards show the row's own `updatedAt`, formatted using the viewer's saved display timezone and locale, with the UTC value in the time element. Company rows also show the server's `depotCount`, including zero. An unavailable timestamp or depot count appears as a dash with a localized accessible label. Successful catalog commands refresh both lists and summary counters.
 
 ## Selectors
 
@@ -32,4 +40,4 @@ The dialog offers CSV and JSON templates per list and shows the exact columns, t
 
 ## Evidence and boundaries
 
-Unit tests cover the logo URL, depot and logo schemas, selector compatibility, combobox row order and key movement, fallback rules, URL filter parsing, template parity with the server's columns and RU/EN string parity. Browser tests cover RU/EN layout at desktop and phone widths, add/edit/hide/restore, import dry-run/apply, permissions, pending, error and empty states, and the combobox keyboard, search and paging behavior. Run the pinned Docker launcher from [testing.md](testing.md). Exact outcomes per candidate SHA belong in the pull request.
+Unit tests cover the logo URL, depot and logo schemas, selector compatibility, combobox row order and key movement, fallback rules, URL filter parsing, template parity with the server's columns and RU/EN string parity. Browser tests cover RU/EN layout at desktop and phone widths, add/edit/hide/restore, import dry-run/apply, permissions, pending, error and empty states, and the combobox keyboard, search and paging behavior. Run the pinned Docker launcher from [testing.md](testing.md). The maintenance browser cases cover shared URLs, reset after filter changes, optional counts, command refresh, keyboard operation and row metadata at 390, 768 and 1280 pixels in both languages. The real API cases use isolated MySQL fixtures to compare the displayed filters, counters, depot counts and timestamps with the API responses and saved timezone. Exact outcomes per candidate SHA belong in the pull request.
