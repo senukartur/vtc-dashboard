@@ -358,7 +358,37 @@ test("web schemas accept server shapes and reject unknown or retired fields", ()
     cargoes: count,
     trailers: count,
   };
-  expect(summarySchema.safeParse({ game: "ats", lists }).success).toBe(true);
+  expect(summarySchema.parse({ game: "ats", lists }).lists.cities).toEqual(count);
+  const expanded = { ...count, untranslated: 1 };
+  const expandedLists = {
+    dlcs: expanded,
+    regions: expanded,
+    cities: expanded,
+    companies: { ...expanded, missingLogo: 0 },
+    depots: expanded,
+    cargoes: expanded,
+    trailers: expanded,
+  };
+  expect(summarySchema.parse({ game: "ats", lists: expandedLists }).lists).toEqual(expandedLists);
+  for (const cities of [
+    { ...expanded, missingLogo: 0 },
+    { ...expanded, unexpected: true },
+    { ...expanded, untranslated: -1 },
+    { ...expanded, untranslated: 0.5 },
+  ]) {
+    expect(
+      summarySchema.safeParse({ game: "ats", lists: { ...expandedLists, cities } }).success,
+    ).toBe(false);
+  }
+  expect(
+    summarySchema.safeParse({
+      game: "ats",
+      lists: {
+        ...expandedLists,
+        companies: { ...expanded, missingLogo: Number.MAX_SAFE_INTEGER + 1 },
+      },
+    }).success,
+  ).toBe(false);
   expect(summarySchema.safeParse({ game: "ats", lists, latest: id }).success).toBe(false);
   // A summary without the company counters is not this contract.
   const { depots: _depots, ...withoutDepots } = lists;
@@ -519,7 +549,30 @@ test("a company row carries an optional logo reference and nothing else about th
   expect(logoSrc(id, { ...logo, version: "fedcba9876543210" })).not.toBe(logoSrc(id, logo));
 });
 
-test("depot rows accept the server shape and reject extras", () => {
+const updatedAt = "2026-11-11T12:34:56.789Z";
+const malformedInstants = [
+  "2026-11-11T12:34:56Z",
+  "2026-11-11T12:34:56.789+00:00",
+  "2026-02-31T12:34:56.789Z",
+  null,
+];
+
+test("item reads accept legacy payloads and the new row timestamp and company depot count", () => {
+  expect(itemSchema.parse(companyItem)).toEqual(companyItem);
+  const expanded = { ...companyItem, updatedAt, depotCount: 0 };
+  expect(itemSchema.parse(expanded)).toEqual(expanded);
+  expect(listSchema.parse({ items: [expanded], nextCursor: null, total: 1 }).items).toEqual([
+    expanded,
+  ]);
+  expect(itemSchema.parse({ ...item, updatedAt }).updatedAt).toBe(updatedAt);
+  for (const depotCount of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "1", null])
+    expect(itemSchema.safeParse({ ...expanded, depotCount }).success).toBe(false);
+  for (const value of malformedInstants)
+    expect(itemSchema.safeParse({ ...expanded, updatedAt: value }).success).toBe(false);
+  expect(itemSchema.safeParse({ ...expanded, untranslated: 1 }).success).toBe(false);
+});
+
+test("depot rows accept both server shapes and reject extras", () => {
   const depot = {
     id: regionId,
     game: "ats",
@@ -534,7 +587,14 @@ test("depot rows accept the server shape and reject extras", () => {
     },
     city: { id: regionId, code: "_x__x", label: { ...label, nameNative: "Fictional city" } },
   };
-  expect(depotSchema.safeParse(depot).success).toBe(true);
+  expect(depotSchema.parse(depot)).toEqual(depot);
+  const expanded = { ...depot, updatedAt };
+  expect(depotListSchema.parse({ items: [expanded], nextCursor: null, total: 1 }).items).toEqual([
+    expanded,
+  ]);
+  for (const value of malformedInstants)
+    expect(depotSchema.safeParse({ ...expanded, updatedAt: value }).success).toBe(false);
+  expect(depotSchema.safeParse({ ...expanded, depotCount: 1 }).success).toBe(false);
   expect(depotListSchema.safeParse({ items: [depot], nextCursor: null, total: 1 }).success).toBe(
     true,
   );

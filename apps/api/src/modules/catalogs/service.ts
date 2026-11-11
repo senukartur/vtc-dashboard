@@ -18,7 +18,7 @@ import {
   or,
   sql,
 } from "@vtc/db/catalogs-schema";
-import { exists, type SQL, type SQLWrapper } from "drizzle-orm";
+import { exists, isNull, type SQL, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { retryTransaction } from "../../platform/jobs/queue.js";
 import { duplicateKey } from "../../platform/outbox/events.js";
@@ -43,6 +43,12 @@ import { inspectPng, logoCodeFromName, PngError } from "./png.js";
 
 type S = components["schemas"];
 type Locale = "en" | "ru";
+type ListFilters = {
+  hidden?: "only";
+  includeHidden?: boolean;
+  untranslated?: boolean;
+  logo?: "missing";
+};
 export interface CatalogPorts {
   identity: Pick<Identity, "authorizeInTransaction" | "onboardingCompany" | "externalCommand">;
 }
@@ -65,6 +71,31 @@ type Common = typeof catalogCities;
 const common = (list: CatalogList) => tables[list] as unknown as Common;
 const dlcParent = alias(catalogDlcs, "dlc_parent");
 const regionParent = alias(catalogRegions, "region_parent");
+const depotVisible = and(
+  eq(catalogCompanyCities.hidden, false),
+  eq(catalogCompanies.hidden, false),
+  eq(catalogCities.hidden, false),
+);
+const depotUntranslated = or(isNull(catalogCompanies.nameRu), isNull(catalogCities.nameRu));
+const companyLogoLink = eq(catalogCompanyLogos.companyId, catalogCompanies.id);
+const companyMissingLogo = isNull(catalogCompanyLogos.companyId);
+const countMatching = (condition: SQL | undefined) =>
+  sql<number>`COUNT(CASE WHEN ${condition} THEN 1 END)`.mapWith(Number);
+
+// Keep the existing cursor binding when none of the maintenance filters is active.
+const maintenanceBinding = ({ hidden, untranslated, logo }: ListFilters) =>
+  hidden || untranslated || logo
+    ? [{ hidden: hidden ?? null, untranslated: untranslated ?? false, logo: logo ?? null }]
+    : [];
+
+function changesFields(row: Record<string, unknown>, fields: Record<string, unknown>) {
+  return Object.entries(fields).some(([field, value]) => {
+    const before = row[field];
+    return Buffer.isBuffer(value) && Buffer.isBuffer(before)
+      ? !value.equals(before)
+      : value !== before;
+  });
+}
 
 const catalogError = (status: number, code: string) => identityError(status, code);
 const importInvalid = (lines: S["CatalogImportLine"][]) =>
@@ -152,6 +183,7 @@ export function createCatalogs(
       nameRu: t.nameRu,
       nameNative: list === "cities" ? catalogCities.nameNative : sql<string | null>`NULL`,
       hidden: t.hidden,
+      updatedAt: t.updatedAt,
       dlcId: list === "dlcs" ? sql<string | null>`NULL` : t.dlcId,
       regionId: list === "cities" ? catalogCities.regionId : sql<string | null>`NULL`,
       steamAppId: list === "dlcs" ? catalogDlcs.steamAppId : sql<number | null>`NULL`,
@@ -175,6 +207,7 @@ export function createCatalogs(
     nameRu: string | null;
     nameNative: string | null;
     hidden: boolean;
+    updatedAt: string;
     dlcId: string | null;
     regionId: string | null;
     steamAppId: number | null;
@@ -201,11 +234,7 @@ export function createCatalogs(
     if (list !== "dlcs") query = query.leftJoin(dlcParent, eq(t.dlcId, dlcParent.id));
     if (list === "cities")
       query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
-    if (list === "companies")
-      query = query.leftJoin(
-        catalogCompanyLogos,
-        eq(catalogCompanyLogos.companyId, catalogCompanies.id),
-      );
+    if (list === "companies") query = query.leftJoin(catalogCompanyLogos, companyLogoLink);
     query = query.where(where);
     if (order) {
       const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
@@ -214,11 +243,26 @@ export function createCatalogs(
     if (limit !== undefined) query = query.limit(limit);
     return (await query) as unknown as ListRow[];
   }
+  async function companyDepotCounts(tx: TxContext, game: Game, ids: string[]) {
+    if (ids.length === 0) return new Map<string, number>();
+    const t = catalogCompanyCities;
+    const rows = await c(tx)
+      .select({ companyId: t.companyId, count: sql<number>`COUNT(*)`.mapWith(Number) })
+      .from(t)
+      .where(and(eq(t.game, game), inArray(t.companyId, ids)))
+      .groupBy(t.companyId);
+    return new Map(rows.map((row) => [row.companyId, row.count]));
+  }
   const logoOf = (sha: Buffer | null, bytes: number | null): S["CatalogLogo"] | null =>
     sha === null || bytes === null
       ? null
       : { version: Buffer.from(sha).toString("hex").slice(0, 16), byteLength: Number(bytes) };
-  function itemDto(list: CatalogList, row: ListRow, locale: Locale): S["CatalogItem"] {
+  function itemDto(
+    list: CatalogList,
+    row: ListRow,
+    locale: Locale,
+    depotCount = 0,
+  ): S["CatalogItem"] {
     const dlc =
       row.dlcId && row.dlcEn !== null
         ? label(row.dlcId, row.dlcEn, row.dlcRu, row.dlcHidden === true, locale)
@@ -230,6 +274,7 @@ export function createCatalogs(
       nameEn: row.nameEn,
       nameRu: row.nameRu,
       hidden: row.hidden,
+      updatedAt: row.updatedAt,
       display: label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
       dlcId: list === "dlcs" ? null : row.dlcId,
       dlc: list === "dlcs" ? null : dlc,
@@ -245,13 +290,14 @@ export function createCatalogs(
           }
         : {}),
       ...(list === "cargoes" ? { adrClass: row.adrClass } : {}),
-      ...(list === "companies" ? { logo: logoOf(row.logoSha, row.logoBytes) } : {}),
+      ...(list === "companies" ? { logo: logoOf(row.logoSha, row.logoBytes), depotCount } : {}),
     };
   }
   async function itemById(tx: TxContext, list: CatalogList, id: string, locale: Locale) {
     const [row] = await fetchRows(tx, list, eq(common(list).id, id));
     if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
-    return itemDto(list, row, locale);
+    const counts = list === "companies" ? await companyDepotCounts(tx, row.game, [id]) : undefined;
+    return itemDto(list, row, locale, counts?.get(id));
   }
   async function parent(
     tx: TxContext,
@@ -685,6 +731,7 @@ export function createCatalogs(
     id: catalogCompanyCities.id,
     game: catalogCompanyCities.game,
     hidden: catalogCompanyCities.hidden,
+    updatedAt: catalogCompanyCities.updatedAt,
     dlcId: catalogCompanyCities.dlcId,
     dlcEn: dlcParent.nameEn,
     dlcRu: dlcParent.nameRu,
@@ -727,6 +774,7 @@ export function createCatalogs(
       id: row.id,
       game: row.game,
       hidden: row.hidden,
+      updatedAt: row.updatedAt,
       dlcId: row.dlcId,
       dlc:
         row.dlcId && row.dlcEn !== null
@@ -920,32 +968,45 @@ export function createCatalogs(
         const lists = {} as S["CatalogSummary"]["lists"];
         for (const list of Object.keys(tables) as CatalogList[]) {
           const t = common(list);
-          const rows = await c(tx)
-            .select({ hidden: t.hidden, count: sql<number | string>`COUNT(*)` })
+          const visible = eq(t.hidden, false);
+          const totals = c(tx)
+            .select({
+              visible: countMatching(visible),
+              hidden: countMatching(eq(t.hidden, true)),
+              untranslated: countMatching(and(visible, isNull(t.nameRu))),
+              ...(list === "companies"
+                ? { missingLogo: countMatching(and(visible, companyMissingLogo)) }
+                : {}),
+            })
             .from(t)
             .where(eq(t.game, game))
-            .groupBy(t.hidden);
-          const count = (flag: boolean) => Number(rows.find((r) => r.hidden === flag)?.count ?? 0);
-          lists[list] = { visible: count(false), hidden: count(true) };
+            .$dynamic();
+          if (list === "companies") totals.leftJoin(catalogCompanyLogos, companyLogoLink);
+          const [counts] = await totals;
+          if (!counts) throw new Error("CATALOG_SUMMARY_COUNT_MISSING");
+          lists[list] = counts;
         }
-        const depots = await c(tx)
-          .select({ hidden: catalogCompanyCities.hidden, count: sql<number | string>`COUNT(*)` })
+        const [depots] = await c(tx)
+          .select({
+            visible: countMatching(eq(catalogCompanyCities.hidden, false)),
+            hidden: countMatching(eq(catalogCompanyCities.hidden, true)),
+            untranslated: countMatching(and(depotVisible, depotUntranslated)),
+          })
           .from(catalogCompanyCities)
-          .where(eq(catalogCompanyCities.game, game))
-          .groupBy(catalogCompanyCities.hidden);
-        const depotCount = (flag: boolean) =>
-          Number(depots.find((r) => r.hidden === flag)?.count ?? 0);
-        lists.depots = { visible: depotCount(false), hidden: depotCount(true) };
+          .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+          .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+          .where(eq(catalogCompanyCities.game, game));
+        if (!depots) throw new Error("CATALOG_SUMMARY_COUNT_MISSING");
+        lists.depots = depots;
         return { game, lists };
       });
     },
     async list(
       actor: Actor,
       list: CatalogList,
-      query: {
+      query: ListFilters & {
         game: Game;
         search?: string;
-        includeHidden?: boolean;
         dlc?: string;
         regionId?: string;
         locale?: Locale;
@@ -960,6 +1021,8 @@ export function createCatalogs(
         if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
         if (list === "dlcs" && query.dlc) throw identityError(422);
         if (list !== "cities" && query.regionId) throw identityError(422);
+        if (list !== "companies" && query.logo) throw identityError(422);
+        const includeHidden = query.hidden !== "only" && (query.includeHidden ?? false);
         const t = common(list),
           binding = [
             actor.userId,
@@ -968,10 +1031,11 @@ export function createCatalogs(
             list,
             query.game,
             query.search ?? null,
-            query.includeHidden ?? false,
+            includeHidden,
             query.dlc ?? null,
             query.regionId ?? null,
             locale,
+            ...maintenanceBinding(query),
           ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -986,7 +1050,9 @@ export function createCatalogs(
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const filter = and(
           eq(t.game, query.game),
-          query.includeHidden ? undefined : eq(t.hidden, false),
+          includeHidden ? undefined : eq(t.hidden, query.hidden === "only"),
+          query.untranslated ? isNull(t.nameRu) : undefined,
+          query.logo === "missing" ? companyMissingLogo : undefined,
           escaped
             ? or(
                 sql`${t.nameEn} LIKE ${`%${escaped}%`}`,
@@ -1005,10 +1071,13 @@ export function createCatalogs(
             ? eq(catalogCities.regionId, applicationId(query.regionId))
             : undefined,
         );
-        const [total] = await c(tx)
+        const totals = c(tx)
           .select({ count: sql<number | string>`COUNT(*)` })
           .from(t)
-          .where(filter);
+          .where(filter)
+          .$dynamic();
+        if (query.logo === "missing") totals.leftJoin(catalogCompanyLogos, companyLogoLink);
+        const [total] = await totals;
         const page = await fetchRows(
           tx,
           list,
@@ -1026,9 +1095,17 @@ export function createCatalogs(
           locale,
         );
         const visible = page.slice(0, limit);
+        const counts =
+          list === "companies"
+            ? await companyDepotCounts(
+                tx,
+                query.game,
+                visible.map((row) => row.id),
+              )
+            : undefined;
         const last = visible[visible.length - 1];
         return {
-          items: visible.map((row) => itemDto(list, row, locale)),
+          items: visible.map((row) => itemDto(list, row, locale, counts?.get(row.id))),
           total: Number(total?.count ?? 0),
           nextCursor:
             page.length > limit && last
@@ -1078,6 +1155,7 @@ export function createCatalogs(
                   nameRu: null,
                   ...fields,
                   hidden: false,
+                  updatedAt: now().toISOString(),
                 } as never);
             } catch (error) {
               if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
@@ -1107,32 +1185,35 @@ export function createCatalogs(
           { list, id, input },
           async () => {
             const t = common(list);
-            const [row] = (await c(tx)
+            const [row] = await c(tx)
               .select({
                 id: t.id,
                 game: t.game,
+                code: t.code,
+                nameEn: t.nameEn,
+                nameRu: t.nameRu,
+                hidden: t.hidden,
                 ...(list !== "dlcs" ? { dlcId: t.dlcId } : {}),
-                ...(list === "cities" ? { regionId: catalogCities.regionId } : {}),
+                ...(list === "dlcs" ? { steamAppId: catalogDlcs.steamAppId } : {}),
+                ...(list === "cities"
+                  ? { regionId: catalogCities.regionId, nameNative: catalogCities.nameNative }
+                  : {}),
+                ...(list === "cargoes" ? { adrClass: catalogCargoes.adrClass } : {}),
               })
               .from(t)
               .where(eq(t.id, id))
-              .for("update")) as {
-              id: string;
-              game: Game;
-              dlcId?: string | null;
-              regionId?: string | null;
-            }[];
+              .for("update");
             if (!row) throw catalogError(404, "CATALOG_ROW_NOT_FOUND");
             if (list !== "dlcs" && "dlcId" in input)
               await parent(tx, "dlc", row.game, input.dlcId, row.dlcId ?? null);
             if (list === "cities" && "regionId" in input)
               await parent(tx, "region", row.game, input.regionId, row.regionId ?? null);
             const fields = fieldsOf(list, input);
-            if (Object.keys(fields).length) {
+            if (changesFields(row, fields)) {
               try {
                 await c(tx)
                   .update(t)
-                  .set(fields as never)
+                  .set({ ...fields, updatedAt: now().toISOString() })
                   .where(eq(t.id, row.id));
               } catch (error) {
                 if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
@@ -1201,11 +1282,14 @@ export function createCatalogs(
             if (plan.errors)
               throw importInvalid(plan.lines.filter((line) => line.status === "error"));
             const table = (list === "depots" ? catalogCompanyCities : tables[list]) as Common;
+            const updatedAt = now().toISOString();
             for (let i = 0; i < plan.inserts.length; i += 200) {
               try {
                 await c(tx)
                   .insert(table)
-                  .values(plan.inserts.slice(i, i + 200) as never[]);
+                  .values(
+                    plan.inserts.slice(i, i + 200).map((row) => ({ ...row, updatedAt })) as never[],
+                  );
               } catch (error) {
                 if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
                 throw error;
@@ -1214,7 +1298,7 @@ export function createCatalogs(
             for (const update of plan.updates)
               await c(tx)
                 .update(table)
-                .set(update.set as never)
+                .set({ ...update.set, updatedAt })
                 .where(eq(table.id, update.id));
             const importId = newId();
             await recordAudit(tx, actor, "catalog.imported", importId);
@@ -1232,13 +1316,12 @@ export function createCatalogs(
     },
     async listDepots(
       actor: Actor,
-      query: {
+      query: Omit<ListFilters, "logo"> & {
         game: Game;
         companyId?: string;
         cityId?: string;
         search?: string;
         dlc?: string;
-        includeHidden?: boolean;
         locale?: Locale;
         limit?: number;
         cursor?: string;
@@ -1249,6 +1332,7 @@ export function createCatalogs(
         const limit = query.limit ?? 25,
           locale = query.locale ?? "en";
         if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw identityError(422);
+        const includeHidden = query.hidden !== "only" && (query.includeHidden ?? false);
         const binding = [
           actor.userId,
           actor.sessionId,
@@ -1259,8 +1343,9 @@ export function createCatalogs(
           query.cityId ?? null,
           query.search ?? null,
           query.dlc ?? null,
-          query.includeHidden ?? false,
+          includeHidden,
           locale,
+          ...maintenanceBinding(query),
         ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1280,13 +1365,12 @@ export function createCatalogs(
         const like = `%${escaped}%`;
         const filter = and(
           eq(catalogCompanyCities.game, query.game),
-          query.includeHidden
-            ? undefined
-            : and(
-                eq(catalogCompanyCities.hidden, false),
-                eq(catalogCompanies.hidden, false),
-                eq(catalogCities.hidden, false),
-              ),
+          query.hidden === "only"
+            ? eq(catalogCompanyCities.hidden, true)
+            : includeHidden
+              ? undefined
+              : depotVisible,
+          query.untranslated ? depotUntranslated : undefined,
           query.companyId
             ? eq(catalogCompanyCities.companyId, applicationId(query.companyId))
             : undefined,
@@ -1374,6 +1458,7 @@ export function createCatalogs(
                   cityId: input.cityId,
                   dlcId: input.dlcId ?? null,
                   hidden: false,
+                  updatedAt: now().toISOString(),
                 });
             } catch (error) {
               if (duplicateKey(error)) throw catalogError(409, "CATALOG_CODE_CONFLICT");
@@ -1405,6 +1490,7 @@ export function createCatalogs(
                 id: catalogCompanyCities.id,
                 game: catalogCompanyCities.game,
                 dlcId: catalogCompanyCities.dlcId,
+                hidden: catalogCompanyCities.hidden,
               })
               .from(catalogCompanyCities)
               .where(eq(catalogCompanyCities.id, id))
@@ -1415,10 +1501,10 @@ export function createCatalogs(
               ...("dlcId" in input ? { dlcId: input.dlcId ?? null } : {}),
               ...("hidden" in input ? { hidden: input.hidden } : {}),
             };
-            if (Object.keys(fields).length)
+            if (changesFields(row, fields))
               await c(tx)
                 .update(catalogCompanyCities)
-                .set(fields)
+                .set({ ...fields, updatedAt: now().toISOString() })
                 .where(eq(catalogCompanyCities.id, row.id));
             await recordAudit(tx, actor, "catalog.changed", row.id);
             return { item: await depotById(tx, row.id, "en") };

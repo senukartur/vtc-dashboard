@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   type CatalogDTO,
+  catalogUpdatedAt,
   labelSchema,
   logoSchema,
   uuid,
@@ -8,16 +9,21 @@ import {
 
 const text = z.string().min(1),
   count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const listCounts = z.strictObject({
+  visible: count,
+  hidden: count,
+  untranslated: count.exactOptional(),
+});
 export const summarySchema: z.ZodType<CatalogDTO["CatalogSummary"]> = z.strictObject({
   game: z.enum(["ets2", "ats"]),
   lists: z.strictObject({
-    dlcs: z.strictObject({ visible: count, hidden: count }),
-    regions: z.strictObject({ visible: count, hidden: count }),
-    cities: z.strictObject({ visible: count, hidden: count }),
-    companies: z.strictObject({ visible: count, hidden: count }),
-    depots: z.strictObject({ visible: count, hidden: count }),
-    cargoes: z.strictObject({ visible: count, hidden: count }),
-    trailers: z.strictObject({ visible: count, hidden: count }),
+    dlcs: listCounts,
+    regions: listCounts,
+    cities: listCounts,
+    companies: listCounts.extend({ missingLogo: count.exactOptional() }),
+    depots: listCounts,
+    cargoes: listCounts,
+    trailers: listCounts,
   }),
 });
 const game = z.enum(["ets2", "ats"]);
@@ -25,6 +31,7 @@ export const depotSchema: z.ZodType<CatalogDTO["CatalogDepot"]> = z.strictObject
   id: uuid,
   game,
   hidden: z.boolean(),
+  updatedAt: catalogUpdatedAt.exactOptional(),
   dlcId: uuid.nullable(),
   dlc: labelSchema.nullable(),
   company: z.strictObject({
