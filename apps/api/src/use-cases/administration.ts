@@ -67,7 +67,7 @@ export function createAdministration(
         options,
       );
       return identity.transaction(async (tx) => {
-        const rows = await identity.administrationMembersInTransaction(
+        const { rows, statusCounts } = await identity.administrationMembersInTransaction(
           tx,
           actor,
           paging.after?.id ?? null,
@@ -96,7 +96,7 @@ export function createAdministration(
           rows.map((row) => ({ id: row.id })),
           (row) => ({ id: row.id, time: null }),
         );
-        return { items, nextCursor: result.nextCursor };
+        return { items, nextCursor: result.nextCursor, ...(statusCounts ? { statusCounts } : {}) };
       });
     },
     async audit(actor: Actor, options: Page) {

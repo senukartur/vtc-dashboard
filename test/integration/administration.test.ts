@@ -876,6 +876,7 @@ test("member administration reports the latest accepted canonical trip without p
       const detail = await app.inject({ url: `/api/v1/admin/members/${subject.id}`, headers });
       expect(detail.statusCode).toBe(200);
       expect(detail.json().data.lastAcceptedTripAt).toBe(expected);
+      expect(detail.json().data).not.toHaveProperty("statusCounts");
     }
     const lists = new Map<string, unknown>();
     for (const status of ["active", "inactive"]) {
@@ -934,10 +935,11 @@ test("member list role and search filters run in SQL and bind the cursor", async
   });
   const { app, headers } = await browser();
   type Row = { status: string; profile: { member: { id: string; roles: string[] } } };
-  async function list(query: string) {
+  async function list(query: string, counts?: { inCompany: number; left: number }) {
     const response = await app.inject({ url: `/api/v1/admin/members?limit=100&${query}`, headers });
     expect(response.statusCode, query).toBe(200);
     expect(response.json().data.nextCursor).toBeNull();
+    if (counts) expect(response.json().data.statusCounts).toMatchObject(counts);
     return response.json().data.items as Row[];
   }
   const ids = (rows: Row[]) => rows.map((row) => row.profile.member.id).sort();
@@ -950,7 +952,7 @@ test("member list role and search filters run in SQL and bind the cursor", async
     expect(ids(trainees)).toContain(trainee.id);
     expect(ids(trainees)).not.toContain(dispatcher.id);
     for (const row of trainees) expect(row.profile.member.roles).toContain("trainee");
-    const directors = await list("role=director");
+    const directors = await list("role=director", { inCompany: 1, left: 0 });
     expect(ids(directors)).toEqual([director.userId]);
     expect(directors[0]?.profile.member.roles).toContain("director");
     expect(ids(await list("search=kestrel&status=active"))).toEqual(
@@ -960,15 +962,52 @@ test("member list role and search filters run in SQL and bind the cursor", async
       [dispatcher.id, trainee.id, formerKestrel.id].sort(),
     );
     expect(ids(await list(`search=${encodeURIComponent("сокол")}`))).toEqual([cyrillic.id]);
-    expect(ids(await list(`search=${encodeURIComponent("100%_")}`))).toEqual([literal.id]);
+    expect(
+      ids(await list(`search=${encodeURIComponent("100%_")}`, { inCompany: 1, left: 0 })),
+    ).toEqual([literal.id]);
     expect(ids(await list(`search=${encodeURIComponent("100")}`))).toEqual(
       [literal.id, decoy.id].sort(),
     );
     expect(ids(await list("role=dispatcher&search=Kestrel&status=active"))).toEqual([
       dispatcher.id,
     ]);
-    expect(ids(await list("search=Kestrel&status=inactive"))).toEqual([formerKestrel.id]);
-    expect(ids(await list("role=dispatcher&search=Kestrel&status=inactive"))).toEqual([]);
+    expect(ids(await list("search=Kestrel&status=inactive", { inCompany: 2, left: 1 }))).toEqual([
+      formerKestrel.id,
+    ]);
+    expect(
+      ids(await list("role=dispatcher&search=Kestrel&status=inactive", { inCompany: 1, left: 0 })),
+    ).toEqual([]);
+    const pagedUrl = "/api/v1/admin/members?limit=1&search=Kestrel&status=active";
+    const firstActive = await app.inject({ url: pagedUrl, headers });
+    expect(firstActive.statusCode).toBe(200);
+    expect(firstActive.json().data.items).toHaveLength(1);
+    expect(firstActive.json().data.statusCounts).toMatchObject({ inCompany: 2, left: 1 });
+    const activeCursor = firstActive.json().data.nextCursor as string;
+    expect(activeCursor).toBeTruthy();
+    const secondActive = await app.inject({
+      url: `${pagedUrl}&cursor=${encodeURIComponent(activeCursor)}`,
+      headers,
+    });
+    expect(secondActive.statusCode).toBe(200);
+    expect(secondActive.json().data.items).toHaveLength(1);
+    expect(secondActive.json().data.nextCursor).toBeNull();
+    expect(secondActive.json().data.statusCounts).toEqual(firstActive.json().data.statusCounts);
+    expect(ids(firstActive.json().data.items)).not.toEqual(ids(secondActive.json().data.items));
+
+    const withoutSources = createAdministration(unit, composed.identity, {
+      ...enabled,
+      admissions: false,
+    });
+    expect(
+      await withoutSources.members(director, {
+        role: "director",
+        status: "inactive",
+      }),
+    ).toEqual({
+      items: [],
+      nextCursor: null,
+      statusCounts: { inCompany: 1, left: 0 },
+    });
     await resetLimits();
     const blank = await app.inject({
       url: `/api/v1/admin/members?search=${encodeURIComponent("   ")}`,
