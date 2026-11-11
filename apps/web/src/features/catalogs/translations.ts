@@ -241,7 +241,7 @@ export const catalogTranslations = {
     missingLogo: "Без логотипа",
     countLoading: "Загрузка количества",
     countUnavailable: "Количество недоступно",
-    colUpdatedAt: "Обновлено",
+    colUpdatedAt: "Изменено",
     colDepotCount: "Депо",
     metadataUnavailable: "Недоступно",
     depotCount_one: "{{value}} депо",
