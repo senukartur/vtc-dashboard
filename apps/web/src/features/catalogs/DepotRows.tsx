@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button, Table } from "../../shared/ui/primitives.js";
+import { type CatalogRowFormat, CatalogUpdatedAt } from "./CatalogRowMetadata.js";
 import { CompanyLogo } from "./CompanyLogo.js";
 import type { Depot } from "./DepotForm.js";
 
-interface RowActions {
+interface RowActions extends CatalogRowFormat {
   depots: Depot[];
   staff: boolean;
   busy: boolean;
@@ -31,16 +32,26 @@ function DepotBadges({ depot }: { depot: Depot }) {
 const rowHidden = (depot: Depot) =>
   depot.hidden || depot.company.label.hidden || depot.city.label.hidden;
 
-export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowActions) {
+export function DepotTable({
+  depots,
+  locale,
+  timezone,
+  staff,
+  busy,
+  onEdit,
+  onToggleHidden,
+}: RowActions) {
   const { t } = useTranslation("catalogs");
   return (
-    <div className="catalog-table-wrap">
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: The table can overflow on tablet and needs keyboard scrolling.
+    <section className="catalog-table-wrap" aria-label={t("tabDepots")} tabIndex={0}>
       <Table className="catalog-table" data-testid="catalog-table" data-list="depots">
         <thead>
           <tr>
             <th>{t("colCompany")}</th>
             <th>{t("colCity")}</th>
             <th>{t("colDlc")}</th>
+            <th>{t("colUpdatedAt")}</th>
             {staff && <th>{t("colActions")}</th>}
           </tr>
         </thead>
@@ -62,6 +73,9 @@ export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowA
                 <CatalogNativeName value={depot.city.label} />
               </td>
               <td>{depot.dlc?.label ?? t("baseGame")}</td>
+              <td className="catalog-updated">
+                <CatalogUpdatedAt value={depot.updatedAt} locale={locale} timezone={timezone} />
+              </td>
               {staff && (
                 <td>
                   <div className="catalog-row-actions">
@@ -84,11 +98,19 @@ export function DepotTable({ depots, staff, busy, onEdit, onToggleHidden }: RowA
           ))}
         </tbody>
       </Table>
-    </div>
+    </section>
   );
 }
 
-export function DepotCards({ depots, staff, busy, onEdit, onToggleHidden }: RowActions) {
+export function DepotCards({
+  depots,
+  locale,
+  timezone,
+  staff,
+  busy,
+  onEdit,
+  onToggleHidden,
+}: RowActions) {
   const { t } = useTranslation("catalogs");
   const [sheet, setSheet] = useState<Depot | null>(null);
   // The code keeps two companies of one brand in one city apart for the actions button and sheet.
@@ -109,6 +131,10 @@ export function DepotCards({ depots, staff, busy, onEdit, onToggleHidden }: RowA
               {depot.city.label.label}
               <CatalogNativeName value={depot.city.label} />
               {` · ${depot.dlc?.label ?? t("baseGame")}`}
+            </span>
+            <span className="catalog-card-meta">
+              {t("colUpdatedAt")}{" "}
+              <CatalogUpdatedAt value={depot.updatedAt} locale={locale} timezone={timezone} />
             </span>
           </div>
           {staff && (

@@ -1,8 +1,11 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { CatalogItem, CatalogList } from "../../shared/catalog-selectors/contracts.js";
+import { formatDecimal } from "../../shared/formatting.js";
 import { Button, Table } from "../../shared/ui/primitives.js";
+import { type CatalogRowFormat, CatalogUpdatedAt, MissingMetadata } from "./CatalogRowMetadata.js";
 import { CompanyLogo } from "./CompanyLogo.js";
+import { tabLabels } from "./model.js";
 
 export const adrText = (t: TFunction<"catalogs">, item: CatalogItem) =>
   item.adrClass ? t("adrClass", { class: item.adrClass }) : t("nonHazardous");
@@ -20,11 +23,13 @@ export function RowBadges({ item }: { item: CatalogItem }) {
 export function CatalogTable({
   list,
   items,
+  locale,
+  timezone,
   staff,
   busy,
   onEdit,
   onToggleHidden,
-}: {
+}: CatalogRowFormat & {
   list: CatalogList;
   items: CatalogItem[];
   staff: boolean;
@@ -34,7 +39,8 @@ export function CatalogTable({
 }) {
   const { t } = useTranslation("catalogs");
   return (
-    <div className="catalog-table-wrap">
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: The table can overflow on tablet and needs keyboard scrolling.
+    <section className="catalog-table-wrap" aria-label={t(tabLabels[list])} tabIndex={0}>
       <Table className="catalog-table" data-testid="catalog-table" data-list={list}>
         <thead>
           <tr>
@@ -46,6 +52,8 @@ export function CatalogTable({
             {list === "cities" && <th>{t("colRegion")}</th>}
             {list === "cargoes" && <th>{t("colAdr")}</th>}
             {list === "dlcs" && <th>{t("colSteam")}</th>}
+            {list === "companies" && <th>{t("colDepotCount")}</th>}
+            <th>{t("colUpdatedAt")}</th>
             {staff && <th>{t("colActions")}</th>}
           </tr>
         </thead>
@@ -66,15 +74,27 @@ export function CatalogTable({
                   </>
                 )}
               </td>
-              <td>{item.nameRu ?? "—"}</td>
+              <td className="catalog-name-ru">{item.nameRu ?? "—"}</td>
               {list === "cities" && <td>{item.nameNative ?? "—"}</td>}
-              <td>
+              <td className="catalog-code">
                 <code>{item.code}</code>
               </td>
               {list !== "dlcs" && <td>{item.dlc?.label ?? t("baseGame")}</td>}
               {list === "cities" && <td>{item.region?.label ?? "—"}</td>}
               {list === "cargoes" && <td>{adrText(t, item)}</td>}
               {list === "dlcs" && <td>{item.steamAppId ?? "—"}</td>}
+              {list === "companies" && (
+                <td>
+                  {item.depotCount === undefined ? (
+                    <MissingMetadata />
+                  ) : (
+                    formatDecimal(String(item.depotCount), locale)
+                  )}
+                </td>
+              )}
+              <td className="catalog-updated">
+                <CatalogUpdatedAt value={item.updatedAt} locale={locale} timezone={timezone} />
+              </td>
               {staff && (
                 <td>
                   <div className="catalog-row-actions">
@@ -97,6 +117,6 @@ export function CatalogTable({
           ))}
         </tbody>
       </Table>
-    </div>
+    </section>
   );
 }
