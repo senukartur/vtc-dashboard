@@ -38,6 +38,7 @@ const origin = "http://127.0.0.1:4173",
   password = "Fictional-catalog-passphrase-42",
   boundary = "vtc-catalog-boundary";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
+const catalogSettings = catalogConfig();
 let instant = Date.parse("2026-10-30T12:00:00.000Z");
 const now = () => new Date(instant);
 let control: Connection,
@@ -73,7 +74,7 @@ beforeAll(async () => {
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
-  catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  catalogs = createCatalogs(unit, catalogSettings, { identity }, now);
   await identity.bootstrap({
     email: "catalog-director@example.invalid",
     name: "Fictional Director",
@@ -364,7 +365,7 @@ test("city filters narrow the total before paging and bind the effective visibil
   ];
   const item = first.items[0];
   if (!item) throw new Error("MISSING_SYNTHETIC_CATALOG_ITEM");
-  const legacyCursor = cursorCodec(catalogConfig().cursorKey).write(
+  const legacyCursor = cursorCodec(catalogSettings.cursorKey).write(
     legacyBinding,
     JSON.stringify([item.nameEn, item.id]),
   );
@@ -439,7 +440,7 @@ test("an import rolls back timestamps and rows when audit recording fails after 
   const row = await city("rollback_row");
   const failing = createCatalogs(
     unit,
-    catalogConfig(),
+    catalogSettings,
     {
       identity: {
         ...identity,
