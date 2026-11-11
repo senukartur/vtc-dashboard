@@ -1774,6 +1774,63 @@ test(
 );
 
 test(
+  "English depot maintenance uses both parent translations and keeps the legacy tab count",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const hiddenParent = depotRow("67000000-0000-4000-8000-000000000024", brokenCo, northCity);
+    hiddenParent.company.label.hidden = true;
+    await mockCatalogs(page, false, {
+      maintenanceCounts: true,
+      rows: {
+        ets2: {
+          companies: [
+            catalogItem(freight.id, freight.name, "en", { nameRu: "Вымышленный перевозчик" }),
+            catalogItem(plainCo.id, plainCo.name),
+            catalogItem(brokenCo.id, brokenCo.name, "en", { hidden: true }),
+          ],
+          cities: [
+            catalogItem(northCity.id, northCity.name),
+            catalogItem(southCity.id, southCity.name, "en", { nameRu: "Вымышленный южный город" }),
+          ],
+        },
+      },
+      depots: {
+        ets2: [
+          depotRow(depotRowId, freight, northCity),
+          depotRow("67000000-0000-4000-8000-000000000021", plainCo, southCity),
+          depotRow("67000000-0000-4000-8000-000000000022", freight, southCity),
+          hiddenParent,
+        ],
+      },
+    });
+    await open(page, "en", "?tab=depots");
+    const untranslated = maintenanceChip(page, c.untranslated);
+    const translatedDepot = rowOf(page, freight.name).filter({ hasText: southCity.name });
+    const hiddenParentDepot = rowOf(page, brokenCo.name);
+    await expect(tab(page, c.tabDepots).getByText("4", { exact: true })).toBeVisible();
+    await expect(maintenanceChip(page, c.hiddenOnly)).toHaveAccessibleDescription("0");
+    await expect(untranslated).toHaveAccessibleDescription("2");
+    await expect(translatedDepot).toBeVisible();
+    await expect(hiddenParentDepot).toHaveCount(0);
+
+    await untranslated.click();
+    await expect(untranslated).toHaveAttribute("aria-pressed", "true");
+    await expect(rowOf(page, freight.name).filter({ hasText: northCity.name })).toBeVisible();
+    await expect(rowOf(page, plainCo.name).filter({ hasText: southCity.name })).toBeVisible();
+    await expect(translatedDepot).toHaveCount(0);
+    await expect(hiddenParentDepot).toHaveCount(0);
+    await expect(
+      page.getByText(c.pagerTotal.replace("{{count}}", "2"), { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("checkbox", { name: c.showHidden }).click();
+    await expect(hiddenParentDepot).toBeVisible();
+    await expect(untranslated).toHaveAccessibleDescription("2");
+  },
+);
+
+test(
   "counts can load or be unavailable while catalog filters remain usable",
   browserCase(["@functional"]),
   async ({ page }) => {

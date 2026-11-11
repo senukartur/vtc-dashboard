@@ -134,8 +134,15 @@ export const defaultRows = (locale: "ru" | "en"): Record<CatalogListName, S["Cat
 });
 const depotVisible = (row: CatalogDepotRow) =>
   !row.hidden && !row.company.label.hidden && !row.city.label.hidden;
-const depotUntranslated = (row: CatalogDepotRow) =>
-  row.company.label.englishFallback || row.city.label.englishFallback;
+function depotUntranslated(
+  row: CatalogDepotRow,
+  parents: Partial<Record<CatalogListName, S["CatalogItem"][]>> | undefined,
+) {
+  // Standalone depot fixtures supply English names only. Parent rows can also supply Russian names.
+  const company = parents?.companies?.find((item) => item.id === row.company.id);
+  const city = parents?.cities?.find((item) => item.id === row.city.id);
+  return !company?.nameRu || !city?.nameRu;
+}
 
 function mockPage(rows: unknown[], query: URLSearchParams, paginate: boolean | undefined) {
   if (!paginate) return catalogList(rows);
@@ -252,12 +259,13 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
             cargoes: counts("cargoes"),
             trailers: counts("trailers"),
             depots: {
-              visible: depots.filter(depotVisible).length,
+              visible: depots.filter((r) => !r.hidden).length,
               hidden: depots.filter((r) => r.hidden).length,
               ...(options.maintenanceCounts
                 ? {
-                    untranslated: depots.filter((r) => depotVisible(r) && depotUntranslated(r))
-                      .length,
+                    untranslated: depots.filter(
+                      (r) => depotVisible(r) && depotUntranslated(r, rows),
+                    ).length,
                   }
                 : {}),
             },
@@ -307,7 +315,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       const visible = (options.depots?.[game] ?? []).filter(
         (r) =>
           (hiddenOnly ? r.hidden : includeHidden || depotVisible(r)) &&
-          (!untranslated || depotUntranslated(r)) &&
+          (!untranslated || depotUntranslated(r, options.rows?.[game])) &&
           (!company || r.company.id === company) &&
           (!city || r.city.id === city) &&
           (!search ||
