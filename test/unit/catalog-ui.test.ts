@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { importColumns as serverColumns } from "../../apps/api/src/modules/catalogs/config.ts";
 import {
   type CatalogFilters,
+  catalogListParams,
   catalogTabs,
   fallbackBadge,
   filterParams,
@@ -16,6 +17,14 @@ import {
 } from "../../apps/web/src/features/catalogs/model.ts";
 import { catalogTranslations } from "../../apps/web/src/features/catalogs/translations.ts";
 import {
+  catalogAttempt,
+  depotListSchema,
+  depotSchema,
+  importPreviewSchema,
+  importResultSchema,
+  summarySchema,
+} from "../../apps/web/src/features/catalogs/transport.ts";
+import {
   clampActive,
   comboboxRows,
   leaveAction,
@@ -24,18 +33,6 @@ import {
   selectorDisplay,
   typedText,
 } from "../../apps/web/src/shared/catalog-selectors/combobox.ts";
-import {
-  cityNameText,
-  secondaryCityName,
-} from "../../apps/web/src/shared/catalog-selectors/native-name.ts";
-import {
-  catalogAttempt,
-  depotListSchema,
-  depotSchema,
-  importPreviewSchema,
-  importResultSchema,
-  summarySchema,
-} from "../../apps/web/src/features/catalogs/transport.ts";
 import {
   type CatalogItem,
   catalogParams,
@@ -46,6 +43,10 @@ import {
   listSchema,
   logoSchema,
 } from "../../apps/web/src/shared/catalog-selectors/contracts.ts";
+import {
+  cityNameText,
+  secondaryCityName,
+} from "../../apps/web/src/shared/catalog-selectors/native-name.ts";
 
 const id = "51000000-0000-4000-8000-000000000020",
   regionId = "52000000-0000-4000-8000-000000000020";
@@ -258,7 +259,7 @@ test("filters parse safely from a shared URL and only non-default values are wri
     region: "",
     company: "",
     city: "",
-    hidden: false,
+    maintenance: null,
   });
   expect(
     parseFilters(
@@ -279,7 +280,7 @@ test("filters parse safely from a shared URL and only non-default values are wri
     region: "",
     company: "",
     city: "",
-    hidden: false,
+    maintenance: null,
   });
   expect(parseFilters(new URLSearchParams({ q: "x".repeat(200) })).q).toHaveLength(128);
   const full: CatalogFilters = {
@@ -290,7 +291,7 @@ test("filters parse safely from a shared URL and only non-default values are wri
     region: regionId,
     company: "",
     city: "",
-    hidden: true,
+    maintenance: "all",
   };
   expect(parseFilters(filterParams(full))).toEqual(full);
   expect(filterParams({ ...full, tab: "dlcs", dlc: id, region: regionId }).toString()).toBe(
@@ -298,7 +299,7 @@ test("filters parse safely from a shared URL and only non-default values are wri
   );
   expect(filterParams({ ...full, tab: "cargoes" }).has("region")).toBe(false);
   expect(
-    filterParams({ ...full, game: "ets2", q: "", dlc: "", region: "", hidden: false }).size,
+    filterParams({ ...full, game: "ets2", q: "", dlc: "", region: "", maintenance: null }).size,
   ).toBe(0);
   expect(parseFilters(new URLSearchParams({ tab: "cargoes" })).tab).toBe("cargoes");
   expect(catalogTabs).toEqual([
@@ -322,6 +323,64 @@ test("filters parse safely from a shared URL and only non-default values are wri
   expect(filterParams({ ...depots, tab: "companies" }).has("company")).toBe(false);
   expect(filterParams({ ...depots, tab: "companies" }).has("city")).toBe(false);
   expect(parseFilters(new URLSearchParams({ tab: "depots", company: "nope" })).company).toBe("");
+});
+
+test("maintenance deep links choose one supported mode and map to the exact list arguments", () => {
+  const cases = [
+    ["hidden=true", "hidden=true", { includeHidden: "true" }],
+    ["hidden=only&untranslated=true", "hidden=only", { hidden: "only" }],
+    ["tab=companies&hidden=only&logo=missing", "tab=companies&hidden=only", { hidden: "only" }],
+    [
+      "tab=companies&logo=missing&untranslated=true",
+      "tab=companies&logo=missing",
+      { logo: "missing" },
+    ],
+    [
+      "tab=depots&logo=missing&untranslated=true&hidden=true",
+      "tab=depots&untranslated=true",
+      { untranslated: "true" },
+    ],
+    ["tab=depots&logo=missing&hidden=true", "tab=depots&hidden=true", { includeHidden: "true" }],
+    ["tab=companies&logo=true&hidden=1&untranslated=on", "tab=companies", {}],
+  ] as const;
+  for (const [input, canonical, maintenance] of cases) {
+    const parsed = parseFilters(new URLSearchParams(input));
+    expect(filterParams(parsed).toString()).toBe(canonical);
+    expect(
+      Object.fromEntries(new URLSearchParams(catalogParams(catalogListParams(parsed, "en")))),
+    ).toEqual({
+      game: "ets2",
+      locale: "en",
+      limit: "25",
+      ...maintenance,
+    });
+  }
+  const filters = parseFilters(
+    new URLSearchParams({
+      tab: "depots",
+      company: id,
+      city: regionId,
+      region: regionId,
+      dlc: "base",
+      hidden: "only",
+      q: "A/B",
+    }),
+  );
+  expect(
+    Object.fromEntries(new URLSearchParams(catalogParams(catalogListParams(filters, "ru")))),
+  ).toEqual({
+    game: "ets2",
+    search: "A/B",
+    dlc: "base",
+    hidden: "only",
+    companyId: id,
+    cityId: regionId,
+    locale: "ru",
+    limit: "25",
+  });
+  expect(filterParams({ ...filters, tab: "dlcs", maintenance: "missingLogo" }).has("logo")).toBe(
+    false,
+  );
 });
 
 test("request parameters drop empty values and keep exact IDs and search text", () => {
