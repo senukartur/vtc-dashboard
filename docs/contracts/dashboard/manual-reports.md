@@ -88,7 +88,7 @@ The staged write fields are UTC `startedAt` and `completedAt`, numeric `cargoDam
 
 These reference facts can appear in the private draft and immutable extended revision fields, including `TripPrivate.manualRevision.fields` and the review's private trip. Earlier records can omit them. Company trip summaries and telemetry carry no new manual reference fields. The dates are driver-supplied reference facts. Staff confirmation still determines manual reporting time, rule selection and progress attribution. Write schemas reject authoritative timestamps, credit, and other server-owned fields.
 
-OpenAPI stages separate request schema references for these operations. Fastify and the manual-report service continue to validate the original write schemas until the owning lane activates the new shapes. Legacy `/manual-trips` and `/trips/{tripId}/manual-revisions` writes keep their existing wire format.
+OpenAPI stages separate request schema references for these operations. Fastify and the manual-report service continue to validate the original write schemas until the owning lane activates the new shapes. Legacy `/manual-trips` and `/trips/{tripId}/manual-revisions` writes keep their existing wire format. For the three final-write operations, the `:success` fixtures cover the current response shape, and the `:dated` fixtures pair staged requests with their dated revision responses.
 
 ## Remaining implementation gates
 

@@ -3985,37 +3985,6 @@
         "meta": {
           "requestId": "synthetic-manual-contract"
         }
-      },
-      "request": {
-        "fields": {
-          "game": "ets2",
-          "origin": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001"
-          },
-          "destination": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002"
-          },
-          "cargo": {
-            "status": "unresolved",
-            "label": "Fictional cargo",
-            "reasonCode": "not_listed",
-            "locale": "en",
-            "context": null
-          },
-          "cargoMassKg": "0",
-          "trailerType": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004"
-          },
-          "actualDistanceM": "12500.5",
-          "evidenceIds": [
-            "51000000-0000-4000-8000-000000000006"
-          ],
-          "startedAt": "2026-10-20T09:00:00.000Z",
-          "completedAt": "2026-10-20T10:00:00.000Z"
-        }
       }
     },
     {
@@ -4140,41 +4109,6 @@
         },
         "meta": {
           "requestId": "synthetic-manual-contract"
-        }
-      },
-      "request": {
-        "fields": {
-          "game": "ets2",
-          "origin": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001"
-          },
-          "destination": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002"
-          },
-          "cargo": {
-            "status": "unresolved",
-            "label": "Fictional cargo",
-            "reasonCode": "not_listed",
-            "locale": "en",
-            "context": null
-          },
-          "cargoMassKg": "0",
-          "trailerType": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004"
-          },
-          "actualDistanceM": "12500.5",
-          "evidenceIds": [
-            "51000000-0000-4000-8000-000000000006"
-          ],
-          "startedAt": "2026-10-20T09:00:00.000Z",
-          "completedAt": "2026-10-20T10:00:00.000Z"
-        },
-        "targetTrip": {
-          "tripId": "51000000-0000-4000-8000-000000000007",
-          "expectedVersion": 2
         }
       }
     },
@@ -4419,40 +4353,6 @@
         "meta": {
           "requestId": "synthetic-manual-contract"
         }
-      },
-      "request": {
-        "fields": {
-          "game": "ets2",
-          "origin": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000001"
-          },
-          "destination": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000002"
-          },
-          "cargo": {
-            "status": "unresolved",
-            "label": "Fictional cargo",
-            "reasonCode": "not_listed",
-            "locale": "en",
-            "context": null
-          },
-          "cargoMassKg": "0",
-          "trailerType": {
-            "status": "resolved",
-            "entityId": "51000000-0000-4000-8000-000000000004"
-          },
-          "actualDistanceM": "12500.5",
-          "evidenceIds": [
-            "51000000-0000-4000-8000-000000000006"
-          ],
-          "eventId": null,
-          "comment": null,
-          "startedAt": "2026-10-20T09:00:00.000Z",
-          "completedAt": "2026-10-20T10:00:00.000Z"
-        },
-        "expectedTripVersion": 3
       }
     },
     {

@@ -30,15 +30,23 @@ const fixture = (id: string) => {
 const validator = createSchemaValidator();
 const valid = (name: keyof S, value: unknown) =>
   validator.compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` })(value);
+function withoutOptionalReferences(fields: S["ManualDatedSubmissionFields"]) {
+  const {
+    cargoDamagePercent: _cargoDamagePercent,
+    originCompanyId: _originCompanyId,
+    destinationCompanyId: _destinationCompanyId,
+    ...datedFields
+  } = fields;
+  return datedFields;
+}
 function withoutReferenceDates(fields: S["ManualDatedSubmissionFields"]) {
   const { startedAt: _startedAt, completedAt: _completedAt, ...legacy } = fields;
   return legacy;
 }
-const stagedRequest = fixture("submitManualReport:success")
-  .request as S["ManualReportCreationInput"];
+const stagedRequest = fixture("submitManualReport:dated").request as S["ManualReportCreationInput"];
 const request: S["ManualReportInput"] = {
   ...stagedRequest,
-  fields: withoutReferenceDates(stagedRequest.fields),
+  fields: withoutReferenceDates(withoutOptionalReferences(stagedRequest.fields)),
 };
 
 test("published legacy manual schema objects remain unchanged from the contract-stage base", () => {
@@ -238,11 +246,16 @@ test("staged final submissions require both dates and live schemas retain the un
     expect(post.requestBody.content["application/json"].schema.$ref).toBe(
       `#/components/schemas/${staged}`,
     );
-    const minimal = fixture(`${operation}:success`).request as {
-      fields: S["ManualDatedSubmissionFields"];
-    };
+    expect(fixture(`${operation}:success`)).not.toHaveProperty("request");
+    const example = fixture(`${operation}:dated`);
+    const next = example.request as { fields: S["ManualDatedSubmissionFields"] };
+    const minimal = { ...next, fields: withoutOptionalReferences(next.fields) };
     const old = { ...minimal, fields: withoutReferenceDates(minimal.fields) };
-    const next = fixture(`${operation}:dated`).request as typeof minimal;
+    const report = example.response.data as S["ManualReport"];
+    expect(report.currentRevision.fields).toMatchObject({
+      startedAt: next.fields.startedAt,
+      completedAt: next.fields.completedAt,
+    });
     expect(valid(live, old)).toBe(true);
     expect(valid(staged, old)).toBe(false);
     expect(valid(staged, minimal)).toBe(true);
