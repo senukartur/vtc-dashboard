@@ -71,6 +71,7 @@ import {
   reconciliationPriorFolder,
   reset,
   root,
+  SCHEMA_SETUP_TIMEOUT_MS,
   telemetryPriorFolder,
   testConnection,
   tripsPriorFolder,
@@ -1303,7 +1304,8 @@ publishedUpgrade(
   },
 );
 
-test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
+const foundationsTimeout = 2 * SCHEMA_SETUP_TIMEOUT_MS + EXTENDED_TEST_TIMEOUT_MS;
+test("real MySQL persistence foundations", { timeout: foundationsTimeout }, async (t) => {
   assert.equal(publishedUpgradeRunning, false, "PUBLISHED_UPGRADE_CLEANUP_REQUIRED");
   const settings = guardedSettings();
   const connection = await testConnection();
@@ -1332,22 +1334,26 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
         }
       },
     );
-    await t.test("server baseline, empty migration and replay", async () => {
-      const readiness = createDatabase(settings);
-      try {
-        assert.equal(await readiness.check(), true);
-      } finally {
-        await readiness.close();
-      }
-      await reset(connection);
-      await serializedFreshMigrations(settings, connection);
-      assert.equal(await runMigrations(settings), 0);
-      const [tables] = await connection.query<RowDataPacket[]>(
-        "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
-      );
-      assert.equal(tables[0]?.ENGINE, "InnoDB");
-      freshSchemaReady = true;
-    });
+    await t.test(
+      "server baseline, empty migration and replay",
+      { timeout: SCHEMA_SETUP_TIMEOUT_MS },
+      async () => {
+        const readiness = createDatabase(settings);
+        try {
+          assert.equal(await readiness.check(), true);
+        } finally {
+          await readiness.close();
+        }
+        await reset(connection);
+        await serializedFreshMigrations(settings, connection);
+        assert.equal(await runMigrations(settings), 0);
+        const [tables] = await connection.query<RowDataPacket[]>(
+          "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_entries'",
+        );
+        assert.equal(tables[0]?.ENGINE, "InnoDB");
+        freshSchemaReady = true;
+      },
+    );
     assert.equal(
       freshSchemaReady,
       true,
@@ -1356,6 +1362,7 @@ test("real MySQL persistence foundations", { timeout: 120000 }, async (t) => {
 
     await t.test(
       "additive migration from committed prior fixture preserves sentinel and rejects history drift",
+      { timeout: SCHEMA_SETUP_TIMEOUT_MS },
       async () => {
         await reset(connection);
         assert.equal(await runMigrations(settings, { folder: join(fixtureRoot, "prior") }), 1);

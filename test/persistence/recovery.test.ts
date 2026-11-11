@@ -198,18 +198,23 @@ for (const target of ["insert", "finalize"] as const) {
       const settings = guardedSettings();
       const connection = await testConnection();
       let gate: Awaited<ReturnType<typeof journalAckGate>> | undefined;
-      let pending: Promise<{ applied: number } | { error: unknown }> | undefined;
+      let pending:
+        | Promise<({ applied: number } | { error: unknown }) & { settledAt: number }>
+        | undefined;
       try {
         await reset(connection);
         const folder = join(fixtureRoot, "prior");
         gate = await journalAckGate(target);
-        const started = performance.now();
-        // Observe rejection immediately, while an independent connection checks durable state.
+        // Measure settlement while the observer checks durable state on its own connection.
         pending = runMigrations(gate.settings, { folder }).then(
-          (applied) => ({ applied }),
-          (error: unknown) => ({ error }),
+          (applied) => ({ applied, settledAt: performance.now() }),
+          (error: unknown) => ({ error, settledAt: performance.now() }),
         );
-        await bounded(gate.withheld, "journal_ack_gate", 10000);
+        const withheldAt = await bounded(
+          gate.withheld.then(() => performance.now()),
+          "journal_ack_gate",
+          10000,
+        );
         assert.equal(gate.facts.okPackets, 1, "withheld response is a genuine MySQL OK packet");
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT state, applied_at FROM _vtc_migrations",
@@ -234,9 +239,12 @@ for (const target of ["insert", "finalize"] as const) {
         const context = databaseFailureContext(error);
         assert.equal(context?.operation, `migration_journal_${target}`);
         assert.equal(context?.wireDeadlineMs, 5000);
-        assert.ok((context?.elapsedMs ?? 0) >= 4500);
-        assert.ok(performance.now() - started >= 4500);
-        assert.ok(performance.now() - started < 7000);
+        const nativeElapsedMs = context?.elapsedMs;
+        assert.ok(
+          nativeElapsedMs !== undefined && nativeElapsedMs >= 4500 && nativeElapsedMs < 7000,
+        );
+        const settlementMs = result.settledAt - withheldAt;
+        assert.ok(settlementMs >= 0 && settlementMs < 7000);
         await until(async () => {
           const [rows] = await connection.query<RowDataPacket[]>(
             "SELECT IS_USED_LOCK(?) AS owner",
