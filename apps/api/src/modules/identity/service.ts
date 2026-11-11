@@ -25,6 +25,7 @@ import {
   sql,
   user,
 } from "@vtc/db/identity-schema";
+import type { SQL, SQLWrapper } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import {
   engine,
@@ -1604,17 +1605,22 @@ export function createIdentity(
     async administrationMembersInTransaction(
       tx: TxContext,
       actor: Actor,
-      after: string | null,
-      limit: number,
-      status?: "active" | "inactive",
-      targetId?: string,
-      filters: AdministrationMemberFilters = {},
+      options: AdministrationMemberFilters & {
+        after: string | null;
+        limit: number;
+        status?: "active" | "inactive" | undefined;
+        targetId?: string | undefined;
+        reportingActivity?: ((ownerRef: SQLWrapper, countedAt: string) => SQL) | undefined;
+      },
     ) {
+      const { after, limit, status, targetId, reportingActivity } = options;
       const current = await lockCompany(tx);
       await checkActor(tx, actor, current);
       requireCapability(actor, "members.manage");
       if (!Number.isInteger(limit) || limit < 1 || limit > 101) throw identityError(422);
-      const matchingMembers = administrationMemberPredicate(current.directorUserId, filters);
+      const matchingMembers = administrationMemberPredicate(current.directorUserId, options);
+      const matchingStatus = status ? eq(membership.status, status) : undefined;
+      const countedAt = targetId ? null : now().toISOString();
       const rows = await client(tx)
         .select({
           id: user.id,
@@ -1630,7 +1636,7 @@ export function createIdentity(
         .where(
           and(
             after ? gt(user.id, applicationId(after)) : undefined,
-            status ? eq(membership.status, status) : undefined,
+            matchingStatus,
             targetId ? eq(user.id, applicationId(targetId)) : undefined,
             matchingMembers,
           ),
@@ -1657,23 +1663,39 @@ export function createIdentity(
           ...(current.directorUserId === row.id ? ["director" as const] : []),
         ].sort(),
       }));
-      if (targetId) return { rows: items };
+      if (countedAt === null) return { rows: items };
 
+      const recentlyActive =
+        reportingActivity && actor.capabilities.includes("company.read")
+          ? and(matchingStatus, reportingActivity(user.id, countedAt))
+          : undefined;
       const [totals] = await client(tx)
         .select({
           inCompany: sql<
             number | string
           >`count(case when ${membership.status} = 'active' then 1 end)`,
           left: sql<number | string>`count(case when ${membership.status} = 'inactive' then 1 end)`,
+          ...(recentlyActive
+            ? {
+                droveLast30Days: sql<
+                  number | string
+                >`count(case when ${recentlyActive} then 1 end)`,
+              }
+            : {}),
         })
         .from(user)
         .innerJoin(membership, eq(membership.userId, user.id))
         .where(matchingMembers);
       return {
         rows: items,
-        statusCounts: {
-          inCompany: Number(totals?.inCompany ?? 0),
-          left: Number(totals?.left ?? 0),
+        counts: {
+          countedAt,
+          currentCapabilities: actor.capabilities,
+          statusCounts: {
+            inCompany: Number(totals?.inCompany ?? 0),
+            left: Number(totals?.left ?? 0),
+            ...(recentlyActive ? { droveLast30Days: Number(totals?.droveLast30Days ?? 0) } : {}),
+          },
         },
       };
     },
