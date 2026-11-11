@@ -369,6 +369,16 @@ export function createManualReports(
     await privateTrip(tx, actor, row.tripId);
     return row;
   }
+  function editingDraftsFor(ownerId: string) {
+    return and(eq(manualDrafts.ownerId, ownerId), eq(manualDrafts.state, "editing"));
+  }
+  async function countEditingDrafts(tx: TxContext, ownerId: string) {
+    const [row] = await c(tx)
+      .select({ total: sql<number | string>`count(*)` })
+      .from(manualDrafts)
+      .where(editingDraftsFor(ownerId));
+    return Number(row?.total ?? 0);
+  }
   async function ownerDraft(tx: TxContext, actor: Actor, id: string, includeDiscarded = false) {
     const current = await authority(tx, actor, true);
     const [row] = await c(tx)
@@ -1248,21 +1258,20 @@ export function createManualReports(
         const { locale } = await authority(tx, actor, true);
         const scope = page.state === "editing" ? "drafts/editing" : "drafts",
           { limit, after } = pageCursor(actor, scope, page);
-        const owner = eq(manualDrafts.ownerId, actor.userId);
-        const editing = eq(manualDrafts.state, "editing");
-        const [count] = await c(tx)
-          .select({ total: sql<number | string>`count(*)` })
-          .from(manualDrafts)
-          .where(and(owner, editing));
+        const visibleDrafts =
+          page.state === "editing"
+            ? editingDraftsFor(actor.userId)
+            : and(
+                eq(manualDrafts.ownerId, actor.userId),
+                inArray(manualDrafts.state, ["editing", "submitted"]),
+              );
+        const editingCount = await countEditingDrafts(tx, actor.userId);
         const rows = await c(tx)
           .select()
           .from(manualDrafts)
           .where(
             and(
-              owner,
-              page.state === "editing"
-                ? editing
-                : inArray(manualDrafts.state, ["editing", "submitted"]),
+              visibleDrafts,
               after
                 ? or(
                     lt(manualDrafts.createdAt, after.time),
@@ -1280,9 +1289,23 @@ export function createManualReports(
         return {
           ...result,
           items: await labeledDrafts(tx, result.items, locale),
-          editingCount: Number(count?.total ?? 0),
+          editingCount,
         };
       });
+    },
+    /** The caller authorizes trips.submit_own for viewerId in this transaction. */
+    async workspaceEditingDraftsInTransaction(
+      tx: TxContext,
+      viewerId: string,
+    ): Promise<{ count: number; items: { draftId: string; updatedAt: string }[] }> {
+      const count = await countEditingDrafts(tx, viewerId);
+      const items = await c(tx)
+        .select({ draftId: manualDrafts.id, updatedAt: manualDrafts.updatedAt })
+        .from(manualDrafts)
+        .where(editingDraftsFor(viewerId))
+        .orderBy(desc(manualDrafts.createdAt), desc(manualDrafts.id))
+        .limit(5);
+      return { count, items };
     },
     submitDraft(
       actor: Actor,

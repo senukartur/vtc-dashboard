@@ -1405,8 +1405,20 @@ test("draft list pages editing and submitted states with owner-bound cursors and
   await add(other);
   instant++;
   const latest = await add();
+  instant++;
+  const edited = await manual.replaceDraft(owner, first.id, newId(), first.version, { fields: {} });
   await manual.submitDraft(owner, sent.id, newId(), sent.version, { fields: fields(image.id) });
   await manual.deleteDraft(owner, discarded.id, newId(), discarded.version);
+
+  const earlier = [edited, second].sort((left, right) => right.id.localeCompare(left.id));
+  const workspace = await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.submit_own");
+    return manual.workspaceEditingDraftsInTransaction(tx, owner.userId);
+  });
+  expect(workspace).toEqual({
+    count: 3,
+    items: [latest, ...earlier].map(({ id, updatedAt }) => ({ draftId: id, updatedAt })),
+  });
 
   const list = "/api/v1/me/manual-drafts";
   const app = await createApp({
@@ -1619,16 +1631,26 @@ test("draft list trims the keyset sentinel before bounded catalog lookups and su
       updatedAt: timestamp,
     }));
   const editing = rows(101, owner.userId, "editing");
-  await unit.run((tx) =>
-    unit
+  const newestIds = editing
+    .map(({ id }) => id)
+    .sort()
+    .reverse();
+  await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.submit_own");
+    await unit
       .client(tx)
       .insert(manualDrafts)
       .values([
         ...editing,
         ...rows(300, owner.userId, "discarded"),
         ...rows(200, other.userId, "editing"),
-      ]),
-  );
+      ]);
+    // These rows are still uncommitted and visible to the caller's transaction.
+    expect(await manual.workspaceEditingDraftsInTransaction(tx, owner.userId)).toEqual({
+      count: 101,
+      items: newestIds.slice(0, 5).map((draftId) => ({ draftId, updatedAt: timestamp })),
+    });
+  });
 
   const labelBatchSizes: number[] = [];
   const measured = createManualReports(
@@ -1671,12 +1693,7 @@ test("draft list trims the keyset sentinel before bounded catalog lookups and su
   expect(last.nextCursor).toBeNull();
   expect(last.editingCount).toBe(101);
   expect(labelBatchSizes).toEqual([200, 100, 2, 1]);
-  expect([...first.items, ...last.items].map(({ id }) => id)).toEqual(
-    editing
-      .map(({ id }) => id)
-      .sort()
-      .reverse(),
-  );
+  expect([...first.items, ...last.items].map(({ id }) => id)).toEqual(newestIds);
 
   await control.query("ANALYZE TABLE manual_drafts");
   const plans = [
