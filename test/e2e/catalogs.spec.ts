@@ -4,9 +4,11 @@ import { catalogTranslations } from "../../apps/web/src/features/catalogs/transl
 import { rgbaLogo } from "../fixtures/catalogs/logos.ts";
 import {
   cargoRowId,
+  catalogInstant,
   catalogItem,
   catalogLanguage,
   catalogList,
+  catalogTimezone,
   chooseCatalogRow,
   companyRowId,
   defaultRows,
@@ -1662,3 +1664,307 @@ test(
     expect(requests.filter((url) => url.pathname.startsWith("/api/v1/admin/"))).toEqual([]);
   },
 );
+
+const maintenanceChip = (page: Page, label: string) =>
+  page.getByRole("button", { name: label, exact: true });
+
+test(
+  "maintenance deep links and game/tab changes keep effective filters and discard old pages",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const companies = Array.from({ length: 26 }, (_, index) =>
+      catalogItem(
+        `66000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
+        `Fictional terminal ${String(index + 1).padStart(2, "0")}`,
+        "en",
+        {
+          nameRu: index < 3 ? null : "Вымышленный терминал",
+          logo: index < 5 ? null : logoRef(),
+        },
+      ),
+    );
+    companies.unshift(
+      catalogItem(companyRowId, "Fictional closed terminal", "en", { hidden: true }),
+    );
+    const { requests } = await mockCatalogs(page, false, {
+      maintenanceCounts: true,
+      paginate: true,
+      rows: { ets2: { companies }, ats: { companies: [] } },
+    });
+    await open(
+      page,
+      "en",
+      "?tab=companies&q=terminal&dlc=base&hidden=only&untranslated=true&logo=missing",
+    );
+    const hidden = maintenanceChip(page, c.hiddenOnly);
+    const untranslated = maintenanceChip(page, c.untranslated);
+    const noLogo = maintenanceChip(page, c.missingLogo);
+    const showHidden = page.getByRole("checkbox", { name: c.showHidden });
+    const currentSearch = () => new URL(page.url()).searchParams;
+    const latestList = () =>
+      requests.findLast((url) => url.pathname === "/api/v1/catalogs/companies")?.searchParams;
+    await expect(hidden).toHaveAccessibleDescription("1");
+    await expect(untranslated).toHaveAccessibleDescription("3");
+    await expect(noLogo).toHaveAccessibleDescription("5");
+    await expect(hidden).toHaveAttribute("aria-pressed", "true");
+    await expect(showHidden).not.toBeChecked();
+    await expect(page).toHaveURL(/\?tab=companies&q=terminal&dlc=base&hidden=only$/);
+    await expect(rowOf(page, "Fictional closed terminal")).toBeVisible();
+    expect(Object.fromEntries(latestList() ?? [])).toEqual({
+      game: "ets2",
+      search: "terminal",
+      hidden: "only",
+      dlc: "base",
+      locale: "en",
+      limit: "25",
+    });
+    await expect(page.getByRole("button", { name: c.edit, exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: c.addCompanies, exact: true })).toHaveCount(0);
+
+    await hidden.click();
+    await expect(rowOf(page, "Fictional terminal 01")).toBeVisible();
+    await page.getByRole("button", { name: c.next, exact: true }).click();
+    await expect(rowOf(page, "Fictional terminal 26")).toBeVisible();
+    expect(latestList()?.get("cursor")).toBe("25");
+    await untranslated.click();
+    await expect(rowOf(page, "Fictional terminal 01")).toBeVisible();
+    await expect(untranslated).toHaveAttribute("aria-pressed", "true");
+    expect(currentSearch().get("untranslated")).toBe("true");
+    expect(latestList()?.get("untranslated")).toBe("true");
+    expect(latestList()?.has("cursor")).toBe(false);
+    await untranslated.click();
+    await expect(rowOf(page, "Fictional terminal 01")).toBeVisible();
+    await expect(rowOf(page, "Fictional terminal 26")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: c.previous, exact: true })).toBeDisabled();
+
+    await noLogo.click();
+    await expect(noLogo).toHaveAttribute("aria-pressed", "true");
+    expect(currentSearch().get("logo")).toBe("missing");
+    await page.reload();
+    await expect(noLogo).toHaveAttribute("aria-pressed", "true");
+    await expect(rowOf(page, "Fictional terminal 05")).toBeVisible();
+    await expect(rowOf(page, "Fictional terminal 06")).toHaveCount(0);
+    expect(latestList()?.get("logo")).toBe("missing");
+    expect(latestList()?.get("search")).toBe("terminal");
+    expect(latestList()?.get("dlc")).toBe("base");
+
+    await showHidden.click();
+    await expect(showHidden).toBeChecked();
+    await expect(rowOf(page, "Fictional closed terminal")).toBeVisible();
+    await expect(noLogo).toHaveAttribute("aria-pressed", "false");
+    expect(currentSearch().get("hidden")).toBe("true");
+    expect(latestList()?.get("includeHidden")).toBe("true");
+    expect(latestList()?.has("logo")).toBe(false);
+    await page.reload();
+    await expect(showHidden).toBeChecked();
+
+    await noLogo.click();
+    await page.getByRole("button", { name: "ATS", exact: true }).click();
+    await expect(noLogo).toHaveAttribute("aria-pressed", "true");
+    await expect(noLogo).toHaveAccessibleDescription("0");
+    await expect(page.getByText(c.empty, { exact: true })).toBeVisible();
+    expect(currentSearch().get("game")).toBe("ats");
+    expect(latestList()?.get("game")).toBe("ats");
+    await tab(page, c.tabDepots).click();
+    await expect(noLogo).toHaveCount(0);
+    await expect(page).toHaveURL(/\?game=ats&tab=depots&q=terminal$/);
+    await expect(hidden).toHaveAccessibleDescription("0");
+  },
+);
+
+test(
+  "English depot maintenance uses both parent translations and keeps the legacy tab count",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    const hiddenParent = depotRow("67000000-0000-4000-8000-000000000024", brokenCo, northCity);
+    hiddenParent.company.label.hidden = true;
+    await mockCatalogs(page, false, {
+      maintenanceCounts: true,
+      rows: {
+        ets2: {
+          companies: [
+            catalogItem(freight.id, freight.name, "en", { nameRu: "Вымышленный перевозчик" }),
+            catalogItem(plainCo.id, plainCo.name),
+            catalogItem(brokenCo.id, brokenCo.name, "en", { hidden: true }),
+          ],
+          cities: [
+            catalogItem(northCity.id, northCity.name),
+            catalogItem(southCity.id, southCity.name, "en", { nameRu: "Вымышленный южный город" }),
+          ],
+        },
+      },
+      depots: {
+        ets2: [
+          depotRow(depotRowId, freight, northCity),
+          depotRow("67000000-0000-4000-8000-000000000021", plainCo, southCity),
+          depotRow("67000000-0000-4000-8000-000000000022", freight, southCity),
+          hiddenParent,
+        ],
+      },
+    });
+    await open(page, "en", "?tab=depots");
+    const untranslated = maintenanceChip(page, c.untranslated);
+    const translatedDepot = rowOf(page, freight.name).filter({ hasText: southCity.name });
+    const hiddenParentDepot = rowOf(page, brokenCo.name);
+    await expect(tab(page, c.tabDepots).getByText("4", { exact: true })).toBeVisible();
+    await expect(maintenanceChip(page, c.hiddenOnly)).toHaveAccessibleDescription("0");
+    await expect(untranslated).toHaveAccessibleDescription("2");
+    await expect(translatedDepot).toBeVisible();
+    await expect(hiddenParentDepot).toHaveCount(0);
+
+    await untranslated.click();
+    await expect(untranslated).toHaveAttribute("aria-pressed", "true");
+    await expect(rowOf(page, freight.name).filter({ hasText: northCity.name })).toBeVisible();
+    await expect(rowOf(page, plainCo.name).filter({ hasText: southCity.name })).toBeVisible();
+    await expect(translatedDepot).toHaveCount(0);
+    await expect(hiddenParentDepot).toHaveCount(0);
+    await expect(
+      page.getByText(c.pagerTotal.replace("{{count}}", "2"), { exact: true }),
+    ).toBeVisible();
+
+    await page.getByRole("checkbox", { name: c.showHidden }).click();
+    await expect(hiddenParentDepot).toBeVisible();
+    await expect(untranslated).toHaveAccessibleDescription("2");
+  },
+);
+
+test(
+  "counts can load or be unavailable while catalog filters remain usable",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    let releaseSummary = () => {};
+    const summaryGate = new Promise<void>((resolve) => {
+      releaseSummary = resolve;
+    });
+    await mockCatalogs(page, true, { summaryGate, failures: { "/catalogs/summary": 503 } });
+    try {
+      await open(page);
+      await expect(rowOf(page, "Fictional city")).toBeVisible();
+      const hidden = maintenanceChip(page, c.hiddenOnly);
+      await expect(hidden).toHaveAccessibleDescription(c.countLoading);
+      await hidden.click();
+      await expect(page.getByText(c.empty, { exact: true })).toBeVisible();
+      releaseSummary();
+      await expect(hidden).toHaveAccessibleDescription(c.countUnavailable);
+      await expect(hidden).toHaveAttribute("aria-pressed", "true");
+      await hidden.click();
+      await expect(rowOf(page, "Fictional city")).toBeVisible();
+    } finally {
+      releaseSummary();
+    }
+  },
+);
+
+for (const locale of ["en", "ru"] as const) {
+  test(
+    `${locale} maintenance chips and row metadata fit the supported layouts`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const c = catalogTranslations[locale];
+      const company = catalogItem(
+        companyRowId,
+        "Fictional company with a long logistics terminal name",
+        locale,
+        {
+          nameRu: "Вымышленная компания с длинным названием логистического терминала",
+          code: "fictional_long_terminal",
+          depotCount: 0,
+          updatedAt: catalogInstant,
+        },
+      );
+      company.display = {
+        ...company.display,
+        label: (locale === "ru" ? company.nameRu : company.nameEn) ?? company.nameEn,
+        renderedLocale: locale,
+        englishFallback: false,
+      };
+      await mockCatalogs(page, true, {
+        displayTimezone: catalogTimezone,
+        depots: {
+          ets2: [depotRow(depotRowId, freight, northCity, { updatedAt: catalogInstant }, locale)],
+        },
+        rows: {
+          ets2: {
+            companies: [
+              company,
+              catalogItem(depotRowId, "Fictional legacy company", locale),
+              catalogItem(plainCo.id, plainCo.name, locale, { depotCount: 1 }),
+            ],
+          },
+        },
+      });
+      await open(page, locale, "?tab=companies");
+      const hidden = maintenanceChip(page, c.hiddenOnly);
+      const noLogo = maintenanceChip(page, c.missingLogo);
+      await expect(hidden).toHaveAccessibleDescription("0");
+      await expect(noLogo).toHaveAccessibleDescription(c.countUnavailable);
+      await page.getByRole("checkbox", { name: c.showHidden }).focus();
+      await page.keyboard.press("Tab");
+      await expect(hidden).toBeFocused();
+      const outline = await hidden.evaluate((button) => getComputedStyle(button).outlineStyle);
+      expect(outline).not.toBe("none");
+      await page.keyboard.press("Space");
+      await expect(hidden).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByText(c.empty, { exact: true })).toBeVisible();
+      await expect(hidden).toBeFocused();
+      await page.keyboard.press("Space");
+      await expect(hidden).toHaveAttribute("aria-pressed", "false");
+
+      const table = page.getByTestId("catalog-table");
+      const cards = page.getByTestId("catalog-cards");
+      if (phone(page)) {
+        await expect(cards).toBeVisible();
+        await expect(table).toBeHidden();
+        expect((await hidden.boundingBox())?.height).toBeGreaterThanOrEqual(40);
+        await expect(rowOf(page, company.code)).toContainText(
+          locale === "en" ? "0 depots" : "0 депо",
+        );
+        await expect(rowOf(page, plainCo.name)).toContainText(
+          locale === "en" ? "1 depot" : "1 депо",
+        );
+      } else {
+        await expect(table).toBeVisible();
+        await expect(cards).toBeHidden();
+        await expect(table.getByRole("columnheader", { name: c.colUpdatedAt })).toBeVisible();
+        await expect(table.getByRole("columnheader", { name: c.colDepotCount })).toBeVisible();
+        await expect(
+          rowOf(page, company.code).getByRole("cell", { name: "0", exact: true }),
+        ).toBeVisible();
+      }
+      const formatted = new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "ru-RU", {
+        timeZone: catalogTimezone,
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(catalogInstant));
+      const time = rowOf(page, company.code).locator("time");
+      await expect(time).toHaveAttribute("datetime", catalogInstant);
+      await expect(time).toHaveText(formatted);
+      const legacy = rowOf(page, "Fictional legacy company");
+      await expect(legacy.locator("time")).toHaveCount(0);
+      await expect(legacy.getByText(c.metadataUnavailable, { exact: true })).toHaveCount(2);
+      await noLogo.click();
+      await expect(noLogo).toHaveAttribute("aria-pressed", "true");
+      await expect(time).toBeVisible();
+      await capture(page, info, `maintenance-${locale}`);
+      if (page.viewportSize()?.width === 768) {
+        const scrollRegion = page.getByRole("region", { name: c.tabCompanies, exact: true });
+        await scrollRegion.focus();
+        await expect(scrollRegion).toBeFocused();
+        await page.keyboard.press("ArrowRight");
+        await expect
+          .poll(() => scrollRegion.evaluate((region) => region.scrollLeft))
+          .toBeGreaterThan(0);
+      }
+
+      await tab(page, c.tabDepots).click();
+      await expect(noLogo).toHaveCount(0);
+      const depotTime = rowOf(page, freight.name).locator("time");
+      await expect(depotTime).toHaveAttribute("datetime", catalogInstant);
+      await expect(depotTime).toHaveText(formatted);
+      await fitsViewport(page);
+    },
+  );
+}

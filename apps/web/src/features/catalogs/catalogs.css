@@ -82,6 +82,30 @@
   color: var(--secondary);
   font-size: var(--font-small);
 }
+.catalog-page .catalog-maintenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.catalog-page .catalog-maintenance .button {
+  gap: 6px;
+  min-height: var(--target-min);
+  border-radius: 999px;
+}
+.catalog-page .catalog-maintenance .button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-active);
+  font-weight: 700;
+}
+.catalog-page .catalog-chip-count {
+  min-width: 2ch;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
 .catalog-page .catalog-muted {
   color: var(--muted);
   font-size: var(--font-small);
@@ -96,6 +120,9 @@
 }
 .catalog-page .catalog-table-wrap {
   overflow-x: auto;
+}
+.catalog-page .catalog-table-wrap:focus-visible {
+  outline-offset: 2px;
 }
 .catalog-page table.catalog-table {
   width: 100%;
@@ -116,6 +143,10 @@
   border-bottom: 1px solid var(--border);
   padding: 0 10px;
   height: 34px;
+  white-space: nowrap;
+}
+.catalog-page .catalog-table .catalog-updated {
+  font-size: var(--font-small);
   white-space: nowrap;
 }
 .catalog-page .catalog-table tr[data-hidden="true"] td {
@@ -339,6 +370,14 @@
   min-width: 260px;
   overflow: visible;
 }
+.catalog-page .catalog-table[data-list="companies"] .catalog-name-ru {
+  min-width: 9rem;
+}
+.catalog-page .catalog-table[data-list="companies"] .catalog-code,
+.catalog-page .catalog-table[data-list="companies"] .catalog-updated,
+.catalog-page .catalog-table[data-list="depots"] .catalog-updated {
+  min-width: 7rem;
+}
 .catalog-page .catalog-table[data-list="companies"] td:last-child,
 .catalog-page .catalog-table[data-list="depots"] td:last-child {
   white-space: nowrap;
@@ -394,6 +433,9 @@
   }
   .catalog-page .catalog-cards {
     display: flex;
+  }
+  .catalog-page .catalog-maintenance .button {
+    min-height: 40px;
   }
   .catalog-page .catalog-mobile-bar {
     position: sticky;

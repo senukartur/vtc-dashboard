@@ -44,8 +44,12 @@ const inputSchema: Record<CatalogList, string> = {
   cargoes: "CatalogCargoInput",
   trailers: "CatalogTrailerInput",
 };
-// Query strings arrive as text; this explicit enum is the only accepted boolean spelling.
-const includeHidden = { type: "string", enum: ["true", "false"] };
+// Validate literal query strings before converting flags for the service.
+const listFilters = {
+  includeHidden: { type: "string", enum: ["true", "false"] },
+  hidden: { type: "string", const: "only" },
+  untranslated: { type: "string", const: "true" },
+};
 const multipartOverhead = 16384;
 // A batch part carries its own boundary and headers; this allows for the longest file names.
 const batchOverhead = CATALOG_LOGO_BULK_MAX_FILES * 1024;
@@ -233,12 +237,19 @@ export async function registerCatalogRoutes(
     game: Game;
     search?: string;
     includeHidden?: "true" | "false";
+    hidden?: "only";
+    untranslated?: "true";
     dlc?: string;
     regionId?: string;
     locale?: "en" | "ru";
     limit?: number;
     cursor?: string;
   };
+  const normalizeListQuery = <T extends ListQuery>(query: T) => ({
+    ...query,
+    includeHidden: query.includeHidden === "true",
+    untranslated: query.untranslated === "true",
+  });
   app.get<{ Querystring: { game: Game } }>(
     "/api/v1/catalogs/summary",
     {
@@ -251,7 +262,7 @@ export async function registerCatalogRoutes(
       envelope(request, await catalogs.summary(await actor(request), request.query.game)),
   );
   for (const list of catalogLists) {
-    app.get<{ Querystring: ListQuery }>(
+    app.get<{ Querystring: ListQuery & { logo?: "missing" } }>(
       `/api/v1/catalogs/${list}`,
       {
         schema: {
@@ -260,8 +271,9 @@ export async function registerCatalogRoutes(
               ...page,
               game,
               search: { type: "string", minLength: 1, maxLength: 128 },
-              includeHidden,
+              ...listFilters,
               locale,
+              ...(list === "companies" ? { logo: { type: "string", const: "missing" } } : {}),
               ...(list === "dlcs" ? {} : { dlc: { anyOf: [{ const: "base" }, uuid] } }),
               ...(list === "cities" ? { regionId: uuid } : {}),
             },
@@ -270,16 +282,11 @@ export async function registerCatalogRoutes(
           response: { 200: ref("EnvelopeCatalogItemList") },
         },
       },
-      async (request) => {
-        const query = request.query;
-        return envelope(
+      async (request) =>
+        envelope(
           request,
-          await catalogs.list(await actor(request), list, {
-            ...query,
-            includeHidden: query.includeHidden === "true",
-          }),
-        );
-      },
+          await catalogs.list(await actor(request), list, normalizeListQuery(request.query)),
+        ),
     );
     app.get<{ Params: { id: string }; Querystring: { locale?: "en" | "ru" } }>(
       `/api/v1/catalogs/${list}/:id`,
@@ -374,7 +381,7 @@ export async function registerCatalogRoutes(
             companyId: uuid,
             cityId: uuid,
             search: { type: "string", minLength: 1, maxLength: 128 },
-            includeHidden,
+            ...listFilters,
             locale,
             dlc: { anyOf: [{ const: "base" }, uuid] },
           },
@@ -383,16 +390,11 @@ export async function registerCatalogRoutes(
         response: { 200: ref("EnvelopeCatalogDepotList") },
       },
     },
-    async (request) => {
-      const query = request.query;
-      return envelope(
+    async (request) =>
+      envelope(
         request,
-        await catalogs.listDepots(await actor(request), {
-          ...query,
-          includeHidden: query.includeHidden === "true",
-        }),
-      );
-    },
+        await catalogs.listDepots(await actor(request), normalizeListQuery(request.query)),
+      ),
   );
   app.post<{ Body: S["CatalogDepotInput"] }>(
     "/api/v1/admin/catalogs/depots",

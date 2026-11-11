@@ -9,6 +9,7 @@ import { bounded, until } from "../support/concurrency.ts";
 import { journalAckGate } from "./journal-ack-gate.ts";
 import {
   analyticsPriorFolder,
+  catalogTimestampsPriorFolder,
   companyCatalogsPriorFolder,
   decisionsPriorFolder,
   EXTENDED_TEST_TIMEOUT_MS,
@@ -123,7 +124,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 23);
+      assert.equal(await runMigrations(settings), 24);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -180,7 +181,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 23);
+      assert.equal(await runMigrations(settings), 24);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -355,7 +356,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 23);
+      assert.equal(await runMigrations(guardedSettings()), 24);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -450,7 +451,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 23);
+        assert.equal(await runMigrations(settings), 24);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -508,7 +509,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 23);
+      assert.equal(await runMigrations(guardedSettings()), 24);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -563,7 +564,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 23);
+      assert.equal(await runMigrations(guardedSettings()), 24);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -617,7 +618,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 23);
+      assert.equal(await runMigrations(guardedSettings()), 24);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -700,7 +701,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 23);
+      assert.equal(await runMigrations(settings), 24);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1144,7 +1145,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 4);
+      assert.equal(await runMigrations(settings), 5);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1227,7 +1228,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 23);
+      assert.equal(history.length, 24);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -1307,8 +1308,13 @@ await recoveryTest(
         "INSERT INTO catalog_cities (id,game,code,name_en,dlc_id) VALUES (?,'ets2','synthetic_city','Synthetic city',?)",
         [id(91), id(90)],
       );
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      const companyCatalogs = await catalogTimestampsPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder: companyCatalogs }), 1);
+        assert.equal(await runMigrations(settings, { folder: companyCatalogs }), 0);
+      } finally {
+        await rm(companyCatalogs, { recursive: true });
+      }
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_dlcs"), 1);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_cities"), 1);
       for (const table of ["catalog_companies", "catalog_company_cities", "catalog_company_logos"])
@@ -1351,6 +1357,117 @@ await recoveryTest(
         connection.execute("DELETE FROM catalog_companies WHERE id=?", [id(92)]),
         hasCode("ER_ROW_IS_REFERENCED_2"),
       );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "catalog timestamps upgrade 0022 with one UTC backfill and preserve legacy inserts",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    const tables = [
+      "catalog_dlcs",
+      "catalog_regions",
+      "catalog_cities",
+      "catalog_cargoes",
+      "catalog_trailers",
+      "catalog_companies",
+      "catalog_company_cities",
+    ] as const;
+    async function seedRows(base: number) {
+      const id = (offset: number) => catalogUpgradeId(base + offset);
+      const code = `synthetic_${base}`;
+      await connection.execute(
+        "INSERT INTO catalog_dlcs (id,game,code,name_en,steam_app_id,hidden) VALUES (?,'ets2',?,'Synthetic pack',123,1)",
+        [id(0), code],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_regions (id,game,code,name_en,dlc_id) VALUES (?,'ets2',?,'Synthetic region',?)",
+        [id(1), code, id(0)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_cities (id,game,code,name_en,name_native,region_id,dlc_id) VALUES (?,'ets2',?,'Synthetic city','Synthetic native',?,?)",
+        [id(2), code, id(1), id(0)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_cargoes (id,game,code,name_en,adr_class,dlc_id) VALUES (?,'ets2',?,'Synthetic cargo','3',?)",
+        [id(3), code, id(0)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_trailers (id,game,code,name_en,dlc_id) VALUES (?,'ets2',?,'Synthetic trailer',?)",
+        [id(4), code, id(0)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_companies (id,game,code,name_en,name_ru,dlc_id) VALUES (?,'ets2',?,'Synthetic company','Синтетическая компания',?)",
+        [id(5), code, id(0)],
+      );
+      await connection.execute(
+        "INSERT INTO catalog_company_cities (id,game,company_id,city_id,dlc_id,hidden) VALUES (?,'ets2',?,?,?,1)",
+        [id(6), id(5), id(2), id(0)],
+      );
+    }
+    async function readRows(base: number) {
+      const rows: RowDataPacket[] = [];
+      for (const [index, table] of tables.entries()) {
+        const [found] = await connection.execute<RowDataPacket[]>(
+          `SELECT * FROM ${table} WHERE id=?`,
+          [catalogUpgradeId(base + index)],
+        );
+        assert.equal(found.length, 1, table);
+        const row = found[0];
+        assert.ok(row, table);
+        rows.push(row);
+      }
+      return rows;
+    }
+    async function serverUtc() {
+      const [rows] = await connection.query<RowDataPacket[]>("SELECT UTC_TIMESTAMP(3) utc");
+      return String(rows[0]?.utc);
+    }
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await catalogTimestampsPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 23);
+      await seedRows(100);
+      const before = await readRows(100);
+      const [prefix] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash FROM _vtc_migrations ORDER BY version",
+      );
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      const [history] = await connection.query<RowDataPacket[]>(
+        "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+      );
+      assert.deepEqual(
+        history.slice(0, -1).map(({ version, hash }) => ({ version, hash })),
+        prefix,
+      );
+      const migration = history.at(-1);
+      assert.equal(migration?.state, "applied");
+
+      const after = await readRows(100);
+      assert.deepEqual(
+        after.map(({ updated_at: _, ...row }) => row),
+        before,
+      );
+      const stamp = after[0]?.updated_at;
+      assert.match(String(stamp), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+      assert.ok(stamp >= migration?.started_at && stamp <= migration?.applied_at);
+      assert.ok(after.every((row) => row.updated_at === stamp));
+
+      // DATETIME must receive UTC even if an old caller inserts from a non-UTC session.
+      await connection.query("SET SESSION time_zone = '+06:00'");
+      const insertStart = await serverUtc();
+      await seedRows(200);
+      const insertEnd = await serverUtc();
+      for (const [index, row] of (await readRows(200)).entries())
+        assert.ok(row.updated_at >= insertStart && row.updated_at <= insertEnd, tables[index]);
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });

@@ -151,7 +151,10 @@ beforeAll(async () => {
       tokens.push(token);
       return importResult;
     },
-    list: async () => ({ items: [], nextCursor: null, total: 0 }),
+    list: async (_actor: Actor, list: string, query: unknown) => {
+      calls.push({ op: "list", args: [list, query] });
+      return { items: [], nextCursor: null, total: 0 };
+    },
     create: async () => {
       throw new Error("SYNTHETIC_CREATE_REACHED");
     },
@@ -262,6 +265,8 @@ test("list and write routes enforce their closed schemas before the service", as
   const valid = { game: "ets2", code: "fixture_city", nameEn: "Fictional" };
   for (const body of [
     { ...valid, code: "a b" },
+    { ...valid, updatedAt: "2026-11-11T12:00:00.000Z" },
+    { ...valid, depotCount: 1 },
     { ...valid, nameEn: "   " },
     { ...valid, unexpected: true },
     { game: "ets2", code: "fixture_city" },
@@ -284,6 +289,43 @@ test("list and write routes enforce their closed schemas before the service", as
       })
     ).statusCode,
   ).toBe(415);
+});
+
+test("maintenance filters validate literal values and only companies accept the logo filter", async () => {
+  const get = (list: string, filters: string) =>
+    app.inject({ url: `/api/v1/catalogs/${list}?game=ets2&${filters}` });
+  const commonQuery = { game: "ets2", hidden: "only", includeHidden: true, untranslated: true };
+  for (const list of ["dlcs", "regions", "cities", "companies", "cargoes", "trailers", "depots"]) {
+    const filters = "hidden=only&includeHidden=true&untranslated=true";
+    expect((await get(list, filters)).statusCode).toBe(200);
+    expect(calls.pop()).toEqual(
+      list === "depots"
+        ? { op: "listDepots", args: [commonQuery] }
+        : { op: "list", args: [list, commonQuery] },
+    );
+    for (const invalid of [
+      "hidden=true",
+      "hidden=visible",
+      "untranslated=false",
+      "untranslated=1",
+      "untranslated=True",
+      "untranslated=true&untranslated=true",
+      ...(list === "companies" ? ["logo=present"] : ["logo=missing"]),
+    ]) {
+      expect((await get(list, invalid)).statusCode).toBe(422);
+    }
+  }
+  expect(calls).toEqual([]);
+  expect((await get("companies", "logo=missing")).statusCode).toBe(200);
+  expect(calls).toEqual([
+    {
+      op: "list",
+      args: [
+        "companies",
+        { game: "ets2", logo: "missing", includeHidden: false, untranslated: false },
+      ],
+    },
+  ]);
 });
 
 const companyId = "40000000-0000-4000-8000-000000000001";
@@ -615,7 +657,14 @@ test("depot routes enforce closed schemas before the service", async () => {
   ])
     expect((await json("POST", "/api/v1/admin/catalogs/depots", body)).statusCode).toBe(422);
   const depotUrl = `/api/v1/admin/catalogs/depots/${id}`;
-  for (const body of [{}, { companyId }, { cityId: id }, { game: "ats" }, { hidden: "yes" }])
+  for (const body of [
+    {},
+    { companyId },
+    { cityId: id },
+    { game: "ats" },
+    { hidden: "yes" },
+    { hidden: true, updatedAt: "2026-11-11T12:00:00.000Z" },
+  ])
     expect((await json("PATCH", depotUrl, body)).statusCode).toBe(422);
   // A valid body reaches the service, which here stands in for the transaction.
   await expect(json("POST", "/api/v1/admin/catalogs/depots", valid)).resolves.toMatchObject({

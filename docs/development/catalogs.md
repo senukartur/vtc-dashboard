@@ -23,6 +23,12 @@ Cities also have an optional `name_native`, the canonical name as the game map w
 
 **Couplings.** Trailers are identified by telemetry body type, not by trailer ID. A coupling takes its first trailer's type: `snapshot.trailers.items` index `0` `bodyType` is the one that resolves, other slots stay provenance, and a slot 0 body type that is unavailable stays unknown even if its `id` matches a row (no fallback). A coupling's other trailers are not checked against qualification limits.
 
+## Maintenance filters and counts
+
+Each list accepts `hidden=only` to select rows by their own hidden flag, overriding `includeHidden`. The `untranslated=true` filter checks for a missing Russian name in both locales. A depot matches when either its company or its city has no Russian name. The companies list also accepts `logo=missing`, which selects companies without a logo row. These filters combine with the existing search and relation filters. Totals cover the full filtered result before pagination, and cursors bind the effective filters.
+
+The per-game summary keeps its existing `visible` and `hidden` buckets based on each row's own flag. The `untranslated` and company `missingLogo` counters use default visibility, which also requires a visible company and city for depots. Company rows include `depotCount` for all linked depots in the same game, including hidden depots.
+
 ## Recognition
 
 The API has no game-build, map or source gate. `resolveInTransaction(game, kind, code)` looks up the exact row, hidden rows included, and uses only `(game, code)`: a city's names, canonical name included, never identify it. The telemetry adapter records resolved cargo ADR as a known class, `cargo_not_adr` for listed non-hazardous cargo (a complete rule context) and `cargo_adr_unknown` otherwise. A later change to a cargo's ADR class does not rewrite an earlier trip; each trip keeps the class it was evaluated with, and staff reading it see the current row name.
@@ -50,6 +56,8 @@ The size, dimension and count limits are engineering bounds in `apps/api/src/mod
 
 1. **Preview.** `POST …/import-previews` takes one CSV or JSON file (UTF-8, up to 8 MiB and 5000 rows; CSV follows RFC 4180) and writes nothing. It returns counts, the changed and error lines, and, when there are no errors, a token bound to the actor and file.
 2. **Apply.** `POST …/imports` sends the same file, the token in `If-Match` and an `Idempotency-Key`. It re-validates and applies all rows or none in one transaction, serialized per list, and records one audit entry per import.
+
+All seven lists return the row's read-only `updatedAt` in UTC with millisecond precision. Creation and edits that change stored fields set it, and an applied import gives its inserted and changed rows one timestamp. Preview, unchanged rows, rejected operations and idempotent replays leave it as stored. Logo writes set the logo row's own timestamp. Changes to parents or links elsewhere leave the catalog row's timestamp as stored.
 
 Rows match by `(game, code)`. An empty cell keeps the current value, so an import cannot clear a field; use the form for that. Imports never delete. File layout is the import header (any order) of `game,code,name_en,name_ru` plus `steam_app_id`, `region_code`, `adr_class` or `dlc_code` per list. Companies use `dlc_code`. Depots are imported at `/admin/catalogs/depots/import-previews` and `/imports` with `game,company_code,city_code,dlc_code`, match by `(game, company_code, city_code)`, resolve codes under a share lock and report the company code on each line. The optional `name_native` column for cities may be left out; a blank cell in it keeps the current value, and values are trimmed and at most 256 characters. JSON is an array of objects with the same keys.
 
