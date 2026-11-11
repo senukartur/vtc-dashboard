@@ -1,11 +1,11 @@
+import type { components } from "@vtc/contracts";
 import type { FastifyInstance } from "fastify";
-import type { Identity } from "../identity/service.js";
-import type { WorkspaceSummary } from "./service.js";
+import type { Actor, Identity } from "../identity/service.js";
 
 export async function registerWorkspaceSummaryRoutes(
   app: FastifyInstance,
   identity: Pick<Identity, "authenticate">,
-  workspace: WorkspaceSummary,
+  workspace: { read(actor: Actor): Promise<components["schemas"]["WorkspaceSummary"]> },
 ) {
   app.get(
     "/api/v1/me/workspace-summary",

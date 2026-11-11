@@ -1,6 +1,6 @@
 import type { components } from "@vtc/contracts";
 import type { TxContext } from "@vtc/db";
-import type { Actor, Identity } from "../identity/service.js";
+import type { Actor, Identity } from "../modules/identity/service.js";
 
 type Summary = components["schemas"]["WorkspaceSummary"];
 type Section<K extends keyof Summary> = NonNullable<Summary[K]>;
@@ -108,5 +108,3 @@ export function createWorkspaceSummary(
     },
   };
 }
-
-export type WorkspaceSummary = ReturnType<typeof createWorkspaceSummary>;

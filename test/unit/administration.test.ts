@@ -6,7 +6,7 @@ import { capabilities, type Role } from "../../apps/api/src/modules/identity/per
 import { type Actor, identityError } from "../../apps/api/src/modules/identity/service.ts";
 import { pagination } from "../../apps/api/src/modules/qualifications/pagination.ts";
 import { registerWorkspaceSummaryRoutes } from "../../apps/api/src/modules/workspace-summary/http.ts";
-import { createWorkspaceSummary } from "../../apps/api/src/modules/workspace-summary/service.ts";
+import { createWorkspaceSummary } from "../../apps/api/src/use-cases/workspace-summary.ts";
 import { frozenAttempt } from "../../apps/web/src/features/admin/attempt.ts";
 import { administrationTranslations } from "../../apps/web/src/features/admin/translations.ts";
 
