@@ -2,6 +2,46 @@
 
 **Status:** VTC-005 implementation contract; review/adoption is recorded in [PR #5](https://github.com/senukartur/vtc-dashboard/pull/5), not proof of an implemented API. [OpenAPI JSON](openapi.json) is the wire reference; [synthetic examples](examples.json), [UI coverage](ui-coverage.md), [domain events](events.md) and the [architecture](../../architecture/README.md) specify behavior that structural schemas cannot enforce. Product requirements remain [CONCEPT.MD](../../CONCEPT.MD). The separate [telemetry v1.0 API](../telemetry-v1.md) is unchanged.
 
+## Stage 1 dashboard contracts (VTC-123)
+
+The OpenAPI operations marked `x-contract-stage: VTC-123 Step 1` describe the staged wire behavior. The feature lanes own runtime activation and behavior tests. Current routes and request validators still follow their implemented contracts.
+
+### Workspace and administration (VTC-114)
+
+`GET /me/workspace-summary` requires a current session with `company.read` and returns a private `no-store` snapshot. Each visible preview has a count before the preview limit and at most five items. Apply the same current permissions, visibility, and ownership as the source reads.
+
+- `tripsNeedingFixes` requires `trips.read_own_private`. Include the caller's trips requiring a driver fix and the latest author-visible return explanation, or null when there is no displayable text.
+- `unfinishedManualDrafts` requires `trips.submit_own` and includes only the caller's editing drafts.
+- `unansweredUpcomingEvents` requires `events.respond` and includes only upcoming events the caller can see and respond to, with no response by the caller.
+- `reviewQueue` requires `trips.review`. Apply the existing review queue predicate and exclude the caller's own trips. Measure `oldestAgeSeconds` at `computedAt` from the oldest eligible queue entry's `createdAt`, or return null when empty.
+- `newApplicationsCount` requires `applications.manage` and counts submitted applications.
+
+Omit unauthorized sections. Return zero for visible empty counts and an empty array for a visible empty preview. Promotion counts belong to a later stage.
+
+The application and member admin lists can add `statusCounts` before cursor pagination. Each bucket uses its own predicate within the authorized population and applies the other relevant filters. Application history retains its original envelope. Application buckets are `submitted`, `approved`, and `rejected`. Member buckets are `inCompany`, `left`, `invited`, and `droveLast30Days`. The last bucket counts members with accepted canonical trip activity in the rolling 30 days by canonical reporting instant. Count only outstanding, unexpired, unused invitation generations and omit `invited` without current `applications.manage`. Counts carry no additional individual data.
+
+### Trip lists and lifetime totals (VTC-115)
+
+`GET /trips` can filter by canonical `ownerId`, UTC `from` inclusive and `toExclusive` exclusive on `reportingAt`, or `q` with `locale=en|ru`. Either time bound can be supplied alone. If both are present, the lower bound must precede the upper bound. A time bound excludes trips with unknown reporting time. Search trims surrounding whitespace and matches localized origin city, destination city, or cargo labels with English fallback. An all-digit term with an optional leading `#` matches the exact canonical number. Existing scope authorization applies, and another owner's matches are accepted trips only.
+
+Sort options `asc` and `desc` use `createdAt` then `id` in every scope, with `desc` the default. `completion_asc` and `completion_desc` use known effective actual completion with missing completion last and a stable ID tie-breaker. `hold` is review-only. Apply all filters before the cursor and optional `total`. Cursors bind the normalized filters, search locale and sort, and a mismatch returns `409 VERSION_CONFLICT`.
+
+`TripSummary` can add a positive safe canonical `number`, UTC `createdAt`, and nullable UTC `submittedAt`. Only authorized author and reviewer projections can include `event` (a visible event ID and title, or null) and `gameMode` (`single-player`, `truckersmp`, `haulmp`, or `unknown`). Company-scope summaries omit both fields. The own trip status summary and member profile can include `lifetimeTotals` from accepted canonical trips, with `acceptedTrips` and exact `actualDistanceM` as a decimal metre string. The own summary applies its optional game filter and the member profile covers all games.
+
+### Manual drafts and reports (VTC-116 and VTC-117)
+
+The [manual report contract](manual-reports.md#stage-1-drafts-and-reference-fields-vtc-116-and-vtc-117) describes editing counts, bodyless guarded draft deletion, and staged reference fields for manual writes and private readback.
+
+### Catalog filters and counters (VTC-118)
+
+The catalog and depot lists can filter `hidden=only` and `untranslated=true`. The companies list also accepts `logo=missing`. `hidden=only` selects by the row's own hidden flag and takes precedence over `includeHidden`. Default depot visibility still requires the depot, company and city to be visible. A row is untranslated when its Russian name is missing. A depot is untranslated when either linked name lacks Russian. Apply filters before paging and bind them into the cursor.
+
+Keep the existing visible and hidden summary counters. Each list can add `untranslated`, and companies can add `missingLogo`, matching the corresponding default-visible filtered population for the selected game. A company row can include `depotCount` for its linked depots in the same game. Each of the six catalog row kinds and depots can include UTC `updatedAt` for the row's own last update.
+
+### Qualification publication (VTC-094)
+
+`publishQualificationRules` stages `QualificationRulePublicationInput` with an optional nonempty `reason`. The live `RulesInput` still requires `reason` until activation. Both threshold keys remain required and nullable. A null threshold means no minimum for that measure. Preview remains a separate optional action. Publication authority, effective-time guards, and immutable history still apply. Reads exclude the private audit reason.
+
 ## Transport and security
 
 - Browser routes use `/api/v1`, same-origin HTTPS and JSON, except private evidence upload/download. No CORS wildcard or bearer fallback for browser membership routes. Native telemetry bearer credentials cannot authenticate browser APIs.
@@ -17,7 +57,7 @@ Application/canonical catalog IDs are opaque UUIDv4 strings. External source IDs
 
 `CatalogLabel` carries requested/rendered locale, an explicit English-fallback flag, `hidden` and, only for a city that has one, `nameNative`, the canonical name as the game map writes it; `label` stays the translation and the field is never an identity key. An unresolved name is a diagnostic fact, not a selected catalog entity. Forms submit catalog row IDs, not translated labels. Hidden rows remain readable on existing records and leave selectors; a hidden row can only be kept unchanged, never newly chosen.
 
-The server derives trip owner, decision actor and company from the session. A manual form contains game, origin/destination selections, cargo/mass, trailer type, actual distance, ready evidence IDs and optional event/comment. The [VTC-025 manual contract evolution](manual-reports.md) preserves legacy resolved payloads and adds partial drafts, explicit unresolved diagnostics, telemetry targets, complete history and correction-request discovery. It explicitly coordinates the response union migration before runtime activation. The form never accepts a trip date, qualification, accepted flag or another owner. Validate every resolved entity's game and kind, and evidence ownership/readiness, on the server. Manual revisions resubmit the same canonical trip; accepted records require a correction request and staff decision. Reconciliation requires distinct canonical trips of the same verified owner, never a trip merged with itself.
+The server derives trip owner, decision actor and company from the session. A manual form contains game, origin/destination selections, cargo/mass, trailer type, actual distance, ready evidence IDs and optional event/comment. The [VTC-025 manual contract evolution](manual-reports.md) preserves legacy resolved payloads and adds partial drafts, explicit unresolved diagnostics, telemetry targets, complete history and correction-request discovery. It explicitly coordinates the response union migration before runtime activation. The current form is undated. The Stage 1 contract adds reference dates. Client-supplied qualification, acceptance and owner fields are forbidden. Validate every resolved entity's game and kind, and evidence ownership/readiness, on the server. Manual revisions resubmit the same canonical trip; accepted records require a correction request and staff decision. Reconciliation requires distinct canonical trips of the same verified owner, never a trip merged with itself.
 
 Private read-back is part of the contract: bounded manual-revision and proposal lists plus individual reads are available only to the trip owner or currently authorized trip-review staff, never ordinary company readers. Historical revisions retain their original form/evidence references; legacy trip history includes extended unresolved revisions through `ManualRevisionRead`, never silent omissions. `Decision.reason` preserves the staff explanation alongside reason codes (null is allowed only for an automated decision without free text). A decision's `reviewedRevisionId` identifies the immutable reviewed manual/source revision. `TripProposal` exposes its immutable `revisionId`, reason, evidence, proposed field changes, base trip/fact versions and review outcome. A correction request is separately discoverable and can have no field changes; its command result ID identifies the request, never a proposal. A resolution proposal must contain supported changes and proposal creation returns that proposal's ID. A proposal detail GET returns the **current trip** ETag, and approval requires that trip ETag plus `reviewedRevisionId == proposal.revisionId`; the server also revalidates the base facts and current supporting versions. Stale proposals require a new reviewed proposal rather than applying obsolete values.
 

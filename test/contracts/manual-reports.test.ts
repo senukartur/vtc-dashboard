@@ -5,10 +5,22 @@ import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 
 type S = components["schemas"];
-const examples = JSON.parse(
-  readFileSync(new URL("../../docs/contracts/dashboard/examples.json", import.meta.url), "utf8"),
-) as {
-  cases: { id: string; operationId: string; request?: unknown; response: { data?: unknown } }[];
+const contractFile = (name: string) =>
+  JSON.parse(
+    readFileSync(new URL(`../../docs/contracts/dashboard/${name}`, import.meta.url), "utf8"),
+  );
+const examples = contractFile("examples.json") as {
+  cases: {
+    id: string;
+    operationId: string;
+    status: number;
+    request?: unknown;
+    path?: Record<string, string>;
+    query?: Record<string, unknown>;
+    headers?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
+    response: { data?: unknown; error?: { code: string } };
+  }[];
 };
 const fixture = (id: string) => {
   const value = examples.cases.find((item) => item.id === id);
@@ -21,9 +33,7 @@ const valid = (name: keyof S, value: unknown) =>
 const request = fixture("submitManualReport:success").request as S["ManualReportInput"];
 
 test("published legacy manual schema objects remain unchanged from the contract-stage base", () => {
-  const spec = JSON.parse(
-    readFileSync(new URL("../../docs/contracts/dashboard/openapi.json", import.meta.url), "utf8"),
-  ) as { components: { schemas: Record<string, unknown> } };
+  const spec = contractFile("openapi.json");
   // Serialized schema-object hashes; whitespace outside objects is irrelevant. ManualRevision is
   // from ef6f2a5; ManualInput was re-pinned when VTC-084 dropped its catalog revision field.
   for (const [name, expected] of [
@@ -188,4 +198,203 @@ test("all new read DTOs reject private storage fields and correction requests re
   );
   const evidence = fixture("getEvidence:success").response.data;
   expect(valid("Evidence", { ...(evidence as object), state: "deleting" })).toBe(false);
+});
+
+test("staged manual requests retain closed legacy wire bodies and require complete dated submissions", () => {
+  const spec = contractFile("openapi.json");
+  const dated = fixture("submitManualReport:dated").request as S["ManualReportCreationInput"];
+  const datedFields = dated.fields as S["ManualDatedSubmissionFields"];
+  const cases = [
+    [
+      "submitManualDraft",
+      "/api/v1/me/manual-drafts/{draftId}/submission",
+      "ManualDraftFinalSubmissionInput",
+      "ManualDraftSubmission",
+    ],
+    [
+      "submitManualReport",
+      "/api/v1/manual-reports",
+      "ManualReportCreationInput",
+      "ManualReportInput",
+    ],
+    [
+      "reviseManualReport",
+      "/api/v1/manual-reports/{reportId}/revisions",
+      "ManualReportResubmissionInput",
+      "ManualReportRevisionInput",
+    ],
+  ] as const;
+  for (const [operation, path, staged, live] of cases) {
+    const post = spec.paths[path].post;
+    expect(post.requestBody.content["application/json"].schema.$ref).toBe(
+      `#/components/schemas/${staged}`,
+    );
+    const old = fixture(`${operation}:success`).request;
+    const next = fixture(`${operation}:dated`).request as {
+      fields: Partial<S["ManualDatedSubmissionFields"]>;
+    };
+    expect(valid(live, old)).toBe(true);
+    expect(valid(staged, old)).toBe(true);
+    expect(valid(staged, next)).toBe(true);
+    expect(valid(live, next)).toBe(false);
+    for (const requiredDate of ["startedAt", "completedAt"] as const) {
+      const incomplete = structuredClone(next);
+      delete incomplete.fields[requiredDate];
+      expect(valid(staged, incomplete)).toBe(false);
+    }
+    const withoutDates = structuredClone(next);
+    delete withoutDates.fields.startedAt;
+    delete withoutDates.fields.completedAt;
+    expect(valid(staged, withoutDates)).toBe(false);
+    for (const invalid of [
+      { startedAt: "2026-02-30T12:00:00.000Z" },
+      { completedAt: "2026-10-20T10:00:00+01:00" },
+      { cargoDamagePercent: -0.01 },
+      { cargoDamagePercent: 100.01 },
+      { cargoDamagePercent: "0" },
+      { originCompanyId: "synthetic-company" },
+      { destinationCompanyId: "00000000-0000-0000-0000-000000000000" },
+      { senderCompanyId: datedFields.originCompanyId },
+      { receiverCompanyId: datedFields.destinationCompanyId },
+      { reportingAt: datedFields.completedAt },
+      { confirmedAt: datedFields.completedAt },
+      { actualStartedAt: datedFields.startedAt },
+      { actualCompletedAt: datedFields.completedAt },
+      { accepted: true },
+      { ownerId: datedFields.originCompanyId },
+      { progressCredit: 1 },
+      { labels: { origin: null } },
+    ]) {
+      expect(valid(staged, { ...next, fields: { ...next.fields, ...invalid } })).toBe(false);
+    }
+    expect(valid(staged, { ...next, progressCredit: 1 })).toBe(false);
+  }
+  for (const [path, operation] of [
+    ["/api/v1/manual-trips", "submitManualTrip"],
+    ["/api/v1/trips/{tripId}/manual-revisions", "reviseManualTrip"],
+  ] as const) {
+    expect(spec.paths[path].post.requestBody.content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/ManualResolvedInput",
+    );
+    expect(valid("ManualResolvedInput", fixture(`${operation}:success`).request)).toBe(true);
+  }
+});
+
+test("staged draft fields are partial and draft labels are closed read-only projections", () => {
+  const spec = contractFile("openapi.json");
+  for (const post of [
+    spec.paths["/api/v1/me/manual-drafts"].post,
+    spec.paths["/api/v1/me/manual-drafts/{draftId}"].put,
+  ]) {
+    expect(post.requestBody.content["application/json"].schema.$ref).toBe(
+      "#/components/schemas/ManualDraftWriteInput",
+    );
+  }
+  const partial = fixture("createManualDraft:partial-reference-fields").request;
+  const request = fixture("replaceManualDraft:reference-fields-and-labels").request;
+  const read = fixture("replaceManualDraft:reference-fields-and-labels").response
+    .data as S["ManualDraft"];
+  expect(valid("ManualDraftWriteInput", { fields: {} })).toBe(true);
+  expect(valid("ManualDraftWriteInput", partial)).toBe(true);
+  expect(valid("ManualDraftWriteInput", request)).toBe(true);
+  expect(valid("ManualDraftInput", partial)).toBe(false);
+  expect(valid("ManualDraftInput", request)).toBe(false);
+  expect(valid("ManualDraft", read)).toBe(true);
+  expect(read.labels?.cargo).toBeNull();
+  expect(valid("ManualDraftWriteInput", { ...(request as object), labels: read.labels })).toBe(
+    false,
+  );
+  expect(valid("ManualDraftWriteInput", { fields: { ...read.fields, labels: read.labels } })).toBe(
+    false,
+  );
+  expect(valid("ManualDraft", { ...read, labels: { ...read.labels, trailer: null } })).toBe(false);
+
+  const old = fixture("getManualReportRevision:success").response.data;
+  const dated = fixture("getManualReportRevision:dated").response.data as S["ManualReportRevision"];
+  expect(valid("ManualReportRevision", old)).toBe(true);
+  expect(valid("ManualReportRevision", dated)).toBe(true);
+  expect(valid("ManualReportFields", dated.fields)).toBe(false);
+  expect(valid("TripPrivate", fixture("getTrip:dated-private-revision").response.data)).toBe(true);
+  expect(valid("Review", fixture("getTripReview:dated-private-revision").response.data)).toBe(true);
+  expect(
+    valid("ManualReportRevision", { ...dated, fields: { ...dated.fields, creditedM: "10" } }),
+  ).toBe(false);
+});
+
+test("editing filter and count are optional and draft deletion is bodyless, guarded and no-store", () => {
+  const spec = contractFile("openapi.json");
+  const list = spec.paths["/api/v1/me/manual-drafts"].get;
+  const state = list.parameters.find((parameter: { name?: string }) => parameter.name === "state");
+  expect(state).toMatchObject({
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["editing"] },
+  });
+  for (const name of ["editing-only", "editing-empty"]) {
+    const editing = fixture(`listMyManualDrafts:${name}`);
+    expect(editing.query?.state).toBe("editing");
+    expect(valid("EnvelopeListManualDraft", editing.response)).toBe(true);
+    const data = editing.response.data as S["ListManualDraft"];
+    expect(data.editingCount).toBe(name === "editing-only" ? 2 : 0);
+    expect(data.items).toHaveLength(name === "editing-only" ? 1 : 0);
+    expect(data.items.every((draft) => draft.state === "editing")).toBe(true);
+    expect(valid("ListManualDraft", { ...data, editingCount: -1 })).toBe(false);
+  }
+  expect(valid("EnvelopeListManualDraft", fixture("listMyManualDrafts:success").response)).toBe(
+    true,
+  );
+
+  const remove = spec.paths["/api/v1/me/manual-drafts/{draftId}"].delete;
+  expect(remove).toMatchObject({
+    operationId: "deleteManualDraft",
+    security: [{ sessionCookie: [], csrfHeader: [] }],
+    "x-capability": "trips.submit_own",
+    "x-guards": expect.arrayContaining(["exact_origin_session_csrf", "owner_only", "editing_only"]),
+  });
+  expect(remove).not.toHaveProperty("requestBody");
+  expect(spec.components.securitySchemes.csrfHeader).toMatchObject({
+    in: "header",
+    name: "X-CSRF-Token",
+  });
+  expect(remove.responses[200].headers["Cache-Control"].schema.const).toBe("no-store");
+  const headers = spec.components.parameters;
+  const draftIdSchema = remove.parameters.find((p: { name?: string }) => p.name === "draftId");
+  expect(draftIdSchema).toMatchObject({ in: "path", required: true });
+  for (const parameter of ["IfMatch", "IdempotencyKey"]) {
+    expect(remove.parameters).toContainEqual({ $ref: `#/components/parameters/${parameter}` });
+    expect(headers[parameter]).toMatchObject({ in: "header", required: true });
+  }
+
+  const success = fixture("deleteManualDraft:success");
+  const replay = fixture("deleteManualDraft:exact-replay");
+  expect(replay.headers).toEqual(success.headers);
+  expect(replay.path).toEqual(success.path);
+  expect(replay.response).toEqual(success.response);
+  expect(valid("EnvelopeCommandResult", success.response)).toBe(true);
+  expect(success.response.data).toMatchObject({ id: success.path?.draftId });
+
+  for (const [name, status, code] of [
+    ["success", 200, null],
+    ["exact-replay", 200, null],
+    ["private-not-found", 404, "NOT_FOUND"],
+    ["version-conflict", 409, "VERSION_CONFLICT"],
+    ["already-submitted", 409, "STATE_CONFLICT"],
+    ["changed-retry", 409, "IDEMPOTENCY_CONFLICT"],
+    ["missing-if-match", 428, "PRECONDITION_REQUIRED"],
+  ] as const) {
+    const example = fixture(`deleteManualDraft:${name}`);
+    expect(example).not.toHaveProperty("request");
+    expect(example.status).toBe(status);
+    expect(example.responseHeaders).toEqual({ "Cache-Control": "no-store" });
+    expect(validator.compile(draftIdSchema.schema)(example.path?.draftId)).toBe(true);
+    expect(example.headers?.Origin).toBe("https://dashboard.example.invalid");
+    expect(example.headers?.["X-CSRF-Token"]).toBe("synthetic-csrf-placeholder");
+    expect(
+      validator.compile(headers.IdempotencyKey.schema)(example.headers?.["Idempotency-Key"]),
+    ).toBe(true);
+    if (status === 428) expect(example.headers).not.toHaveProperty("If-Match");
+    else
+      expect(validator.compile(headers.IfMatch.schema)(example.headers?.["If-Match"])).toBe(true);
+    if (code) expect(example.response.error?.code).toBe(code);
+  }
 });

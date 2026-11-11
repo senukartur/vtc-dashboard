@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
+
 const valid = (name: string) =>
   createSchemaValidator().compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 test("leadership confirmation cannot supply a successor and safe audit rejects private payload", () => {
@@ -116,4 +118,102 @@ test("member administration rows require a nullable millisecond UTC last accepte
   expect(
     valid("ListMemberAdmin")({ items: [{ ...row, lastAcceptedTripAt: null }], nextCursor: null }),
   ).toBe(true);
+});
+
+const dashboardContract = (file: string) =>
+  JSON.parse(
+    readFileSync(new URL(`../../docs/contracts/dashboard/${file}`, import.meta.url), "utf8"),
+  );
+const stageFixtures = dashboardContract("examples.json");
+const stageFixture = (id: string) =>
+  stageFixtures.cases.find((item: { id: string }) => item.id === id);
+
+test("workspace summary exposes bounded typed previews and distinguishes omitted from zero", () => {
+  const operation = dashboardContract("openapi.json").paths["/api/v1/me/workspace-summary"].get;
+  expect(operation).toMatchObject({
+    operationId: "getMyWorkspaceSummary",
+    security: [{ sessionCookie: [] }],
+    "x-capability": "company.read",
+    "x-contract-stage": "VTC-123 Step 1",
+    responses: { 200: { headers: { "Cache-Control": { schema: { const: "no-store" } } } } },
+  });
+
+  const summary = valid("WorkspaceSummary");
+  const visible = stageFixture("getMyWorkspaceSummary:mixed-capabilities").response.data;
+  const empty = stageFixture("getMyWorkspaceSummary:authorized-empty").response.data;
+  const limited = stageFixture("getMyWorkspaceSummary:limited-capabilities").response.data;
+  for (const name of ["mixed-capabilities", "authorized-empty", "limited-capabilities"]) {
+    const fixture = stageFixture(`getMyWorkspaceSummary:${name}`);
+    expect(fixture.responseHeaders).toEqual({ "Cache-Control": "no-store" });
+    expect(valid("EnvelopeWorkspaceSummary")(fixture.response)).toBe(true);
+  }
+  expect(limited).toEqual({ computedAt: empty.computedAt });
+  expect(empty).toMatchObject({
+    tripsNeedingFixes: { count: 0, items: [] },
+    unfinishedManualDrafts: { count: 0, items: [] },
+    unansweredUpcomingEvents: { count: 0, items: [] },
+    reviewQueue: { count: 0, oldestAgeSeconds: null },
+    newApplicationsCount: 0,
+  });
+  const trip = visible.tripsNeedingFixes.items[0];
+  const draft = visible.unfinishedManualDrafts.items[0];
+  const event = visible.unansweredUpcomingEvents.items[0];
+  expect(visible.tripsNeedingFixes.items[1].latestReturnReason).toBeNull();
+  for (const extra of [
+    { promotionCount: 1 },
+    { reviewQueue: { ...visible.reviewQueue, oldestAgeSeconds: -1 } },
+    { tripsNeedingFixes: { count: 6, items: Array(6).fill(trip) } },
+    { tripsNeedingFixes: { count: 1, items: [{ ...trip, reviewerId: trip.tripId }] } },
+    { unfinishedManualDrafts: { count: 1, items: [{ ...draft, updatedAt: "yesterday" }] } },
+    { unansweredUpcomingEvents: { count: 1, items: [{ ...event, declineReason: "private" }] } },
+    { newApplicationsCount: 1.5 },
+  ]) {
+    expect(summary({ ...visible, ...extra })).toBe(false);
+  }
+});
+
+test("administration counters are optional and invitation counts require a separate projection", () => {
+  const spec = dashboardContract("openapi.json");
+  const responseSchema = (path: string) =>
+    spec.paths[path].get.responses[200].content["application/json"].schema.$ref;
+  expect(responseSchema("/api/v1/admin/applications")).toBe(
+    "#/components/schemas/EnvelopeListAdminApplication",
+  );
+  expect(responseSchema("/api/v1/admin/applications/{applicationId}/history")).toBe(
+    "#/components/schemas/EnvelopeListApplication",
+  );
+  expect(responseSchema("/api/v1/admin/members")).toBe(
+    "#/components/schemas/EnvelopeListMemberAdmin",
+  );
+
+  const app = stageFixture("listApplications:status-counts");
+  expect(app.query).toEqual({ status: "rejected", limit: 5 });
+  expect(app.response.data.statusCounts).toEqual({ submitted: 2, approved: 3, rejected: 0 });
+  expect(valid("EnvelopeListAdminApplication")(app.response)).toBe(true);
+  expect(valid("EnvelopeListApplication")(app.response)).toBe(false);
+  expect(
+    valid("EnvelopeListAdminApplication")(stageFixture("listApplications:empty").response),
+  ).toBe(true);
+  expect(valid("AdminApplicationStatusCounts")({ submitted: 0, approved: 0, rejected: -1 })).toBe(
+    false,
+  );
+
+  const members = stageFixture("listAdminMembers:status-counts");
+  expect(members.query).toEqual({ status: "active", limit: 1 });
+  expect(members.response.data.statusCounts).toEqual({
+    inCompany: 8,
+    left: 2,
+    invited: 1,
+    droveLast30Days: 3,
+  });
+  expect(valid("EnvelopeListMemberAdmin")(members.response)).toBe(true);
+  const restricted = stageFixture("listAdminMembers:without-invitation-authority").response;
+  expect(restricted.data.statusCounts).toEqual({ inCompany: 0, left: 0, droveLast30Days: 0 });
+  expect(valid("EnvelopeListMemberAdmin")(restricted)).toBe(true);
+  expect(valid("EnvelopeListMemberAdmin")(stageFixture("listAdminMembers:empty").response)).toBe(
+    true,
+  );
+  expect(
+    valid("AdminMemberStatusCounts")({ ...restricted.data.statusCounts, inviteEmail: "private" }),
+  ).toBe(false);
 });

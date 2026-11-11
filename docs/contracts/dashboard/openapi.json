@@ -1199,7 +1199,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/admin/members": {
@@ -1279,7 +1280,9 @@
               "maxLength": 128
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "description": "Optional statusCounts use the authorized populations and each bucket's own predicate with other applicable filters before pagination. The invited bucket also requires current admissions authority."
       }
     },
     "/api/v1/admin/members/{memberId}": {
@@ -1872,7 +1875,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EnvelopeListApplication"
+                  "$ref": "#/components/schemas/EnvelopeListAdminApplication"
                 }
               }
             }
@@ -1901,7 +1904,9 @@
               ]
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "description": "Optional statusCounts are calculated within the authorized population before pagination. Each bucket uses its own status predicate and the other applicable list filters."
       }
     },
     "/api/v1/admin/applications/{applicationId}": {
@@ -2252,7 +2257,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/catalogs/{list}": {
@@ -2376,8 +2382,44 @@
               ],
               "default": "en"
             }
+          },
+          {
+            "name": "hidden",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "only"
+              ]
+            },
+            "description": "Select rows with their own hidden flag. Takes precedence over includeHidden."
+          },
+          {
+            "name": "untranslated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "const": true
+            },
+            "description": "Select rows missing a Russian name. English remains required."
+          },
+          {
+            "name": "logo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "missing"
+              ]
+            },
+            "description": "Companies list only. Select companies without an uploaded logo."
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "description": "Apply visibility and filters before paging. The normalized filters are bound into the cursor."
       }
     },
     "/api/v1/catalogs/{list}/{id}": {
@@ -2450,7 +2492,8 @@
               "default": "en"
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/admin/catalogs/{list}": {
@@ -2887,9 +2930,32 @@
               ],
               "default": "en"
             }
+          },
+          {
+            "name": "hidden",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "only"
+              ]
+            },
+            "description": "Select rows with their own hidden flag. Takes precedence over includeHidden."
+          },
+          {
+            "name": "untranslated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "const": true
+            },
+            "description": "Select depots whose linked company or city lacks a Russian name."
           }
         ],
-        "description": "Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true."
+        "description": "Company and city depots of one game. companyId lists the cities of a company (ordered by city name), cityId the companies in a city, both narrow to one depot; otherwise ordered by company name. Rows hidden by the depot, its company or its city are excluded unless includeHidden is true. Explicit hidden=only selects the depot's own hidden flag and takes precedence over includeHidden. Apply filters before paging and bind them into the cursor.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/admin/catalogs/depots": {
@@ -3870,7 +3936,7 @@
           "company_scope_accepted_only",
           "mine_owner_only",
           "review_scope_staff_only",
-          "review_filters_review_scope_only"
+          "hold_review_scope_only"
         ],
         "responses": {
           "200": {
@@ -3882,6 +3948,10 @@
                 }
               }
             }
+          },
+          "409": {
+            "$ref": "#/components/responses/Error",
+            "description": "VERSION_CONFLICT when the signed cursor does not match the authorized scope, normalized filters, search locale or order."
           },
           "default": {
             "$ref": "#/components/responses/Error"
@@ -3963,13 +4033,70 @@
               "type": "string",
               "enum": [
                 "asc",
-                "desc"
+                "desc",
+                "completion_asc",
+                "completion_desc"
               ],
               "default": "desc"
             },
-            "description": "Review queue only (scope=review): createdAt then id order; default desc. 422 otherwise. Cursors are bound to hold and order."
+            "description": "Available in every scope. asc/desc sort by createdAt then id in the selected direction. completion_asc/completion_desc sort by known effective actual completion in the selected direction, with missing completion last and id as a stable tie-breaker."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Timestamp"
+            },
+            "description": "Inclusive UTC lower bound on reportingAt. Independent of toExclusive. Trips with unknown reportingAt are excluded whenever a bound is supplied."
+          },
+          {
+            "name": "toExclusive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Timestamp"
+            },
+            "description": "Exclusive UTC upper bound on reportingAt. Independent of from. When both bounds are supplied, from must be earlier than toExclusive."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "\\S"
+            },
+            "description": "Trim surrounding whitespace. Match a localized origin city, destination city or cargo label with English fallback, or match the exact canonical number for an all-digit term with an optional leading #."
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ],
+              "default": "en"
+            },
+            "description": "Locale used for matching city and cargo labels, with English fallback."
+          },
+          {
+            "name": "ownerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Id"
+            },
+            "description": "Restrict to the canonical trip owner within authorized visibility. For another owner, only accepted trips can match."
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "description": "Apply authorized visibility and all supplied filters before the cursor and optional total. When filtering for another owner, return only accepted trips within the caller's authorized scope. Signed cursors bind the normalized filter set, search locale, and order; a mismatch returns 409 VERSION_CONFLICT."
       }
     },
     "/api/v1/trips/{tripId}": {
@@ -4026,7 +4153,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/me/trip-status-summary": {
@@ -4076,7 +4204,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/manual-trips": {
@@ -4413,7 +4542,8 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/trips/{tripId}/manual-revisions/{revisionId}": {
@@ -4494,7 +4624,8 @@
             }
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/trips/{tripId}/proposals": {
@@ -6049,11 +6180,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RulesInput"
+                "$ref": "#/components/schemas/QualificationRulePublicationInput"
               }
             }
           }
-        }
+        },
+        "x-contract-stage": "VTC-123 Step 1",
+        "description": "VTC-094 stages an optional reason for later activation. The current implementation still validates RulesInput and requires a reason. Authorization, effective time, and immutable publication history remain as defined."
       },
       "get": {
         "operationId": "listQualificationRuleHistory",
@@ -8139,9 +8272,22 @@
           },
           {
             "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "editing"
+              ]
+            },
+            "description": "Limit the list to editing drafts. Omission preserves the existing list."
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. Optional state=editing narrows the owner's list. Optional editingCount counts the owner's editing drafts before cursor pagination.",
+        "x-contract-stage": "VTC-123 Step 1"
       },
       "post": {
         "operationId": "createManualDraft",
@@ -8232,12 +8378,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualDraftInput"
+                "$ref": "#/components/schemas/ManualDraftWriteInput"
               }
             }
           }
         },
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/me/manual-drafts/{draftId}": {
@@ -8314,7 +8461,8 @@
             }
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.",
+        "x-contract-stage": "VTC-123 Step 1"
       },
       "put": {
         "operationId": "replaceManualDraft",
@@ -8423,12 +8571,109 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualDraftInput"
+                "$ref": "#/components/schemas/ManualDraftWriteInput"
               }
             }
           }
         },
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.",
+        "x-contract-stage": "VTC-123 Step 1"
+      },
+      "delete": {
+        "operationId": "deleteManualDraft",
+        "tags": [
+          "manual-reports"
+        ],
+        "summary": "Delete an editing manual draft",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "manual-reports",
+        "x-owner-card": "VTC-116",
+        "x-capability": "trips.submit_own",
+        "x-guards": [
+          "current_active_membership",
+          "exact_origin_session_csrf",
+          "owner_only",
+          "editing_only",
+          "authorized_exact_replay"
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "responses": {
+          "200": {
+            "description": "The editing draft was deleted, or the caller is authorized to replay the same committed result.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeCommandResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "401": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "403": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "404": {
+            "$ref": "#/components/responses/PrivateNoStoreError",
+            "description": "Missing or inaccessible draft."
+          },
+          "409": {
+            "$ref": "#/components/responses/PrivateNoStoreError",
+            "description": "VERSION_CONFLICT for a stale version, STATE_CONFLICT for a submitted draft, or IDEMPOTENCY_CONFLICT for a changed retry."
+          },
+          "422": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "428": {
+            "$ref": "#/components/responses/PrivateNoStoreError",
+            "description": "Required If-Match header was omitted."
+          },
+          "429": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "503": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "description": "Bodyless command. Authorize the current actor and validate the editing state and version under lock. Return the stored result for an authorized exact retry. Release the draft's attachment references under the existing evidence retention policy. Physical file deletion remains governed by that policy. All responses use Cache-Control: no-store."
       }
     },
     "/api/v1/me/manual-drafts/{draftId}/submission": {
@@ -8545,12 +8790,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualDraftSubmission"
+                "$ref": "#/components/schemas/ManualDraftFinalSubmissionInput"
               }
             }
           }
         },
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/me/manual-reports": {
@@ -8715,12 +8961,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualReportInput"
+                "$ref": "#/components/schemas/ManualReportCreationInput"
               }
             }
           }
         },
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/trips/{tripId}/manual-reports": {
@@ -8876,7 +9123,8 @@
             }
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/manual-reports/{reportId}/revisions": {
@@ -9070,12 +9318,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ManualReportRevisionInput"
+                "$ref": "#/components/schemas/ManualReportResubmissionInput"
               }
             }
           }
         },
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate. VTC-117 stages this request shape for later activation. The current implementation continues to use the legacy request schema.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/manual-reports/{reportId}/revisions/{revisionId}": {
@@ -9157,7 +9406,8 @@
             }
           }
         ],
-        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate."
+        "description": "VTC-025 contract; see manual-reports.md for coordinated compatibility, authority, concurrency, upload and retention semantics. Runtime implementation is a separate gate.",
+        "x-contract-stage": "VTC-123 Step 1"
       }
     },
     "/api/v1/trips/{tripId}/correction-requests/{requestId}": {
@@ -9682,6 +9932,63 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/v1/me/workspace-summary": {
+      "get": {
+        "operationId": "getMyWorkspaceSummary",
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Get the current member's workspace summary",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "administration",
+        "x-owner-card": "VTC-114",
+        "x-capability": "company.read",
+        "x-guards": [
+          "current_active_membership",
+          "source_capabilities_and_visibility",
+          "own_items_only",
+          "exclude_own_trips_from_review_queue"
+        ],
+        "x-contract-stage": "VTC-123 Step 1",
+        "responses": {
+          "200": {
+            "description": "Current workspace counts and bounded previews.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Private response; never cache."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvelopeWorkspaceSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "403": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "503": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          },
+          "default": {
+            "$ref": "#/components/responses/PrivateNoStoreError"
+          }
+        },
+        "description": "Evaluate the source operations' current capabilities, visibility, and ownership. Each count covers the full eligible population before the preview limit. Use computedAt as the UTC snapshot time. All responses use Cache-Control: no-store."
       }
     }
   },
@@ -10471,6 +10778,10 @@
             "items": {
               "$ref": "#/components/schemas/Assignment"
             }
+          },
+          "lifetimeTotals": {
+            "$ref": "#/components/schemas/LifetimeTripTotals",
+            "description": "All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile."
           }
         },
         "required": [
@@ -11557,6 +11868,63 @@
           },
           "review": {
             "$ref": "#/components/schemas/TripReviewQueueEntry"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "description": "Stable canonical trip number when assigned."
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "UTC canonical trip creation instant."
+          },
+          "submittedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC submission instant, or null if no submission is known."
+          },
+          "event": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/Id"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "id",
+                  "title"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope."
+          },
+          "gameMode": {
+            "type": "string",
+            "enum": [
+              "single-player",
+              "truckersmp",
+              "haulmp",
+              "unknown"
+            ],
+            "description": "Only in authorized author/reviewer projections. Omit entirely in company scope."
           }
         },
         "required": [
@@ -14205,6 +14573,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "lifetimeTotals": {
+            "$ref": "#/components/schemas/LifetimeTripTotals",
+            "description": "Lifetime accepted canonical trip count and exact actual distance in metres, restricted by the optional game filter when supplied."
           }
         },
         "required": [
@@ -14894,6 +15266,9 @@
                 "type": "null"
               }
             ]
+          },
+          "statusCounts": {
+            "$ref": "#/components/schemas/AdminMemberStatusCounts"
           }
         },
         "required": [
@@ -15154,6 +15529,12 @@
                 "type": "null"
               }
             ]
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Authorized filtered trip count before cursor pagination."
           }
         },
         "required": [
@@ -16719,7 +17100,7 @@
             ]
           },
           "fields": {
-            "$ref": "#/components/schemas/ManualDraftFields"
+            "$ref": "#/components/schemas/ManualDraftEditableFields"
           },
           "targetTrip": {
             "anyOf": [
@@ -16752,6 +17133,11 @@
                 "type": "null"
               }
             ]
+          },
+          "labels": {
+            "$ref": "#/components/schemas/ManualDraftLabels",
+            "readOnly": true,
+            "description": "Display labels for the current origin, destination and cargo selections. A missing label is null."
           }
         },
         "required": [
@@ -16847,7 +17233,7 @@
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
           },
           "fields": {
-            "$ref": "#/components/schemas/ManualReportFields"
+            "$ref": "#/components/schemas/ManualReportReadFields"
           }
         },
         "required": [
@@ -17056,6 +17442,11 @@
                 "type": "null"
               }
             ]
+          },
+          "editingCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -18554,6 +18945,16 @@
                 "type": "null"
               }
             ]
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Last update to this catalog row."
+          },
+          "depotCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Companies list only. Count linked same-game depots."
           }
         },
         "required": [
@@ -18650,6 +19051,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -18670,6 +19077,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -18690,6 +19103,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -18710,6 +19129,18 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
+                  },
+                  "missingLogo": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible companies in this game without a logo."
                   }
                 },
                 "required": [
@@ -18730,6 +19161,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible depots in this game whose company or city lacks a Russian name."
                   }
                 },
                 "required": [
@@ -18750,6 +19187,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -18770,6 +19213,12 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "untranslated": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Default-visible rows in this game missing a Russian name."
                   }
                 },
                 "required": [
@@ -19370,6 +19819,10 @@
           },
           "city": {
             "$ref": "#/components/schemas/CatalogDepotCity"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Last update to the depot row itself."
           }
         },
         "required": [
@@ -19794,6 +20247,794 @@
           "meta"
         ],
         "additionalProperties": false
+      },
+      "WorkspaceSummary": {
+        "type": "object",
+        "properties": {
+          "computedAt": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "tripsNeedingFixes": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "tripId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "latestReturnReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tripId",
+                    "latestReturnReason"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires trips.read_own_private. Current own trips requiring a driver fix. Return the latest author-visible return explanation, or null if no displayable text is available."
+          },
+          "unfinishedManualDrafts": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "draftId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "updatedAt": {
+                      "$ref": "#/components/schemas/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "draftId",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires trips.submit_own. Current own editing drafts."
+          },
+          "unansweredUpcomingEvents": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "startsAt": {
+                      "$ref": "#/components/schemas/Timestamp"
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "title",
+                    "startsAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 5
+              }
+            },
+            "required": [
+              "count",
+              "items"
+            ],
+            "additionalProperties": false,
+            "description": "Requires events.respond. Upcoming events the caller can see and respond to, for which they have no response."
+          },
+          "reviewQueue": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "oldestAgeSeconds": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "count",
+              "oldestAgeSeconds"
+            ],
+            "additionalProperties": false,
+            "description": "Requires trips.review. Use the existing review queue predicate and exclude the caller's own trips. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+          },
+          "newApplicationsCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Requires applications.manage. Count submitted applications."
+          }
+        },
+        "required": [
+          "computedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Current permission-filtered workspace snapshot. Omit unauthorized sections. Include zero for visible empty counts and an empty items array for an empty preview."
+      },
+      "EnvelopeWorkspaceSummary": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceSummary"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "AdminApplicationStatusCounts": {
+        "type": "object",
+        "properties": {
+          "submitted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "approved": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rejected": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "submitted",
+          "approved",
+          "rejected"
+        ],
+        "additionalProperties": false
+      },
+      "ListAdminApplication": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Application"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "statusCounts": {
+            "$ref": "#/components/schemas/AdminApplicationStatusCounts"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EnvelopeListAdminApplication": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ListAdminApplication"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "AdminMemberStatusCounts": {
+        "type": "object",
+        "properties": {
+          "inCompany": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Members currently in the company."
+          },
+          "left": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Former members."
+          },
+          "invited": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Outstanding unexpired, unused invitation generations. Omit without current applications.manage authority."
+          },
+          "droveLast30Days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Distinct members with accepted canonical trip activity in the rolling 30 days, using the canonical reporting instant."
+          }
+        },
+        "required": [
+          "inCompany",
+          "left",
+          "droveLast30Days"
+        ],
+        "additionalProperties": false
+      },
+      "LifetimeTripTotals": {
+        "type": "object",
+        "properties": {
+          "acceptedTrips": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          }
+        },
+        "required": [
+          "acceptedTrips",
+          "actualDistanceM"
+        ],
+        "additionalProperties": false
+      },
+      "ManualDraftEditableFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 0,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference start time supplied by the driver."
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference completion time supplied by the driver."
+          },
+          "cargoDamagePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "originCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected origin city."
+          },
+          "destinationCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected destination city."
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "description": "Partial draft fields, including independently optional reference dates. Read-only display labels are never write fields."
+      },
+      "ManualDatedSubmissionFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference start time supplied by the driver."
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference completion time supplied by the driver."
+          },
+          "cargoDamagePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "originCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected origin city."
+          },
+          "destinationCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected destination city."
+          }
+        },
+        "required": [
+          "game",
+          "origin",
+          "destination",
+          "cargo",
+          "cargoMassKg",
+          "trailerType",
+          "actualDistanceM",
+          "evidenceIds",
+          "startedAt",
+          "completedAt"
+        ],
+        "additionalProperties": false,
+        "description": "Complete dated manual submission. At submission both instants must be nonfuture, and startedAt must be strictly earlier than completedAt. The dates are reference facts only. Reporting, qualification and progress continue to use staff confirmation."
+      },
+      "ManualFinalSubmissionFields": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ManualSubmissionFields"
+          },
+          {
+            "$ref": "#/components/schemas/ManualDatedSubmissionFields"
+          }
+        ],
+        "description": "The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates."
+      },
+      "ManualReportReadFields": {
+        "type": "object",
+        "properties": {
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "origin": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargo": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "cargoMassKg": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "trailerType": {
+            "$ref": "#/components/schemas/ManualCatalogSelection"
+          },
+          "actualDistanceM": {
+            "$ref": "#/components/schemas/Decimal"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "eventId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference start time supplied by the driver."
+          },
+          "completedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Reference completion time supplied by the driver."
+          },
+          "cargoDamagePercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "originCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected origin city."
+          },
+          "destinationCompanyId": {
+            "$ref": "#/components/schemas/Id",
+            "description": "Selected company with a visible same-game depot in the selected destination city."
+          }
+        },
+        "required": [
+          "game",
+          "origin",
+          "destination",
+          "cargo",
+          "cargoMassKg",
+          "trailerType",
+          "actualDistanceM",
+          "evidenceIds",
+          "eventId",
+          "comment"
+        ],
+        "additionalProperties": false,
+        "description": "Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress.",
+        "dependentRequired": {
+          "startedAt": [
+            "completedAt"
+          ],
+          "completedAt": [
+            "startedAt"
+          ]
+        }
+      },
+      "ManualDraftLabels": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "cargo"
+        ],
+        "additionalProperties": false
+      },
+      "ManualDraftWriteInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualDraftEditableFields"
+          },
+          "targetTrip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTelemetryTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "ManualDraftFinalSubmissionInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false,
+        "description": "Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target."
+      },
+      "ManualReportCreationInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+          },
+          "targetTrip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManualTelemetryTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "ManualReportResubmissionInput": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "$ref": "#/components/schemas/ManualFinalSubmissionFields"
+          },
+          "expectedTripVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "fields",
+          "expectedTripVersion"
+        ],
+        "additionalProperties": false
+      },
+      "QualificationRulePublicationInput": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "maxItems": 32
+          },
+          "requiredTrips": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDistanceM": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "pattern": "\\S"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+            "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
+          }
+        },
+        "required": [
+          "rules",
+          "requiredTrips",
+          "requiredDistanceM"
+        ],
+        "additionalProperties": false,
+        "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
       }
     },
     "parameters": {
@@ -19844,6 +21085,24 @@
             "schema": {
               "$ref": "#/components/schemas/Error"
             }
+          }
+        }
+      },
+      "PrivateNoStoreError": {
+        "description": "Safe application error; HTTP statuses, codes and retry semantics are defined in README.md.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        },
+        "headers": {
+          "Cache-Control": {
+            "schema": {
+              "const": "no-store"
+            },
+            "description": "Private response; never cache."
           }
         }
       }

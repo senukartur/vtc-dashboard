@@ -6372,6 +6372,1744 @@
           "requestId": "synthetic-request-001"
         }
       }
+    },
+    {
+      "id": "getMyWorkspaceSummary:mixed-capabilities",
+      "operationId": "getMyWorkspaceSummary",
+      "status": 200,
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-10-21T12:00:00.000Z",
+          "tripsNeedingFixes": {
+            "count": 2,
+            "items": [
+              {
+                "tripId": "54000000-0000-4000-8000-000000000001",
+                "latestReturnReason": "Please attach a clear delivery screenshot."
+              },
+              {
+                "tripId": "54000000-0000-4000-8000-000000000002",
+                "latestReturnReason": null
+              }
+            ]
+          },
+          "unfinishedManualDrafts": {
+            "count": 1,
+            "items": [
+              {
+                "draftId": "51000000-0000-4000-8000-000000000010",
+                "updatedAt": "2026-10-20T12:00:00.000Z"
+              }
+            ]
+          },
+          "unansweredUpcomingEvents": {
+            "count": 1,
+            "items": [
+              {
+                "eventId": "54000000-0000-4000-8000-000000000003",
+                "title": "Fictional evening convoy",
+                "startsAt": "2026-10-22T18:00:00.000Z"
+              }
+            ]
+          },
+          "reviewQueue": {
+            "count": 1,
+            "oldestAgeSeconds": 5400
+          },
+          "newApplicationsCount": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:authorized-empty",
+      "operationId": "getMyWorkspaceSummary",
+      "status": 200,
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-10-21T12:00:00.000Z",
+          "tripsNeedingFixes": {
+            "count": 0,
+            "items": []
+          },
+          "unfinishedManualDrafts": {
+            "count": 0,
+            "items": []
+          },
+          "unansweredUpcomingEvents": {
+            "count": 0,
+            "items": []
+          },
+          "reviewQueue": {
+            "count": 0,
+            "oldestAgeSeconds": null
+          },
+          "newApplicationsCount": 0
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "getMyWorkspaceSummary:limited-capabilities",
+      "operationId": "getMyWorkspaceSummary",
+      "status": 200,
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "computedAt": "2026-10-21T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listApplications:status-counts",
+      "operationId": "listApplications",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "statusCounts": {
+            "submitted": 2,
+            "approved": 3,
+            "rejected": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "status": "rejected",
+        "limit": 5
+      }
+    },
+    {
+      "id": "listAdminMembers:status-counts",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "profile": {
+                "member": {
+                  "id": "41000000-0000-4000-8000-000000000001",
+                  "nickname": "Fixture Driver",
+                  "formerMember": false,
+                  "roles": []
+                },
+                "qualifications": []
+              },
+              "email": "fixture@example.invalid",
+              "status": "active",
+              "accessEpoch": 1,
+              "identityEpoch": 1,
+              "version": 1,
+              "lastAcceptedTripAt": "2026-10-20T18:30:00.000Z"
+            }
+          ],
+          "nextCursor": "synthetic-active-member-cursor",
+          "statusCounts": {
+            "inCompany": 8,
+            "left": 2,
+            "invited": 1,
+            "droveLast30Days": 3
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "status": "active",
+        "limit": 1
+      }
+    },
+    {
+      "id": "listAdminMembers:without-invitation-authority",
+      "operationId": "listAdminMembers",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "statusCounts": {
+            "inCompany": 0,
+            "left": 0,
+            "droveLast30Days": 0
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "search": "Fictional absent driver"
+      }
+    },
+    {
+      "id": "listTrips:filtered-company",
+      "operationId": "listTrips",
+      "status": 200,
+      "query": {
+        "scope": "company",
+        "game": "ets2",
+        "ownerId": "41000000-0000-4000-8000-000000000001",
+        "from": "2026-10-20T09:00:00.000Z",
+        "toExclusive": "2026-10-21T12:00:00.000Z",
+        "q": "#42",
+        "locale": "ru",
+        "order": "completion_desc",
+        "limit": 1
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "view": "summary",
+              "id": "54000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "delivered",
+              "decision": "accepted",
+              "origin": {
+                "entityId": "54000000-0000-4000-8000-000000000004",
+                "label": "Fictional Harbor",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": "12500.5",
+              "reportingAt": "2026-10-20T10:00:00.000Z",
+              "sourceKinds": [
+                "ets2telemetry"
+              ],
+              "number": 42,
+              "reportingBasis": "actual_completion",
+              "createdAt": "2026-10-20T12:00:00.000Z",
+              "submittedAt": "2026-10-20T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": "synthetic-company-trip-cursor",
+          "total": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listTrips:filtered-own",
+      "operationId": "listTrips",
+      "status": 200,
+      "query": {
+        "scope": "mine",
+        "q": "Fictional Harbor",
+        "from": "2026-10-20T09:00:00.000Z",
+        "locale": "ru",
+        "order": "asc"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "view": "summary",
+              "id": "54000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "delivered",
+              "decision": "accepted",
+              "origin": {
+                "entityId": "54000000-0000-4000-8000-000000000004",
+                "label": "Fictional Harbor",
+                "requestedLocale": "ru",
+                "renderedLocale": "en",
+                "englishFallback": true,
+                "hidden": false
+              },
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": "12500.5",
+              "reportingAt": "2026-10-20T10:00:00.000Z",
+              "sourceKinds": [
+                "ets2telemetry"
+              ],
+              "number": 42,
+              "reportingBasis": "actual_completion",
+              "createdAt": "2026-10-20T12:00:00.000Z",
+              "submittedAt": null,
+              "event": {
+                "id": "54000000-0000-4000-8000-000000000003",
+                "title": "Fictional evening convoy"
+              },
+              "gameMode": "haulmp"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listTrips:completion-review",
+      "operationId": "listTrips",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "view": "summary",
+              "id": "41000000-0000-4000-8000-000000000001",
+              "version": 1,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "delivered",
+              "decision": "pending_review",
+              "origin": null,
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": "123400",
+              "reportingAt": null,
+              "sourceKinds": [
+                "manual"
+              ],
+              "recording": "unknown",
+              "reportingBasis": "unknown",
+              "review": {
+                "hold": true,
+                "reasonCodes": [
+                  "rule_mass_exceeded"
+                ],
+                "createdAt": "2026-10-17T12:00:00.000Z",
+                "manualRevision": {
+                  "number": 2,
+                  "submittedAt": "2026-10-17T12:00:00.000Z"
+                }
+              },
+              "number": 43,
+              "createdAt": "2026-10-20T12:00:00.000Z",
+              "submittedAt": "2026-10-17T12:00:00.000Z",
+              "event": null,
+              "gameMode": "unknown"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "scope": "review",
+        "hold": true,
+        "order": "completion_asc",
+        "locale": "en"
+      }
+    },
+    {
+      "id": "listTrips:filter-cursor-mismatch",
+      "operationId": "listTrips",
+      "status": 409,
+      "response": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "messageKey": "errors.version_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "query": {
+        "scope": "mine",
+        "order": "completion_asc",
+        "cursor": "synthetic-cursor-for-different-filters"
+      }
+    },
+    {
+      "id": "getMyTripStatusSummary:game-lifetime-totals",
+      "operationId": "getMyTripStatusSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "counts": {
+            "unassessed": 1,
+            "pendingReview": 1,
+            "accepted": 1,
+            "rejected": 1
+          },
+          "activeTrips": 1,
+          "correctionPending": 1,
+          "lifetimeTotals": {
+            "acceptedTrips": 4,
+            "actualDistanceM": "312500.5"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "game": "ets2"
+      }
+    },
+    {
+      "id": "getMember:all-game-lifetime-totals",
+      "operationId": "getMember",
+      "status": 200,
+      "response": {
+        "data": {
+          "member": {
+            "id": "41000000-0000-4000-8000-000000000001",
+            "nickname": "Fixture Driver",
+            "formerMember": false,
+            "roles": []
+          },
+          "qualifications": [],
+          "lifetimeTotals": {
+            "acceptedTrips": 0,
+            "actualDistanceM": "0"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "listMyManualDrafts:editing-only",
+      "operationId": "listMyManualDrafts",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "51000000-0000-4000-8000-000000000010",
+              "version": 1,
+              "state": "editing",
+              "fields": {
+                "game": "ets2",
+                "evidenceIds": []
+              },
+              "targetTrip": null,
+              "createdAt": "2026-10-20T12:00:00.000Z",
+              "updatedAt": "2026-10-20T12:00:00.000Z",
+              "submittedReportId": null
+            }
+          ],
+          "nextCursor": "synthetic-editing-draft-cursor",
+          "editingCount": 2
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "query": {
+        "state": "editing",
+        "limit": 1
+      }
+    },
+    {
+      "id": "listMyManualDrafts:editing-empty",
+      "operationId": "listMyManualDrafts",
+      "status": 200,
+      "response": {
+        "data": {
+          "items": [],
+          "nextCursor": null,
+          "editingCount": 0
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "query": {
+        "state": "editing"
+      }
+    },
+    {
+      "id": "getMyManualDraft:partial-reference-fields",
+      "operationId": "getMyManualDraft",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 1,
+          "state": "editing",
+          "fields": {
+            "game": "ets2",
+            "evidenceIds": [],
+            "startedAt": "2026-10-20T09:00:00.000Z",
+            "cargoDamagePercent": 0
+          },
+          "targetTrip": null,
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null,
+          "labels": {
+            "origin": null,
+            "destination": null,
+            "cargo": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "createManualDraft:partial-reference-fields",
+      "operationId": "createManualDraft",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 1,
+          "state": "editing",
+          "fields": {
+            "game": "ets2",
+            "evidenceIds": [],
+            "completedAt": "2026-10-20T10:00:00.000Z",
+            "cargoDamagePercent": 100
+          },
+          "targetTrip": null,
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "evidenceIds": [],
+          "completedAt": "2026-10-20T10:00:00.000Z",
+          "cargoDamagePercent": 100
+        }
+      }
+    },
+    {
+      "id": "replaceManualDraft:reference-fields-and-labels",
+      "operationId": "replaceManualDraft",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 2,
+          "state": "editing",
+          "fields": {
+            "origin": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000002"
+            },
+            "startedAt": "2026-10-20T09:00:00.000Z",
+            "completedAt": "2026-10-20T10:00:00.000Z",
+            "cargoDamagePercent": 12.5,
+            "originCompanyId": "54000000-0000-4000-8000-000000000005",
+            "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+          },
+          "targetTrip": {
+            "tripId": "51000000-0000-4000-8000-000000000007",
+            "expectedVersion": 2
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z",
+          "updatedAt": "2026-10-20T12:00:00.000Z",
+          "submittedReportId": null,
+          "labels": {
+            "origin": {
+              "entityId": "51000000-0000-4000-8000-000000000001",
+              "label": "Fictional Harbor",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            },
+            "destination": {
+              "entityId": "51000000-0000-4000-8000-000000000002",
+              "label": "Fictional Depot City",
+              "requestedLocale": "en",
+              "renderedLocale": "en",
+              "englishFallback": false,
+              "hidden": false
+            },
+            "cargo": null
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002"
+          },
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z",
+          "cargoDamagePercent": 12.5,
+          "originCompanyId": "54000000-0000-4000-8000-000000000005",
+          "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+        },
+        "targetTrip": {
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "id": "submitManualDraft:dated",
+      "operationId": "submitManualDraft",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 1,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 3,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null,
+              "startedAt": "2026-10-20T09:00:00.000Z",
+              "completedAt": "2026-10-20T10:00:00.000Z",
+              "cargoDamagePercent": 12.5,
+              "originCompanyId": "54000000-0000-4000-8000-000000000005",
+              "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ],
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z",
+          "cargoDamagePercent": 12.5,
+          "originCompanyId": "54000000-0000-4000-8000-000000000005",
+          "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+        }
+      }
+    },
+    {
+      "id": "submitManualReport:dated",
+      "operationId": "submitManualReport",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 1,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 3,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null,
+              "startedAt": "2026-10-20T09:00:00.000Z",
+              "completedAt": "2026-10-20T10:00:00.000Z",
+              "cargoDamagePercent": 12.5,
+              "originCompanyId": "54000000-0000-4000-8000-000000000005",
+              "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ],
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z",
+          "cargoDamagePercent": 12.5,
+          "originCompanyId": "54000000-0000-4000-8000-000000000005",
+          "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+        },
+        "targetTrip": {
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "id": "reviseManualReport:dated",
+      "operationId": "reviseManualReport",
+      "status": 200,
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000009",
+          "version": 2,
+          "tripId": "51000000-0000-4000-8000-000000000007",
+          "tripVersion": 4,
+          "currentRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000028",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 2,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null,
+              "startedAt": "2026-10-20T09:00:00.000Z",
+              "completedAt": "2026-10-20T10:00:00.000Z",
+              "cargoDamagePercent": 12.5,
+              "originCompanyId": "54000000-0000-4000-8000-000000000005",
+              "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+            }
+          },
+          "createdAt": "2026-10-20T12:00:00.000Z"
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      },
+      "request": {
+        "fields": {
+          "game": "ets2",
+          "origin": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000001"
+          },
+          "destination": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000002"
+          },
+          "cargo": {
+            "status": "unresolved",
+            "label": "Fictional cargo",
+            "reasonCode": "not_listed",
+            "locale": "en",
+            "context": null
+          },
+          "cargoMassKg": "0",
+          "trailerType": {
+            "status": "resolved",
+            "entityId": "51000000-0000-4000-8000-000000000004"
+          },
+          "actualDistanceM": "12500.5",
+          "evidenceIds": [
+            "51000000-0000-4000-8000-000000000006"
+          ],
+          "eventId": null,
+          "comment": null,
+          "startedAt": "2026-10-20T09:00:00.000Z",
+          "completedAt": "2026-10-20T10:00:00.000Z",
+          "cargoDamagePercent": 12.5,
+          "originCompanyId": "54000000-0000-4000-8000-000000000005",
+          "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+        },
+        "expectedTripVersion": 3
+      }
+    },
+    {
+      "id": "getManualReportRevision:dated",
+      "operationId": "getManualReportRevision",
+      "status": 200,
+      "response": {
+        "data": {
+          "representation": "extended",
+          "id": "51000000-0000-4000-8000-000000000008",
+          "reportId": "51000000-0000-4000-8000-000000000009",
+          "number": 1,
+          "submittedAt": "2026-10-20T12:00:00.000Z",
+          "fields": {
+            "game": "ets2",
+            "origin": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000001"
+            },
+            "destination": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000002"
+            },
+            "cargo": {
+              "status": "unresolved",
+              "label": "Fictional cargo",
+              "reasonCode": "not_listed",
+              "locale": "en",
+              "context": null
+            },
+            "cargoMassKg": "0",
+            "trailerType": {
+              "status": "resolved",
+              "entityId": "51000000-0000-4000-8000-000000000004"
+            },
+            "actualDistanceM": "12500.5",
+            "evidenceIds": [
+              "51000000-0000-4000-8000-000000000006"
+            ],
+            "eventId": null,
+            "comment": null,
+            "startedAt": "2026-10-20T09:00:00.000Z",
+            "completedAt": "2026-10-20T10:00:00.000Z",
+            "cargoDamagePercent": 12.5,
+            "originCompanyId": "54000000-0000-4000-8000-000000000005",
+            "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "getTrip:dated-private-revision",
+      "operationId": "getTrip",
+      "status": 200,
+      "response": {
+        "data": {
+          "view": "private",
+          "summary": {
+            "view": "summary",
+            "id": "51000000-0000-4000-8000-000000000007",
+            "version": 3,
+            "owner": {
+              "id": "41000000-0000-4000-8000-000000000001",
+              "nickname": "Fixture Driver",
+              "formerMember": false,
+              "roles": []
+            },
+            "game": "ets2",
+            "outcome": "delivered",
+            "decision": "pending_review",
+            "origin": null,
+            "destination": null,
+            "cargo": null,
+            "actualDistanceM": "12500.5",
+            "reportingAt": null,
+            "sourceKinds": [
+              "manual"
+            ],
+            "reportingBasis": "unknown"
+          },
+          "manualRevision": {
+            "representation": "extended",
+            "id": "51000000-0000-4000-8000-000000000008",
+            "reportId": "51000000-0000-4000-8000-000000000009",
+            "number": 1,
+            "submittedAt": "2026-10-20T12:00:00.000Z",
+            "fields": {
+              "game": "ets2",
+              "origin": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000001"
+              },
+              "destination": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000002"
+              },
+              "cargo": {
+                "status": "unresolved",
+                "label": "Fictional cargo",
+                "reasonCode": "not_listed",
+                "locale": "en",
+                "context": null
+              },
+              "cargoMassKg": "0",
+              "trailerType": {
+                "status": "resolved",
+                "entityId": "51000000-0000-4000-8000-000000000004"
+              },
+              "actualDistanceM": "12500.5",
+              "evidenceIds": [
+                "51000000-0000-4000-8000-000000000006"
+              ],
+              "eventId": null,
+              "comment": null,
+              "startedAt": "2026-10-20T09:00:00.000Z",
+              "completedAt": "2026-10-20T10:00:00.000Z",
+              "cargoDamagePercent": 12.5,
+              "originCompanyId": "54000000-0000-4000-8000-000000000005",
+              "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+            }
+          },
+          "evidence": [],
+          "decisions": [],
+          "pendingProposalId": null,
+          "reviewReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-manual-contract"
+        }
+      }
+    },
+    {
+      "id": "getTripReview:dated-private-revision",
+      "operationId": "getTripReview",
+      "status": 200,
+      "response": {
+        "data": {
+          "trip": {
+            "view": "private",
+            "summary": {
+              "view": "summary",
+              "id": "51000000-0000-4000-8000-000000000007",
+              "version": 3,
+              "owner": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "nickname": "Fixture Driver",
+                "formerMember": false,
+                "roles": []
+              },
+              "game": "ets2",
+              "outcome": "delivered",
+              "decision": "pending_review",
+              "origin": null,
+              "destination": null,
+              "cargo": null,
+              "actualDistanceM": "12500.5",
+              "reportingAt": null,
+              "sourceKinds": [
+                "manual"
+              ],
+              "reportingBasis": "unknown"
+            },
+            "manualRevision": {
+              "representation": "extended",
+              "id": "51000000-0000-4000-8000-000000000008",
+              "reportId": "51000000-0000-4000-8000-000000000009",
+              "number": 1,
+              "submittedAt": "2026-10-20T12:00:00.000Z",
+              "fields": {
+                "game": "ets2",
+                "origin": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000001"
+                },
+                "destination": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000002"
+                },
+                "cargo": {
+                  "status": "unresolved",
+                  "label": "Fictional cargo",
+                  "reasonCode": "not_listed",
+                  "locale": "en",
+                  "context": null
+                },
+                "cargoMassKg": "0",
+                "trailerType": {
+                  "status": "resolved",
+                  "entityId": "51000000-0000-4000-8000-000000000004"
+                },
+                "actualDistanceM": "12500.5",
+                "evidenceIds": [
+                  "51000000-0000-4000-8000-000000000006"
+                ],
+                "eventId": null,
+                "comment": null,
+                "startedAt": "2026-10-20T09:00:00.000Z",
+                "completedAt": "2026-10-20T10:00:00.000Z",
+                "cargoDamagePercent": 12.5,
+                "originCompanyId": "54000000-0000-4000-8000-000000000005",
+                "destinationCompanyId": "54000000-0000-4000-8000-000000000006"
+              }
+            },
+            "evidence": [],
+            "decisions": [],
+            "pendingProposalId": null,
+            "reviewReasonCodes": []
+          },
+          "factRevisionId": "41000000-0000-4000-8000-000000000001",
+          "facts": [],
+          "evaluation": {
+            "factRevisionId": "41000000-0000-4000-8000-000000000001",
+            "qualificationAssignmentId": null,
+            "levelId": null,
+            "ruleVersionId": null,
+            "eventId": null,
+            "attendanceRevisionId": null,
+            "attributionAt": null,
+            "attributionBasis": "actual_start",
+            "reportingAt": null
+          },
+          "qualificationCheck": {
+            "status": "unresolved",
+            "reasonCode": "qualification_history_unknown",
+            "rules": []
+          },
+          "acceptance": {
+            "mode": "unavailable",
+            "blockedReasonCodes": [
+              "qualification_history_unknown"
+            ]
+          },
+          "canDecide": false,
+          "blockedReasonCodes": []
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:success",
+      "operationId": "deleteManualDraft",
+      "status": 200,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v1\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:exact-replay",
+      "operationId": "deleteManualDraft",
+      "status": 200,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v1\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "data": {
+          "id": "51000000-0000-4000-8000-000000000010",
+          "version": 2
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:private-not-found",
+      "operationId": "deleteManualDraft",
+      "status": 404,
+      "path": {
+        "draftId": "54000000-0000-4000-8000-000000000008"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v1\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "error": {
+          "code": "NOT_FOUND",
+          "messageKey": "errors.not_found",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:version-conflict",
+      "operationId": "deleteManualDraft",
+      "status": 409,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v1\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "messageKey": "errors.version_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:already-submitted",
+      "operationId": "deleteManualDraft",
+      "status": 409,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v1\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "error": {
+          "code": "STATE_CONFLICT",
+          "messageKey": "errors.state_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:changed-retry",
+      "operationId": "deleteManualDraft",
+      "status": 409,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "If-Match": "\"v2\"",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "error": {
+          "code": "IDEMPOTENCY_CONFLICT",
+          "messageKey": "errors.idempotency_conflict",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "deleteManualDraft:missing-if-match",
+      "operationId": "deleteManualDraft",
+      "status": 428,
+      "path": {
+        "draftId": "51000000-0000-4000-8000-000000000010"
+      },
+      "headers": {
+        "Origin": "https://dashboard.example.invalid",
+        "X-CSRF-Token": "synthetic-csrf-placeholder",
+        "Idempotency-Key": "54000000-0000-4000-8000-000000000007"
+      },
+      "responseHeaders": {
+        "Cache-Control": "no-store"
+      },
+      "response": {
+        "error": {
+          "code": "PRECONDITION_REQUIRED",
+          "messageKey": "errors.precondition_required",
+          "retryable": false
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "getCatalogSummary:visible-filter-counts",
+      "operationId": "getCatalogSummary",
+      "status": 200,
+      "response": {
+        "data": {
+          "game": "ets2",
+          "lists": {
+            "dlcs": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1
+            },
+            "regions": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1
+            },
+            "cities": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1
+            },
+            "companies": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1,
+              "missingLogo": 1
+            },
+            "depots": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1
+            },
+            "cargoes": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 1
+            },
+            "trailers": {
+              "visible": 1,
+              "hidden": 0,
+              "untranslated": 0
+            }
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "query": {
+        "game": "ets2"
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-dlcs",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "dlcs"
+      },
+      "query": {
+        "game": "ets2",
+        "hidden": "only",
+        "includeHidden": false
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000083",
+              "game": "ets2",
+              "code": "fictional_dlcs",
+              "nameEn": "Fictional Map Expansion",
+              "nameRu": null,
+              "hidden": true,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000083",
+                "label": "Fictional Map Expansion",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": true
+              },
+              "dlcId": null,
+              "dlc": null,
+              "steamAppId": null,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-regions",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "regions"
+      },
+      "query": {
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000084",
+              "game": "ets2",
+              "code": "fictional_regions",
+              "nameEn": "Fictional Region",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000084",
+                "label": "Fictional Region",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-cities",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "cities"
+      },
+      "query": {
+        "game": "ets2",
+        "untranslated": true
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000085",
+              "game": "ets2",
+              "code": "fictional_cities",
+              "nameEn": "Synthetic City",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000085",
+                "label": "Synthetic City",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "regionId": null,
+              "region": null,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-companies",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "companies"
+      },
+      "query": {
+        "game": "ets2",
+        "logo": "missing"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000086",
+              "game": "ets2",
+              "code": "fictional_companies",
+              "nameEn": "Synthetic Without Logo",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000086",
+                "label": "Synthetic Without Logo",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "logo": null,
+              "depotCount": 2,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-cargoes",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "cargoes"
+      },
+      "query": {
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000087",
+              "game": "ets2",
+              "code": "fictional_cargoes",
+              "nameEn": "Fictional Cargo",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000087",
+                "label": "Fictional Cargo",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "adrClass": null,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogItems:updated-trailers",
+      "operationId": "listCatalogItems",
+      "status": 200,
+      "path": {
+        "list": "trailers"
+      },
+      "query": {
+        "game": "ets2"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "54000000-0000-4000-8000-000000000088",
+              "game": "ets2",
+              "code": "fictional_trailers",
+              "nameEn": "Fictional Trailer",
+              "nameRu": null,
+              "hidden": false,
+              "display": {
+                "entityId": "54000000-0000-4000-8000-000000000088",
+                "label": "Fictional Trailer",
+                "requestedLocale": "en",
+                "renderedLocale": "en",
+                "englishFallback": false,
+                "hidden": false
+              },
+              "dlcId": null,
+              "dlc": null,
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "listCatalogDepots:hidden-untranslated",
+      "operationId": "listCatalogDepots",
+      "status": 200,
+      "query": {
+        "game": "ets2",
+        "hidden": "only",
+        "includeHidden": false,
+        "untranslated": true,
+        "locale": "ru"
+      },
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "41000000-0000-4000-8000-000000000021",
+              "game": "ets2",
+              "hidden": true,
+              "dlcId": null,
+              "dlc": null,
+              "company": {
+                "id": "41000000-0000-4000-8000-000000000011",
+                "code": "synthetic_freight",
+                "label": {
+                  "entityId": "41000000-0000-4000-8000-000000000011",
+                  "label": "Synthetic Freight",
+                  "requestedLocale": "ru",
+                  "renderedLocale": "en",
+                  "englishFallback": true,
+                  "hidden": false
+                },
+                "logo": {
+                  "version": "0123456789abcdef",
+                  "byteLength": 2048
+                }
+              },
+              "city": {
+                "id": "41000000-0000-4000-8000-000000000001",
+                "code": "synthetic_city",
+                "label": {
+                  "entityId": "41000000-0000-4000-8000-000000000001",
+                  "label": "Synthetic City",
+                  "requestedLocale": "en",
+                  "renderedLocale": "en",
+                  "englishFallback": false,
+                  "hidden": false
+                }
+              },
+              "updatedAt": "2026-10-21T12:00:00.000Z"
+            }
+          ],
+          "nextCursor": null,
+          "total": 1
+        },
+        "meta": {
+          "requestId": "synthetic-stage-one"
+        }
+      }
+    },
+    {
+      "id": "publishQualificationRules:without-reason",
+      "operationId": "publishQualificationRules",
+      "status": 201,
+      "response": {
+        "data": {
+          "id": "41000000-0000-4000-8000-000000000001",
+          "version": 1,
+          "game": "ets2",
+          "code": "trainee",
+          "name": "synthetic-example",
+          "ruleVersionId": null,
+          "configured": false,
+          "requiredTrips": null,
+          "requiredDistanceM": null
+        },
+        "meta": {
+          "requestId": "synthetic-request-001"
+        }
+      },
+      "request": {
+        "rules": [],
+        "requiredTrips": null,
+        "requiredDistanceM": null
+      }
     }
   ]
 }

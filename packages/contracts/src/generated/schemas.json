@@ -786,6 +786,10 @@
           "items": {
             "$ref": "#/$defs/Assignment"
           }
+        },
+        "lifetimeTotals": {
+          "$ref": "#/$defs/LifetimeTripTotals",
+          "description": "All-game lifetime accepted canonical trip count and exact actual distance in metres for this visible member profile."
         }
       },
       "required": [
@@ -1872,6 +1876,63 @@
         },
         "review": {
           "$ref": "#/$defs/TripReviewQueueEntry"
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "Stable canonical trip number when assigned."
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "UTC canonical trip creation instant."
+        },
+        "submittedAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "UTC submission instant, or null if no submission is known."
+        },
+        "event": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "#/$defs/Id"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "required": [
+                "id",
+                "title"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Associated visible event, or null if none is visible. Only in authorized author/reviewer projections. Omit entirely in company scope."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": [
+            "single-player",
+            "truckersmp",
+            "haulmp",
+            "unknown"
+          ],
+          "description": "Only in authorized author/reviewer projections. Omit entirely in company scope."
         }
       },
       "required": [
@@ -4520,6 +4581,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "lifetimeTotals": {
+          "$ref": "#/$defs/LifetimeTripTotals",
+          "description": "Lifetime accepted canonical trip count and exact actual distance in metres, restricted by the optional game filter when supplied."
         }
       },
       "required": [
@@ -5209,6 +5274,9 @@
               "type": "null"
             }
           ]
+        },
+        "statusCounts": {
+          "$ref": "#/$defs/AdminMemberStatusCounts"
         }
       },
       "required": [
@@ -5469,6 +5537,12 @@
               "type": "null"
             }
           ]
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Authorized filtered trip count before cursor pagination."
         }
       },
       "required": [
@@ -7034,7 +7108,7 @@
           ]
         },
         "fields": {
-          "$ref": "#/$defs/ManualDraftFields"
+          "$ref": "#/$defs/ManualDraftEditableFields"
         },
         "targetTrip": {
           "anyOf": [
@@ -7067,6 +7141,11 @@
               "type": "null"
             }
           ]
+        },
+        "labels": {
+          "$ref": "#/$defs/ManualDraftLabels",
+          "readOnly": true,
+          "description": "Display labels for the current origin, destination and cargo selections. A missing label is null."
         }
       },
       "required": [
@@ -7162,7 +7241,7 @@
           "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
         },
         "fields": {
-          "$ref": "#/$defs/ManualReportFields"
+          "$ref": "#/$defs/ManualReportReadFields"
         }
       },
       "required": [
@@ -7371,6 +7450,11 @@
               "type": "null"
             }
           ]
+        },
+        "editingCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -8869,6 +8953,16 @@
               "type": "null"
             }
           ]
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Last update to this catalog row."
+        },
+        "depotCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Companies list only. Count linked same-game depots."
         }
       },
       "required": [
@@ -8965,6 +9059,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -8985,6 +9085,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -9005,6 +9111,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -9025,6 +9137,18 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
+                },
+                "missingLogo": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible companies in this game without a logo."
                 }
               },
               "required": [
@@ -9045,6 +9169,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible depots in this game whose company or city lacks a Russian name."
                 }
               },
               "required": [
@@ -9065,6 +9195,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -9085,6 +9221,12 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "untranslated": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "Default-visible rows in this game missing a Russian name."
                 }
               },
               "required": [
@@ -9685,6 +9827,10 @@
         },
         "city": {
           "$ref": "#/$defs/CatalogDepotCity"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Last update to the depot row itself."
         }
       },
       "required": [
@@ -10109,6 +10255,794 @@
         "meta"
       ],
       "additionalProperties": false
+    },
+    "WorkspaceSummary": {
+      "type": "object",
+      "properties": {
+        "computedAt": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "tripsNeedingFixes": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tripId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "latestReturnReason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2048
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "tripId",
+                  "latestReturnReason"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires trips.read_own_private. Current own trips requiring a driver fix. Return the latest author-visible return explanation, or null if no displayable text is available."
+        },
+        "unfinishedManualDrafts": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "draftId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "updatedAt": {
+                    "$ref": "#/$defs/Timestamp"
+                  }
+                },
+                "required": [
+                  "draftId",
+                  "updatedAt"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires trips.submit_own. Current own editing drafts."
+        },
+        "unansweredUpcomingEvents": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "eventId": {
+                    "$ref": "#/$defs/Id"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "startsAt": {
+                    "$ref": "#/$defs/Timestamp"
+                  }
+                },
+                "required": [
+                  "eventId",
+                  "title",
+                  "startsAt"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 5
+            }
+          },
+          "required": [
+            "count",
+            "items"
+          ],
+          "additionalProperties": false,
+          "description": "Requires events.respond. Upcoming events the caller can see and respond to, for which they have no response."
+        },
+        "reviewQueue": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "oldestAgeSeconds": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "count",
+            "oldestAgeSeconds"
+          ],
+          "additionalProperties": false,
+          "description": "Requires trips.review. Use the existing review queue predicate and exclude the caller's own trips. Age is the elapsed whole seconds since the oldest eligible TripReviewQueueEntry.createdAt, or null for an empty queue."
+        },
+        "newApplicationsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Requires applications.manage. Count submitted applications."
+        }
+      },
+      "required": [
+        "computedAt"
+      ],
+      "additionalProperties": false,
+      "description": "Current permission-filtered workspace snapshot. Omit unauthorized sections. Include zero for visible empty counts and an empty items array for an empty preview."
+    },
+    "EnvelopeWorkspaceSummary": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/WorkspaceSummary"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "AdminApplicationStatusCounts": {
+      "type": "object",
+      "properties": {
+        "submitted": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "approved": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "submitted",
+        "approved",
+        "rejected"
+      ],
+      "additionalProperties": false
+    },
+    "ListAdminApplication": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Application"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "statusCounts": {
+          "$ref": "#/$defs/AdminApplicationStatusCounts"
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EnvelopeListAdminApplication": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/ListAdminApplication"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "AdminMemberStatusCounts": {
+      "type": "object",
+      "properties": {
+        "inCompany": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Members currently in the company."
+        },
+        "left": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Former members."
+        },
+        "invited": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Outstanding unexpired, unused invitation generations. Omit without current applications.manage authority."
+        },
+        "droveLast30Days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Distinct members with accepted canonical trip activity in the rolling 30 days, using the canonical reporting instant."
+        }
+      },
+      "required": [
+        "inCompany",
+        "left",
+        "droveLast30Days"
+      ],
+      "additionalProperties": false
+    },
+    "LifetimeTripTotals": {
+      "type": "object",
+      "properties": {
+        "acceptedTrips": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        }
+      },
+      "required": [
+        "acceptedTrips",
+        "actualDistanceM"
+      ],
+      "additionalProperties": false
+    },
+    "ManualDraftEditableFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 0,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference start time supplied by the driver."
+        },
+        "completedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference completion time supplied by the driver."
+        },
+        "cargoDamagePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "originCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected origin city."
+        },
+        "destinationCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected destination city."
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "description": "Partial draft fields, including independently optional reference dates. Read-only display labels are never write fields."
+    },
+    "ManualDatedSubmissionFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference start time supplied by the driver."
+        },
+        "completedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference completion time supplied by the driver."
+        },
+        "cargoDamagePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "originCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected origin city."
+        },
+        "destinationCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected destination city."
+        }
+      },
+      "required": [
+        "game",
+        "origin",
+        "destination",
+        "cargo",
+        "cargoMassKg",
+        "trailerType",
+        "actualDistanceM",
+        "evidenceIds",
+        "startedAt",
+        "completedAt"
+      ],
+      "additionalProperties": false,
+      "description": "Complete dated manual submission. At submission both instants must be nonfuture, and startedAt must be strictly earlier than completedAt. The dates are reference facts only. Reporting, qualification and progress continue to use staff confirmation."
+    },
+    "ManualFinalSubmissionFields": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ManualSubmissionFields"
+        },
+        {
+          "$ref": "#/$defs/ManualDatedSubmissionFields"
+        }
+      ],
+      "description": "The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates."
+    },
+    "ManualReportReadFields": {
+      "type": "object",
+      "properties": {
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "origin": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "destination": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargo": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "cargoMassKg": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "trailerType": {
+          "$ref": "#/$defs/ManualCatalogSelection"
+        },
+        "actualDistanceM": {
+          "$ref": "#/$defs/Decimal"
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "eventId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference start time supplied by the driver."
+        },
+        "completedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Reference completion time supplied by the driver."
+        },
+        "cargoDamagePercent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "originCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected origin city."
+        },
+        "destinationCompanyId": {
+          "$ref": "#/$defs/Id",
+          "description": "Selected company with a visible same-game depot in the selected destination city."
+        }
+      },
+      "required": [
+        "game",
+        "origin",
+        "destination",
+        "cargo",
+        "cargoMassKg",
+        "trailerType",
+        "actualDistanceM",
+        "evidenceIds",
+        "eventId",
+        "comment"
+      ],
+      "additionalProperties": false,
+      "description": "Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress.",
+      "dependentRequired": {
+        "startedAt": [
+          "completedAt"
+        ],
+        "completedAt": [
+          "startedAt"
+        ]
+      }
+    },
+    "ManualDraftLabels": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cargo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "origin",
+        "destination",
+        "cargo"
+      ],
+      "additionalProperties": false
+    },
+    "ManualDraftWriteInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualDraftEditableFields"
+        },
+        "targetTrip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualTelemetryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "ManualDraftFinalSubmissionInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualFinalSubmissionFields"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false,
+      "description": "Complete final fields replace partial draft fields in the same guarded submission. Draft target is retained; update the draft with a fresh telemetry target version before retrying a stale target."
+    },
+    "ManualReportCreationInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualFinalSubmissionFields"
+        },
+        "targetTrip": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ManualTelemetryTarget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "ManualReportResubmissionInput": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "$ref": "#/$defs/ManualFinalSubmissionFields"
+        },
+        "expectedTripVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "fields",
+        "expectedTripVersion"
+      ],
+      "additionalProperties": false
+    },
+    "QualificationRulePublicationInput": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "maxItems": 32
+        },
+        "requiredTrips": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDistanceM": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "\\S"
+        },
+        "effectiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "Omit for immediate publication. Supplied effective time must be at or after server publication and later than every existing effective version. Retroactive publication is rejected."
+        }
+      },
+      "required": [
+        "rules",
+        "requiredTrips",
+        "requiredDistanceM"
+      ],
+      "additionalProperties": false,
+      "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
     }
   }
 }
