@@ -10767,111 +10767,201 @@
       "description": "The closed undated fields support legacy clients. Stage 1 clients send the closed dated fields with both reference dates."
     },
     "ManualReportReadFields": {
-      "type": "object",
-      "properties": {
-        "game": {
-          "type": "string",
-          "enum": [
-            "ets2",
-            "ats"
-          ]
-        },
-        "origin": {
-          "$ref": "#/$defs/ManualCatalogSelection"
-        },
-        "destination": {
-          "$ref": "#/$defs/ManualCatalogSelection"
-        },
-        "cargo": {
-          "$ref": "#/$defs/ManualCatalogSelection"
-        },
-        "cargoMassKg": {
-          "$ref": "#/$defs/Decimal"
-        },
-        "trailerType": {
-          "$ref": "#/$defs/ManualCatalogSelection"
-        },
-        "actualDistanceM": {
-          "$ref": "#/$defs/Decimal"
-        },
-        "evidenceIds": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "game": {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            },
+            "origin": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "destination": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "cargo": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "cargoMassKg": {
+              "$ref": "#/$defs/Decimal"
+            },
+            "trailerType": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "actualDistanceM": {
+              "$ref": "#/$defs/Decimal"
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "eventId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "comment": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "startedAt": false,
+            "completedAt": false,
+            "cargoDamagePercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "originCompanyId": {
+              "$ref": "#/$defs/Id",
+              "description": "Selected company with a visible same-game depot in the selected origin city."
+            },
+            "destinationCompanyId": {
+              "$ref": "#/$defs/Id",
+              "description": "Selected company with a visible same-game depot in the selected destination city."
+            }
           },
-          "minItems": 1,
-          "uniqueItems": true
+          "required": [
+            "game",
+            "origin",
+            "destination",
+            "cargo",
+            "cargoMassKg",
+            "trailerType",
+            "actualDistanceM",
+            "evidenceIds",
+            "eventId",
+            "comment"
+          ],
+          "additionalProperties": false
         },
-        "eventId": {
-          "anyOf": [
-            {
+        {
+          "type": "object",
+          "properties": {
+            "game": {
               "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              "enum": [
+                "ets2",
+                "ats"
+              ]
             },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "comment": {
-          "anyOf": [
-            {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4000
+            "origin": {
+              "$ref": "#/$defs/ManualCatalogSelection"
             },
-            {
-              "type": "null"
+            "destination": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "cargo": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "cargoMassKg": {
+              "$ref": "#/$defs/Decimal"
+            },
+            "trailerType": {
+              "$ref": "#/$defs/ManualCatalogSelection"
+            },
+            "actualDistanceM": {
+              "$ref": "#/$defs/Decimal"
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "eventId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "comment": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "startedAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "Reference start time supplied by the driver."
+            },
+            "completedAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "Reference completion time supplied by the driver."
+            },
+            "cargoDamagePercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "originCompanyId": {
+              "$ref": "#/$defs/Id",
+              "description": "Selected company with a visible same-game depot in the selected origin city."
+            },
+            "destinationCompanyId": {
+              "$ref": "#/$defs/Id",
+              "description": "Selected company with a visible same-game depot in the selected destination city."
             }
-          ]
-        },
-        "startedAt": {
-          "$ref": "#/$defs/Timestamp",
-          "description": "Reference start time supplied by the driver."
-        },
-        "completedAt": {
-          "$ref": "#/$defs/Timestamp",
-          "description": "Reference completion time supplied by the driver."
-        },
-        "cargoDamagePercent": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "originCompanyId": {
-          "$ref": "#/$defs/Id",
-          "description": "Selected company with a visible same-game depot in the selected origin city."
-        },
-        "destinationCompanyId": {
-          "$ref": "#/$defs/Id",
-          "description": "Selected company with a visible same-game depot in the selected destination city."
+          },
+          "required": [
+            "game",
+            "origin",
+            "destination",
+            "cargo",
+            "cargoMassKg",
+            "trailerType",
+            "actualDistanceM",
+            "evidenceIds",
+            "eventId",
+            "comment",
+            "startedAt",
+            "completedAt"
+          ],
+          "additionalProperties": false
         }
-      },
-      "required": [
-        "game",
-        "origin",
-        "destination",
-        "cargo",
-        "cargoMassKg",
-        "trailerType",
-        "actualDistanceM",
-        "evidenceIds",
-        "eventId",
-        "comment"
       ],
-      "additionalProperties": false,
-      "description": "Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress.",
-      "dependentRequired": {
-        "startedAt": [
-          "completedAt"
-        ],
-        "completedAt": [
-          "startedAt"
-        ]
-      }
+      "description": "Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress. Reference dates appear together when present."
     },
     "ManualDraftLabels": {
       "type": "object",

@@ -3908,15 +3908,34 @@ export interface components {
             fields: components["schemas"]["ManualSubmissionFields"];
             targetTrip?: components["schemas"]["ManualTelemetryTarget"] | null;
         };
-        /** @description Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress. */
+        /** @description Immutable submitted fields including available reference facts. Old records can omit the new fields. They do not change effective reporting, rule selection or credited progress. Reference dates appear together when present. */
         ManualReportReadFields: {
             actualDistanceM: components["schemas"]["Decimal"];
             cargo: components["schemas"]["ManualCatalogSelection"];
             cargoDamagePercent?: number;
             cargoMassKg: components["schemas"]["Decimal"];
             comment: string | null;
+            completedAt?: never;
+            destination: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected destination city. */
+            destinationCompanyId?: components["schemas"]["Id"];
+            eventId: string | null;
+            evidenceIds: string[];
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            origin: components["schemas"]["ManualCatalogSelection"];
+            /** @description Selected company with a visible same-game depot in the selected origin city. */
+            originCompanyId?: components["schemas"]["Id"];
+            startedAt?: never;
+            trailerType: components["schemas"]["ManualCatalogSelection"];
+        } | {
+            actualDistanceM: components["schemas"]["Decimal"];
+            cargo: components["schemas"]["ManualCatalogSelection"];
+            cargoDamagePercent?: number;
+            cargoMassKg: components["schemas"]["Decimal"];
+            comment: string | null;
             /** @description Reference completion time supplied by the driver. */
-            completedAt?: components["schemas"]["Timestamp"];
+            completedAt: components["schemas"]["Timestamp"];
             destination: components["schemas"]["ManualCatalogSelection"];
             /** @description Selected company with a visible same-game depot in the selected destination city. */
             destinationCompanyId?: components["schemas"]["Id"];
@@ -3928,7 +3947,7 @@ export interface components {
             /** @description Selected company with a visible same-game depot in the selected origin city. */
             originCompanyId?: components["schemas"]["Id"];
             /** @description Reference start time supplied by the driver. */
-            startedAt?: components["schemas"]["Timestamp"];
+            startedAt: components["schemas"]["Timestamp"];
             trailerType: components["schemas"]["ManualCatalogSelection"];
         };
         ManualReportResubmissionInput: {

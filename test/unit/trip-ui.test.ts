@@ -231,3 +231,34 @@ test("conditional importer matches authoritative generated AJV semantics on posi
       expect(schema("TripProposal").safeParse(value).success).toBe(!!check(value));
     }
 });
+
+test("manual revision readback keeps paired reference dates and closed fields in Ajv and Zod", async () => {
+  const { createSchemaValidator } = await import("../../apps/api/src/platform/http/schemas.ts");
+  const ajv = createSchemaValidator().compile({
+    $ref: "urn:vtc:browser:v1#/$defs/EnvelopeManualRevision",
+  });
+  const zod = schema("EnvelopeManualRevision");
+  const undated = cases.find(
+    (f: { id: string }) => f.id === "getManualReportRevision:success",
+  ).response;
+  const dated = cases.find(
+    (f: { id: string }) => f.id === "getManualReportRevision:dated",
+  ).response;
+  const { startedAt, completedAt, ...withoutDates } = dated.data.fields;
+  for (const [fields, expected] of [
+    [undated.data.fields, true],
+    [dated.data.fields, true],
+    [withoutDates, true],
+    [{ ...withoutDates, startedAt }, false],
+    [{ ...withoutDates, completedAt }, false],
+    [{ ...dated.data.fields, startedAt: "2026-10-20" }, false],
+    [{ ...withoutDates, extra: true }, false],
+    [{ ...dated.data.fields, extra: true }, false],
+  ] as const) {
+    const value = { ...dated, data: { ...dated.data, fields } };
+    expect(ajv(value), "server validation").toBe(expected);
+    const result = zod.safeParse(value);
+    expect(result.success, "browser validation").toBe(expected);
+    if (result.success) expect(result.data).toEqual(value);
+  }
+});
