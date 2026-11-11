@@ -31,7 +31,7 @@ export const trips = mysqlTable(
   "trips",
   {
     id: idColumn("id").primaryKey(),
-    number: int("trip_number", { unsigned: true }).autoincrement().notNull(),
+    number: int("number", { unsigned: true }).autoincrement().notNull(),
     ownerId: idColumn("owner_id")
       .notNull()
       .references(() => membership.userId, { onDelete: "restrict" }),
