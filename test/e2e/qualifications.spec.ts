@@ -948,6 +948,79 @@ test(
   },
 );
 
+for (const locale of ["en", "ru"] as const)
+  test(
+    `controlled ${locale} progress recognizes a distance-only rule with an outdated level pointer`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockQualifications(page, locale, false);
+      state.unconfigured = true;
+      state.progressRequirements = {
+        requiredTrips: null,
+        requiredDistanceM: "20000",
+        eligibleForConfirmation: false,
+      };
+      await page.goto("/account/qualifications");
+      await catalogLanguage(page, locale);
+      const current = page
+        .getByRole("heading", {
+          name: locale === "en" ? "Current qualification · ETS2" : "Текущая квалификация · ETS2",
+          exact: true,
+        })
+        .locator("..");
+      const rulesUnavailable =
+        locale === "en"
+          ? "Current qualification rules are unavailable."
+          : "Текущие правила квалификации недоступны.";
+      await expect(
+        current.getByText(locale === "en" ? "2 / No minimum" : "2 / Без минимума", { exact: true }),
+      ).toBeVisible();
+      await expect(current.getByText(locale === "en" ? /\/ 20 km$/ : /\/ 20 км$/)).toBeVisible();
+      await expect(
+        current.getByText(
+          locale === "en"
+            ? "Meet the configured minimums before staff can confirm promotion."
+            : "Для подтверждения повышения нужно достичь заданных минимумов.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(current.getByText(rulesUnavailable, { exact: true })).toBeVisible();
+      await expect(
+        current.getByText(
+          /Publish an effective rule version|Опубликуйте действующую версию правил/,
+        ),
+      ).toHaveCount(0);
+
+      const progressUnavailable = current.getByText(
+        locale === "en"
+          ? "Promotion requirements are unavailable."
+          : "Требования для повышения недоступны.",
+        { exact: true },
+      );
+      // The reverse read order can return the new pointer before its corresponding progress.
+      state.unconfigured = false;
+      state.progressRequirements = {
+        requiredTrips: null,
+        requiredDistanceM: null,
+        eligibleForConfirmation: false,
+      };
+      await page.reload();
+      await expect(current.getByText("10 kg", { exact: true })).toBeVisible();
+      await expect(progressUnavailable).toBeVisible();
+
+      // Progress alone is also ambiguous if the level read fails.
+      await page.route("**/api/v1/qualification-levels?*", (route) =>
+        route.fulfill({ status: 503, json: {} }),
+      );
+      await page.reload();
+      await expect(
+        current.getByText(locale === "en" ? "2 / Unavailable" : "2 / Недоступно", { exact: true }),
+      ).toBeVisible();
+      await expect(progressUnavailable).toBeVisible();
+      await expect(current.getByText(rulesUnavailable, { exact: true })).toBeVisible();
+    },
+  );
+
 test(
   "controlled member permissions disabled minimums retained-review and unavailable states",
   browserCase(["@functional"]),

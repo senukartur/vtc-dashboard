@@ -25,6 +25,10 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
   const held: { release: () => void; done: Promise<void> }[] = [];
   const state = {
     progressStatus: 200,
+    progressRequirements: null as Pick<
+      S["Progress"],
+      "requiredTrips" | "requiredDistanceM" | "eligibleForConfirmation"
+    > | null,
     publishStatus: 201,
     uncertain: false,
     version: 1,
@@ -184,9 +188,11 @@ export async function mockQualifications(page: Page, locale: "en" | "ru" = "en",
           },
           acceptedTrips: 2,
           actualDistanceM: "100.000000000000000001",
-          requiredTrips: state.unset || state.unconfigured ? null : 2,
-          requiredDistanceM: state.unset || state.unconfigured ? null : "100",
-          eligibleForConfirmation: !state.unconfigured && state.currentRank < 3 && state.eligible,
+          ...(state.progressRequirements ?? {
+            requiredTrips: state.unset || state.unconfigured ? null : 2,
+            requiredDistanceM: state.unset || state.unconfigured ? null : "100",
+            eligibleForConfirmation: !state.unconfigured && state.currentRank < 3 && state.eligible,
+          }),
           reviewRequired: state.review,
           computedAt: "2026-10-25T12:00:00.000Z",
           projectionVersion: 99,

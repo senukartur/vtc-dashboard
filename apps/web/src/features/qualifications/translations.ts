@@ -27,6 +27,7 @@ export const qualificationTranslations = {
     current: "Current qualification",
     noAssignment: "No current assignment is recorded for this game.",
     restrictions: "Allowed work",
+    restrictionsUnavailable: "Current qualification rules are unavailable.",
     noRules: "No effective rules have been published. Launch configuration is incomplete.",
     unrestricted: "No additional qualification restriction",
     emptyAllowlist:
@@ -39,6 +40,7 @@ export const qualificationTranslations = {
     unset: "Unset",
     noMinimum: "No minimum",
     progressUnconfigured: "Publish an effective rule version to configure promotion.",
+    progressUnavailable: "Promotion requirements are unavailable.",
     eligible: "Promotion requirements are met. Staff confirmation is required.",
     ineligible: "Meet the configured minimums before staff can confirm promotion.",
     terminal: "Driver I is the terminal qualification. No further promotion is available.",
@@ -201,6 +203,7 @@ export const qualificationTranslations = {
     current: "Текущая квалификация",
     noAssignment: "Для этой игры текущее назначение не записано.",
     restrictions: "Допустимые перевозки",
+    restrictionsUnavailable: "Текущие правила квалификации недоступны.",
     noRules: "Действующие правила ещё не опубликованы. Настройка перед запуском не завершена.",
     unrestricted: "Дополнительных ограничений квалификации нет",
     emptyAllowlist:
@@ -213,6 +216,7 @@ export const qualificationTranslations = {
     unset: "Не задано",
     noMinimum: "Без минимума",
     progressUnconfigured: "Опубликуйте действующую версию правил, чтобы настроить повышение.",
+    progressUnavailable: "Требования для повышения недоступны.",
     eligible: "Требования для повышения выполнены. Необходимо подтверждение руководства.",
     ineligible: "Для подтверждения повышения нужно достичь заданных минимумов.",
     terminal: "Водитель I — высшая квалификация. Дальнейших повышений нет.",
