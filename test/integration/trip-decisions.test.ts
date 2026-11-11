@@ -5,14 +5,25 @@ import {
   newId,
   runMigrations,
   TransactionCommitOutcomeUnknownError,
+  type TxContext,
   type UnitOfWork,
 } from "@vtc/db";
-import { manualEvidence } from "@vtc/db/manual-reports-schema";
+import { manualEvidence, manualReports, manualRevisions } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
-import { tripEventAssociations } from "@vtc/db/trip-decisions-schema";
+import { tripDecisions, tripEventAssociations } from "@vtc/db/trip-decisions-schema";
 import { catalogCargoes } from "@vtc/db/catalogs-schema";
-import { eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
+import {
+  and,
+  eq,
+  isNull,
+  or,
+  sql,
+  tripContributions,
+  tripFacts,
+  trips,
+} from "@vtc/db/trips-schema";
+import { alias } from "drizzle-orm/mysql-core";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -46,6 +57,7 @@ import {
   createTripDecisions,
   type TripDecisions,
 } from "../../apps/api/src/modules/trip-decisions/service.ts";
+import { createTripDecisionWorkspace } from "../../apps/api/src/modules/trip-decisions/workspace.ts";
 import {
   createTrips,
   type ListOptions,
@@ -3523,4 +3535,234 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
         .where(eq(catalogCargoes.id, ids.get("fixture_gas") as string)),
     );
   }
+});
+
+function returnedTripFixture() {
+  const root = alias(trips, "fixture_workspace_root");
+  const groupMember = alias(trips, "fixture_workspace_member");
+  return createTripDecisionWorkspace(unit, {
+    rejectedGroupMembers: (tx, viewerId) =>
+      unit
+        .client(tx)
+        .select({
+          canonicalTripId: sql<string>`${root.id}`.as("canonical_trip_id"),
+          groupMemberTripId: sql<string>`${groupMember.id}`.as("group_member_trip_id"),
+        })
+        .from(root)
+        .innerJoin(
+          groupMember,
+          and(
+            or(eq(groupMember.id, root.id), eq(groupMember.aliasOf, root.id)),
+            eq(groupMember.ownerId, root.ownerId),
+            eq(groupMember.game, root.game),
+          ),
+        )
+        .where(and(eq(root.ownerId, viewerId), isNull(root.aliasOf), eq(root.decision, "rejected")))
+        .as("fixture_workspace_groups"),
+    resubmittableRevisions: (tx, viewerId) =>
+      unit
+        .client(tx)
+        .select({ reportTripId: manualReports.tripId, revisionId: manualRevisions.id })
+        .from(manualReports)
+        .innerJoin(
+          manualRevisions,
+          and(
+            eq(manualRevisions.id, manualReports.currentRevisionId),
+            eq(manualRevisions.reportId, manualReports.id),
+          ),
+        )
+        .where(eq(manualReports.ownerId, viewerId))
+        .as("fixture_workspace_revisions"),
+  });
+}
+
+test("workspace returns a rejected author revision until resubmission and follows the subsequent rejection", async () => {
+  const author = await member();
+  const workspace = returnedTripFixture();
+  const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, author.userId);
+  const submitted = await report(author);
+  const rejected = await decide(submitted.tripId, "reject");
+  expect(await unit.run(read)).toEqual({
+    count: 1,
+    items: [{ tripId: submitted.tripId, latestReturnReason: rejected.data.reason }],
+  });
+
+  const fields = submitted.currentRevision.fields;
+  if (!("origin" in fields)) throw new Error("SYNTHETIC_MANUAL_V2_REQUIRED");
+  const resubmitted = await manual.reviseReport(author, submitted.id, newId(), submitted.version, {
+    fields: { ...fields, actualDistanceM: "124000" },
+    expectedTripVersion: rejected.version,
+  });
+  expect((await state(submitted.tripId))?.decision).toBe("pending_review");
+  expect(await unit.run(read)).toEqual({ count: 0, items: [] });
+
+  const review = await service.review(dispatcher, submitted.tripId);
+  await service.decide(dispatcher, submitted.tripId, newId(), review.version, {
+    decision: "reject",
+    reviewedRevisionId: resubmitted.currentRevision.id,
+    factRevisionId: review.data.factRevisionId,
+    proposalId: null,
+    reason: "Fictional updated author feedback",
+  });
+  expect(await unit.run(read)).toEqual({
+    count: 1,
+    items: [{ tripId: submitted.tripId, latestReturnReason: "Fictional updated author feedback" }],
+  });
+});
+
+test("workspace ignores alias and proposal decisions but accepts an explicit root review of an alias-held revision", async () => {
+  const author = await member();
+  const workspace = returnedTripFixture();
+  const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, author.userId);
+  const primary = await receive(overweight(), author);
+  const telemetryOnly = await receive(overweight(), author);
+  await decide(telemetryOnly.tripId, "reject");
+  const attached = await report(author);
+  const rejected = await decide(attached.tripId, "reject");
+  const sourceFact = (await state(primary.tripId))?.currentFactId;
+  const manualFact = (await state(attached.tripId))?.currentFactId;
+  if (!sourceFact || !manualFact) throw new Error("SYNTHETIC_TRIP_FACT_REQUIRED");
+  expect(await unit.run(read)).toEqual({
+    count: 1,
+    items: [{ tripId: attached.tripId, latestReturnReason: rejected.data.reason }],
+  });
+
+  const tripVersion = async (tripId: string) => {
+    const current = await state(tripId);
+    if (!current) throw new Error("SYNTHETIC_TRIP_REQUIRED");
+    return current.version;
+  };
+  const merge = async (secondaryTripId: string) => {
+    await reconciliation.merge(director, newId(), {
+      primaryTripId: primary.tripId,
+      secondaryTripId,
+      primaryVersion: await tripVersion(primary.tripId),
+      secondaryVersion: await tripVersion(secondaryTripId),
+      reason: "Fictional reconciliation",
+    });
+  };
+  await merge(attached.tripId);
+  instant += 1000;
+  const unrelated = await report(author);
+  await merge(unrelated.tripId);
+  expect((await state(primary.tripId))?.decision).toBe("rejected");
+  expect(await unit.run(read)).toEqual({ count: 0, items: [] });
+
+  const proposal = await service.propose(
+    dispatcher,
+    primary.tripId,
+    newId(),
+    await tripVersion(primary.tripId),
+    {
+      reason: "Fictional proposed amendment",
+      evidenceIds: attached.currentRevision.fields.evidenceIds,
+      actualDistanceM: "125000",
+    },
+  );
+  const detail = await service.getProposal(dispatcher, primary.tripId, proposal.data.id);
+  await decideProposal(deputy, primary.tripId, proposal.data.id, newId(), detail.version, {
+    decision: "reject",
+    reviewedRevisionId: detail.data.revisionId,
+    reason: "Fictional private proposal feedback",
+  });
+  expect(await unit.run(read)).toEqual({ count: 0, items: [] });
+
+  const review = await service.review(dispatcher, primary.tripId);
+  await service.decide(dispatcher, primary.tripId, newId(), review.version, {
+    decision: "reject",
+    reviewedRevisionId: attached.currentRevision.id,
+    factRevisionId: manualFact,
+    proposalId: null,
+    reason: "Fictional canonical author feedback",
+  });
+  // A reconciliation can project another fact and hold review without superseding the rejection.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(trips)
+      .set({ currentFactId: sourceFact, reviewHold: true, correctionPending: true })
+      .where(eq(trips.id, primary.tripId)),
+  );
+  expect(await unit.run(read)).toEqual({
+    count: 1,
+    items: [{ tripId: primary.tripId, latestReturnReason: "Fictional canonical author feedback" }],
+  });
+});
+
+test("workspace uses the latest root sequence before filtering and counts before the five-item preview", async () => {
+  const author = await member();
+  const workspace = returnedTripFixture();
+  const read = (tx: TxContext) => workspace.workspaceReturnedTripsInTransaction(tx, author.userId);
+  const decided: {
+    decisionId: string;
+    decidedAt: string;
+    item: { tripId: string; latestReturnReason: string | null };
+  }[] = [];
+  const savedTime = instant;
+  try {
+    for (let index = 0; index < 6; index++) {
+      if (index === 5) instant += 1000;
+      const r = await report(author);
+      const { data } = await decide(r.tripId, "reject");
+      decided.push({
+        decisionId: data.id,
+        decidedAt: data.decidedAt,
+        item: { tripId: r.tripId, latestReturnReason: data.reason },
+      });
+    }
+  } finally {
+    instant = savedTime;
+  }
+  decided.sort(
+    (a, b) => b.decidedAt.localeCompare(a.decidedAt) || b.item.tripId.localeCompare(a.item.tripId),
+  );
+  const ordered = decided.map(({ item }) => item);
+  expect(await unit.run(read)).toEqual({ count: 6, items: ordered.slice(0, 5) });
+
+  const newest = decided[0];
+  const oldest = decided.at(-1);
+  if (!newest || !oldest) throw new Error("SYNTHETIC_ROOT_DECISION_REQUIRED");
+  const [previous] = await unit.run((tx) =>
+    unit.client(tx).select().from(tripDecisions).where(eq(tripDecisions.id, newest.decisionId)),
+  );
+  if (!previous) throw new Error("SYNTHETIC_ROOT_DECISION_REQUIRED");
+  for (const replacement of [
+    { actorId: null, reason: null },
+    { reviewedRevisionId: newId() },
+    { outcome: "accepted" as const },
+  ]) {
+    await unit.run(async (tx) => {
+      const id = newId();
+      await unit
+        .client(tx)
+        .insert(tripDecisions)
+        .values({
+          ...previous,
+          ...replacement,
+          id,
+          sequence: previous.sequence + 1,
+          decidedAt: oldest.decidedAt,
+        });
+      expect(await read(tx)).toEqual({ count: 5, items: ordered.slice(1) });
+      await unit.client(tx).delete(tripDecisions).where(eq(tripDecisions.id, id));
+    });
+  }
+
+  await unit.run(async (tx) => {
+    const id = newId();
+    await unit
+      .client(tx)
+      .insert(tripDecisions)
+      .values({
+        ...previous,
+        id,
+        sequence: previous.sequence + 1,
+        reason: null,
+      });
+    expect(await read(tx)).toEqual({
+      count: 6,
+      items: [{ ...newest.item, latestReturnReason: null }, ...ordered.slice(1, 5)],
+    });
+    await unit.client(tx).delete(tripDecisions).where(eq(tripDecisions.id, id));
+  });
 });
