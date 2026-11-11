@@ -639,7 +639,7 @@ export function createTrips(
     const factMembers = new Map(membership.map((row) => [row.id, row.aliasOf ?? row.id]));
     const associations = new Map<string, string>();
     const privateViewer = read?.privateViewer;
-    let events: Map<string, { id: string; title: string }> | undefined;
+    let events: Awaited<ReturnType<Events["tripTitlesInTransaction"]>> | undefined;
     if (privateViewer && ports.eventTitles) {
       const saved = await ports.eventAssociations?.(tx, ids);
       for (const id of ids) {
@@ -657,6 +657,7 @@ export function createTrips(
         throw new Error("TRIP_FACT_POINTER_INVALID");
       const f = saved?.evidence;
       const eventId = associations.get(row.id);
+      const event = eventId ? events?.get(eventId) : undefined;
       const label = (value: NormalizedTripEvidence["origin"] | undefined) =>
         value?.status === "known" ? (labels.get(value.value.entityId) ?? null) : null;
       return {
@@ -691,7 +692,7 @@ export function createTrips(
           submittedAt: read.manual.get(row.id)?.submittedAt ?? null,
         }),
         ...(privateViewer && {
-          event: eventId ? (events?.get(eventId) ?? null) : null,
+          event: event?.game === row.game ? { id: event.id, title: event.title } : null,
           gameMode: effectiveGameMode(f),
         }),
       };

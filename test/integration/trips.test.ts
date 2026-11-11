@@ -7,6 +7,7 @@ import {
   sourceMessages,
   sourcePayloads,
   sourceTrips,
+  sql,
   tripFacts,
   tripFactTrailers,
   tripHistory,
@@ -31,6 +32,7 @@ import {
 import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
+import { tripSearchCondition } from "../../apps/api/src/modules/trips/list-query.ts";
 import {
   createTrips,
   type SourceContext,
@@ -2262,6 +2264,114 @@ test("source filter keeps each scope's page index with ref probes and no outer f
   // Review without hold has no page index today; its source probes must still be ref lookups.
   const { table: unheld } = await plan("review", "ets2telemetry");
   for (const row of unheld.slice(1)) expect(row.type).toBe("ref");
+});
+
+test("EXPLAIN covers owner reporting bounds, completion and localized page and count", async () => {
+  const { catalogs, trips: catalogTrips } = await listedTrips();
+  const matched = await receive(fresh(), catalogTrips);
+  const rows = Array.from({ length: 600 }, (_, i) => {
+    const row = tripRow(newId(), i % 10 === 1 ? owner.userId : other.userId, {
+      game: i % 3 ? "ets2" : "ats",
+      decision: i % 4 ? "accepted" : "unassessed",
+    });
+    return {
+      ...row,
+      reportingAt: i % 7 ? row.createdAt : null,
+      actualEnd: i % 5 ? row.createdAt : null,
+    };
+  });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.update(trips).set({ decision: "accepted" }).where(eq(trips.id, matched.tripId));
+    await db.insert(trips).values(rows);
+  });
+  await control.query("ANALYZE TABLE trips, trip_facts, catalog_cities, catalog_cargoes");
+
+  const first = rows[0] as (typeof rows)[number];
+  const upper = rows[31] as (typeof rows)[number];
+  const queries = await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    const base = { scope: "company" as const, viewerId: owner.userId };
+    const ownerReporting = tripListQuery(db, {
+      ...base,
+      ownerId: owner.userId,
+      from: first.createdAt,
+      toExclusive: upper.createdAt,
+    });
+    const completion = tripListQuery(db, {
+      ...base,
+      order: "completion_asc",
+      after: { instant: upper.actualEnd, id: upper.id },
+    });
+    const localized = tripListQuery(db, {
+      ...base,
+      searchCondition: tripSearchCondition(
+        unit,
+        tx,
+        catalogs.labelSearchCondition,
+        { label: "Fictional north" },
+        "ru",
+      ),
+    });
+    const page = (query: ReturnType<typeof tripListQuery>) =>
+      db
+        .select()
+        .from(trips)
+        .where(query.where)
+        .orderBy(...query.orderBy)
+        .limit(26)
+        .toSQL();
+    return {
+      ownerReporting: page(ownerReporting),
+      completion: page(completion),
+      localizedPage: page(localized),
+      localizedCount: db
+        .select({ total: sql<string>`COUNT(*)` })
+        .from(trips)
+        .where(localized.filtered)
+        .toSQL(),
+    };
+  });
+  const explain = async (query: { sql: string; params: unknown[] }) => {
+    const [plan] = await control.query<RowDataPacket[]>(`EXPLAIN ${query.sql}`, query.params);
+    return plan;
+  };
+  const [ownerPlan, completionPlan, labelPagePlan, labelCountPlan] = await Promise.all([
+    explain(queries.ownerReporting),
+    explain(queries.completion),
+    explain(queries.localizedPage),
+    explain(queries.localizedCount),
+  ]);
+  const ownerAccess = ownerPlan.find((row) => row.table === "trips");
+  const possible = String(ownerAccess?.possible_keys ?? "").split(",");
+  expect([...possible, ownerAccess?.key]).toContain("trip_owner_reporting");
+  expect(completionPlan.some((row) => row.table === "trips")).toBe(true);
+  expect(queries.completion.sql).toMatch(
+    /order by `trips`\.`actual_end` is null asc, `trips`\.`actual_end` asc, `trips`\.`id` asc/i,
+  );
+  for (const plan of [labelPagePlan, labelCountPlan])
+    expect(plan.map((row) => row.table)).toEqual(
+      expect.arrayContaining(["trips", "trip_facts", "catalog_cities", "catalog_cargoes"]),
+    );
+  expect(queries.localizedCount.sql).not.toMatch(/order by|limit/i);
+
+  const accesses = (plan: RowDataPacket[]) =>
+    plan.map((row) => ({
+      table: row.table,
+      access: row.type,
+      index: row.key,
+      estimatedRows: row.rows,
+      filesort: /filesort/i.test(String(row.Extra ?? "")),
+    }));
+  console.log(
+    JSON.stringify({
+      event: "trip_list_explain",
+      ownerReporting: accesses(ownerPlan),
+      completion: accesses(completionPlan),
+      localizedPage: accesses(labelPagePlan),
+      localizedCount: accesses(labelCountPlan),
+    }),
+  );
 });
 
 test("private normalized telemetry facts retain supported actual timing, zero, planned distance and unknown completeness", async () => {

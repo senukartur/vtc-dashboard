@@ -3549,3 +3549,51 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
     );
   }
 });
+
+test("trip reads omit a persisted wrong-game event candidate", async () => {
+  const who = await member();
+  const created = await events.create(director, newId(), {
+    title: "Fictional other-game convoy",
+    description: "Fictional invalid association",
+    game: "ats",
+    server: "Synthetic",
+    organizer: "Fictional company",
+    meetingLocation: "Fictional yard",
+    route: "Fictional route",
+    meetingAt: new Date(instant + 1800000).toISOString(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  });
+  const eventId = created.data.event.id;
+  const submitted = await report(who, manual, { eventId });
+  const [saved] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select({ eventId: tripEventAssociations.eventId })
+      .from(tripEventAssociations)
+      .where(eq(tripEventAssociations.tripId, submitted.tripId)),
+  );
+  expect(saved).toEqual({ eventId });
+  const trip = await state(submitted.tripId);
+  expect(trip).toMatchObject({ game: "ets2", decision: "pending_review" });
+  const q = String(trip?.number);
+  expect((await tripsService.list(who, { scope: "mine", q })).items[0]).toMatchObject({
+    id: submitted.tripId,
+    event: null,
+  });
+  expect((await tripsService.list(dispatcher, { scope: "review", q })).items[0]).toMatchObject({
+    id: submitted.tripId,
+    event: null,
+  });
+  expect(await tripsService.detail(who, submitted.tripId)).toMatchObject({
+    view: "private",
+    summary: { event: null },
+  });
+  expect((await service.review(dispatcher, submitted.tripId)).data.trip.summary.event).toBeNull();
+});

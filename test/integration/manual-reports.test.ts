@@ -47,6 +47,7 @@ import {
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
+import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
   type Actor,
@@ -103,6 +104,7 @@ let control: Connection,
   unit: UnitOfWork,
   identity: Identity,
   catalogs: Catalogs,
+  events: Events,
   tripService: Trips,
   manual: ManualReports,
   blobs: PrivateBlobs,
@@ -260,6 +262,7 @@ beforeAll(async () => {
   reviewer = (await setupPhase("reviewer_credentials", () => member(["dispatcher"]))).actor;
   trainee = (await setupPhase("trainee_credentials", () => member(["trainee"]))).actor;
   catalogs = createCatalogs(unit, catalogConfig(), { identity });
+  events = createEvents(unit, { cursorKey: randomBytes(32).toString("hex") }, { identity }, now);
   tripService = createTrips(
     unit,
     { cursorKey: randomBytes(32).toString("hex") },
@@ -270,6 +273,7 @@ beforeAll(async () => {
         manual.validateSourceInTransaction(tx, owner, payload, tripId),
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
       manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
+      eventTitles: events.tripTitlesInTransaction,
     },
     now,
   );
@@ -398,6 +402,56 @@ test("partial owner drafts create no trip; submission is atomic/idempotent with 
       fields: { ...fields(image.id), actualDistanceM: "2" },
     }),
   ).rejects.toMatchObject({ publicCode: "IDEMPOTENCY_CONFLICT" });
+});
+
+test("manual event fallback omits a wrong-game reference and shows the matching revision title", async () => {
+  const input: S["EventInput"] = {
+    title: "Fictional ATS convoy",
+    description: "Fictional manual association",
+    game: "ats",
+    server: "Synthetic",
+    organizer: "Fictional company",
+    meetingLocation: "Fictional yard",
+    route: "Fictional route",
+    meetingAt: new Date(instant + 1800000).toISOString(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  };
+  const ats = (await events.create(staff, newId(), input)).data.event;
+  const ets2 = (
+    await events.create(staff, newId(), { ...input, title: "Fictional ETS2 convoy", game: "ets2" })
+  ).data.event;
+  const image = await upload();
+  const report = await manual.submitReport(owner, newId(), {
+    fields: { ...fields(image.id), eventId: ats.id },
+  });
+  expect(report.currentRevision.fields.eventId).toBe(ats.id);
+  expect((await tripService.list(owner, { scope: "mine" })).items[0]).toMatchObject({
+    id: report.tripId,
+    event: null,
+  });
+  expect((await tripService.list(reviewer, { scope: "review" })).items[0]).toMatchObject({
+    id: report.tripId,
+    event: null,
+  });
+  expect(await tripService.detail(owner, report.tripId)).toMatchObject({
+    view: "private",
+    summary: { event: null },
+  });
+
+  await manual.reviseReport(owner, report.id, newId(), report.version, {
+    fields: { ...fields(image.id), eventId: ets2.id },
+    expectedTripVersion: report.tripVersion,
+  });
+  const [matching] = (await tripService.list(owner, { scope: "mine" })).items;
+  expect(matching?.id).toBe(report.tripId);
+  expect(matching?.event).toEqual({ id: ets2.id, title: ets2.title });
 });
 
 test("same-ETag revisions race safely, rejected edits retain history, and accepted correction requests preserve effective results", async () => {
