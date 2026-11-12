@@ -37,10 +37,13 @@ export async function registerEventRoutes(
     csrf = csrfProtection(identity.config);
   const stage2 = events.publishedRoutesEnabled;
   const drafts = events.drafts;
-  const localeQuery = object({ locale: { type: "string", enum: ["en", "ru"] } });
+  const locale = { type: "string", enum: ["en", "ru"] };
+  const localeQuery = object({ locale });
   const localized = stage2 ? localeQuery : object({});
   const wire = (legacy: string, staged: string) =>
     stage2 ? { oneOf: [ref(legacy), ref(staged)] } : ref(legacy);
+  const readWire = (legacy: string, staged: string) =>
+    stage2 ? { anyOf: [ref(legacy), ref(staged)] } : ref(legacy);
   const owned = (p: string) =>
     p.startsWith("/api/v1/events") ||
     p.startsWith("/api/v1/public/events") ||
@@ -106,15 +109,31 @@ export async function registerEventRoutes(
   }
   for (const publicOnly of [false, true]) {
     const prefix = publicOnly ? "/api/v1/public/events" : "/api/v1/events";
-    app.get<{ Querystring: Page & { period?: "upcoming" | "past" } }>(
+    app.get<{ Querystring: Page & LocaleQuery & { period?: "upcoming" | "past" } }>(
       prefix,
       {
         schema: {
-          querystring: object({ ...page, period: { type: "string", enum: ["upcoming", "past"] } }),
-          response: { 200: ref("EnvelopeListEventPublic") },
+          querystring: object({
+            ...page,
+            period: { type: "string", enum: ["upcoming", "past"] },
+            ...(stage2 && !publicOnly ? { locale } : {}),
+          }),
+          response: {
+            200: publicOnly
+              ? ref("EnvelopeListEventPublic")
+              : readWire("EnvelopeListEventPublic", "EventStage2EnvelopeMemberList"),
+          },
         },
       },
-      async (r) => envelope(r, await events.list(publicOnly ? null : await actor(r), r.query)),
+      async (r) => {
+        if (publicOnly) return envelope(r, await events.list(null, r.query));
+        const viewer = await actor(r);
+        const data =
+          stage2 && r.query.locale
+            ? await events.listStage2(viewer, r.query.locale, r.query)
+            : await events.list(viewer, r.query);
+        return envelope(r, data);
+      },
     );
     app.get<{ Params: { eventId: string }; Querystring: LocaleQuery }>(
       `${prefix}/:eventId`,
@@ -140,10 +159,22 @@ export async function registerEventRoutes(
       },
     );
   }
-  app.get(
+  app.get<{ Querystring: LocaleQuery }>(
     "/api/v1/me/upcoming-event",
-    { schema: { querystring: object({}), response: { 200: ref("EnvelopeOptionalEvent") } } },
-    async (r) => envelope(r, await events.nearest(await actor(r))),
+    {
+      schema: {
+        querystring: localized,
+        response: { 200: readWire("EnvelopeOptionalEvent", "EventStage2EnvelopeUpcoming") },
+      },
+    },
+    async (r) => {
+      const viewer = await actor(r);
+      const data =
+        stage2 && r.query.locale
+          ? await events.nearestStage2(viewer, r.query.locale)
+          : await events.nearest(viewer);
+      return envelope(r, data);
+    },
   );
   app.get<{ Params: { eventId: string } }>(
     "/api/v1/events/:eventId/my-response",
@@ -366,16 +397,37 @@ export async function registerEventRoutes(
     },
   );
   app.get<{ Params: { eventId: string }; Querystring: Page }>(
-    "/api/v1/admin/events/:eventId/attendance",
+    "/api/v1/admin/events/:eventId/nonresponders",
     {
       schema: {
         params,
         querystring: object(page),
-        response: { 200: ref("EnvelopeListAttendance") },
+        response: {
+          200: ref("EventStage2EnvelopeNonresponders"),
+          409: ref("Error"),
+          422: ref("Error"),
+        },
+      },
+    },
+    async (r) => envelope(r, await events.nonresponders(await actor(r), r.params.eventId, r.query)),
+  );
+  app.get<{ Params: { eventId: string }; Querystring: Page & { view?: "stage2" } }>(
+    "/api/v1/admin/events/:eventId/attendance",
+    {
+      schema: {
+        params,
+        querystring: object({ ...page, view: { type: "string", enum: ["stage2"] } }),
+        response: {
+          200: { anyOf: [ref("EnvelopeListAttendance"), ref("EventStage2EnvelopeAttendance")] },
+        },
       },
     },
     async (r, reply) => {
-      const result = await events.attendance(await actor(r), r.params.eventId, r.query);
+      const a = await actor(r);
+      const result =
+        r.query.view === "stage2"
+          ? await events.attendanceStage2(a, r.params.eventId, r.query)
+          : await events.attendance(a, r.params.eventId, r.query);
       reply.header("ETag", `"v${result.version}"`);
       return envelope(r, result.data);
     },

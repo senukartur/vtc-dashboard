@@ -1058,6 +1058,29 @@ export function createTrips(
           : summary;
       });
     },
+    async eventAttendanceRootsInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      game: Trip["game"],
+      memberIds: string[],
+    ) {
+      if (!memberIds.length || memberIds.length > 100)
+        throw new Error("EVENT_TRIP_MEMBER_BOUND_EXCEEDED");
+      // Attendance is a leadership view. Confirm current private-trip visibility
+      // in the same transaction before making any canonical IDs available.
+      await authority(tx, actor, true);
+      return c(tx)
+        .select({ tripId: trips.id, ownerId: trips.ownerId })
+        .from(trips)
+        .where(
+          and(
+            isNull(trips.aliasOf),
+            eq(trips.game, game),
+            inArray(trips.ownerId, memberIds.map(applicationId)),
+          ),
+        )
+        .as("event_attendance_roots");
+    },
     async lifetimeTotalsInTransaction(
       tx: TxContext,
       ownerId: string,
