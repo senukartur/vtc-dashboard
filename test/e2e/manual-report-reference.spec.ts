@@ -276,9 +276,13 @@ test(
       "href",
       `/account/reports/drafts/${draftId}`,
     );
+    const tabsFit = () =>
+      page.getByRole("tablist").evaluate((strip) => strip.scrollWidth <= strip.clientWidth);
+    await expect.poll(tabsFit).toBe(true);
     await capture(page, info, "drafts-en");
     await catalogLanguage(page, "ru");
     await expect(page.getByRole("tab", { name: "Черновики (38)", exact: true })).toBeVisible();
+    await expect.poll(tabsFit).toBe(true);
     await capture(page, info, "drafts-ru");
     await catalogLanguage(page);
     await region.getByRole("button", { name: "Next page", exact: true }).click();

@@ -28,7 +28,14 @@
 }
 @media (max-width: 760px) {
   .trip-page .trips-scope .tabs-trigger {
+    min-width: 0;
     padding-inline: 8px;
+  }
+  .trip-page .trips-scope .tabs-trigger:not(.trips-drafts-tab) {
+    flex-shrink: 1;
+  }
+  .trip-page .trips-scope .trips-drafts-tab {
+    white-space: nowrap;
   }
 }
 .trip-page .trips-tab-count {

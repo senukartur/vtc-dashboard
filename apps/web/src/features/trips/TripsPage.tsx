@@ -248,6 +248,7 @@ export function TripsPage() {
             {submit && (
               <TabsTrigger
                 value="drafts"
+                className="trips-drafts-tab"
                 aria-label={
                   editingCount === undefined
                     ? undefined
