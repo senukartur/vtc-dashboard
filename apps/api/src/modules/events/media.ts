@@ -387,8 +387,7 @@ export function createEventMedia(
       }
 
       try {
-        const image = await blobs.putImage(reservation, bytes, signal);
-        if (image.contentType !== contentType) throw new BlobFailure("invalid");
+        const image = await blobs.putImage(reservation, bytes, contentType, signal);
         return await run(async (tx) => {
           const { metadata } = await eventForManager(tx, actor, eventId, "update");
           const row = await store.media(tx, eventId, reservation.id);

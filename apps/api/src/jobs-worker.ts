@@ -37,6 +37,20 @@ export async function runJobsWorker(): Promise<void> {
     const record = acceptanceWorkerPhase(diagnosticActive, step);
     if (record) console.error(JSON.stringify(record));
   }
+  function reportMediaStorageFailure(
+    error: unknown,
+    event: "event_media_root_unavailable" | "event_media_maintenance_failed",
+  ) {
+    if (
+      !(error instanceof BlobFailure) ||
+      error.category !== "unavailable" ||
+      abort.signal.aborted ||
+      "cause" in error
+    )
+      throw error;
+    console.error(JSON.stringify({ event, category: "storage_unavailable" }));
+    process.exitCode = 1;
+  }
   try {
     const mode = process.argv[2] ?? "run";
     if (!["run", "inspect"].includes(mode) || process.argv.length > 3)
@@ -126,29 +140,26 @@ export async function runJobsWorker(): Promise<void> {
       console.error(
         JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
       );
+    let mediaRootUnavailable = false;
     if (mode === "run" && composed?.eventMedia) {
-      phase("jobs_event_media_maintenance");
+      phase("jobs_event_media_initialize");
       try {
         await composed.eventMedia.initialize();
-        await composed.eventMedia.maintenance(abort.signal);
       } catch (error) {
-        if (
-          !(error instanceof BlobFailure) ||
-          error.category !== "unavailable" ||
-          abort.signal.aborted
-        )
-          throw error;
-        console.error(
-          JSON.stringify({
-            event: "event_media_maintenance_failed",
-            category: "storage_unavailable",
-          }),
-        );
-        process.exitCode = 1;
+        reportMediaStorageFailure(error, "event_media_root_unavailable");
+        mediaRootUnavailable = true;
+      }
+      if (!mediaRootUnavailable) {
+        phase("jobs_event_media_maintenance");
+        try {
+          await composed.eventMedia.maintenance(abort.signal);
+        } catch (error) {
+          reportMediaStorageFailure(error, "event_media_maintenance_failed");
+        }
       }
     }
     const queue =
-      composed?.jobsQueue ??
+      (mediaRootUnavailable ? composed?.jobsQueueFor(mediaJobKinds) : composed?.jobsQueue) ??
       createQueue(unit, [], [], undefined, [
         "mail.deliver",
         "manual.evidence-delete",

@@ -62,7 +62,7 @@ export function createMediaStore(unit: UnitOfWork) {
         .select({ visibility: events.visibility })
         .from(events)
         .where(eq(events.id, eventId))
-        .for(mode);
+        .for("share");
       if (event) return { kind: "published" as const, visibility: event.visibility, metadata };
     }
     if (metadata) {
@@ -70,7 +70,7 @@ export function createMediaStore(unit: UnitOfWork) {
         .select({ discardedAt: eventDrafts.discardedAt })
         .from(eventDrafts)
         .where(eq(eventDrafts.eventId, eventId))
-        .for(mode);
+        .for("share");
       if (draft)
         return { kind: draft.discardedAt ? ("discarded" as const) : ("draft" as const), metadata };
     }

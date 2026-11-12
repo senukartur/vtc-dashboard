@@ -72,7 +72,11 @@ test("image renditions keep original bytes and produce bounded, restartable JPEG
   const original = pngBytes(600, 320);
   const attempt = { id: f.key.id, generation: newId() };
   const signal = new AbortController().signal;
-  expect(await store.putImage(f.key, bytes(original))).toMatchObject({
+  await expect(store.putImage(f.key, bytes(original), "image/jpeg")).rejects.toMatchObject({
+    category: "invalid",
+  });
+  expect(await readdir(f.root)).toEqual([]);
+  expect(await store.putImage(f.key, bytes(original), "image/png")).toMatchObject({
     contentType: "image/png",
     width: 600,
     height: 320,
@@ -85,7 +89,7 @@ test("image renditions keep original bytes and produce bounded, restartable JPEG
   for await (const chunk of stream) chunks.push(chunk);
   const jpeg = Buffer.concat(chunks);
   const jpegKey = { id: newId(), generation: newId() };
-  expect(await restarted.putImage(jpegKey, bytes(jpeg))).toMatchObject({
+  expect(await restarted.putImage(jpegKey, bytes(jpeg), "image/jpeg")).toMatchObject({
     contentType: "image/jpeg",
     width: 480,
     height: 256,

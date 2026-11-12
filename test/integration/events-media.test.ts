@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import type { components } from "@vtc/contracts";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import {
@@ -10,6 +12,7 @@ import {
   eventMediaGenerations,
   eventMetadata,
 } from "@vtc/db/events-schema";
+import { mailDeliveries } from "@vtc/db/messaging-schema";
 import { durableJobs, eq } from "@vtc/db/platform-schema";
 import type { Connection } from "mysql2/promise";
 import {
@@ -40,6 +43,7 @@ import {
 } from "../../apps/api/src/platform/blob-storage/filesystem.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import { pngBytes } from "../fixtures/manual-images.ts";
 import {
   guardedSettings,
@@ -48,6 +52,8 @@ import {
   testConnection,
 } from "../persistence/support.ts";
 import { bounded, deferred } from "../support/concurrency.ts";
+import { safeChildEnvironment } from "../support/environment.ts";
+import { childClose } from "../support/fixture-settlement.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(before, after);
@@ -175,6 +181,30 @@ async function dueJob(id: string) {
       .where(eq(durableJobs.id, id)),
   );
 }
+async function runWorker(env: NodeJS.ProcessEnv) {
+  const child = spawn(process.execPath, ["apps/api/dist/jobs.js", "run"], {
+    env: { ...safeChildEnvironment(), ...env },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const completion = childClose(child);
+  let storageUnavailable = false;
+  let result = false;
+  createInterface({ input: child.stdout }).on("line", (line) => {
+    if (line.includes('"event":"jobs_result"')) result = true;
+  });
+  createInterface({ input: child.stderr }).on("line", (line) => {
+    if (line.includes('"event":"event_media_root_unavailable"')) storageUnavailable = true;
+  });
+  try {
+    const outcome = await bounded(completion, "event-media-worker", 8_000);
+    expect(outcome).toMatchObject({ signal: null, spawnFailed: false, streamFailed: false });
+    return { code: outcome.code, storageUnavailable, result };
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await completion;
+  }
+}
 function useStorage(adapter: PrivateImages) {
   media = createEventMedia(unit, storage, config.cursorKey, identity, adapter, now);
 }
@@ -278,6 +308,11 @@ test("staged multipart, closed gallery, full image and public-cover access use c
     expect((await post({ cookie: director.cookie })).statusCode).toBe(403);
     const { "if-match": _expected, ...missingVersion } = headers(director, 1);
     expect((await post(missingVersion)).statusCode).toBe(428);
+    expect((await post(headers(director, 1), multipart(image, "image/jpeg"))).statusCode).toBe(422);
+    const empty = await app.inject({ url: base, headers: { cookie: director.cookie } });
+    expect(empty.headers.etag).toBe('"v1"');
+    expect(empty.json().data).toEqual({ version: 1, items: [] });
+    expect(await readdir(directory)).toEqual([]);
     expect(
       (await post(headers(director, 1), multipart(Buffer.from("not an image")))).statusCode,
     ).toBe(422);
@@ -591,3 +626,104 @@ test("expired invisible reservations release capacity and old writes stay fenced
     await first;
   }
 });
+
+test("thumbnail and cleanup jobs use shared locks on published and draft lifecycle records", async () => {
+  const publishedId = await event();
+  const draftId = await draft();
+  const publishedImage = await upload(publishedId, 1);
+  const draftImage = await upload(draftId, 1);
+  await control.beginTransaction();
+  try {
+    await control.execute("SELECT id FROM events WHERE id=? FOR SHARE", [Buffer.from(publishedId)]);
+    await control.execute("SELECT event_id FROM event_drafts WHERE event_id=? FOR SHARE", [
+      Buffer.from(draftId),
+    ]);
+    await runNext();
+    await runNext();
+    expect((await state(publishedImage.item.id))?.state).toBe("ready");
+    expect((await state(draftImage.item.id))?.state).toBe("ready");
+    await media.remove(director.actor, publishedId, publishedImage.item.id, command(3));
+    await media.remove(director.actor, draftId, draftImage.item.id, command(3));
+    await cleanup();
+    expect((await state(publishedImage.item.id))?.state).toBe("deleted");
+    expect((await state(draftImage.item.id))?.state).toBe("deleted");
+    expect(await readdir(directory)).toEqual([]);
+  } finally {
+    await control.rollback();
+  }
+});
+
+test("worker passes preserve media attempts during a root outage while local mail completes", async () => {
+  const activeRoot = join(directory, "active");
+  const offlineRoot = join(directory, "offline");
+  await mkdir(activeRoot, { mode: 0o700 });
+  storage = { ...storage, root: activeRoot };
+  useStorage(createPrivateFilesystem(storage));
+  const id = await event();
+  const accepted = await upload(id, 1);
+  const [thumbnail] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select({ id: durableJobs.id })
+      .from(durableJobs)
+      .where(eq(durableJobs.kind, Buffer.from("events.media-thumbnail"))),
+  );
+  if (!thumbnail) throw new Error("EXPECTED_MEDIA_THUMBNAIL");
+  const mail = {
+    mode: "local" as const,
+    key: randomBytes(32).toString("hex"),
+    sender: "event-media-notice@example.invalid",
+    origin,
+    production: false,
+  };
+  const messaging = composeIdentity(unit, identity.config, mail);
+  const mailRecipient = await createMember("trainee");
+  const challenge = await messaging.identity.requestChallenge(
+    mailRecipient.actor,
+    newId(),
+    "email_verification",
+  );
+  const deliveryGeneration = challenge.id;
+  if (typeof deliveryGeneration !== "string") throw new Error("EXPECTED_LOCAL_MAIL_CHALLENGE");
+  const db = guardedSettings();
+  const env = {
+    MYSQL_HOST: db.host,
+    MYSQL_PORT: String(db.port),
+    MYSQL_DATABASE: db.database,
+    MYSQL_USER: db.user,
+    MYSQL_PASSWORD: db.password,
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: identity.config.secret,
+    IDENTITY_ORIGIN: origin,
+    MAIL_MODE: mail.mode,
+    MAIL_ENCRYPTION_KEY: mail.key,
+    MAIL_SENDER: mail.sender,
+    EVENTS_ENABLED: "true",
+    EVENTS_CURSOR_KEY: config.cursorKey,
+    EVENT_MEDIA_ROOT: activeRoot,
+    MANUAL_MAX_FILE_BYTES: String(storage.maxFileBytes),
+    MANUAL_MAX_PIXELS: String(storage.maxPixels),
+    MANUAL_UPLOAD_TIMEOUT_MS: String(storage.timeoutMs),
+  };
+  await rename(activeRoot, offlineRoot);
+  try {
+    for (let pass = 0; pass < 2; pass++) {
+      expect(await runWorker(env)).toEqual({ code: 1, storageUnavailable: true, result: true });
+      expect(await jobState(thumbnail.id)).toMatchObject({ state: "ready", attempts: 0 });
+      expect((await state(accepted.item.id))?.state).toBe("processing");
+    }
+    const [delivery] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ state: mailDeliveries.state, attempts: mailDeliveries.attempts })
+        .from(mailDeliveries)
+        .where(eq(mailDeliveries.generationId, deliveryGeneration)),
+    );
+    expect(delivery).toEqual({ state: "simulated", attempts: 1 });
+  } finally {
+    await rename(offlineRoot, activeRoot);
+  }
+  expect(await runWorker(env)).toEqual({ code: 0, storageUnavailable: false, result: true });
+  expect(await jobState(thumbnail.id)).toMatchObject({ state: "completed", attempts: 1 });
+  expect((await state(accepted.item.id))?.state).toBe("ready");
+}, 30_000);

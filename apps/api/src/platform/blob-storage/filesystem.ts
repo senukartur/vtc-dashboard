@@ -42,6 +42,7 @@ export interface PrivateImages extends PrivateBlobs {
   putImage(
     key: BlobIdentity,
     bytes: AsyncIterable<Uint8Array>,
+    declaredType: VerifiedBlob["contentType"],
     signal?: AbortSignal,
   ): Promise<VerifiedImage>;
   makeThumbnail(key: BlobIdentity, attempt: BlobIdentity, signal: AbortSignal): Promise<void>;
@@ -391,7 +392,7 @@ export function createPrivateFilesystem(config: BlobConfig): PrivateImages {
         }),
         signal,
       ),
-    putImage: (key, bytes, signal) =>
+    putImage: (key, bytes, declaredType, signal) =>
       put(
         key,
         bytes,
@@ -404,7 +405,7 @@ export function createPrivateFilesystem(config: BlobConfig): PrivateImages {
             (result) => {
               const [contentType, width, height] = result.toString().split(":");
               if (
-                (contentType === "image/png" || contentType === "image/jpeg") &&
+                contentType === declaredType &&
                 width &&
                 height &&
                 /^\d+$/.test(width) &&

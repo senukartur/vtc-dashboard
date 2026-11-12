@@ -299,29 +299,31 @@ export function composeIdentity(
           manual: manualReports as ManualReports,
         })
       : undefined;
-  const jobsQueue = createQueue(
-    unit,
-    [
-      ...(messaging ? [messaging.handler] : []),
-      ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
-      ...(reconciliation ? [reconciliation.handler] : []),
-      ...(tripDecisions ? [tripDecisions.handler] : []),
-      ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
-      ...(eventMedia?.handlers ?? []),
-    ],
-    notifications ? [notifications.subscription] : [],
-    undefined,
-    [
-      ...(!messaging ? ["mail.deliver"] : []),
-      ...(!reconciliation ? ["reconciliation.search"] : []),
-      ...(!tripDecisions ? ["trips.reevaluate"] : []),
-      ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
-      ...(!eventMedia ? mediaJobKinds : []),
-      ...(!manualReports?.config.storage
-        ? ["manual.evidence-delete", "manual.generation-delete"]
-        : []),
-    ],
-  );
+  const jobsQueueFor = (pausedKinds: readonly string[] = []) =>
+    createQueue(
+      unit,
+      [
+        ...(messaging ? [messaging.handler] : []),
+        ...(manualReports ? [manualReports.handler, manualReports.generationHandler] : []),
+        ...(reconciliation ? [reconciliation.handler] : []),
+        ...(tripDecisions ? [tripDecisions.handler] : []),
+        ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
+        ...(eventMedia?.handlers ?? []),
+      ],
+      notifications ? [notifications.subscription] : [],
+      undefined,
+      [
+        ...pausedKinds,
+        ...(!messaging ? ["mail.deliver"] : []),
+        ...(!reconciliation ? ["reconciliation.search"] : []),
+        ...(!tripDecisions ? ["trips.reevaluate"] : []),
+        ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
+        ...(!eventMedia ? mediaJobKinds : []),
+        ...(!manualReports?.config.storage
+          ? ["manual.evidence-delete", "manual.generation-delete"]
+          : []),
+      ],
+    );
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   const analytics =
     analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
@@ -380,7 +382,8 @@ export function composeIdentity(
       : {}),
     ...(trips ? { trips } : {}),
     ...(externalIdentities ? { externalIdentities } : {}),
-    jobsQueue,
+    jobsQueue: jobsQueueFor(),
+    jobsQueueFor,
     ...(catalogs ? { catalogs } : {}),
     ...(messaging ? { messaging } : {}),
     ...(admissions ? { admissions } : {}),
