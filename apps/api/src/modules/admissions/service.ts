@@ -14,6 +14,7 @@ import {
   or,
   sql,
 } from "@vtc/db/admissions-schema";
+import { gt, isNotNull, isNull } from "drizzle-orm";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { MailIntent } from "../messaging/content.js";
@@ -466,6 +467,49 @@ export function createAdmissions(
         });
       });
     },
+    async submittedCountInTransaction(tx: TxContext, actor: Actor) {
+      await ports.identity.authorizeInTransaction(tx, actor, "applications.manage");
+      const [row] = await client(tx)
+        .select({ count: sql<number | string>`count(*)` })
+        .from(applications)
+        .where(eq(applications.status, "submitted"));
+      return Number(row?.count ?? 0);
+    },
+    async usableInvitationCountInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      computedAt: string,
+      search?: string,
+    ) {
+      await ports.identity.authorizeInTransaction(tx, actor, "applications.manage");
+      const term = search?.trim();
+      if (term !== undefined && (!term || term.length > 128)) throw identityError(422);
+      const escaped = term?.replace(/[\\%_]/g, (value) => `\\${value}`);
+      const [row] = await client(tx)
+        .select({ count: sql<number | string>`count(*)` })
+        .from(applications)
+        .innerJoin(
+          invitations,
+          and(
+            eq(applications.invitationId, invitations.id),
+            eq(applications.id, invitations.applicationId),
+          ),
+        )
+        .where(
+          and(
+            eq(applications.status, "approved"),
+            eq(invitations.state, "active"),
+            isNull(invitations.consumedAt),
+            isNotNull(invitations.secretHash),
+            isNotNull(invitations.ciphertext),
+            gt(invitations.expiresAt, computedAt),
+            escaped !== undefined
+              ? sql`${applications.nickname} LIKE ${`%${escaped}%`}`
+              : undefined,
+          ),
+        );
+      return Number(row?.count ?? 0);
+    },
     async list(
       actor: Actor,
       options: {
@@ -513,7 +557,16 @@ export function createAdmissions(
               )
           : [];
         const byApplication = new Map(history.map((row) => [row.applicationId, row]));
+        const statusCounts = { submitted: 0, approved: 0, rejected: 0 };
+        if (!parent) {
+          const totals = await client(tx)
+            .select({ status: applications.status, count: sql<number | string>`count(*)` })
+            .from(applications)
+            .groupBy(applications.status);
+          for (const total of totals) statusCounts[total.status] = Number(total.count);
+        }
         return {
+          ...(!parent ? { statusCounts } : {}),
           items: await Promise.all(
             selected.map((row) => appDto(tx, row, byApplication.get(row.id) ?? null)),
           ),

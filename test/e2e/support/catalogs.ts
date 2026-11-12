@@ -7,6 +7,8 @@ import { switchLanguage } from "./locale.ts";
 import { inertNotifications } from "./notifications.ts";
 
 type S = components["schemas"];
+export const catalogInstant = "2026-10-18T23:15:00.000Z";
+export const catalogTimezone = "Asia/Tokyo";
 export type CatalogListName = "dlcs" | "regions" | "cities" | "companies" | "cargoes" | "trailers";
 export type CatalogDepotRow = S["CatalogDepot"];
 export type CatalogGame = S["CatalogItem"]["game"];
@@ -130,10 +132,25 @@ export const defaultRows = (locale: "ru" | "en"): Record<CatalogListName, S["Cat
   cargoes: [catalogItem(cargoRowId, "Fictional cargo", locale)],
   trailers: [catalogItem(trailerRowId, "Fictional trailer", locale)],
 });
-const summaryOf = (rows: S["CatalogItem"][]) => ({
-  visible: rows.filter((r) => !r.hidden).length,
-  hidden: rows.filter((r) => r.hidden).length,
-});
+const depotVisible = (row: CatalogDepotRow) =>
+  !row.hidden && !row.company.label.hidden && !row.city.label.hidden;
+function depotUntranslated(
+  row: CatalogDepotRow,
+  parents: Partial<Record<CatalogListName, S["CatalogItem"][]>> | undefined,
+) {
+  // Standalone depot fixtures supply English names only. Parent rows can also supply Russian names.
+  const company = parents?.companies?.find((item) => item.id === row.company.id);
+  const city = parents?.cities?.find((item) => item.id === row.city.id);
+  return !company?.nameRu || !city?.nameRu;
+}
+
+function mockPage(rows: unknown[], query: URLSearchParams, paginate: boolean | undefined) {
+  if (!paginate) return catalogList(rows);
+  const start = Number(query.get("cursor") ?? 0);
+  const limit = Number(query.get("limit") ?? 25);
+  const end = start + limit;
+  return catalogList(rows.slice(start, end), end < rows.length ? String(end) : null, rows.length);
+}
 /** Optional overrides; omitting them keeps the original synthetic responses unchanged. */
 export type CatalogMockOptions = {
   /** Replaces the session capabilities after the staff adjustment. */
@@ -142,6 +159,12 @@ export type CatalogMockOptions = {
   failures?: Record<string, number>;
   /** Read routes wait for this promise. */
   gate?: Promise<void>;
+  /** Hold the summary independently of list reads. */
+  summaryGate?: Promise<void>;
+  /** Add the optional maintenance counters from the current contract. */
+  maintenanceCounts?: boolean;
+  paginate?: boolean;
+  displayTimezone?: string;
   /** Rows per list and game; other lists keep the defaults for that game. */
   rows?: Partial<Record<CatalogGame, Partial<Record<CatalogListName, S["CatalogItem"][]>>>>;
   /** Depots per game. */
@@ -175,6 +198,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
     const url = new URL(route.request().url()),
       path = url.pathname;
     const json = (data: unknown) => route.fulfill({ json: data });
+    if (path === "/api/v1/catalogs/summary" && options.summaryGate) await options.summaryGate;
     const failure = Object.entries(options.failures ?? {}).find(([suffix]) =>
       path.endsWith(suffix),
     );
@@ -188,6 +212,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
       }
       if (options.capabilities)
         self.data.capabilities = options.capabilities as typeof self.data.capabilities;
+      if (options.displayTimezone) self.data.preferences.displayTimezone = options.displayTimezone;
       return json(self);
     }
     if (path === "/api/v1/auth/csrf") return json(envelope({ token: "NONFUNCTIONAL_FIXTURE" }));
@@ -207,18 +232,42 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
     if (path === "/api/v1/catalogs/summary") {
       if (options.gate) await options.gate;
       const game = url.searchParams.get("game") === "ats" ? "ats" : "ets2",
-        rows = { ...defaultRows(locale), ...options.rows?.[game] };
+        rows = { ...(game === "ets2" ? defaultRows(locale) : {}), ...options.rows?.[game] };
       const depots = options.depots?.[game] ?? [];
+      const counts = (name: CatalogListName) => {
+        const items = rows[name] ?? [];
+        const visible = items.filter((item) => !item.hidden);
+        return {
+          visible: visible.length,
+          hidden: items.length - visible.length,
+          ...(options.maintenanceCounts
+            ? { untranslated: visible.filter((item) => !item.nameRu).length }
+            : {}),
+          ...(options.maintenanceCounts && name === "companies"
+            ? { missingLogo: visible.filter((item) => !item.logo).length }
+            : {}),
+        };
+      };
       return json(
         envelope({
           game,
           lists: {
-            ...Object.fromEntries(
-              (Object.keys(rows) as CatalogListName[]).map((name) => [name, summaryOf(rows[name])]),
-            ),
+            dlcs: counts("dlcs"),
+            regions: counts("regions"),
+            cities: counts("cities"),
+            companies: counts("companies"),
+            cargoes: counts("cargoes"),
+            trailers: counts("trailers"),
             depots: {
               visible: depots.filter((r) => !r.hidden).length,
               hidden: depots.filter((r) => r.hidden).length,
+              ...(options.maintenanceCounts
+                ? {
+                    untranslated: depots.filter(
+                      (r) => depotVisible(r) && depotUntranslated(r, rows),
+                    ).length,
+                  }
+                : {}),
             },
           },
         }),
@@ -260,17 +309,20 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         company = url.searchParams.get("companyId"),
         city = url.searchParams.get("cityId"),
         includeHidden = url.searchParams.get("includeHidden") === "true",
+        hiddenOnly = url.searchParams.get("hidden") === "only",
+        untranslated = url.searchParams.get("untranslated") === "true",
         search = url.searchParams.get("search")?.toLowerCase();
       const visible = (options.depots?.[game] ?? []).filter(
         (r) =>
-          (includeHidden || (!r.hidden && !r.company.label.hidden && !r.city.label.hidden)) &&
+          (hiddenOnly ? r.hidden : includeHidden || depotVisible(r)) &&
+          (!untranslated || depotUntranslated(r, options.rows?.[game])) &&
           (!company || r.company.id === company) &&
           (!city || r.city.id === city) &&
           (!search ||
             r.company.label.label.toLowerCase().includes(search) ||
             r.city.label.label.toLowerCase().includes(search)),
       );
-      return json(catalogList(visible));
+      return json(mockPage(visible, url.searchParams, options.paginate));
     }
     const match =
       /^\/api\/v1\/catalogs\/(dlcs|regions|cities|companies|cargoes|trailers)(?:\/([^/]+))?$/.exec(
@@ -301,16 +353,21 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         );
       }
       const search = url.searchParams.get("search")?.toLowerCase(),
-        includeHidden = url.searchParams.get("includeHidden") === "true";
+        includeHidden = url.searchParams.get("includeHidden") === "true",
+        hiddenOnly = url.searchParams.get("hidden") === "only",
+        untranslated = url.searchParams.get("untranslated") === "true",
+        missingLogo = name === "companies" && url.searchParams.get("logo") === "missing";
       const visible = rows.filter(
         (r) =>
-          (includeHidden || !r.hidden) &&
+          (hiddenOnly ? r.hidden : includeHidden || !r.hidden) &&
+          (!untranslated || !r.nameRu) &&
+          (!missingLogo || !r.logo) &&
           (!search ||
             r.code.toLowerCase().includes(search) ||
             r.display.label.toLowerCase().includes(search) ||
             r.nameNative?.toLowerCase().includes(search)),
       );
-      return json(catalogList(visible));
+      return json(mockPage(visible, url.searchParams, options.paginate));
     }
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });

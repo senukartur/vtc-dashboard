@@ -281,14 +281,14 @@ export async function registerQualificationRoutes(
       return envelope(request, result.data);
     },
   );
-  app.post<{ Params: { levelId: string }; Body: S["RulesInput"] }>(
+  app.post<{ Params: { levelId: string }; Body: S["QualificationRulePublicationInput"] }>(
     "/api/v1/admin/qualification-levels/:levelId/rule-versions",
     {
       bodyLimit: 131072,
       schema: {
         params: object({ levelId: id }, ["levelId"]),
         querystring: object({}),
-        body: ref("RulesInput"),
+        body: ref("QualificationRulePublicationInput"),
         response: { 201: ref("EnvelopeQualificationLevel") },
       },
     },

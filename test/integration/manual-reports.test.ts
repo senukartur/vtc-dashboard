@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -23,18 +23,23 @@ import {
   TransactionCommitOutcomeUnknownError,
   type UnitOfWork,
 } from "@vtc/db";
-import { catalogCities } from "@vtc/db/catalogs-schema";
-import { membership } from "@vtc/db/identity-schema";
+import { catalogCargoes, catalogCities } from "@vtc/db/catalogs-schema";
+import { membership, roles } from "@vtc/db/identity-schema";
 import {
   eq,
   manualBlobGenerations,
   manualCommands,
+  manualDraftEvidence,
+  manualDraftHistory,
+  manualDrafts,
   manualEvidence,
   manualEvidenceReferences,
   manualReports,
   manualReviewGates,
   manualRevisions,
+  sql,
 } from "@vtc/db/manual-reports-schema";
+import { outboxEvents } from "@vtc/db/platform-schema";
 import { sourceMessages, tripFacts, tripFactTrailers, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
@@ -82,7 +87,6 @@ import {
 import { telemetryFixture } from "../support/builders.ts";
 import { bounded, deferred, until } from "../support/concurrency.ts";
 import { safeChildEnvironment } from "../support/environment.ts";
-import { manualJobsObservation } from "../support/manual-jobs-diagnostics.ts";
 import { fixtureDatabaseFailure } from "../support/fixture-database-diagnostics.ts";
 import { childClose, fixtureSettlement } from "../support/fixture-settlement.ts";
 import {
@@ -91,6 +95,7 @@ import {
   generationTransactionArguments,
   parseGenerationWorkerLine,
 } from "../support/manual-generation-diagnostics.ts";
+import { manualJobsObservation } from "../support/manual-jobs-diagnostics.ts";
 import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
 
 const { beforeAll, afterAll } = schemaLifecycleHooks(vitestBeforeAll, vitestAfterAll);
@@ -751,6 +756,394 @@ test("HTTP enforces CSRF/Origin, closed bodies, ETags, multipart limits and priv
   }
 });
 
+const emptyJsonHeaders = { "content-type": "application/json", "content-length": "0" };
+
+test("bodyless draft deletion enforces current session, capability, ownership, Origin, CSRF and command headers", async () => {
+  const draft = await manual.createDraft(owner, newId(), { fields: {} });
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  const csrf = csrfProtection(identityConfig);
+  const headers = {
+    cookie: ownerCookie,
+    origin: identityConfig.origin,
+    "x-csrf-token": csrf.issue({}, owner).token,
+    "idempotency-key": newId(),
+    "if-match": '"v1"',
+  };
+  const url = `/api/v1/me/manual-drafts/${draft.id}`;
+  // The identity and manual reports hooks both charge the source bucket.
+  const sources = new Map<number, string>();
+  for (let host = 1; host <= 254; host++) {
+    const source = `192.0.2.${host}`;
+    const bucket = createHmac("sha256", identityConfig.secret).update(source).digest().readUInt8(0);
+    sources.set(bucket, source);
+  }
+  const sourceBuckets = sources.values();
+  function nextSource() {
+    const source = sourceBuckets.next();
+    if (source.done) throw Error("SYNTHETIC_RATE_LIMIT_SOURCE_REQUIRED");
+    return source.value;
+  }
+  try {
+    for (const [override, status, code, path] of [
+      [{ cookie: undefined }, 401, "UNAUTHORIZED"],
+      [{ origin: `${identityConfig.origin}/` }, 403, "FORBIDDEN"],
+      [{ "x-csrf-token": csrf.issue({}, other).token }, 403, "FORBIDDEN"],
+      [{ cookie: otherCookie, "x-csrf-token": csrf.issue({}, other).token }, 404, "NOT_FOUND"],
+      [{ cookie: staffCookie, "x-csrf-token": csrf.issue({}, staff).token }, 404, "NOT_FOUND"],
+      [{}, 404, "NOT_FOUND", `/api/v1/me/manual-drafts/${newId()}`],
+      [{ "idempotency-key": undefined }, 422, "INVALID_PAYLOAD"],
+      [{ "idempotency-key": "malformed-key" }, 422, "INVALID_PAYLOAD"],
+      [{ "if-match": undefined }, 428, "PRECONDITION_REQUIRED"],
+      [{ ...emptyJsonHeaders, "if-match": undefined }, 428, "PRECONDITION_REQUIRED"],
+      [{ "if-match": 'W/"v1"' }, 422, "INVALID_PAYLOAD"],
+      [{ "if-match": "*" }, 422, "INVALID_PAYLOAD"],
+      [{ "if-match": '"v1", "v2"' }, 422, "INVALID_PAYLOAD"],
+      [{ "if-match": '"v2"' }, 409, "VERSION_CONFLICT"],
+      [{ "transfer-encoding": "chunked" }, 422, "INVALID_PAYLOAD"],
+    ] as const) {
+      const reply = await app.inject({
+        method: "DELETE",
+        url: path ?? url,
+        remoteAddress: nextSource(),
+        headers: Object.fromEntries(
+          Object.entries({ ...headers, ...override }).filter(([, value]) => value !== undefined),
+        ),
+      });
+      expect(reply.statusCode).toBe(status);
+      expect(reply.headers["cache-control"]).toBe("no-store");
+      expect(reply.json()).toMatchObject({ error: { code } });
+    }
+    const payload = await app.inject({
+      method: "DELETE",
+      url,
+      headers,
+      payload: { fields: {} },
+      remoteAddress: nextSource(),
+    });
+    expect(payload.statusCode).toBe(422);
+    expect(payload.headers["cache-control"]).toBe("no-store");
+    expect(payload.json()).toMatchObject({ error: { code: "INVALID_PAYLOAD" } });
+    expect(await manual.getDraft(owner, draft.id)).toMatchObject({ state: "editing", version: 1 });
+
+    const formerSubmitter = await member();
+    const own = await manual.createDraft(formerSubmitter.actor, newId(), { fields: {} });
+    const key = newId();
+    await manual.deleteDraft(formerSubmitter.actor, own.id, key, own.version);
+    await unit.run((tx) =>
+      unit.client(tx).delete(roles).where(eq(roles.userId, formerSubmitter.actor.userId)),
+    );
+    const lost = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/me/manual-drafts/${own.id}`,
+      remoteAddress: nextSource(),
+      headers: {
+        ...headers,
+        cookie: formerSubmitter.cookie,
+        "x-csrf-token": csrf.issue({}, formerSubmitter.actor).token,
+        "idempotency-key": key,
+      },
+    });
+    expect(lost.statusCode).toBe(403);
+    expect(lost.headers["cache-control"]).toBe("no-store");
+    expect(lost.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+  } finally {
+    await app.close();
+  }
+});
+
+test("discard retains immutable history and independent evidence holds through ordinary orphan cleanup", async () => {
+  const orphan = await upload();
+  const draftHeld = await upload();
+  const reportHeld = await upload();
+  const report = await submit(reportHeld.id);
+  const value = { fields: { evidenceIds: [orphan.id, draftHeld.id, reportHeld.id] } };
+  const createKey = newId();
+  const draft = await manual.createDraft(owner, createKey, value);
+  const replaceKey = newId();
+  const replacedValue = { fields: { ...value.fields, comment: "Fictional saved draft" } };
+  const replaced = await manual.replaceDraft(owner, draft.id, replaceKey, 1, replacedValue);
+  instant += 30_000;
+  const otherDraft = await manual.createDraft(owner, newId(), {
+    fields: { evidenceIds: [draftHeld.id] },
+  });
+  const previousCounts = await counts();
+  const beforeEvents = await unit.run((tx) =>
+    unit.client(tx).select().from(outboxEvents).orderBy(outboxEvents.id),
+  );
+  const key = newId();
+  const deleted = await manual.deleteDraft(owner, draft.id, key, replaced.version);
+  expect(deleted).toEqual({ id: draft.id, version: 3 });
+  expect(await manual.deleteDraft(owner, draft.id, key, replaced.version)).toEqual(deleted);
+  expect(await manual.createDraft(owner, createKey, value)).toEqual(draft);
+  expect(await manual.replaceDraft(owner, draft.id, replaceKey, 1, replacedValue)).toEqual(
+    replaced,
+  );
+  await expect(
+    manual.replaceDraft(owner, draft.id, newId(), 3, replacedValue),
+  ).rejects.toMatchObject({ statusCode: 404 });
+  await expect(
+    manual.submitDraft(owner, draft.id, newId(), 3, { fields: fields(orphan.id) }),
+  ).rejects.toMatchObject({ statusCode: 404 });
+
+  await unit.run(async (tx) => {
+    const client = unit.client(tx);
+    const history = await client
+      .select({ version: manualDraftHistory.version, snapshot: manualDraftHistory.snapshot })
+      .from(manualDraftHistory)
+      .where(eq(manualDraftHistory.draftId, draft.id))
+      .orderBy(manualDraftHistory.version);
+    expect(history).toEqual([
+      { version: 1, snapshot: draft },
+      { version: 2, snapshot: replaced },
+      { version: 3, snapshot: { ...deleted, state: "discarded", updatedAt: now().toISOString() } },
+    ]);
+    const [parent] = await client.select().from(manualDrafts).where(eq(manualDrafts.id, draft.id));
+    expect(parent).toMatchObject({
+      id: draft.id,
+      ownerId: owner.userId,
+      state: "discarded",
+      version: 3,
+      fields: replaced.fields,
+      updatedAt: now().toISOString(),
+    });
+    expect(
+      await client.select().from(manualCommands).where(eq(manualCommands.key, key)),
+    ).toHaveLength(1);
+    const joins = await client
+      .select({ draftId: manualDraftEvidence.draftId, evidenceId: manualDraftEvidence.evidenceId })
+      .from(manualDraftEvidence);
+    expect(joins).toEqual([{ draftId: otherDraft.id, evidenceId: draftHeld.id }]);
+    const reportReferences = await client
+      .select()
+      .from(manualEvidenceReferences)
+      .where(eq(manualEvidenceReferences.evidenceId, reportHeld.id));
+    expect(reportReferences).toMatchObject([
+      { reportId: report.id, revisionId: report.currentRevision.id },
+    ]);
+    expect(await client.select().from(outboxEvents).orderBy(outboxEvents.id)).toEqual(beforeEvents);
+  });
+  expect(await counts()).toEqual(previousCounts);
+  expect((await manual.metadata(owner, orphan.id)).state).toBe("ready");
+  expect(await manual.reserveExpiry(orphan.id)).toBe(false);
+  instant += 30_000;
+  expect(await manual.reserveExpiry(draftHeld.id)).toBe(false);
+  expect(await manual.reserveExpiry(reportHeld.id)).toBe(false);
+  expect(await manual.reserveExpiry(orphan.id)).toBe(true);
+  await control.query(
+    "UPDATE durable_jobs SET available_at=UTC_TIMESTAMP(3) WHERE kind='manual.evidence-delete'",
+  );
+  const queue = createQueue(unit, [manual.handler]);
+  expect((await runPass(queue, new AbortController().signal)).processed).toBe(1);
+  expect((await manual.metadata(owner, orphan.id)).state).toBe("expired");
+  await expect(manual.content(owner, orphan.id)).rejects.toMatchObject({ statusCode: 410 });
+  expect((await manual.metadata(owner, draftHeld.id)).state).toBe("ready");
+  expect((await manual.metadata(owner, reportHeld.id)).state).toBe("ready");
+});
+
+async function raceDraftCommands(
+  winner: (service: ManualReports) => Promise<unknown>,
+  contender: (service: ManualReports) => Promise<unknown>,
+) {
+  const staged = deferred<number>(),
+    started = deferred<number>(),
+    release = deferred<void>();
+  const connectionId = async (tx: Parameters<UnitOfWork["client"]>[0]) => {
+    const [rows] = await unit.client(tx).execute(sql`SELECT CONNECTION_ID() AS connectionId`);
+    const id = Array.isArray(rows) ? Number(rows[0]?.connectionId) : NaN;
+    if (!Number.isSafeInteger(id)) throw Error("SYNTHETIC_CONNECTION_ID_REQUIRED");
+    return id;
+  };
+  const service = (run: UnitOfWork["run"]) =>
+    createManualReports(
+      { ...unit, run },
+      manualConfig,
+      { identity, catalogs, trips: tripService, blobs },
+      now,
+    );
+  const first = winner(
+    service((fn) =>
+      unit.run(async (tx) => {
+        const result = await fn(tx);
+        staged.resolve(await connectionId(tx));
+        await bounded(release.promise, "release_draft_command", 5000);
+        return result;
+      }),
+    ),
+  );
+  const second = bounded(staged.promise, "stage_draft_command", 5000).then(() =>
+    contender(
+      service((fn) =>
+        unit.run(async (tx) => {
+          const id = await connectionId(tx);
+          const outcome = fn(tx);
+          started.resolve(id);
+          return outcome;
+        }),
+      ),
+    ),
+  );
+  const settled = Promise.allSettled([first, second] as const);
+  try {
+    const firstId = await bounded(staged.promise, "stage_draft_command", 5000);
+    const secondId = await bounded(started.promise, "start_peer_draft_command", 5000);
+    expect(secondId).not.toBe(firstId);
+    // The winner holds the exclusive company gate until release. Observe the contender's
+    // actual locking SELECT at that gate, using only the fixture account's own connections.
+    await until(async () => {
+      const [rows] = await control.query<RowDataPacket[]>({
+        sql: "SELECT EXISTS(SELECT 1 FROM information_schema.PROCESSLIST WHERE ID=? AND USER=SUBSTRING_INDEX(CURRENT_USER(),'@',1) AND LOCATE('from `identity_company`',LOWER(INFO))>0 AND LOCATE('for update',LOWER(INFO))>0) AS at_gate",
+        values: [secondId],
+        timeout: 500,
+      });
+      return Number(rows[0]?.at_gate) === 1;
+    });
+  } finally {
+    release.resolve();
+    await settled;
+  }
+  return settled;
+}
+
+test("concurrent exact deletes serialize on two connections and write one receipt and marker", async () => {
+  const draft = await manual.createDraft(owner, newId(), { fields: {} });
+  const key = newId();
+  const remove = (service: ManualReports) =>
+    service.deleteDraft({ ...owner }, draft.id, key, draft.version);
+  const outcomes = await raceDraftCommands(remove, remove);
+  expect(outcomes).toEqual([
+    { status: "fulfilled", value: { id: draft.id, version: 2 } },
+    { status: "fulfilled", value: { id: draft.id, version: 2 } },
+  ]);
+  await unit.run(async (tx) => {
+    const client = unit.client(tx);
+    expect(
+      await client.select().from(manualCommands).where(eq(manualCommands.key, key)),
+    ).toHaveLength(1);
+    const history = await client
+      .select()
+      .from(manualDraftHistory)
+      .where(eq(manualDraftHistory.draftId, draft.id))
+      .orderBy(manualDraftHistory.version);
+    expect(history.map((row) => row.version)).toEqual([1, 2]);
+    expect(history[1]?.snapshot).toMatchObject({ state: "discarded", version: 2 });
+  });
+});
+
+test.each(["submit", "delete"] as const)(
+  "%s winning the two-connection draft race determines the only committed operation",
+  async (winner) => {
+    const image = await upload();
+    const draft = await manual.createDraft(owner, newId(), { fields: { evidenceIds: [image.id] } });
+    const submitKey = newId(),
+      deleteKey = newId(),
+      value = { fields: fields(image.id) };
+    const submit = (service: ManualReports) =>
+      service.submitDraft({ ...owner }, draft.id, submitKey, draft.version, value);
+    const remove = (service: ManualReports) =>
+      service.deleteDraft({ ...owner }, draft.id, deleteKey, draft.version);
+    const outcomes =
+      winner === "submit"
+        ? await raceDraftCommands(submit, remove)
+        : await raceDraftCommands(remove, submit);
+    const [committed, denied] = outcomes;
+    if (committed.status !== "fulfilled") throw committed.reason;
+    if (winner === "submit") {
+      expect(denied).toMatchObject({
+        status: "rejected",
+        reason: { statusCode: 409, publicCode: "VERSION_CONFLICT" },
+      });
+      expect(await counts()).toMatchObject({ trips: 1, reports: 1, revisions: 1, messages: 1 });
+      expect(await submit(manual)).toEqual(committed.value);
+      expect(await manual.getDraft(owner, draft.id)).toMatchObject({
+        state: "submitted",
+        version: 2,
+      });
+    } else {
+      expect(denied).toMatchObject({ status: "rejected", reason: { statusCode: 404 } });
+      expect(await counts()).toMatchObject({ trips: 0, reports: 0, revisions: 0, messages: 0 });
+      expect(await remove(manual)).toEqual({ id: draft.id, version: 2 });
+      await expect(manual.getDraft(owner, draft.id)).rejects.toMatchObject({ statusCode: 404 });
+    }
+    const losingKey = winner === "submit" ? deleteKey : submitKey;
+    expect(
+      await unit.run((tx) =>
+        unit.client(tx).select().from(manualCommands).where(eq(manualCommands.key, losingKey)),
+      ),
+    ).toEqual([]);
+  },
+);
+
+test("draft deletion returns a private versioned receipt and preserves version-before-state precedence", async () => {
+  const image = await upload();
+  const draft = await manual.createDraft(owner, newId(), { fields: {} });
+  const submitted = await manual.createDraft(owner, newId(), { fields: {} });
+  await manual.submitDraft(owner, submitted.id, newId(), submitted.version, {
+    fields: fields(image.id),
+  });
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  const key = newId();
+  async function remove(id: string, version: number, commandKey = key, typedEmpty = false) {
+    const reply = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/me/manual-drafts/${id}`,
+      headers: {
+        cookie: ownerCookie,
+        origin: identityConfig.origin,
+        "x-csrf-token": csrfProtection(identityConfig).issue({}, owner).token,
+        "idempotency-key": commandKey,
+        "if-match": `"v${version}"`,
+        ...(typedEmpty ? emptyJsonHeaders : {}),
+      },
+    });
+    expect(reply.headers["cache-control"]).toBe("no-store");
+    expect(reply.headers.etag).toBeUndefined();
+    return reply;
+  }
+  try {
+    const stale = await remove(submitted.id, 1);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json()).toMatchObject({ error: { code: "VERSION_CONFLICT" } });
+    const state = await remove(submitted.id, 2);
+    expect(state.statusCode).toBe(409);
+    expect(state.json()).toMatchObject({ error: { code: "STATE_CONFLICT" } });
+
+    const deleted = await remove(draft.id, draft.version, key, true);
+    const replayed = await remove(draft.id, draft.version, key, true);
+    const untypedReplay = await remove(draft.id, draft.version);
+    expect(deleted.statusCode).toBe(200);
+    expect(replayed.statusCode).toBe(200);
+    expect(untypedReplay.statusCode).toBe(200);
+    const result = deleted.json() as S["EnvelopeCommandResult"];
+    const replay = replayed.json() as S["EnvelopeCommandResult"];
+    expect(result.data).toEqual({ id: draft.id, version: 2 });
+    expect(replay.data).toEqual(result.data);
+    expect(untypedReplay.json()).toMatchObject({ data: result.data });
+    expect(replay.meta.requestId).not.toBe(result.meta.requestId);
+    const changed = await remove(draft.id, 2);
+    expect(changed.statusCode).toBe(409);
+    expect(changed.json()).toMatchObject({ error: { code: "IDEMPOTENCY_CONFLICT" } });
+    const fresh = await remove(draft.id, 2, newId());
+    expect(fresh.statusCode).toBe(404);
+    expect(fresh.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
+    const detail = await app.inject({
+      url: `/api/v1/me/manual-drafts/${draft.id}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(detail.statusCode).toBe(404);
+    expect(detail.headers["cache-control"]).toBe("no-store");
+  } finally {
+    await app.close();
+  }
+});
+
 test("retention protects every reference until the newest decision calendar boundary, fences review/attach and retains structured history after expiry", async () => {
   const image = await upload(),
     first = await submit(image.id);
@@ -1068,6 +1461,441 @@ test("equal-time revision keysets retain every immutable revision exactly once",
     report.currentRevision,
   );
   expect(history.find((row) => row.id === next.currentRevision.id)).toEqual(next.currentRevision);
+});
+
+test("workspace joins only current author revisions, including multiple reports for the same trip", async () => {
+  const trip = await unit.run(async (tx) => {
+    const telemetry = await tripService.storeInTransaction(
+      tx,
+      "ets2telemetry",
+      telemetryFixture("completed"),
+      {
+        ownerUserId: owner.userId,
+        connection: { state: "unknown", referenceId: null },
+      },
+    );
+    const [stored] = await tripService.statesInTransaction(tx, [telemetry.tripId]);
+    if (!stored) throw Error("SYNTHETIC_TELEMETRY_TRIP_REQUIRED");
+    return stored;
+  });
+  const image = await upload();
+  const original = await manual.submitReport(owner, newId(), {
+    fields: fields(image.id),
+    targetTrip: { tripId: trip.id, expectedVersion: trip.version },
+  });
+  instant += 1000;
+  const revised = await manual.reviseReport(owner, original.id, newId(), original.version, {
+    fields: { ...fields(image.id), actualDistanceM: "2" },
+    expectedTripVersion: original.tripVersion,
+  });
+  instant += 1000;
+  const second = await manual.submitReport(owner, newId(), {
+    fields: fields(image.id),
+    targetTrip: { tripId: trip.id, expectedVersion: revised.tripVersion },
+  });
+  const foreignImage = await manual.upload(other, newId(), "synthetic.png", bytes(), "image/png");
+  const foreign = await manual.submitReport(other, newId(), { fields: fields(foreignImage.id) });
+  expect(second.tripId).toBe(original.tripId);
+  expect(revised.currentRevision.submittedAt).not.toBe(original.createdAt);
+
+  await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.read_own_private");
+    const db = unit.client(tx);
+    const relation = manual.workspaceCurrentAuthorRevisionsRelation(tx, owner.userId);
+    const read = () =>
+      db
+        .select({
+          tripId: trips.id,
+          reportTripId: relation.reportTripId,
+          reportId: relation.reportId,
+          revisionId: relation.revisionId,
+          reportCreatedAt: relation.reportCreatedAt,
+          revisionNumber: manualRevisions.number,
+        })
+        .from(trips)
+        .leftJoin(relation, eq(relation.reportTripId, trips.id))
+        .leftJoin(manualRevisions, eq(manualRevisions.id, relation.revisionId))
+        .orderBy(relation.reportCreatedAt, relation.reportId);
+    const unmatched = {
+      tripId: foreign.tripId,
+      reportTripId: null,
+      reportId: null,
+      revisionId: null,
+      reportCreatedAt: null,
+      revisionNumber: null,
+    };
+    const own = [
+      {
+        tripId: original.tripId,
+        reportTripId: original.tripId,
+        reportId: original.id,
+        revisionId: revised.currentRevision.id,
+        reportCreatedAt: original.createdAt,
+        revisionNumber: revised.currentRevision.number,
+      },
+      {
+        tripId: second.tripId,
+        reportTripId: second.tripId,
+        reportId: second.id,
+        revisionId: second.currentRevision.id,
+        reportCreatedAt: second.createdAt,
+        revisionNumber: second.currentRevision.number,
+      },
+    ];
+    expect(await read()).toEqual([unmatched, ...own]);
+    await db
+      .update(manualReports)
+      .set({ currentRevisionId: null })
+      .where(eq(manualReports.id, original.id));
+    expect(await read()).toEqual([unmatched, own[1]]);
+    await db
+      .update(manualReports)
+      .set({ currentRevisionId: revised.currentRevision.id })
+      .where(eq(manualReports.id, original.id));
+    expect(await read()).toEqual([unmatched, ...own]);
+  });
+});
+
+test("draft list pages editing and submitted states with owner-bound cursors and an unpaged editing count", async () => {
+  expect(await manual.listDrafts(owner, { state: "editing" })).toEqual({
+    items: [],
+    nextCursor: null,
+    editingCount: 0,
+  });
+  const image = await upload();
+  const add = (actor = owner) => manual.createDraft(actor, newId(), { fields: {} });
+  const first = await add(),
+    second = await add(),
+    sent = await add(),
+    discarded = await add();
+  await add(other);
+  instant++;
+  const latest = await add();
+  instant++;
+  const edited = await manual.replaceDraft(owner, first.id, newId(), first.version, { fields: {} });
+  await manual.submitDraft(owner, sent.id, newId(), sent.version, { fields: fields(image.id) });
+  await manual.deleteDraft(owner, discarded.id, newId(), discarded.version);
+
+  const earlier = [edited, second].sort((left, right) => right.id.localeCompare(left.id));
+  const workspace = await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.submit_own");
+    return manual.workspaceEditingDraftsInTransaction(tx, owner.userId);
+  });
+  expect(workspace).toEqual({
+    count: 3,
+    items: [latest, ...earlier].map(({ id, updatedAt }) => ({ draftId: id, updatedAt })),
+  });
+
+  const list = "/api/v1/me/manual-drafts";
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  async function page(query: string, cookie = ownerCookie) {
+    const reply = await app.inject({ url: `${list}?${query}`, headers: { cookie } });
+    expect(reply.headers["cache-control"]).toBe("no-store");
+    return reply;
+  }
+  function read(reply: Awaited<ReturnType<typeof page>>) {
+    expect(reply.statusCode).toBe(200);
+    return (reply.json() as S["EnvelopeListManualDraft"]).data;
+  }
+  try {
+    const all = read(await page("limit=1"));
+    const editing = read(await page("limit=1&state=editing"));
+    expect(all.items.map(({ id }) => id)).toEqual([latest.id]);
+    expect(editing.items.map(({ id }) => id)).toEqual([latest.id]);
+    expect(all.editingCount).toBe(3);
+    expect(editing.editingCount).toBe(3);
+    expect(all.nextCursor).toEqual(expect.any(String));
+    expect(editing.nextCursor).toEqual(expect.any(String));
+    const allCursor = encodeURIComponent(all.nextCursor ?? "");
+    const editingCursor = encodeURIComponent(editing.nextCursor ?? "");
+    const remaining = read(await page(`cursor=${allCursor}`));
+    expect(remaining.items.map(({ id }) => id)).toEqual(
+      [first.id, second.id, sent.id].sort().reverse(),
+    );
+    expect(remaining.items.find(({ id }) => id === sent.id)?.state).toBe("submitted");
+    expect(remaining.editingCount).toBe(3);
+    expect(remaining.nextCursor).toBeNull();
+    const filtered = read(await page(`state=editing&cursor=${editingCursor}`));
+    expect(filtered.items.map(({ id }) => id)).toEqual([first.id, second.id].sort().reverse());
+    expect(filtered.items.every((draft) => draft.state === "editing")).toBe(true);
+    expect(filtered.editingCount).toBe(3);
+    expect(filtered.nextCursor).toBeNull();
+
+    for (const [query, cookie] of [
+      [`state=editing&cursor=${allCursor}`, ownerCookie],
+      [`cursor=${editingCursor}`, ownerCookie],
+      [`state=editing&cursor=${editingCursor}`, otherCookie],
+    ] as const) {
+      const incompatible = await page(query, cookie);
+      expect(incompatible.statusCode).toBe(409);
+      expect(incompatible.json()).toMatchObject({ error: { code: "VERSION_CONFLICT" } });
+    }
+    expect((await page("state=submitted")).statusCode).toBe(422);
+    expect((await page("state=editing&limit=101")).statusCode).toBe(422);
+    const anotherList = await app.inject({
+      url: "/api/v1/me/manual-reports?state=editing",
+      headers: { cookie: ownerCookie },
+    });
+    expect(anotherList.statusCode).toBe(422);
+    expect(read(await page("state=editing", otherCookie)).editingCount).toBe(1);
+  } finally {
+    await app.close();
+  }
+});
+
+test("draft labels follow current member locale and only matching catalog game and kind", async () => {
+  const catalog = await seedCatalog(unit, "ets2", {
+    cities: [
+      {
+        code: "draft-native-city",
+        nameEn: "Fictional North",
+        nameRu: "Северный город",
+        hidden: true,
+      },
+      { code: "draft-english-city", nameEn: "Fictional South" },
+    ],
+  });
+  const wrongGame = await seedCatalog(unit, "ats", { cities: ["draft-foreign-city"] });
+  const north = catalog.id("draft-native-city"),
+    south = catalog.id("draft-english-city");
+  await unit.run(async (tx) => {
+    const client = unit.client(tx);
+    await client
+      .update(catalogCities)
+      .set({ nameNative: "Fictional native North" })
+      .where(eq(catalogCities.id, north));
+    // Cross-table ID reuse must not shadow a different kind's label.
+    await client.insert(catalogCargoes).values({
+      id: north,
+      game: "ets2",
+      code: Buffer.from("draft-cargo"),
+      nameEn: "Fictional cargo",
+      nameRu: "Вымышленный груз",
+    });
+  });
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
+  const draft = await manual.createDraft(owner, newId(), {
+    fields: {
+      game: "ets2",
+      origin: resolved(north),
+      destination: resolved(south),
+      cargo: resolved(north),
+    },
+  });
+  const invalid = await manual.createDraft(owner, newId(), {
+    fields: {
+      game: "ets2",
+      origin: resolved(wrongGame.id("draft-foreign-city")),
+      destination: resolved(newId()),
+      cargo: resolved(south),
+    },
+  });
+  const partial = await manual.createDraft(owner, newId(), {
+    fields: { origin: resolved(north), destination: fields(newId()).destination },
+  });
+  const emptyLabels = { origin: null, destination: null, cargo: null };
+  expect(draft).not.toHaveProperty("labels");
+  const russian = await manual.getDraft(owner, draft.id);
+  expect(russian.fields).toEqual(draft.fields);
+  expect(russian.labels).toEqual({
+    origin: {
+      entityId: north,
+      label: "Северный город",
+      nameNative: "Fictional native North",
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+      englishFallback: false,
+      hidden: true,
+    },
+    destination: {
+      entityId: south,
+      label: "Fictional South",
+      requestedLocale: "ru",
+      renderedLocale: "en",
+      englishFallback: true,
+      hidden: false,
+    },
+    cargo: {
+      entityId: north,
+      label: "Вымышленный груз",
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+      englishFallback: false,
+      hidden: false,
+    },
+  });
+  expect((await manual.getDraft(owner, invalid.id)).labels).toEqual(emptyLabels);
+  expect((await manual.getDraft(owner, partial.id)).labels).toEqual({
+    ...emptyLabels,
+    origin: russian.labels?.origin,
+  });
+  const setLocale = (locale: "ru" | "en") =>
+    unit.run((tx) =>
+      unit.client(tx).update(membership).set({ locale }).where(eq(membership.userId, owner.userId)),
+    );
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  try {
+    await setLocale("en");
+    const headers = { cookie: ownerCookie, "accept-language": "ru" };
+    const detail = await app.inject({ url: `/api/v1/me/manual-drafts/${draft.id}`, headers });
+    const list = await app.inject({ url: "/api/v1/me/manual-drafts?state=editing", headers });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.headers.etag).toBe('"v1"');
+    expect(list.statusCode).toBe(200);
+    const current = (detail.json() as S["EnvelopeManualDraft"]).data;
+    expect(current.fields).toEqual(draft.fields);
+    expect(current.labels).toMatchObject({
+      origin: {
+        label: "Fictional North",
+        nameNative: "Fictional native North",
+        requestedLocale: "en",
+        renderedLocale: "en",
+        englishFallback: false,
+        hidden: true,
+      },
+      destination: { label: "Fictional South", englishFallback: false },
+      cargo: { label: "Fictional cargo", englishFallback: false },
+    });
+    const { items } = (list.json() as S["EnvelopeListManualDraft"]).data;
+    expect(items.find(({ id }) => id === draft.id)).toEqual(current);
+    expect(items.find(({ id }) => id === invalid.id)?.labels).toEqual(emptyLabels);
+    expect(items.find(({ id }) => id === partial.id)?.labels).toEqual({
+      ...emptyLabels,
+      origin: current.labels?.origin,
+    });
+  } finally {
+    await setLocale("ru");
+    await app.close();
+  }
+});
+
+test("draft list trims the keyset sentinel before bounded catalog lookups and supports indexed owner/state queries", async () => {
+  const catalog = await seedCatalog(unit, "ets2", {
+    cities: ["draft-batch-city"],
+    cargoes: ["draft-batch-cargo"],
+  });
+  const city = { status: "resolved" as const, entityId: catalog.id("draft-batch-city") },
+    cargo = { status: "resolved" as const, entityId: catalog.id("draft-batch-cargo") };
+  const draftFields = { game: "ets2", origin: city, destination: city, cargo };
+  const timestamp = now().toISOString();
+  const rows = (length: number, ownerId: string, state: "editing" | "discarded") =>
+    Array.from({ length }, () => ({
+      id: newId(),
+      ownerId,
+      state,
+      version: state === "editing" ? 1 : 2,
+      fields: draftFields,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }));
+  const editing = rows(101, owner.userId, "editing");
+  const newestIds = editing
+    .map(({ id }) => id)
+    .sort()
+    .reverse();
+  await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.submit_own");
+    await unit
+      .client(tx)
+      .insert(manualDrafts)
+      .values([
+        ...editing,
+        ...rows(300, owner.userId, "discarded"),
+        ...rows(200, other.userId, "editing"),
+      ]);
+    // These rows are still uncommitted and visible to the caller's transaction.
+    expect(await manual.workspaceEditingDraftsInTransaction(tx, owner.userId)).toEqual({
+      count: 101,
+      items: newestIds.slice(0, 5).map((draftId) => ({ draftId, updatedAt: timestamp })),
+    });
+  });
+
+  const labelBatchSizes: number[] = [];
+  const measured = createManualReports(
+    unit,
+    manualConfig,
+    {
+      identity,
+      trips: tripService,
+      blobs,
+      catalogs: {
+        ...catalogs,
+        labelsInTransaction(tx, refs, locale) {
+          labelBatchSizes.push(refs.length);
+          return catalogs.labelsInTransaction(tx, refs, locale);
+        },
+      },
+    },
+    now,
+  );
+  const defaultPage = await manual.listDrafts(owner);
+  expect(defaultPage.items).toHaveLength(25);
+  expect(defaultPage.editingCount).toBe(101);
+
+  const first = await measured.listDrafts(owner, { state: "editing", limit: 100 });
+  expect(first.items).toHaveLength(100);
+  expect(first.editingCount).toBe(101);
+  expect(labelBatchSizes).toEqual([200, 100]);
+  expect(
+    first.items.every(
+      ({ labels }) =>
+        labels?.origin?.entityId === city.entityId && labels.cargo?.entityId === cargo.entityId,
+    ),
+  ).toBe(true);
+  if (!first.nextCursor) throw Error("SYNTHETIC_DRAFT_CURSOR_REQUIRED");
+  const last = await measured.listDrafts(owner, {
+    state: "editing",
+    limit: 100,
+    cursor: first.nextCursor,
+  });
+  expect(last.nextCursor).toBeNull();
+  expect(last.editingCount).toBe(101);
+  expect(labelBatchSizes).toEqual([200, 100, 2, 1]);
+  expect([...first.items, ...last.items].map(({ id }) => id)).toEqual(newestIds);
+
+  await control.query("ANALYZE TABLE manual_drafts");
+  const plans = [
+    [
+      "unfiltered",
+      "SELECT * FROM manual_drafts WHERE owner_id=? AND state IN ('editing','submitted') ORDER BY created_at DESC,id DESC LIMIT 26",
+      "manual_draft_owner_page",
+    ],
+    [
+      "editing",
+      "SELECT * FROM manual_drafts WHERE owner_id=? AND state='editing' ORDER BY created_at DESC,id DESC LIMIT 26",
+      "manual_draft_owner_state_page",
+    ],
+    [
+      "editing_count",
+      "SELECT COUNT(*) FROM manual_drafts WHERE owner_id=? AND state='editing'",
+      "manual_draft_owner_state_page",
+    ],
+  ] as const;
+  for (const [shape, statement, expectedIndex] of plans) {
+    const [rows] = await control.query<RowDataPacket[]>(`EXPLAIN ${statement}`, [
+      Buffer.from(owner.userId, "ascii"),
+    ]);
+    const [plan] = rows;
+    expect(String(plan?.possible_keys).split(",")).toContain(expectedIndex);
+    console.log(
+      JSON.stringify({
+        event: "manual_query_plan",
+        shape,
+        index: plan?.key,
+        access: plan?.type,
+        estimatedRows: Number(plan?.rows),
+        extra: plan?.Extra,
+      }),
+    );
+  }
 });
 
 test("resolved selections take same-game list rows, hidden rows stay only when unchanged and the legacy route stays readable", async () => {

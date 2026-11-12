@@ -300,7 +300,10 @@ for (const locale of ["en", "ru"] as const)
       });
       await review.click();
       await expect(review).toHaveCount(0);
-      await expect(publish).toBeDisabled();
+      await expect(
+        editor.getByRole("heading", { name: /Sample outcome|Результат примера/ }),
+      ).toHaveCount(0);
+      await expect(publish).toBeEnabled();
       for (const [field, value] of [
         ["mass", "12"],
         ["count", "3"],
@@ -391,7 +394,8 @@ test(
       "Fictional retained rules during rename",
     );
     await review.click();
-    await expect(publish).toBeDisabled();
+    await expect(editor.getByRole("heading", { name: /Sample outcome/ })).toHaveCount(0);
+    await expect(publish).toBeEnabled();
     await preview.click();
     await expect(publish).toBeEnabled();
     await publish.click();
@@ -435,6 +439,7 @@ test(
     );
     await page.keyboard.press("Escape");
     await editor.locator('[id^="mode-"]').selectOption("immediate");
+    await expect(publish).toBeDisabled();
     await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
     await expect(card.getByText("Version: 2", { exact: true })).toBeVisible();
     await expect(publish).toBeDisabled();
@@ -444,6 +449,8 @@ test(
     ).toBeVisible();
     expect(state.keys).toEqual([state.keys[0], state.keys[0]]);
     expect(state.etags).toEqual(['"v1"', '"v1"']);
+    expect(state.publications).toHaveLength(2);
+    expect(state.publications[1]).toEqual(state.publications[0]);
     expect(state.publications.map((body) => body.effectiveAt)).toEqual([
       "2099-01-01T12:00:00.000Z",
       "2099-01-01T12:00:00.000Z",
@@ -458,7 +465,8 @@ test(
       "Fictional retained future publication",
     );
     await review.click();
-    await expect(publish).toBeDisabled();
+    await expect(editor.getByRole("heading", { name: /Sample outcome/ })).toHaveCount(0);
+    await expect(publish).toBeEnabled();
     await preview.click();
     await expect(publish).toBeEnabled();
     await publish.click();
@@ -686,7 +694,7 @@ for (const locale of ["en", "ru"] as const)
           name: locale === "en" ? "Publish rule version" : "Опубликовать версию правил",
           exact: true,
         });
-      await expect(publish).toBeDisabled();
+      await expect(publish).toBeEnabled();
       await editor.locator('[id^="reason-"]').fill("Fictional draft rationale");
       await editor.locator('[id^="mass-"]').fill("100000000000000000000");
       await expect(preview).toBeDisabled();
@@ -701,7 +709,10 @@ for (const locale of ["en", "ru"] as const)
       ).toBeVisible();
       await expect(publish).toBeEnabled();
       await editor.locator('[id^="sample-mass-"]').fill("10");
-      await expect(publish).toBeDisabled();
+      await expect(
+        editor.getByRole("heading", { name: /Sample outcome|Результат примера/ }),
+      ).toHaveCount(0);
+      await expect(publish).toBeEnabled();
       await preview.click();
       await expect(publish).toBeEnabled();
       await publish.click();
@@ -937,8 +948,81 @@ test(
   },
 );
 
+for (const locale of ["en", "ru"] as const)
+  test(
+    `controlled ${locale} progress recognizes a distance-only rule with an outdated level pointer`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const state = await mockQualifications(page, locale, false);
+      state.unconfigured = true;
+      state.progressRequirements = {
+        requiredTrips: null,
+        requiredDistanceM: "20000",
+        eligibleForConfirmation: false,
+      };
+      await page.goto("/account/qualifications");
+      await catalogLanguage(page, locale);
+      const current = page
+        .getByRole("heading", {
+          name: locale === "en" ? "Current qualification · ETS2" : "Текущая квалификация · ETS2",
+          exact: true,
+        })
+        .locator("..");
+      const rulesUnavailable =
+        locale === "en"
+          ? "Current qualification rules are unavailable."
+          : "Текущие правила квалификации недоступны.";
+      await expect(
+        current.getByText(locale === "en" ? "2 / No minimum" : "2 / Без минимума", { exact: true }),
+      ).toBeVisible();
+      await expect(current.getByText(locale === "en" ? /\/ 20 km$/ : /\/ 20 км$/)).toBeVisible();
+      await expect(
+        current.getByText(
+          locale === "en"
+            ? "Meet the configured minimums before staff can confirm promotion."
+            : "Для подтверждения повышения нужно достичь заданных минимумов.",
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(current.getByText(rulesUnavailable, { exact: true })).toBeVisible();
+      await expect(
+        current.getByText(
+          /Publish an effective rule version|Опубликуйте действующую версию правил/,
+        ),
+      ).toHaveCount(0);
+
+      const progressUnavailable = current.getByText(
+        locale === "en"
+          ? "Promotion requirements are unavailable."
+          : "Требования для повышения недоступны.",
+        { exact: true },
+      );
+      // The reverse read order can return the new pointer before its corresponding progress.
+      state.unconfigured = false;
+      state.progressRequirements = {
+        requiredTrips: null,
+        requiredDistanceM: null,
+        eligibleForConfirmation: false,
+      };
+      await page.reload();
+      await expect(current.getByText("10 kg", { exact: true })).toBeVisible();
+      await expect(progressUnavailable).toBeVisible();
+
+      // Progress alone is also ambiguous if the level read fails.
+      await page.route("**/api/v1/qualification-levels?*", (route) =>
+        route.fulfill({ status: 503, json: {} }),
+      );
+      await page.reload();
+      await expect(
+        current.getByText(locale === "en" ? "2 / Unavailable" : "2 / Недоступно", { exact: true }),
+      ).toBeVisible();
+      await expect(progressUnavailable).toBeVisible();
+      await expect(current.getByText(rulesUnavailable, { exact: true })).toBeVisible();
+    },
+  );
+
 test(
-  "controlled member permissions unset thresholds retained-review and unavailable states",
+  "controlled member permissions disabled minimums retained-review and unavailable states",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     const state = await mockQualifications(page, "en", false);
@@ -952,7 +1036,7 @@ test(
     await expect(
       page.getByText("Earlier promotion requirements are no longer met.", { exact: false }),
     ).toBeVisible();
-    await expect(page.getByText("2 / Unset", { exact: true })).toBeVisible();
+    await expect(page.getByText("2 / No minimum", { exact: true })).toBeVisible();
     await page.screenshot({
       path: info.outputPath("qualification-review-unset.png"),
       fullPage: true,
@@ -982,6 +1066,10 @@ test(
     state.unconfigured = true;
     state.progressStatus = 200;
     await page.reload();
+    await expect(page.getByText("2 / Unset", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Publish an effective rule version to configure promotion.", { exact: true }),
+    ).toBeVisible();
     await expect(
       page
         .getByText("No effective rules have been published. Launch configuration is incomplete.", {
