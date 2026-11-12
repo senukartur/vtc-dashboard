@@ -1,5 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
+import { stage2DraftId, stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
@@ -733,3 +735,162 @@ test(
     }
   },
 );
+
+test.describe("Stage 2 draft entry", () => {
+  const url = `/account/events/new?draftId=${stage2DraftId}`;
+  const path = `/api/v1/admin/events/drafts/${stage2DraftId}`;
+  const fixture = () =>
+    stage2Fixture("getEventDraft", "read")
+      .response as components["schemas"]["EventStage2EnvelopeDraft"];
+
+  test(
+    "a manager opens a draft directly, saves it and reloads without requesting media",
+    browserCase(["@functional", "@smoke-events"]),
+    async ({ page }) => {
+      await mockEventsStage2(page);
+      const draft = fixture();
+      const retained = {
+        originCityId: "e1320000-0000-4000-8000-000000000002",
+        originDepotId: "e1320000-0000-4000-8000-000000000004",
+        organizerMemberId: "e1320000-0000-4000-8000-000000000006",
+        prescribedMassKg: "0",
+        requiredDlcIds: ["e1320000-0000-4000-8000-000000000008"],
+      };
+      draft.data.fields = { ...draft.data.fields, ...retained };
+      const expected = { ...draft.data.fields, title: "Fictional draft revision" };
+      const requests: string[] = [];
+      const writes: { body: unknown; etag: string | undefined; key: string | undefined }[] = [];
+      page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+      let loseReceipt = true;
+      await page.route(`**${path}`, async (route) => {
+        const request = route.request();
+        if (request.method() === "PATCH") {
+          const body = request.postDataJSON();
+          const etag = request.headers()["if-match"];
+          const key = request.headers()["idempotency-key"];
+          writes.push({ body, etag, key });
+          if (loseReceipt) {
+            loseReceipt = false;
+            draft.data.fields = body;
+            draft.data.version += 1;
+            return route.abort("failed");
+          }
+        }
+        return route.fulfill({ json: draft, headers: { ETag: `"v${draft.data.version}"` } });
+      });
+      await page.goto(url);
+      const title = page.getByRole("textbox", { name: "Event title" });
+      await expect(title).toHaveValue(draft.data.fields.title ?? "");
+      await title.fill("Fictional draft revision");
+      await page.getByRole("button", { name: "Save draft" }).click();
+      await expect(title).toHaveValue("Fictional draft revision");
+      await page.getByRole("button", { name: "Retry the same request" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
+      expect(writes).toEqual([
+        { body: expected, etag: '"v1"', key: expect.stringMatching(/^[a-f0-9-]{36}$/) },
+        { body: expected, etag: '"v1"', key: writes[0]?.key },
+      ]);
+      await page.reload();
+      await expect(title).toHaveValue("Fictional draft revision");
+      expect(requests.filter((request) => request.endsWith("/media"))).toEqual([]);
+    },
+  );
+
+  test(
+    "conflicting draft saves require explicit review before using a newer ETag",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockEventsStage2(page);
+      const draft = fixture();
+      const attempts: { etag: string | undefined; body: typeof draft.data.fields }[] = [];
+      await page.route(`**${path}`, async (route) => {
+        const request = route.request();
+        if (request.method() === "PATCH") {
+          const etag = request.headers()["if-match"];
+          const body = request.postDataJSON();
+          attempts.push({ etag, body });
+          if (attempts.length === 1) {
+            draft.data.version = 2;
+            draft.data.fields.title = "Fictional concurrent title";
+            draft.data.fields.distanceKm = "12.5";
+            return route.fulfill({ status: 412 });
+          }
+          draft.data.version = 3;
+          draft.data.fields = body;
+        }
+        return route.fulfill({ json: draft, headers: { ETag: `"v${draft.data.version}"` } });
+      });
+      await page.goto(url);
+      const title = page.getByRole("textbox", { name: "Event title" });
+      await title.fill("Fictional local edit");
+      const save = page.getByRole("button", { name: "Save draft" });
+      await save.click();
+      await expect(
+        page.getByRole("alert").filter({ hasText: "The saved draft changed." }),
+      ).toBeVisible();
+      await expect(title).toHaveValue("Fictional local edit");
+      await expect(save).toBeDisabled();
+      await page.getByRole("button", { name: "Check latest draft" }).click();
+      await expect(page.getByText(/Latest saved title.*Fictional concurrent title/)).toBeVisible();
+      await page.getByRole("button", { name: "Keep my edits" }).click();
+      await save.click();
+      await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
+      expect(attempts.map(({ etag }) => etag)).toEqual(['"v1"', '"v2"']);
+      expect(attempts[1]?.body).toMatchObject({
+        title: "Fictional local edit",
+        distanceKm: "12.5",
+      });
+    },
+  );
+
+  test(
+    "malformed or repeated draft IDs cannot open a draft or start creation",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page);
+      for (const invalid of [
+        "?draftId=",
+        "?draftId=bad",
+        `?draftId=${stage2DraftId}&draftId=${stage2DraftId}`,
+      ]) {
+        await page.goto(`/account/events/new${invalid}`);
+        await expect(
+          page.getByRole("alert").filter({ hasText: "This draft link is invalid." }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      }
+      expect(mock.requests.filter(({ route }) => route.includes("/admin/events"))).toEqual([]);
+    },
+  );
+
+  test(
+    "a member without event management cannot request a draft",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page, "member");
+      await page.goto(url);
+      await expect(
+        page.getByRole("alert").filter({ hasText: "You no longer have access to this action." }),
+      ).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      expect(mock.requests.filter(({ route }) => route.includes("/admin/events"))).toEqual([]);
+    },
+  );
+
+  test(
+    "an unavailable draft stays on the protected draft entry",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const mock = await mockEventsStage2(page);
+      mock.statusByRequest.set(`GET /admin/events/drafts/${stage2DraftId}`, 404);
+      await page.goto(url);
+      await expect(
+        page
+          .getByRole("alert")
+          .filter({ hasText: "This event is unavailable or you do not have access." }),
+      ).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+      expect(mock.requests.filter(({ route }) => route === "POST /admin/events")).toEqual([]);
+    },
+  );
+});
