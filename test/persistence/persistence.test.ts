@@ -1726,8 +1726,8 @@ test("real MySQL persistence foundations", { timeout: foundationsTimeout }, asyn
         const [history] = await connection.query<RowDataPacket[]>(
           "SELECT COUNT(*) AS count FROM _vtc_migrations",
         );
-        // The extended fixture retains its synthetic prior entry plus twenty-seven current migrations.
-        assert.equal(String(history[0]?.count), "28");
+        // The extended fixture retains its synthetic prior entry plus twenty-eight current migrations.
+        assert.equal(String(history[0]?.count), "29");
       },
     );
   } finally {
