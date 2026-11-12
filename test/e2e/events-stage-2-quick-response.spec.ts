@@ -1,5 +1,5 @@
 import type { components } from "@vtc/contracts";
-import { stage2EventId, stage2Fixture } from "../fixtures/events-stage-2.ts";
+import { stage2EventId, stage2Fixture, stage2LegacyEventId } from "../fixtures/events-stage-2.ts";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
@@ -15,31 +15,59 @@ function upcomingProjection() {
 }
 
 test(
-  "header and overview share a localized nearest-event read and refresh once at cutoff",
+  "header and overview share each localized nearest-event read at cutoff and on notification poll",
   browserCase(["@functional"]),
   async ({ page }) => {
-    await page.clock.install({ time: new Date("2099-10-25T12:59:00.000Z") });
+    // Cross the cutoff without advancing to the next notification poll.
+    await page.clock.install({ time: new Date("2099-10-25T12:59:50.000Z") });
     await mockDashboardRoutes(page);
     let reads = 0;
-    const next = upcomingProjection();
-    const title = next.data?.event.title ?? "";
+    const initial = upcomingProjection();
+    const initialEvent = initial.data;
+    if (!initialEvent) throw new Error("Missing nearest event fixture");
+    let wire = initial;
     await page.route(upcomingPath, (route) => {
       expect(new URL(route.request().url()).searchParams.get("locale")).toBe("en");
       reads++;
-      return route.fulfill({ json: reads === 1 ? next : { ...next, data: null } });
+      return route.fulfill({ json: wire });
     });
     await page.goto("/account/dashboard");
     const overview = page.getByRole("region", { name: "Upcoming Event" });
-    await expect(overview.getByRole("heading", { name: title })).toBeVisible();
-    await expect(page.locator(".event-nearest").getByRole("link")).toHaveAttribute(
+    const header = page.locator(".event-nearest");
+    await expect(overview.getByRole("heading", { name: initialEvent.event.title })).toBeVisible();
+    await expect(header.getByRole("link")).toHaveAttribute(
       "href",
       `/account/events/${stage2EventId}`,
     );
     expect(reads).toBe(1);
-    await page.clock.fastForward(61_000);
+    wire = { ...initial, data: null };
+    await page.clock.fastForward(11_000);
     await expect(overview.getByText("No scheduled convoys")).toBeVisible();
-    await expect(page.locator(".event-nearest")).toContainText("No upcoming event");
+    await expect(header).toContainText("No upcoming event");
     expect(reads).toBe(2);
+
+    const nextTitle = "Fictional afternoon convoy";
+    wire = {
+      ...initial,
+      data: {
+        ...initialEvent,
+        event: {
+          ...initialEvent.event,
+          id: stage2LegacyEventId,
+          title: nextTitle,
+          meetingAt: "2099-10-25T14:00:00.000Z",
+          startsAt: "2099-10-25T15:00:00.000Z",
+        },
+      },
+    };
+    // The next notification poll invalidates the shared query for both surfaces.
+    await page.clock.fastForward(31_000);
+    await expect(overview.getByRole("heading", { name: nextTitle })).toBeVisible();
+    await expect(header.getByRole("link")).toHaveAttribute(
+      "href",
+      `/account/events/${stage2LegacyEventId}`,
+    );
+    expect(reads).toBe(3);
   },
 );
 
