@@ -1,23 +1,17 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useCatalogPages } from "../../shared/catalog-selectors/queries.js";
-import { Button, Label } from "../../shared/ui/primitives.js";
+import { DepotSelector } from "../../shared/catalog-selectors/DepotSelector.js";
+import { visibleDepot } from "../../shared/catalog-selectors/depots.js";
 import { State } from "../trips/components.js";
 import { useTripQuery } from "../trips/queries.js";
-import { type DTO, queryString, schema } from "../trips/transport.js";
+import { type DTO, queryString } from "../trips/transport.js";
 
 type Game = DTO["ManualDatedSubmissionFields"]["game"];
 
-function visibleDepot(depot: DTO["CatalogDepot"], game: Game, cityId: string | undefined) {
-  return (
-    depot.game === game &&
-    depot.city.id === cityId &&
-    !depot.hidden &&
-    !depot.city.label.hidden &&
-    !depot.company.label.hidden
-  );
-}
-
+/**
+ * The chosen company's eligibility: it must have a visible depot in the selected city of the same
+ * game. A company that loses it is cleared once, with a notice.
+ */
 export function useDepotCompany(
   game: Game,
   selection: DTO["ManualCatalogSelection"] | undefined,
@@ -27,15 +21,16 @@ export function useDepotCompany(
   const { i18n } = useTranslation("trips");
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const cityId = selection?.status === "resolved" ? selection.entityId : undefined;
-  const params = { game, cityId, locale };
   const exact = useTripQuery(
-    `/catalogs/depots?${queryString({ ...params, companyId: value, limit: 1 })}`,
+    `/catalogs/depots?${queryString({ game, cityId, locale, companyId: value, limit: 1 })}`,
     "EnvelopeCatalogDepotList",
     !!cityId && !!value,
   );
-  const eligible = exact.data?.data.data.items.find(
-    (depot) => visibleDepot(depot, game, cityId) && depot.company.id === value,
-  )?.company;
+  const eligible = cityId
+    ? exact.data?.data.data.items.find(
+        (depot) => visibleDepot(depot, game, cityId) && depot.company.id === value,
+      )?.company
+    : undefined;
   const incompatible = !!value && (!cityId || (!!exact.data && !eligible));
   const [cleared, setCleared] = useState<string | null>(null);
   useEffect(() => {
@@ -43,24 +38,13 @@ export function useDepotCompany(
     setCleared(`${game}:${cityId ?? ""}`);
     clear();
   }, [incompatible, clear, game, cityId]);
-
-  const pages = useCatalogPages(
-    ["manual-depots"],
-    "/catalogs/depots",
-    params,
-    schema("CatalogDepotList"),
-    !!cityId,
-  );
-  const companies = new Map<string, DTO["CatalogDepotCompany"]>();
-  for (const page of pages.data?.pages ?? [])
-    for (const depot of page.data.data.items)
-      if (visibleDepot(depot, game, cityId)) companies.set(depot.company.id, depot.company);
-  if (eligible) companies.set(eligible.id, eligible);
   return {
+    game,
     cityId,
-    companies,
-    pages,
     exact,
+    selected: eligible
+      ? { id: eligible.id, label: eligible.label.label, code: eligible.code }
+      : undefined,
     blocked: !!value && !eligible,
     cleared: !value && cleared === `${game}:${cityId ?? ""}`,
     clearNotice: () => setCleared(null),
@@ -79,36 +63,25 @@ export function DepotCompanyField({
   choices: ReturnType<typeof useDepotCompany>;
 }) {
   const { t } = useTranslation("trips");
-  const { cityId, companies, pages, exact, cleared } = choices;
-  const pendingSelection = value && !companies.has(value);
-  const optionsLoading = !!cityId && pages.isPending;
-  const empty = !!cityId && !!pages.data && companies.size === 0 && !value;
-  const hint = !cityId ? "companyChooseCity" : empty ? "companyNone" : undefined;
+  const { game, cityId, exact, selected, cleared } = choices;
+  const hint = !cityId ? "companyChooseCity" : undefined;
   return (
     <div className="field manual-company-field">
-      <Label htmlFor={name}>{t(`${name}Optional`)}</Label>
-      <select
+      <DepotSelector
         id={name}
-        className="input"
-        value={value ?? ""}
-        disabled={!cityId || (!value && (optionsLoading || empty || pages.isError))}
-        aria-describedby={hint || cleared ? `${name}-hint` : undefined}
-        onChange={(event) => {
+        label={t(`${name}Optional`)}
+        game={game}
+        cityId={cityId}
+        value={value ?? null}
+        selected={selected}
+        selectedPending={!!value && exact.isPending}
+        describedBy={hint || cleared ? `${name}-hint` : undefined}
+        emptyText={t("companyNone")}
+        onChange={(next) => {
           choices.clearNotice();
-          onChange(event.target.value || undefined);
+          onChange(next ?? undefined);
         }}
-      >
-        <option value="">{t("notSpecified")}</option>
-        {pendingSelection && (
-          <option value={value}>{t(exact.isError ? "unknown" : "companyChecking")}</option>
-        )}
-        {[...companies.values()].map(({ id, label }) => (
-          <option key={id} value={id}>
-            {label.label}
-            {label.englishFallback ? ` · ${t("catalogs:fallback")}` : ""}
-          </option>
-        ))}
-      </select>
+      />
       {cleared ? (
         <p id={`${name}-hint`} className="manual-report-hint" role="status">
           {t("companyCleared")}
@@ -120,19 +93,7 @@ export function DepotCompanyField({
           </p>
         )
       )}
-      {cityId && <State query={pages} />}
       {cityId && value && <State query={exact} />}
-      {pages.hasNextPage && !pages.isError && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={pages.isFetchingNextPage}
-          onClick={() => void pages.fetchNextPage()}
-        >
-          {t("companyMore")}
-        </Button>
-      )}
     </div>
   );
 }

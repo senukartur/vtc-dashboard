@@ -2,7 +2,9 @@ import { expect, test } from "vitest";
 import {
   CATALOG_IMPORT_MAX_ROWS,
   type CatalogConfig,
+  canonicalLists,
   catalogLists,
+  ignoredImportColumns,
   importColumns,
   validateCatalogConfig,
   validCode,
@@ -182,7 +184,7 @@ test("every list declares its import columns, and a template header round-trips 
 test("companies are a plain list and depots read their company and city by code", () => {
   expect(catalogLists).toContain("companies");
   expect(catalogLists).not.toContain("depots");
-  expect(importColumns.companies).toEqual(["game", "code", "name_en", "name_ru", "dlc_code"]);
+  expect(importColumns.companies).toEqual(["game", "code", "name_en", "dlc_code"]);
   expect(importColumns.depots).toEqual(["game", "company_code", "city_code", "dlc_code"]);
   const rows = readImportFile(
     "depots",
@@ -203,11 +205,61 @@ test("companies are a plain list and depots read their company and city by code"
   ]);
   // A depot file with the company columns of a plain list is not a depot file.
   expect(
-    reason(() => readImportFile("depots", csv(importColumns.companies.join(","), "ets2,a,b,,"))),
+    reason(() => readImportFile("depots", csv(importColumns.companies.join(","), "ets2,a,b,"))),
+  ).toBe("unknown_column");
+  // Depots never had a Russian name column, so they do not accept one either.
+  expect(
+    reason(() => readImportFile("depots", csv(`${importColumns.depots.join(",")},name_ru`))),
   ).toBe("unknown_column");
   expect(reason(() => readImportFile("depots", csv("game,company_code,dlc_code", "ets2,a,")))).toBe(
     "missing_column",
   );
+});
+
+test("canonical lists accept and drop a Russian name column; translated lists keep it", () => {
+  expect(canonicalLists).toEqual(["dlcs", "companies"]);
+  for (const list of canonicalLists) {
+    expect(importColumns[list]).not.toContain("name_ru");
+    expect(ignoredImportColumns[list]).toEqual(["name_ru"]);
+  }
+  for (const list of ["regions", "cities", "cargoes", "trailers"] as const) {
+    expect(importColumns[list]).toContain("name_ru");
+    expect(ignoredImportColumns[list]).toBeUndefined();
+  }
+  // Older exports and the DLC extractor still write the column; its values never reach a row.
+  const withRu = readImportFile(
+    "companies",
+    csv("game,code,name_en,name_ru,dlc_code", "ets2,fictional_co,Fictional Freight,Фикция,"),
+  );
+  expect(withRu[0]).toEqual({
+    line: 2,
+    values: { game: "ets2", code: "fictional_co", name_en: "Fictional Freight", dlc_code: "" },
+    fileIssues: [],
+  });
+  const without = readImportFile(
+    "companies",
+    csv(importColumns.companies.join(","), "ets2,fictional_co,Fictional Freight,"),
+  );
+  expect(without[0]?.values).toEqual(withRu[0]?.values);
+  const json = readImportFile(
+    "dlcs",
+    Buffer.from(
+      JSON.stringify([{ game: "ets2", code: "fictional_pack", name_en: "Pack", name_ru: "Пакет" }]),
+    ),
+  );
+  expect(json[0]).toEqual({
+    line: 1,
+    values: { game: "ets2", code: "fictional_pack", name_en: "Pack", steam_app_id: "" },
+    fileIssues: [],
+  });
+  // The column is still unique, and a translated list still reads it.
+  expect(
+    reason(() => readImportFile("dlcs", csv("game,code,name_en,name_ru,name_ru,steam_app_id"))),
+  ).toBe("unknown_column");
+  expect(
+    readImportFile("regions", csv(importColumns.regions.join(","), "ets2,r,Region,Регион,"))[0]
+      ?.values.name_ru,
+  ).toBe("Регион");
 });
 
 test("code validation keeps opaque bytes but refuses blanks, whitespace, controls and overflow", () => {

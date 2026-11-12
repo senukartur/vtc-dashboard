@@ -13,6 +13,12 @@ export type CatalogList = (typeof catalogLists)[number];
 export type ImportList = CatalogList | "depots";
 export type Game = "ets2" | "ats";
 export type CatalogKind = "city" | "cargo" | "trailer";
+/**
+ * Lists named only by their canonical game name: they carry no translation, so a stored
+ * Russian name is never shown, searched, filtered or written. Depots read their company's name.
+ */
+export const canonicalLists: readonly CatalogList[] = ["dlcs", "companies"];
+export const isCanonicalList = (list: CatalogList) => canonicalLists.includes(list);
 export type { AdrClass } from "@vtc/db/catalogs-schema";
 export { adrClasses };
 
@@ -37,10 +43,10 @@ export function validateCatalogConfig(config: CatalogConfig) {
 
 /** Import columns per list; a header carries exactly this set, in any order, minus optional ones. */
 export const importColumns: Readonly<Record<ImportList, readonly string[]>> = {
-  dlcs: ["game", "code", "name_en", "name_ru", "steam_app_id"],
+  dlcs: ["game", "code", "name_en", "steam_app_id"],
   regions: ["game", "code", "name_en", "name_ru", "dlc_code"],
   cities: ["game", "code", "name_en", "name_ru", "region_code", "dlc_code", "name_native"],
-  companies: ["game", "code", "name_en", "name_ru", "dlc_code"],
+  companies: ["game", "code", "name_en", "dlc_code"],
   depots: ["game", "company_code", "city_code", "dlc_code"],
   cargoes: ["game", "code", "name_en", "name_ru", "adr_class", "dlc_code"],
   trailers: ["game", "code", "name_en", "name_ru", "dlc_code"],
@@ -49,6 +55,15 @@ export const importColumns: Readonly<Record<ImportList, readonly string[]>> = {
 /** Columns a file header may leave out; an absent column reads as an empty cell. */
 export const optionalImportColumns: Readonly<Partial<Record<ImportList, readonly string[]>>> = {
   cities: ["name_native"],
+};
+
+/**
+ * Columns a file may still carry for compatibility but that are never read: canonical lists keep
+ * accepting the `name_ru` column older exports and extractors write, and drop its values.
+ */
+export const ignoredImportColumns: Readonly<Partial<Record<ImportList, readonly string[]>>> = {
+  dlcs: ["name_ru"],
+  companies: ["name_ru"],
 };
 
 /** A code is opaque telemetry bytes: never trimmed or rewritten, only bounded or rejected. */

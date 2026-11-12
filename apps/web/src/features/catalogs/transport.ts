@@ -1,51 +1,27 @@
 import { z } from "zod";
 import {
   type CatalogDTO,
-  catalogUpdatedAt,
+  depotListSchema,
+  depotSchema,
   labelSchema,
-  logoSchema,
-  uuid,
 } from "../../shared/catalog-selectors/contracts.js";
 
 const text = z.string().min(1),
   count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-const listCounts = z.strictObject({
-  visible: count,
-  hidden: count,
-  untranslated: count.exactOptional(),
-});
+// DLCs, companies and depots carry no translation, so they report no untranslated count.
+const canonicalCounts = z.strictObject({ visible: count, hidden: count });
+const listCounts = canonicalCounts.extend({ untranslated: count.exactOptional() });
 export const summarySchema: z.ZodType<CatalogDTO["CatalogSummary"]> = z.strictObject({
   game: z.enum(["ets2", "ats"]),
   lists: z.strictObject({
-    dlcs: listCounts,
+    dlcs: canonicalCounts,
     regions: listCounts,
     cities: listCounts,
-    companies: listCounts.extend({ missingLogo: count.exactOptional() }),
-    depots: listCounts,
+    companies: canonicalCounts.extend({ missingLogo: count.exactOptional() }),
+    depots: canonicalCounts,
     cargoes: listCounts,
     trailers: listCounts,
   }),
-});
-const game = z.enum(["ets2", "ats"]);
-export const depotSchema: z.ZodType<CatalogDTO["CatalogDepot"]> = z.strictObject({
-  id: uuid,
-  game,
-  hidden: z.boolean(),
-  updatedAt: catalogUpdatedAt.exactOptional(),
-  dlcId: uuid.nullable(),
-  dlc: labelSchema.nullable(),
-  company: z.strictObject({
-    id: uuid,
-    code: text.max(128),
-    label: labelSchema,
-    logo: logoSchema.nullable(),
-  }),
-  city: z.strictObject({ id: uuid, code: text.max(128), label: labelSchema }),
-});
-export const depotListSchema: z.ZodType<CatalogDTO["CatalogDepotList"]> = z.strictObject({
-  items: z.array(depotSchema).max(100),
-  nextCursor: text.max(2048).nullable(),
-  total: count,
 });
 const issue = z.strictObject({ field: text.max(64), reason: text.max(64) });
 export const importPreviewSchema: z.ZodType<CatalogDTO["CatalogImportPreview"]> = z.strictObject({
@@ -74,7 +50,7 @@ export const importResultSchema: z.ZodType<CatalogDTO["CatalogImportResult"]> = 
   changed: count,
   unchanged: count,
 });
-export { labelSchema };
+export { depotListSchema, depotSchema, labelSchema };
 export type CatalogAttempt = { fingerprint: string; key: string; createdAt: number };
 export function catalogAttempt(
   fingerprint: string,

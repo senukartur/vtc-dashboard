@@ -671,7 +671,17 @@ test(
       await page.goto("/account/reports/new");
       await catalogLanguage(page);
       await fill(page);
-      await page.getByLabel("Origin company (optional)", { exact: true }).selectOption(company.id);
+      // The shared database may hold more companies in the city, so the picker searches the code.
+      const companyField = page.getByRole("combobox", {
+        name: "Origin company (optional)",
+        exact: true,
+      });
+      await companyField.fill(company.code);
+      await page
+        .getByRole("listbox", { name: "Origin company (optional)", exact: true })
+        .getByRole("option", { name: `Fictional North Depot ${company.code}` })
+        .click();
+      await expect(companyField).toHaveValue(`Fictional North Depot · ${company.code}`);
       await page.getByLabel("Cargo damage (%) (optional)", { exact: true }).fill("0");
       await confirm(page, "Submit for review", "/api/v1/manual-reports");
       await expect(page).toHaveURL(/\/account\/trips\/[0-9a-f-]{36}$/);

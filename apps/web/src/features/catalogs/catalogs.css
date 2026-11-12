@@ -124,10 +124,15 @@
 .catalog-page .catalog-table-wrap:focus-visible {
   outline-offset: 2px;
 }
+/*
+ * Columns size to their content and long names, codes and sources wrap inside their own cell,
+ * so a long value never runs into the next column. The wrapper scrolls when the minimum is wider.
+ */
 .catalog-page table.catalog-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--font-body);
+  table-layout: auto;
 }
 .catalog-page .catalog-table th {
   border-bottom: 1px solid var(--border-strong);
@@ -141,11 +146,15 @@
 }
 .catalog-page .catalog-table td {
   border-bottom: 1px solid var(--border);
-  padding: 0 10px;
+  padding: 6px 10px;
   height: 34px;
-  white-space: nowrap;
+  vertical-align: middle;
+  white-space: normal;
+  /* Unlike "anywhere", this keeps whole words in the column's minimum width. */
+  overflow-wrap: break-word;
 }
 .catalog-page .catalog-table .catalog-updated {
+  min-width: 7rem;
   font-size: var(--font-small);
   white-space: nowrap;
 }
@@ -153,13 +162,24 @@
   color: var(--muted);
 }
 .catalog-page .catalog-table td.catalog-name {
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 11rem;
+}
+.catalog-page .catalog-table .catalog-name-ru {
+  min-width: 9rem;
+}
+.catalog-page .catalog-table .catalog-source {
+  min-width: 9rem;
+}
+.catalog-page .catalog-table td.catalog-code {
+  min-width: 8rem;
 }
 .catalog-page .catalog-table code {
   color: var(--secondary);
   font-size: var(--font-small);
+  overflow-wrap: anywhere;
+}
+.catalog-page .catalog-table td.catalog-actions-cell {
+  white-space: nowrap;
 }
 .catalog-page .catalog-row-actions {
   display: flex;
@@ -353,34 +373,14 @@
   gap: 10px;
   min-width: 0;
 }
-/* The logo plate needs room: columns size to their content and text may wrap instead of clipping. */
-.catalog-page .catalog-table[data-list="companies"],
-.catalog-page .catalog-table[data-list="depots"] {
-  table-layout: auto;
-}
+/* The logo plate needs room beside the company name. */
 .catalog-page .catalog-table[data-list="companies"] td,
 .catalog-page .catalog-table[data-list="depots"] td {
   height: 44px;
-  vertical-align: middle;
-  white-space: normal;
 }
 .catalog-page .catalog-table[data-list="companies"] td.catalog-name,
 .catalog-page .catalog-table[data-list="depots"] td.catalog-name {
-  max-width: none;
   min-width: 260px;
-  overflow: visible;
-}
-.catalog-page .catalog-table[data-list="companies"] .catalog-name-ru {
-  min-width: 9rem;
-}
-.catalog-page .catalog-table[data-list="companies"] .catalog-code,
-.catalog-page .catalog-table[data-list="companies"] .catalog-updated,
-.catalog-page .catalog-table[data-list="depots"] .catalog-updated {
-  min-width: 7rem;
-}
-.catalog-page .catalog-table[data-list="companies"] td:last-child,
-.catalog-page .catalog-table[data-list="depots"] td:last-child {
-  white-space: nowrap;
 }
 .catalog-page .catalog-toolbar .catalog-selector {
   flex: 1 1 200px;

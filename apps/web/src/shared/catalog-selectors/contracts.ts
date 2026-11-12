@@ -64,6 +64,27 @@ export const listSchema = z.strictObject({
   nextCursor: text.max(2048).nullable(),
   total: z.number().int().min(0),
 });
+const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+export const depotSchema: z.ZodType<CatalogDTO["CatalogDepot"]> = z.strictObject({
+  id: uuid,
+  game,
+  hidden: z.boolean(),
+  updatedAt: catalogUpdatedAt.exactOptional(),
+  dlcId: uuid.nullable(),
+  dlc: labelSchema.nullable(),
+  company: z.strictObject({
+    id: uuid,
+    code: text.max(128),
+    label: labelSchema,
+    logo: logoSchema.nullable(),
+  }),
+  city: z.strictObject({ id: uuid, code: text.max(128), label: labelSchema }),
+});
+export const depotListSchema: z.ZodType<CatalogDTO["CatalogDepotList"]> = z.strictObject({
+  items: z.array(depotSchema).max(100),
+  nextCursor: text.max(2048).nullable(),
+  total: count,
+});
 export function catalogParams(values: Record<string, string | number | undefined | null>) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(values))
