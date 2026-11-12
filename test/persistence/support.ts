@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 95 tables including the ledger and 25 migrations.
+// Fresh full-schema preparation now covers 95 tables including the ledger and 26 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -265,7 +265,8 @@ async function publishedPrefixFolder(
     | 19
     | 22
     | 23
-    | 24,
+    | 24
+    | 25,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -313,6 +314,8 @@ async function publishedPrefixFolder(
     throw new Error("PUBLISHED_COMPANY_CATALOG_PREFIX_REQUIRED");
   if (count === 24 && entries[23]?.tag !== "0023_curly_captain_flint")
     throw new Error("PUBLISHED_CATALOG_TIMESTAMPS_PREFIX_REQUIRED");
+  if (count === 25 && entries[24]?.tag !== "0024_bizarre_malcolm_colcord")
+    throw new Error("PUBLISHED_QUALIFICATION_RULE_EDITING_PREFIX_REQUIRED");
   for (const entry of entries)
     await copyFile(join(migrationFolder, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
   await writeFile(join(folder, "meta/_journal.json"), JSON.stringify({ ...production, entries }));
@@ -420,6 +423,10 @@ export async function catalogTimestampsPriorFolder(): Promise<string> {
 
 export async function qualificationRuleEditingPriorFolder(): Promise<string> {
   return publishedPrefixFolder(24);
+}
+
+export async function manualDraftDiscardPriorFolder(): Promise<string> {
+  return publishedPrefixFolder(25);
 }
 
 export async function simpleCatalogsPriorFolder(): Promise<string> {

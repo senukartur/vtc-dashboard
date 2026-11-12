@@ -176,6 +176,13 @@
       "when": 1794430521727,
       "tag": "0024_bizarre_malcolm_colcord",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1794433441207,
+      "tag": "0025_fixed_wolverine",
+      "breakpoints": true
     }
   ]
 }
