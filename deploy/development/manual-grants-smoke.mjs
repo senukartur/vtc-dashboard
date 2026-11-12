@@ -158,6 +158,8 @@ try {
       trailerType: unresolved,
       cargoMassKg: "0",
       actualDistanceM: "1",
+      startedAt: "2019-12-31T22:00:00.000Z",
+      completedAt: "2019-12-31T23:00:00.000Z",
       evidenceIds: [image.id],
     };
     smokePhase = "draft";
