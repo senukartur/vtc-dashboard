@@ -200,12 +200,23 @@ test(
     });
 
     try {
+      const baselineFeed = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.ok() &&
+          url.pathname === "/api/v1/notifications" &&
+          !url.searchParams.has("cursor")
+        );
+      });
       await page.goto("/account/dashboard");
+      await baselineFeed;
       const header = page.locator(".event-nearest");
       await expect(header.getByRole("link")).toHaveAttribute(
         "href",
         `/account/events/${row.event.id}`,
       );
+      // Move most of the way to the next poll before starting the bounded list read.
+      await page.clock.fastForward(24_000);
       const firstRead = page.waitForRequest((request) => memberList.test(request.url()));
       await page
         .getByRole("navigation", { name: "Main navigation" })
@@ -215,7 +226,8 @@ test(
       await expect.poll(() => listReads).toBe(1);
 
       mock.upcoming = false;
-      await page.clock.fastForward(31_000);
+      expect(oldRequest.failure()).toBeNull();
+      await page.clock.fastForward(8_000);
       const main = page.getByRole("main");
       await expect(header).toContainText("No upcoming event");
       await expect(main.getByText("No events in this period.")).toBeVisible();
