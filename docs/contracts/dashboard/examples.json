@@ -8311,6 +8311,9 @@
       "operationId": "listEvents",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "items": [
@@ -8371,6 +8374,7 @@
               "organizerMemberId": "e1320000-0000-4000-8000-000000000002",
               "visibility": "public",
               "myResponse": "participating",
+              "myResponseVersion": 2,
               "responseCounts": {
                 "participating": 1,
                 "declined": 0
@@ -8486,6 +8490,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "event": {
@@ -8541,7 +8548,8 @@
             ],
             "hasCover": true
           },
-          "myResponse": "participating"
+          "myResponse": "participating",
+          "myResponseVersion": 2
         },
         "meta": {
           "requestId": "synthetic-event-stage-2"
@@ -8553,6 +8561,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "en"
+      },
       "response": {
         "data": null,
         "meta": {
@@ -8825,6 +8836,9 @@
       "operationId": "getEventAttendance",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "view": "stage2"
+      },
       "response": {
         "data": {
           "items": [
