@@ -39,5 +39,20 @@ test(
       ({ pathname }) => pathname === "/api/v1/me/upcoming-event",
     );
     expect(nearest.map(({ searchParams }) => searchParams.get("locale"))).toEqual([null]);
+
+    await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
+    await expect(main.getByRole("link", { name: event.title })).toBeVisible();
+    await expect(main.getByRole("button", { name: "Upcoming", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(listReads).toHaveLength(2);
+    const fallback = listReads.at(-1)?.searchParams;
+    expect(fallback?.get("period")).toBe("upcoming");
+    expect(fallback?.has("cursor")).toBe(false);
+    expect(fallback?.has("locale")).toBe(false);
+    expect(
+      dashboard.requests.some(({ pathname }) => pathname.startsWith("/api/v1/admin/events")),
+    ).toBe(false);
   },
 );

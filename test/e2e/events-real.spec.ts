@@ -810,11 +810,14 @@ test(
           response.request().method() === "GET" &&
           new URL(response.url()).pathname === "/api/v1/events",
       );
-      await page.goto("/account/events");
+      await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
       await catalogLanguage(page);
       const legacyList = await legacyRead;
       expect(legacyList.status()).toBe(200);
-      expect(new URL(legacyList.url()).searchParams.has("locale")).toBe(false);
+      const legacySearch = new URL(legacyList.url()).searchParams;
+      expect(legacySearch.has("locale")).toBe(false);
+      expect(legacySearch.get("period")).toBe("upcoming");
+      expect(legacySearch.has("cursor")).toBe(false);
       await expect(
         page.getByRole("main").getByRole("link", { name: title, exact: true }),
       ).toBeVisible();
