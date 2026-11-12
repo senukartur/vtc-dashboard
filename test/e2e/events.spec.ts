@@ -812,6 +812,7 @@ test.describe("Stage 2 draft entry", () => {
           if (attempts.length === 1) {
             draft.data.version = 2;
             draft.data.fields.title = "Fictional concurrent title";
+            draft.data.fields.description = "Fictional concurrent description";
             draft.data.fields.distanceKm = "12.5";
             return route.fulfill({ status: 412 });
           }
@@ -823,6 +824,7 @@ test.describe("Stage 2 draft entry", () => {
       await page.goto(url);
       const title = page.getByRole("textbox", { name: "Event title" });
       await title.fill("Fictional local edit");
+      await page.getByRole("textbox", { name: "Description" }).fill("Fictional local description");
       const save = page.getByRole("button", { name: "Save draft" });
       await save.click();
       await expect(
@@ -831,17 +833,63 @@ test.describe("Stage 2 draft entry", () => {
       await expect(title).toHaveValue("Fictional local edit");
       await expect(save).toBeDisabled();
       await page.getByRole("button", { name: "Check latest draft" }).click();
-      await expect(page.getByText(/Latest saved title.*Fictional concurrent title/)).toBeVisible();
+      await expect(page.getByText("Latest saved title", { exact: true })).toBeVisible();
+      await expect(page.getByText("Fictional concurrent title", { exact: true })).toBeVisible();
+      await expect(page.getByText("Latest saved description", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Fictional concurrent description", { exact: true }),
+      ).toBeVisible();
       await page.getByRole("button", { name: "Keep my edits" }).click();
       await save.click();
       await expect(page.getByRole("status").filter({ hasText: "Draft saved." })).toBeVisible();
       expect(attempts.map(({ etag }) => etag)).toEqual(['"v1"', '"v2"']);
       expect(attempts[1]?.body).toMatchObject({
         title: "Fictional local edit",
+        description: "Fictional local description",
         distanceKm: "12.5",
       });
     },
   );
+
+  for (const terminalRead of [false, true]) {
+    test(
+      terminalRead
+        ? "a terminal draft read closes an opened editor"
+        : "a terminal draft write closes an opened editor",
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        await mockEventsStage2(page);
+        const draft = fixture();
+        let writes = 0;
+        let terminalReads = 0;
+        await page.route(`**${path}`, async (route) => {
+          if (route.request().method() === "PATCH") {
+            writes += 1;
+            return route.fulfill({ status: terminalRead ? 412 : 404 });
+          }
+          if (terminalRead && writes) {
+            terminalReads += 1;
+            return route.fulfill({ status: 404 });
+          }
+          return route.fulfill({ json: draft, headers: { ETag: '"v1"' } });
+        });
+        await page.goto(url);
+        const title = page.getByRole("textbox", { name: "Event title" });
+        await title.fill("Fictional inaccessible draft");
+        await page.getByRole("button", { name: "Save draft" }).click();
+        await expect(
+          page
+            .getByRole("alert")
+            .filter({ hasText: "This event is unavailable or you do not have access." }),
+        ).toBeVisible();
+        await expect(title).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Retry the same request" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Check latest draft" })).toHaveCount(0);
+        expect(writes).toBe(1);
+        expect(terminalReads).toBe(terminalRead ? 1 : 0);
+      },
+    );
+  }
 
   test(
     "malformed or repeated draft IDs cannot open a draft or start creation",
