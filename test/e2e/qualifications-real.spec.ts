@@ -263,7 +263,7 @@ test(
   },
 );
 test(
-  "real named target rule preview publication assignment accepted contributions and explicit promotion preserve ATS and additive roles",
+  "real named target 20 km publication and explicit promotion preserve ATS and additive roles",
   browserCase(["@real"]),
   async ({ page, context }, info) => {
     test.setTimeout(150000);
@@ -390,58 +390,91 @@ test(
         .filter({ has: page.locator('[id^="sample-mass-"]') })
         .last();
       await editor.locator('[id^="mass-"]').fill("25000");
-      await editor.locator('[id^="count-"]').fill("1");
-      await editor.locator('[id^="distance-"]').fill("100");
-      await editor.locator('[id^="reason-"]').fill("Fictional qualification browser publication");
-      await editor.locator('[id^="sample-mass-"]').fill("25000");
-      await editor.getByRole("button", { name: "Evaluate sample", exact: true }).click();
-      await expect(
-        editor.getByRole("heading", { name: "Sample outcome: Pass", exact: true }),
-      ).toBeVisible();
-      await confirm(page, "Publish rule version");
+      await editor.locator('[id^="count-"]').fill("");
+      await editor.locator('[id^="distance-"]').fill("20");
+      await expect(editor.locator('[id^="reason-"]')).toHaveValue("");
+      await expect(editor.locator('[id^="sample-mass-"]')).toHaveValue("");
+      const publicationResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname ===
+            `/api/v1/admin/qualification-levels/${structuralLevels.ets2[0]}/rule-versions` &&
+          response.request().method() === "POST",
+      );
+      await confirm(page, "Publish rule version", editor);
+      const publication = await publicationResponse;
+      expect(publication.status()).toBe(201);
+      expect(publication.request().postDataJSON()).toEqual({
+        rules: [{ type: "max_mass", maxKg: "25000" }],
+        requiredTrips: null,
+        requiredDistanceM: "20000",
+      });
       phase = "ASSIGN";
       await page.locator("#assignment-level").selectOption(structuralLevels.ets2[0]);
       await page.locator("#assignment-reason").fill("Fictional first ETS2 assignment");
       await confirm(page, "Assign qualification");
       await resetAccountLimits();
       phase = "CONTRIBUTION";
-      const bytes = pngBytes(),
-        image = await manual.upload(
-          author,
-          randomUUID(),
-          "synthetic-qualification.png",
-          (async function* () {
-            yield bytes;
-          })(),
-          "image/png",
-        ),
-        report = await manual.submitReport(author, randomUUID(), {
-          fields: { ...fixture.fields, actualDistanceM: "100", evidenceIds: [image.id] },
-        }),
-        review = await decisions.review(fixture.staff, report.tripId);
-      const reviewedRevisionId = review.data.trip.manualRevision?.id;
-      if (!reviewedRevisionId) throw Error("QUALIFICATION_BROWSER_REVISION_MISSING");
-      await decisions.decide(fixture.staff, report.tripId, randomUUID(), review.version, {
-        decision: "accept",
-        reviewedRevisionId,
-        factRevisionId: review.data.factRevisionId,
-        proposalId: null,
-        reason: "Fictional accepted canonical contribution",
-      });
+      const acceptTrip = async (actualDistanceM: string) => {
+        const bytes = pngBytes(),
+          image = await manual.upload(
+            author,
+            randomUUID(),
+            "synthetic-qualification.png",
+            (async function* () {
+              yield bytes;
+            })(),
+            "image/png",
+          );
+        const report = await manual.submitReport(author, randomUUID(), {
+            fields: { ...fixture.fields, actualDistanceM, evidenceIds: [image.id] },
+          }),
+          review = await decisions.review(fixture.staff, report.tripId);
+        const reviewedRevisionId = review.data.trip.manualRevision?.id;
+        if (!reviewedRevisionId) throw Error("QUALIFICATION_BROWSER_REVISION_MISSING");
+        await decisions.decide(fixture.staff, report.tripId, randomUUID(), review.version, {
+          decision: "accept",
+          reviewedRevisionId,
+          factRevisionId: review.data.factRevisionId,
+          proposalId: null,
+          reason: "Fictional accepted canonical contribution",
+        });
+      };
+      await acceptTrip("19999");
       expect((await q.progress(fixture.staff, userId, "ets2", "admin")).data).toMatchObject({
+        assignment: { levelId: structuralLevels.ets2[0] },
         acceptedTrips: 1,
-        actualDistanceM: "100",
+        actualDistanceM: "19999",
+        requiredTrips: null,
+        requiredDistanceM: "20000",
+        eligibleForConfirmation: false,
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await expect(page.getByText("19.999 km / 20 km", { exact: true })).toBeVisible();
+      await page.locator("#assignment-reason").fill("Fictional explicit next-level confirmation");
+      await expect(
+        page.getByRole("button", { name: "Confirm next-level promotion", exact: true }),
+      ).toBeDisabled();
+      await acceptTrip("1");
+      expect((await q.progress(fixture.staff, userId, "ets2", "admin")).data).toMatchObject({
+        assignment: { levelId: structuralLevels.ets2[0] },
+        acceptedTrips: 2,
+        actualDistanceM: "20000",
         eligibleForConfirmation: true,
       });
+      expect(promotionObserved).toBe(false);
       phase = "PROMOTION";
+      await resetAccountLimits();
       // Reload deliberately returns to the owned member; select the named target again.
       await picker.select(async () => {
         await page.reload();
         await catalogLanguage(page);
       });
       await expect(
-        page.getByText("Both thresholds are met. Staff confirmation is required.", { exact: true }),
+        page.getByText("Promotion requirements are met. Staff confirmation is required.", {
+          exact: true,
+        }),
       ).toBeVisible();
+      await expect(page.getByText("20 km / 20 km", { exact: true })).toBeVisible();
       await page.locator("#assignment-reason").fill("Fictional explicit next-level confirmation");
       await confirm(page, "Confirm next-level promotion");
       phase = "READBACK";

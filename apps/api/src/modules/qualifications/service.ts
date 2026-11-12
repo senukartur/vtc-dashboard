@@ -366,8 +366,7 @@ export function createQualifications(
     };
     const eligible =
       selected.code !== "driver_i" &&
-      requirements.requiredTrips !== null &&
-      requirements.requiredDistanceM !== null &&
+      !!rule &&
       evaluateQualificationProgress(requirements, totals).eligibleForPromotion;
     const data: S["ProgressPublic"] = {
       assignment: assignmentDto(assignment),
@@ -478,7 +477,8 @@ export function createQualifications(
         .for("share");
       if (!row) throw new Error("NOTIFICATION_ASSIGNMENT_MISSING");
       let eligible = false;
-      if (row.endedAt === null && row.assignedAt <= at()) {
+      const instant = at();
+      if (row.endedAt === null && row.assignedAt <= instant) {
         // Notification consumption never creates state or takes writer-only locks. The caller
         // holds Identity's shared company fence; all qualification/contribution writers take X.
         const [current] = await c(tx)
@@ -496,18 +496,12 @@ export function createQualifications(
             .where(eq(qualificationLevels.id, row.levelId))
             .for("share");
           if (!selected) throw new Error("NOTIFICATION_QUALIFICATION_LEVEL_MISSING");
-          const rule = await ruleAt(tx, row.levelId, at()),
-            requirements = {
-              requiredTrips: rule?.requiredTrips ?? null,
-              requiredDistanceM:
-                rule?.requiredDistanceM == null ? null : decimal(rule.requiredDistanceM),
-            };
+          const rule = await ruleAt(tx, row.levelId, instant);
           eligible =
             selected.code !== "driver_i" &&
-            requirements.requiredTrips !== null &&
-            requirements.requiredDistanceM !== null &&
+            !!rule &&
             evaluateQualificationProgress(
-              requirements,
+              rule,
               await ports.trips.contributions.totals(tx, row.id, "share"),
             ).eligibleForPromotion;
         }
@@ -694,9 +688,9 @@ export function createQualifications(
       levelId: string,
       key: string,
       expected: number,
-      input: S["RulesInput"],
+      input: S["QualificationRulePublicationInput"],
     ) {
-      reason(input.reason);
+      if (input.reason !== undefined) reason(input.reason);
       let rules: Rule[];
       try {
         rules = validateDraftRules(input.rules);
@@ -759,17 +753,19 @@ export function createQualifications(
                 }
               }
             }
-            await c(tx).insert(qualificationRules).values({
-              id: newId(),
-              levelId,
-              publishedAt,
-              effectiveAt,
-              rules,
-              requiredTrips: input.requiredTrips,
-              requiredDistanceM: distance,
-              actorId: actor.userId,
-              reason: input.reason,
-            });
+            await c(tx)
+              .insert(qualificationRules)
+              .values({
+                id: newId(),
+                levelId,
+                publishedAt,
+                effectiveAt,
+                rules,
+                requiredTrips: input.requiredTrips,
+                requiredDistanceM: distance,
+                actorId: actor.userId,
+                reason: input.reason ?? null,
+              });
             await c(tx)
               .update(qualificationLevels)
               .set({ version: selected.version + 1 })
@@ -1196,13 +1192,7 @@ export function createQualifications(
             const confirmedAt = at(),
               currentProgress = await progress(tx, userId, input.game, true, confirmedAt),
               rule = currentProgress.rule;
-            if (
-              !currentProgress.data.eligibleForConfirmation ||
-              !rule ||
-              rule.requiredTrips === null ||
-              rule.requiredDistanceM === null
-            )
-              throw identityError(409);
+            if (!currentProgress.data.eligibleForConfirmation || !rule) throw identityError(409);
             const result = await writeAssignment(
               tx,
               actor,

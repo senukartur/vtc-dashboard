@@ -7,6 +7,8 @@ import {
 import {
   attemptFor,
   countInput,
+  distanceForEditor,
+  distanceInput,
   exactInput,
   qualificationRead,
   schema,
@@ -95,6 +97,35 @@ test("form values retain exact precision and distinguish unset from zero; UTC fi
   expect(utcInput("2026-02-29T12:00")).toBeUndefined();
   expect(utcInput("2028-02-29T12:00")).toBe("2028-02-29T12:00:00.000Z");
 });
+test("kilometres round trip exactly across locales and fit the metre persistence bound", () => {
+  const maximum = "99999999999999999999.999999999999999999";
+  for (const [metres, english] of [
+    ["0", "0"],
+    ["20000", "20"],
+    ["20123.4", "20.1234"],
+    ["0.000000000000000001", "0.000000000000000000001"],
+    [maximum, "99999999999999999.999999999999999999999"],
+  ] as const) {
+    expect(distanceForEditor(metres, "en")).toBe(english);
+    expect(distanceForEditor(metres, "ru")).toBe(english.replace(".", ","));
+    for (const locale of ["en", "ru"] as const)
+      expect(distanceInput(distanceForEditor(metres, locale))).toBe(metres);
+  }
+  expect(distanceForEditor(null, "ru")).toBe("");
+  expect(distanceInput("  ")).toBeNull();
+  expect(distanceInput("0,000")).toBe("0");
+  expect(distanceInput(" 20,12500 ")).toBe("20125");
+  for (const invalid of [
+    "-1",
+    "1e2",
+    "1,2.3",
+    "1 234",
+    "100000000000000000",
+    "0.0000000000000000000001",
+  ])
+    expect(distanceInput(invalid)).toBeUndefined();
+});
+
 test("browser generated schemas consume qualification success and reject diagnostic additions", () => {
   const result = { data: previewRules(input()), meta: { requestId: "synthetic-preview" } };
   expect(schema("EnvelopeQualificationPreview").safeParse(result).success).toBe(true);

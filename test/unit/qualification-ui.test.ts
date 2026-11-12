@@ -87,7 +87,7 @@ describe("qualification levels model", () => {
     });
   });
 
-  test("keeps unset threshold parts unset and treats Driver I as terminal", () => {
+  test("keeps disabled minimums null and treats Driver I as terminal", () => {
     expect(thresholdSummary(level("trainee"))).toEqual({
       kind: "value",
       trips: 2,
@@ -118,6 +118,12 @@ describe("qualification translations", () => {
     "noneAllowed",
     "allowedCount",
     "thresholdValue",
+    "noMinimum",
+    "progressUnconfigured",
+    "required",
+    "distanceInvalid",
+    "sampleAdrRequired",
+    "previewStale",
     "topLevel",
     "statusEffective",
     "statusUnpublished",
