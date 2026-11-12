@@ -12,6 +12,7 @@ import {
   mockCatalogs,
 } from "./catalogs.ts";
 import { expect } from "./fixtures.ts";
+import { manualReferenceTimes } from "./manual-reference.ts";
 import { inertNotifications } from "./notifications.ts";
 
 export const id = "41000000-0000-4000-8000-000000000001",
@@ -44,6 +45,7 @@ export async function mockTrips(page: Page) {
         item = catalogItem(selectedId, `Fictional ${label}`, locale);
       return route.fulfill({ json: catalogRow[2] ? envelope(item) : catalogList([item]) });
     }
+    if (path === "/api/v1/catalogs/depots") return route.fulfill({ json: catalogList([]) });
     if (path === "/api/v1/me/trip-status-summary")
       return route.fulfill({ json: example("getMyTripStatusSummary:success") });
     if (path === "/api/v1/trips") {
@@ -63,11 +65,12 @@ export async function mockTrips(page: Page) {
       trip.sourceKinds = ["manual"];
       return route.fulfill({ json: list([trip]) });
     }
+    if (path === "/api/v1/me/manual-drafts")
+      return route.fulfill({ json: example("listMyManualDrafts:editing-empty") });
     if (
       path === "/api/v1/events" ||
       path.endsWith("/proposals") ||
-      path.endsWith("/correction-requests") ||
-      path === "/api/v1/me/manual-drafts"
+      path.endsWith("/correction-requests")
     )
       return route.fulfill({ json: list([]) });
     if (path === "/api/v1/me/upload-policy")
@@ -112,6 +115,13 @@ export async function completeForm(page: Page) {
     );
   await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("1000");
   await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("0");
+  await page
+    .getByLabel("Trip start", { exact: true })
+    .fill(manualReferenceTimes.startedAt.slice(0, 16));
+  await page
+    .getByLabel("Trip completion", { exact: true })
+    .fill(manualReferenceTimes.completedAt.slice(0, 16));
+  await expect(page.locator(".manual-company-field [role=status]")).toHaveCount(0);
   await page
     .getByLabel("Choose completion screenshot", { exact: true })
     .setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: pngBytes() });

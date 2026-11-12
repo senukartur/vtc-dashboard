@@ -127,7 +127,7 @@ export async function registerManualRoutes(
     url: string,
     response: string,
     invoke: (actor: Actor, r: Request) => Promise<unknown>,
-    body?: string,
+    body?: string | readonly [string, string],
     status = 200,
     page: boolean | Record<string, unknown> = false,
   ) {
@@ -146,7 +146,7 @@ export async function registerManualRoutes(
               }
             : {},
         ),
-        ...(body ? { body: ref(body) } : {}),
+        ...(body ? { body: typeof body === "string" ? ref(body) : { anyOf: body.map(ref) } } : {}),
         response: { [status]: ref(response) },
       },
       handler: async (raw, reply) => {
@@ -184,8 +184,8 @@ export async function registerManualRoutes(
     "POST",
     "/api/v1/me/manual-drafts",
     "EnvelopeManualDraft",
-    (a, r) => manual.createDraft(a, key(r), r.body as S["ManualDraftInput"]),
-    "ManualDraftInput",
+    (a, r) => manual.createDraft(a, key(r), r.body as S["ManualDraftWriteInput"]),
+    "ManualDraftWriteInput",
     201,
   );
   route("GET", "/api/v1/me/manual-drafts/:draftId", "EnvelopeManualDraft", (a, r) =>
@@ -201,9 +201,9 @@ export async function registerManualRoutes(
         r.params.draftId as string,
         key(r),
         expected(r),
-        r.body as S["ManualDraftInput"],
+        r.body as S["ManualDraftWriteInput"],
       ),
-    "ManualDraftInput",
+    "ManualDraftWriteInput",
   );
   route("DELETE", "/api/v1/me/manual-drafts/:draftId", "EnvelopeCommandResult", (a, r) =>
     manual.deleteDraft(a, r.params.draftId as string, key(r), expected(r)),
@@ -218,9 +218,9 @@ export async function registerManualRoutes(
         r.params.draftId as string,
         key(r),
         expected(r),
-        r.body as S["ManualDraftSubmission"],
+        r.body as S["ManualDraftFinalSubmissionInput"] | S["ManualDraftSubmission"],
       ),
-    "ManualDraftSubmission",
+    ["ManualDraftFinalSubmissionInput", "ManualDraftSubmission"],
     201,
   );
   route(
@@ -236,8 +236,13 @@ export async function registerManualRoutes(
     "POST",
     "/api/v1/manual-reports",
     "EnvelopeManualReport",
-    (a, r) => manual.submitReport(a, key(r), r.body as S["ManualReportInput"]),
-    "ManualReportInput",
+    (a, r) =>
+      manual.submitReport(
+        a,
+        key(r),
+        r.body as S["ManualReportCreationInput"] | S["ManualReportInput"],
+      ),
+    ["ManualReportCreationInput", "ManualReportInput"],
     201,
   );
   route(
@@ -280,9 +285,9 @@ export async function registerManualRoutes(
         r.params.reportId as string,
         key(r),
         expected(r),
-        r.body as S["ManualReportRevisionInput"],
+        r.body as S["ManualReportResubmissionInput"] | S["ManualReportRevisionInput"],
       ),
-    "ManualReportRevisionInput",
+    ["ManualReportResubmissionInput", "ManualReportRevisionInput"],
   );
   route(
     "POST",

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  double,
   foreignKey,
   index,
   int,
@@ -115,6 +116,11 @@ export const manualRevisions = mysqlTable(
       onDelete: "restrict",
     }),
     submittedAt: utcColumn("submitted_at").notNull(),
+    startedAt: utcColumn("started_at"),
+    completedAt: utcColumn("completed_at"),
+    cargoDamagePercent: double("cargo_damage_percent"),
+    originCompanyId: idColumn("origin_company_id"),
+    destinationCompanyId: idColumn("destination_company_id"),
   },
   (t) => [
     uniqueIndex("manual_revision_number").on(t.reportId, t.number),
@@ -168,6 +174,11 @@ export const manualDrafts = mysqlTable(
     }),
     createdAt: utcColumn("created_at").notNull(),
     updatedAt: utcColumn("updated_at").notNull(),
+    startedAt: utcColumn("started_at"),
+    completedAt: utcColumn("completed_at"),
+    cargoDamagePercent: double("cargo_damage_percent"),
+    originCompanyId: idColumn("origin_company_id"),
+    destinationCompanyId: idColumn("destination_company_id"),
   },
   (t) => [
     index("manual_draft_owner_page").on(t.ownerId, t.createdAt, t.id),

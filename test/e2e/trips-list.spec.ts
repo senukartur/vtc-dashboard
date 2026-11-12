@@ -216,13 +216,16 @@ test(
       .locator("header")
       .filter({ has: page.getByRole("heading", { level: 1 }) });
     await expect(header.getByRole("link")).toHaveText(["New report"]);
-    await expect(page.getByRole("link", { name: "Saved drafts" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Drafts (0)", exact: true })).toBeVisible();
     if (narrow) {
       await expect(page.getByRole("combobox", { name: "Game", exact: true })).toHaveCount(0);
       await openFilters(page);
     }
     const tabs = page.getByRole("tablist", { name: "Trip scope", exact: true });
-    await expect(tabs.getByRole("tab")).toHaveText(["My trips", "Accepted company trips"]);
+    await expect(tabs.getByRole("tab")).toHaveCount(3);
+    await expect(
+      tabs.getByRole("tab", { name: "Accepted company trips", exact: true }),
+    ).toBeVisible();
     await expect(tabs.getByRole("tab", { name: "My trips" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -266,7 +269,7 @@ test(
     for (const target of [
       page.getByRole("combobox", { name: "Game", exact: true }),
       page.getByRole("tab", { name: "Accepted company trips", exact: true }),
-      page.getByRole("link", { name: "Saved drafts", exact: true }),
+      page.getByRole("tab", { name: "Drafts (0)", exact: true }),
     ])
       await target.click({ trial: true, timeout: 2000 });
     const nextPage = page.getByRole("button", { name: "Next page", exact: true });
@@ -344,8 +347,13 @@ test(
       await capture(page, info, `trips-list-${locale}`);
     }
     await catalogLanguage(page);
-    await page.getByRole("link", { name: "Saved drafts", exact: true }).click();
-    await expect(page).toHaveURL(/\/account\/reports$/);
+    await page.getByRole("tab", { name: "Drafts (0)", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/trips\?tab=drafts$/);
+    await expect(page.getByRole("heading", { name: "Saved drafts", exact: true })).toBeVisible();
+    await page.goto("/account/reports");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Saved drafts", exact: true }),
+    ).toBeVisible();
     expectListParams(lists);
   },
 );
@@ -896,7 +904,7 @@ test(
     await page.goto("/account/trips");
     await catalogLanguage(page);
 
-    const drafts = page.getByRole("link", { name: "Saved drafts", exact: true });
+    const drafts = page.getByRole("tab", { name: "Drafts (0)", exact: true });
     await expect(drafts).toBeVisible();
     expect((await drafts.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40);
     const event = page.getByRole("link", { name: "Fictional Winter Convoy", exact: true });
@@ -947,7 +955,7 @@ test(
     await catalogLanguage(page);
     await expect(page.getByText("Lifetime accepted trips · 0 · 0 km")).toBeVisible();
     await expect(page.getByRole("link", { name: "New report", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Saved drafts", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: /^Drafts/ })).toHaveCount(0);
     const retry = page.getByRole("button", { name: "Refresh", exact: true });
     await expect(retry).toBeVisible();
     await expect(page.getByText("Count unavailable", { exact: true })).toBeVisible();

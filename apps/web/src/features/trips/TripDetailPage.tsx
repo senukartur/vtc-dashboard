@@ -4,8 +4,9 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { Badge, Button, Card, Label } from "../../shared/ui/primitives.js";
 import { EventSelect, EvidenceItem } from "../manual-reports/fields.js";
-import { ReconciliationHistory } from "../review/ReconciliationPage.js";
+import { ReferenceFacts } from "../manual-reports/ReferenceFacts.js";
 import { DecisionPanel } from "../review/DecisionPanel.js";
+import { ReconciliationHistory } from "../review/ReconciliationPage.js";
 import { ProposalList } from "../review/ReviewPanel.js";
 import { queueSearch } from "../review/review-model.js";
 import {
@@ -83,7 +84,8 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
               <Codes values={view.reviewReasonCodes} />
               {view.manualRevision && (
                 <Card className="stack">
-                  <Revision revision={view.manualRevision} />
+                  <ReferenceFacts revision={view.manualRevision} />
+                  <Revision revision={view.manualRevision} hideReferenceFields />
                   {summary.owner.id === session.self?.member.id &&
                     summary.decision !== "accepted" &&
                     "reportId" in view.manualRevision && (

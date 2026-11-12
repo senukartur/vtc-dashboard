@@ -1,8 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
+  damagePercent,
   missingRequirements,
   requirements,
+  submissionTimeErrors,
 } from "../../apps/web/src/features/manual-reports/model.ts";
+import {
+  displayTimezone,
+  referenceInstant,
+  referenceLocalValue,
+} from "../../apps/web/src/features/manual-reports/reference-time.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import { schema } from "../../apps/web/src/features/trips/transport.ts";
 
@@ -20,6 +27,8 @@ const complete = () => ({
   actualDistanceM: "123400",
   evidenceIds: ["43000000-0000-4000-8000-000000000030"],
   comment: null,
+  startedAt: "2025-01-12T10:00:00.000Z",
+  completedAt: "2025-01-12T11:00:00.000Z",
 });
 const unresolved = (label: string) => ({
   status: "unresolved" as const,
@@ -38,6 +47,8 @@ describe("manual report requirements", () => {
       "trailerType",
       "cargoMassKg",
       "actualDistanceM",
+      "startedAt",
+      "completedAt",
       "evidence",
     ]);
   });
@@ -105,13 +116,66 @@ describe("manual report requirements", () => {
           }
         });
         const result = missingRequirements(submission, ready),
-          completeNow = schema("ManualSubmissionFields").safeParse(submission).success && ready;
+          completeNow =
+            schema("ManualDatedSubmissionFields").safeParse(submission).success && ready;
         expect(result.length === 0, JSON.stringify([mask, ready])).toBe(completeNow);
         expect(result).toEqual(requirements.filter((item) => result.includes(item)));
         expect(new Set(result).size).toBe(result.length);
         checked++;
       }
     expect(checked).toBe(256);
+  });
+});
+
+describe("manual report reference controls", () => {
+  test("account timezone converts wall time to UTC and unknown zones fall back to UTC", () => {
+    expect(displayTimezone("Unknown/Fictional")).toBe("UTC");
+    expect(displayTimezone(null)).toBe("UTC");
+    expect(referenceInstant("2025-01-12T10:15", "Asia/Kathmandu")).toBe("2025-01-12T04:30:00.000Z");
+    expect(referenceLocalValue("2025-01-12T04:30:00.037Z", "Asia/Kathmandu")).toBe(
+      "2025-01-12T10:15",
+    );
+  });
+
+  test("skipped wall times, skipped dates and invalid calendar dates have no instant", () => {
+    expect(referenceInstant("2025-03-30T02:30", "Europe/Warsaw")).toBeUndefined();
+    expect(referenceInstant("2011-12-30T10:00", "Pacific/Apia")).toBeUndefined();
+    expect(referenceInstant("2025-02-29T10:00", "UTC")).toBeUndefined();
+  });
+
+  test("new repeated times choose the first instant and unchanged times keep exact milliseconds", () => {
+    const saved = "2025-10-26T01:30:12.437Z";
+    const local = referenceLocalValue(saved, "Europe/Warsaw");
+    expect(local).toBe("2025-10-26T02:30");
+    expect(referenceInstant(local, "Europe/Warsaw", saved)).toBe(saved);
+    expect(referenceInstant(local, "Europe/Warsaw")).toBe("2025-10-26T00:30:00.000Z");
+    expect(referenceInstant("2025-04-06T01:45", "Australia/Lord_Howe")).toBe(
+      "2025-04-05T14:45:00.000Z",
+    );
+  });
+
+  test("final writes distinguish future dates and invalid ordering at the millisecond", () => {
+    const end = "2025-01-12T11:00:00.000Z";
+    const now = Date.parse(end);
+    expect(submissionTimeErrors("2025-01-12T10:59:59.999Z", end, now)).toEqual({
+      startedAt: undefined,
+      completedAt: undefined,
+    });
+    expect(submissionTimeErrors(end, end, now).completedAt).toBe("referenceOrder");
+    expect(submissionTimeErrors("2025-01-12T11:00:00.001Z", end, now).startedAt).toBe(
+      "referenceFuture",
+    );
+    expect(submissionTimeErrors(undefined, "2025-01-12T11:00:00.001Z", now).completedAt).toBe(
+      "referenceFuture",
+    );
+  });
+
+  test("optional damage accepts zero and fractional percentages without rounding the bound", () => {
+    expect(damagePercent("0")).toBe(0);
+    expect(damagePercent("2,75")).toBe(2.75);
+    expect(damagePercent("100.000")).toBe(100);
+    for (const invalid of ["", "-0.1", "1e2", "100.1", "100.000000000000000001"])
+      expect(damagePercent(invalid), invalid).toBeUndefined();
   });
 });
 

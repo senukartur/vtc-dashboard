@@ -6,6 +6,7 @@ import { useSession } from "../../app/Session.js";
 import { formatDecimal, formatQuantity } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs.js";
+import { DraftList, useManualDrafts } from "../manual-reports/Drafts.js";
 import { PageNav, State } from "./components.js";
 import { useWideLayout } from "./layout.js";
 import { tripListFilters, tripPeriodBounds } from "./list-model.js";
@@ -36,10 +37,15 @@ export function TripsPage() {
   const savedTimezone = session.self?.preferences.displayTimezone;
   const timezone = savedTimezone ?? "UTC";
   const submit = !!session.self?.capabilities.includes("trips.submit_own");
+  const viewDrafts = submit && params.get("tab") === "drafts";
+  const drafts = useManualDrafts(submit);
+  const editingCount = drafts.data?.data.data.editingCount;
   const { period, ...effective } = tripListFilters(params);
   const { scope, ownerId, q, order } = effective;
   const showOwnLifetime =
-    scope === "mine" && !!session.self?.capabilities.includes("trips.read_own_private");
+    !viewDrafts &&
+    scope === "mine" &&
+    !!session.self?.capabilities.includes("trips.read_own_private");
 
   const bounds =
     period && savedTimezone ? tripPeriodBounds(period, new Date(), savedTimezone) : undefined;
@@ -56,6 +62,7 @@ export function TripsPage() {
   const query = useTripQuery(
     `/trips?${queryString({ ...effective, ...bounds, locale, limit: 25, cursor })}`,
     "EnvelopeListTripSummary",
+    !viewDrafts,
   );
   const ownSummary = useTripQuery(
     "/me/trip-status-summary",
@@ -69,7 +76,7 @@ export function TripsPage() {
   if (rejectedCursor(cursor, query.error)) setPage(firstPage(filterKey));
 
   // The side panel exists only on wide layouts; narrow layouts ignore `?trip=` entirely.
-  const selected = wide ? selectedTrip(params) : null;
+  const selected = !viewDrafts && wide ? selectedTrip(params) : null;
   const heading = useRef<HTMLHeadingElement>(null);
   // Focus intent from a plain row click; Back/Forward and deep links leave focus alone.
   const focusPanel = useRef(false);
@@ -83,10 +90,17 @@ export function TripsPage() {
   function change(key: string, value: string) {
     const next = filterSearch(window.location.search, key, value);
     if (key === "scope") {
-      next.delete("decision");
-      next.delete("ownerId");
+      next.delete("tab");
+      if (scope !== value) {
+        next.delete("decision");
+        next.delete("ownerId");
+      }
     }
     setParams(next);
+  }
+  function changeTab(value: string) {
+    if (value === "drafts") setParams(filterSearch(window.location.search, "tab", value));
+    else change("scope", value);
   }
   const { draft, setDraft } = useSearchDraft(q, (value) => change("q", value));
   const searchInput = useRef<HTMLInputElement>(null);
@@ -215,8 +229,8 @@ export function TripsPage() {
       </header>
       <Tabs
         className="trips-workspace"
-        value={scope}
-        onValueChange={(value) => change("scope", value)}
+        value={viewDrafts ? "drafts" : scope}
+        onValueChange={changeTab}
         activationMode="manual"
       >
         <div className="trips-scope">
@@ -231,44 +245,70 @@ export function TripsPage() {
                 )}
               </TabsTrigger>
             ))}
+            {submit && (
+              <TabsTrigger
+                value="drafts"
+                className="trips-drafts-tab"
+                aria-label={
+                  editingCount === undefined
+                    ? undefined
+                    : t("draftsWithCount", { total: formatDecimal(String(editingCount), locale) })
+                }
+              >
+                {t("draftsTab")}
+                {editingCount !== undefined && (
+                  <span className="trips-tab-count" aria-hidden="true">
+                    {formatDecimal(String(editingCount), locale)}
+                  </span>
+                )}
+              </TabsTrigger>
+            )}
           </TabsList>
-          {submit && <Link to="/account/reports">{t("drafts")}</Link>}
         </div>
-        <TripListFilters
-          filters={{ ...effective, period }}
-          effectivePeriod={periodUnavailable ? undefined : period}
-          search={draft}
-          searchRef={searchInput}
-          onSearch={setDraft}
-          onChange={change}
-          onReset={reset}
-          matches={matches}
-        />
-        {periodUnavailable && (
-          <div className="trips-period-note" role="status">
-            <span>{t("periodUnavailable")}</span>
-            <Link to="/account/preferences">{t("openPreferences")}</Link>
-          </div>
+        {!viewDrafts && (
+          <>
+            <TripListFilters
+              filters={{ ...effective, period }}
+              effectivePeriod={periodUnavailable ? undefined : period}
+              search={draft}
+              searchRef={searchInput}
+              onSearch={setDraft}
+              onChange={change}
+              onReset={reset}
+              matches={matches}
+            />
+            {periodUnavailable && (
+              <div className="trips-period-note" role="status">
+                <span>{t("periodUnavailable")}</span>
+                <Link to="/account/preferences">{t("openPreferences")}</Link>
+              </div>
+            )}
+            <div className="trips-list-meta">
+              {ownerId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("clearDriver")}
+                  onClick={() => {
+                    searchInput.current?.focus();
+                    change("ownerId", "");
+                  }}
+                >
+                  {driver ?? t("selectedDriver")} <span aria-hidden="true">×</span>
+                </Button>
+              )}
+              <small className="trips-timezone">{t("timesIn", { timezone })}</small>
+            </div>
+            <TabsContent value="mine">{body}</TabsContent>
+            <TabsContent value="company">{body}</TabsContent>
+          </>
         )}
-        <div className="trips-list-meta">
-          {ownerId && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label={t("clearDriver")}
-              onClick={() => {
-                searchInput.current?.focus();
-                change("ownerId", "");
-              }}
-            >
-              {driver ?? t("selectedDriver")} <span aria-hidden="true">×</span>
-            </Button>
-          )}
-          <small className="trips-timezone">{t("timesIn", { timezone })}</small>
-        </div>
-        <TabsContent value="mine">{body}</TabsContent>
-        <TabsContent value="company">{body}</TabsContent>
+        {viewDrafts && (
+          <TabsContent value="drafts">
+            <DraftList first={drafts} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

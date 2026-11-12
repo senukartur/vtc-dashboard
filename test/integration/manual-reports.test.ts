@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -23,7 +23,12 @@ import {
   TransactionCommitOutcomeUnknownError,
   type UnitOfWork,
 } from "@vtc/db";
-import { catalogCargoes, catalogCities } from "@vtc/db/catalogs-schema";
+import {
+  catalogCargoes,
+  catalogCities,
+  catalogCompanies,
+  catalogCompanyCities,
+} from "@vtc/db/catalogs-schema";
 import { membership, roles } from "@vtc/db/identity-schema";
 import {
   eq,
@@ -40,7 +45,13 @@ import {
   sql,
 } from "@vtc/db/manual-reports-schema";
 import { outboxEvents } from "@vtc/db/platform-schema";
-import { sourceMessages, tripFacts, tripFactTrailers, trips } from "@vtc/db/trips-schema";
+import {
+  sourceMessages,
+  sourcePayloads,
+  tripFacts,
+  tripFactTrailers,
+  trips,
+} from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   afterEach,
@@ -64,6 +75,7 @@ import {
   type ManualReports,
 } from "../../apps/api/src/modules/manual-reports/service.ts";
 import { createQualifications } from "../../apps/api/src/modules/qualifications/service.ts";
+import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import { createTrips, type Trips } from "../../apps/api/src/modules/trips/service.ts";
 import {
@@ -161,7 +173,7 @@ async function* bytes(value = pngBytes()) {
 async function upload(key = newId(), name = "synthetic.png", value = pngBytes()) {
   return manual.upload(owner, key, name, bytes(value), "image/png");
 }
-function fields(evidenceId: string): S["ManualSubmissionFields"] {
+function undatedFields(evidenceId: string): S["ManualSubmissionFields"] {
   const unknown = {
     status: "unresolved" as const,
     label: "Fictional selection",
@@ -179,6 +191,13 @@ function fields(evidenceId: string): S["ManualSubmissionFields"] {
     actualDistanceM: "1234.5",
     evidenceIds: [evidenceId],
   };
+}
+const referenceDates = {
+  startedAt: "2026-09-19T08:00:00.001Z",
+  completedAt: "2026-09-19T09:00:00.002Z",
+};
+function fields(evidenceId: string): S["ManualDatedSubmissionFields"] {
+  return { ...undatedFields(evidenceId), ...referenceDates };
 }
 async function submit(evidenceId: string, key = newId()) {
   return manual.submitReport(owner, key, { fields: fields(evidenceId) });
@@ -757,6 +776,530 @@ test("HTTP enforces CSRF/Origin, closed bodies, ETags, multipart limits and priv
 });
 
 const emptyJsonHeaders = { "content-type": "application/json", "content-length": "0" };
+
+test("staged HTTP writes save partial dates, clear omitted references and replace them on final submission", async () => {
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  const image = await upload();
+  const headers = {
+    cookie: ownerCookie,
+    origin: identityConfig.origin,
+    "x-csrf-token": csrfProtection(identityConfig).issue({}, owner).token,
+  };
+  function write(
+    method: "POST" | "PUT",
+    url: string,
+    payload: object,
+    key = newId(),
+    version?: number,
+  ) {
+    return app.inject({
+      method,
+      url,
+      headers: {
+        ...headers,
+        "idempotency-key": key,
+        ...(version === undefined ? {} : { "if-match": `"v${version}"` }),
+      },
+      payload,
+    });
+  }
+  try {
+    const created = await write("POST", "/api/v1/me/manual-drafts", {
+      fields: { startedAt: referenceDates.startedAt, cargoDamagePercent: 0 },
+    });
+    expect(created.statusCode).toBe(201);
+    const { data: draft } = created.json() as S["EnvelopeManualDraft"];
+    expect(draft.fields).toEqual({ startedAt: referenceDates.startedAt, cargoDamagePercent: 0 });
+
+    const path = `/api/v1/me/manual-drafts/${draft.id}`;
+    const replacement = { fields: { completedAt: referenceDates.completedAt } };
+    const replaceKey = newId();
+    const replaced = await write("PUT", path, replacement, replaceKey, draft.version);
+    expect(replaced.statusCode).toBe(200);
+    const { data: saved } = replaced.json() as S["EnvelopeManualDraft"];
+    expect(saved.fields).toEqual(replacement.fields);
+    expect((await manual.getDraft(owner, draft.id)).fields).toEqual(replacement.fields);
+    const [stored] = await unit.run((tx) =>
+      unit.client(tx).select().from(manualDrafts).where(eq(manualDrafts.id, draft.id)),
+    );
+    expect(stored).toMatchObject({
+      fields: {},
+      startedAt: null,
+      completedAt: referenceDates.completedAt,
+      cargoDamagePercent: null,
+    });
+
+    const dated = {
+      ...fields(image.id),
+      completedAt: now().toISOString(),
+      cargoDamagePercent: 100,
+    };
+    const final = await write(
+      "POST",
+      `${path}/submission`,
+      { fields: dated },
+      newId(),
+      saved.version,
+    );
+    expect(final.statusCode).toBe(201);
+    const { data: submitted } = final.json() as S["EnvelopeManualReport"];
+    expect(submitted.currentRevision.fields).toMatchObject(dated);
+    expect(await manual.getDraft(owner, draft.id)).toMatchObject({
+      state: "submitted",
+      fields: dated,
+      submittedReportId: submitted.id,
+    });
+    const oldDraft = await write("PUT", path, replacement, replaceKey, draft.version);
+    expect(oldDraft.statusCode).toBe(200);
+    expect((oldDraft.json() as S["EnvelopeManualDraft"]).data).toEqual(saved);
+
+    const createKey = newId();
+    const rejected = await write(
+      "POST",
+      "/api/v1/manual-reports",
+      { fields: undatedFields(image.id) },
+      createKey,
+    );
+    expect(rejected.statusCode).toBe(422);
+    const direct = await write("POST", "/api/v1/manual-reports", { fields: dated }, createKey);
+    expect(direct.statusCode).toBe(201);
+    const { data: report } = direct.json() as S["EnvelopeManualReport"];
+    const damage = 12.345678901234567;
+    const revision = await write(
+      "POST",
+      `/api/v1/manual-reports/${report.id}/revisions`,
+      { expectedTripVersion: report.tripVersion, fields: { ...dated, cargoDamagePercent: damage } },
+      newId(),
+      report.version,
+    );
+    expect(revision.statusCode).toBe(200);
+    const { data: revised } = revision.json() as S["EnvelopeManualReport"];
+    expect(revised.currentRevision.fields).toMatchObject({ ...dated, cargoDamagePercent: damage });
+    const history = await manual.revisions(owner, report.id, {}, false, report.currentRevision.id);
+    expect(history).toEqual(report.currentRevision);
+  } finally {
+    await app.close();
+  }
+});
+
+test("final dates and damage fail closed without creating trips or receipts", async () => {
+  const image = await upload();
+  const base = fields(image.id);
+  for (const invalid of [
+    undatedFields(image.id),
+    { ...undatedFields(image.id), startedAt: base.startedAt },
+    { ...undatedFields(image.id), completedAt: base.completedAt },
+    { ...base, startedAt: base.completedAt },
+    { ...base, startedAt: "2026-09-20T08:00:00.001Z" },
+    { ...base, completedAt: new Date(instant + 1).toISOString() },
+    { ...base, startedAt: "2026-02-30T08:00:00.001Z" },
+    { ...base, startedAt: "0999-12-31T08:00:00.001Z" },
+    { ...base, startedAt: "2026-09-19T08:00:00+00:00" },
+    { ...base, cargoDamagePercent: -0.1 },
+    { ...base, cargoDamagePercent: 100.1 },
+  ]) {
+    await expect(
+      Promise.resolve().then(() => manual.submitReport(owner, newId(), { fields: invalid })),
+    ).rejects.toMatchObject({ statusCode: 422 });
+  }
+  await expect(
+    manual.createDraft(owner, newId(), { fields: { startedAt: "0999-12-31T08:00:00.001Z" } }),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  expect(await counts()).toMatchObject({ trips: 0, reports: 0, revisions: 0, messages: 0 });
+  const receipts = await unit.run((tx) => unit.client(tx).select().from(manualCommands));
+  expect(receipts.map((row) => row.scope.toString())).toEqual(["upload"]);
+
+  const dated = { ...base, startedAt: "1000-01-01T00:00:00.000Z", cargoDamagePercent: 0 };
+  const report = await manual.submitReport(owner, newId(), { fields: dated });
+  expect(report.currentRevision.fields).toMatchObject(dated);
+});
+
+test("company selections require visible same-game depots and stay private reference data", async () => {
+  const cities = await seedCatalog(unit, "ets2", {
+    cities: ["reference-north", "reference-south"],
+  });
+  const ats = await seedCatalog(unit, "ats", { cities: ["reference-ats"] });
+  const north = cities.id("reference-north"),
+    south = cities.id("reference-south"),
+    atsCity = ats.id("reference-ats");
+  const originCompanyId = newId(),
+    destinationCompanyId = newId(),
+    atsCompanyId = newId(),
+    originDepot = newId();
+  await unit.run(async (tx) => {
+    const client = unit.client(tx);
+    await client.insert(catalogCompanies).values([
+      {
+        id: originCompanyId,
+        game: "ets2",
+        code: Buffer.from("reference-north"),
+        nameEn: "Fictional North Depot",
+      },
+      {
+        id: destinationCompanyId,
+        game: "ets2",
+        code: Buffer.from("reference-south"),
+        nameEn: "Fictional South Depot",
+      },
+      {
+        id: atsCompanyId,
+        game: "ats",
+        code: Buffer.from("reference-ats"),
+        nameEn: "Fictional ATS Depot",
+      },
+    ]);
+    await client.insert(catalogCompanyCities).values([
+      { id: originDepot, game: "ets2", cityId: north, companyId: originCompanyId },
+      { id: newId(), game: "ets2", cityId: south, companyId: destinationCompanyId },
+      { id: newId(), game: "ats", cityId: atsCity, companyId: atsCompanyId },
+    ]);
+  });
+  const resolved = (entityId: string) => ({ status: "resolved" as const, entityId });
+  for (const invalid of [
+    { originCompanyId },
+    { game: "ets2" as const, originCompanyId, origin: resolved(south) },
+    { game: "ets2" as const, originCompanyId: atsCompanyId, origin: resolved(atsCity) },
+  ]) {
+    await expect(manual.createDraft(owner, newId(), { fields: invalid })).rejects.toMatchObject({
+      statusCode: 422,
+    });
+  }
+
+  const image = await upload();
+  const base = {
+    ...undatedFields(image.id),
+    origin: resolved(north),
+    destination: resolved(south),
+  };
+  const dated = {
+    ...base,
+    ...referenceDates,
+    cargoDamagePercent: 0,
+    originCompanyId,
+    destinationCompanyId,
+  };
+  const value = { fields: dated };
+  const draft = await manual.createDraft(owner, newId(), { fields: dated });
+  expect(draft.fields).toEqual(dated);
+  const key = newId();
+  const report = await manual.submitReport(owner, key, value);
+
+  const stored = await unit.run(async (tx) => {
+    const [row] = await unit
+      .client(tx)
+      .select({
+        fields: manualRevisions.fields,
+        startedAt: manualRevisions.startedAt,
+        completedAt: manualRevisions.completedAt,
+        cargoDamagePercent: manualRevisions.cargoDamagePercent,
+        originCompanyId: manualRevisions.originCompanyId,
+        destinationCompanyId: manualRevisions.destinationCompanyId,
+        content: sourcePayloads.content,
+        sha256: sourceMessages.sha256,
+      })
+      .from(manualRevisions)
+      .innerJoin(sourceMessages, eq(sourceMessages.id, manualRevisions.sourceRecordId))
+      .innerJoin(sourcePayloads, eq(sourcePayloads.messageId, sourceMessages.id))
+      .where(eq(manualRevisions.id, report.currentRevision.id));
+    return row;
+  });
+  const canonicalFields = { ...base, comment: null, eventId: null };
+  const canonical = canonicalJson({
+    format: 2,
+    reportId: report.id,
+    revisionId: report.currentRevision.id,
+    revision: 1,
+    fields: canonicalFields,
+  });
+  expect(stored).toEqual({
+    fields: canonicalFields,
+    ...referenceDates,
+    cargoDamagePercent: 0,
+    originCompanyId,
+    destinationCompanyId,
+    content: canonical,
+    sha256: createHash("sha256").update(canonical).digest(),
+  });
+  const [trip] = await unit.run((tx) => tripService.statesInTransaction(tx, [report.tripId]));
+  expect(trip).toMatchObject({ actualStart: null, actualEnd: null, reportingAt: null });
+  for (const actor of [owner, reviewer]) {
+    const view = await tripService.detail(actor, report.tripId);
+    expect(view).toMatchObject({ view: "private", manualRevision: { fields: dated } });
+  }
+  await expect(tripService.detail(other, report.tripId)).rejects.toMatchObject({ statusCode: 404 });
+
+  await catalogs.patchDepot(staff, originDepot, newId(), { hidden: true });
+  expect(await manual.submitReport(owner, key, value)).toEqual(report);
+  await expect(
+    manual.submitReport(owner, key, { fields: { ...dated, cargoDamagePercent: 1 } }),
+  ).rejects.toMatchObject({ publicCode: "IDEMPOTENCY_CONFLICT" });
+  await expect(
+    manual.submitDraft(owner, draft.id, newId(), draft.version, value),
+  ).rejects.toMatchObject({ statusCode: 422 });
+  expect(await manual.getDraft(owner, draft.id)).toMatchObject({
+    version: 1,
+    state: "editing",
+    fields: dated,
+  });
+
+  await catalogs.patchDepot(staff, originDepot, newId(), { hidden: false });
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(catalogCompanies)
+      .set({ hidden: true })
+      .where(eq(catalogCompanies.id, originCompanyId)),
+  );
+  await expect(manual.submitReport(owner, newId(), value)).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  await unit.run(async (tx) => {
+    const client = unit.client(tx);
+    await client
+      .update(catalogCompanies)
+      .set({ hidden: false })
+      .where(eq(catalogCompanies.id, originCompanyId));
+    await client.update(catalogCities).set({ hidden: true }).where(eq(catalogCities.id, north));
+  });
+  await expect(manual.submitReport(owner, newId(), value)).rejects.toMatchObject({
+    statusCode: 422,
+  });
+  expect(await counts()).toMatchObject({ trips: 1, reports: 1, revisions: 1, messages: 1 });
+
+  await terminal(report);
+  const company = await tripService.detail(other, report.tripId);
+  expect(company.view).toBe("summary");
+  expect(company).not.toHaveProperty("manualRevision");
+  expect(company).not.toHaveProperty("startedAt");
+});
+
+test("all three staged routes replay predecessor undated receipts and preserve undated history", async () => {
+  const image = await upload();
+  const value = { fields: undatedFields(image.id) };
+  const base = { ...value.fields, eventId: null, comment: null };
+  const reportId = newId(),
+    draftReportId = newId(),
+    firstRevision = newId(),
+    currentRevision = newId(),
+    draftRevision = newId(),
+    draftId = newId();
+  const createdKey = newId(),
+    revisedKey = newId(),
+    submittedKey = newId();
+  const timestamp = now().toISOString();
+  const { beforeRevision, currentTripVersion } = await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.submit_own");
+    const tripId = await tripService.reserveManualInTransaction(tx, owner.userId, "ets2");
+    const draftTripId = await tripService.reserveManualInTransaction(tx, owner.userId, "ets2");
+    const client = unit.client(tx);
+    await client.insert(manualReports).values([
+      {
+        id: reportId,
+        ownerId: owner.userId,
+        tripId,
+        version: 2,
+        revisionNumber: 2,
+        createdAt: timestamp,
+      },
+      {
+        id: draftReportId,
+        ownerId: owner.userId,
+        tripId: draftTripId,
+        version: 1,
+        revisionNumber: 1,
+        createdAt: timestamp,
+      },
+    ]);
+    await client.insert(manualRevisions).values([
+      {
+        id: firstRevision,
+        reportId,
+        number: 1,
+        format: "extended",
+        fields: base,
+        submittedAt: timestamp,
+      },
+      {
+        id: currentRevision,
+        reportId,
+        number: 2,
+        format: "extended",
+        fields: base,
+        submittedAt: timestamp,
+      },
+      {
+        id: draftRevision,
+        reportId: draftReportId,
+        number: 1,
+        format: "extended",
+        fields: base,
+        submittedAt: timestamp,
+      },
+    ]);
+    // Seed predecessor rows with their real canonical source chain, but no reference columns.
+    const tripVersion = async (id: string) => {
+      const [trip] = await tripService.statesInTransaction(tx, [id]);
+      if (!trip) throw Error("SYNTHETIC_MANUAL_TRIP_REQUIRED");
+      return trip.version;
+    };
+    let priorTripVersion = 1;
+    for (const [id, trip, revisionId, number, previous] of [
+      [reportId, tripId, firstRevision, 1, null],
+      [reportId, tripId, currentRevision, 2, firstRevision],
+      [draftReportId, draftTripId, draftRevision, 1, null],
+    ] as const) {
+      const payload = { format: 2, reportId: id, revisionId, revision: number, fields: base };
+      const context = {
+        ownerUserId: owner.userId,
+        connection: { state: "unknown" as const, referenceId: null },
+        canonical: { tripId: trip, expectedVersion: await tripVersion(trip) },
+      };
+      if (previous) priorTripVersion = context.canonical.expectedVersion;
+      const source = previous
+        ? await tripService.supersedeManualInTransaction(tx, payload, context, previous)
+        : await tripService.storeInTransaction(tx, "manual", payload, context);
+      await client
+        .update(manualRevisions)
+        .set({ sourceRecordId: source.sourceRecordId })
+        .where(eq(manualRevisions.id, revisionId));
+      await client.insert(manualEvidenceReferences).values({
+        evidenceId: image.id,
+        revisionId,
+        reportId: id,
+        tripId: trip,
+      });
+      await tripService.manualPendingInTransaction(tx, trip);
+      await tripService.manualStoredInTransaction(tx, trip, source.sourceRecordId);
+    }
+    for (const [id, revisionId] of [
+      [reportId, currentRevision],
+      [draftReportId, draftRevision],
+    ] as const)
+      await client
+        .update(manualReports)
+        .set({ currentRevisionId: revisionId })
+        .where(eq(manualReports.id, id));
+    await client.insert(manualDrafts).values({
+      id: draftId,
+      ownerId: owner.userId,
+      state: "submitted",
+      version: 2,
+      fields: base,
+      submittedReportId: draftReportId,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const currentTripVersion = await tripVersion(tripId);
+    const beforeRevision = priorTripVersion;
+    const receipts = [
+      {
+        scope: "report/create",
+        key: createdKey,
+        input: { fields: base, targetTrip: null },
+        id: reportId,
+        version: 1,
+        revisionId: firstRevision,
+        tripVersion: beforeRevision,
+      },
+      {
+        scope: `report/${reportId}/revise`,
+        key: revisedKey,
+        input: { expected: 1, expectedTripVersion: beforeRevision, fields: base },
+        id: reportId,
+        version: 2,
+        revisionId: currentRevision,
+        tripVersion: currentTripVersion,
+      },
+      {
+        scope: `draft/${draftId}/submit`,
+        key: submittedKey,
+        input: { expected: 1, fields: base },
+        id: draftReportId,
+        version: 1,
+        revisionId: draftRevision,
+        tripVersion: await tripVersion(draftTripId),
+      },
+    ];
+    await client.insert(manualCommands).values(
+      receipts.map(({ scope, key, input, ...result }) => ({
+        ownerId: owner.userId,
+        scope: Buffer.from(scope),
+        key,
+        fingerprint: createHmac("sha256", Buffer.from(manualConfig.key, "hex"))
+          .update(`manual-command/v1\0${canonicalJson(input)}`)
+          .digest(),
+        result: { kind: "report", ...result },
+        createdAt: timestamp,
+      })),
+    );
+    return { beforeRevision, currentTripVersion };
+  });
+
+  const historyBefore = await manual.getReport(owner, reportId);
+  expect(historyBefore.currentRevision.fields).toEqual(base);
+  const beforeCounts = await counts();
+  expect((await manual.getDraft(owner, draftId)).fields).toEqual(base);
+  const app = await createApp({
+    identity,
+    manualReports: manual,
+    checkReadiness: async () => true,
+  });
+  try {
+    for (const [url, key, payload, status, revisionId, version] of [
+      ["/api/v1/manual-reports", createdKey, value, 201, firstRevision, 1],
+      [
+        `/api/v1/manual-reports/${reportId}/revisions`,
+        revisedKey,
+        { ...value, expectedTripVersion: beforeRevision },
+        200,
+        currentRevision,
+        2,
+      ],
+      [
+        `/api/v1/me/manual-drafts/${draftId}/submission`,
+        submittedKey,
+        value,
+        201,
+        draftRevision,
+        1,
+      ],
+    ] as const) {
+      const response = await app.inject({
+        method: "POST",
+        url,
+        headers: {
+          cookie: ownerCookie,
+          origin: identityConfig.origin,
+          "x-csrf-token": csrfProtection(identityConfig).issue({}, owner).token,
+          "if-match": '"v1"',
+          "idempotency-key": key,
+        },
+        payload,
+      });
+      expect(response.statusCode).toBe(status);
+      const { data } = response.json() as S["EnvelopeManualReport"];
+      expect(data.version).toBe(version);
+      expect(data.currentRevision.id).toBe(revisionId);
+      expect(data.currentRevision.fields).toEqual(base);
+    }
+  } finally {
+    await app.close();
+  }
+  expect(await counts()).toEqual(beforeCounts);
+  const dated = await manual.reviseReport(owner, reportId, newId(), historyBefore.version, {
+    expectedTripVersion: currentTripVersion,
+    fields: fields(image.id),
+  });
+  expect(dated.currentRevision.number).toBe(3);
+  expect(dated.currentRevision.fields).toMatchObject(referenceDates);
+  expect(await manual.revisions(owner, reportId, {}, false, currentRevision)).toEqual(
+    historyBefore.currentRevision,
+  );
+});
 
 test("bodyless draft deletion enforces current session, capability, ownership, Origin, CSRF and command headers", async () => {
   const draft = await manual.createDraft(owner, newId(), { fields: {} });
@@ -1409,7 +1952,7 @@ test("more than one hundred referencing trips are locked in complete ordered bat
       reportId: r.id,
       number: 1,
       format: "extended" as const,
-      fields: { ...fields(image.id), eventId: null, comment: null },
+      fields: { ...undatedFields(image.id), eventId: null, comment: null },
       submittedAt: now().toISOString(),
     }));
     await db.insert(manualRevisions).values(revisions);
@@ -1916,7 +2459,7 @@ test("resolved selections take same-game list rows, hidden rows stay only when u
     trailer = rows.id("manual-box"),
     hidden = rows.id("manual-hidden-city"),
     image = await upload();
-  const listed: S["ManualSubmissionFields"] = {
+  const listed: S["ManualDatedSubmissionFields"] = {
     ...fields(image.id),
     origin: resolved(north),
     destination: resolved(south),
