@@ -295,14 +295,10 @@ test("maintenance filters validate literal values and only companies accept the 
   const get = (list: string, filters: string) =>
     app.inject({ url: `/api/v1/catalogs/${list}?game=ets2&${filters}` });
   const commonQuery = { game: "ets2", hidden: "only", includeHidden: true, untranslated: true };
-  for (const list of ["dlcs", "regions", "cities", "companies", "cargoes", "trailers", "depots"]) {
+  for (const list of ["regions", "cities", "cargoes", "trailers"]) {
     const filters = "hidden=only&includeHidden=true&untranslated=true";
     expect((await get(list, filters)).statusCode).toBe(200);
-    expect(calls.pop()).toEqual(
-      list === "depots"
-        ? { op: "listDepots", args: [commonQuery] }
-        : { op: "list", args: [list, commonQuery] },
-    );
+    expect(calls.pop()).toEqual({ op: "list", args: [list, commonQuery] });
     for (const invalid of [
       "hidden=true",
       "hidden=visible",
@@ -314,6 +310,18 @@ test("maintenance filters validate literal values and only companies accept the 
     ]) {
       expect((await get(list, invalid)).statusCode).toBe(422);
     }
+  }
+  // DLCs, companies and depots have no translation, so their reads do not offer the filter.
+  for (const list of ["dlcs", "companies", "depots"]) {
+    expect((await get(list, "hidden=only&includeHidden=true")).statusCode).toBe(200);
+    const hiddenOnly = { game: "ets2", hidden: "only", includeHidden: true };
+    expect(calls.pop()).toEqual(
+      list === "depots"
+        ? { op: "listDepots", args: [hiddenOnly] }
+        : { op: "list", args: [list, { ...hiddenOnly, untranslated: false }] },
+    );
+    for (const invalid of ["untranslated=true", "untranslated=false", "hidden=true"])
+      expect((await get(list, invalid)).statusCode).toBe(422);
   }
   expect(calls).toEqual([]);
   expect((await get("companies", "logo=missing")).statusCode).toBe(200);

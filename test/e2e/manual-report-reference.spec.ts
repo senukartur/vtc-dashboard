@@ -22,6 +22,7 @@ import {
 
 const companyId = "54000000-0000-4000-8000-000000000005";
 const otherCompanyId = "54000000-0000-4000-8000-000000000006";
+const twinCompanyId = "54000000-0000-4000-8000-000000000007";
 const secondCityId = "54000000-0000-4000-8000-000000000021";
 const thirdCityId = "54000000-0000-4000-8000-000000000022";
 const draftId = "51000000-0000-4000-8000-000000000010";
@@ -92,7 +93,7 @@ test(
 );
 
 test(
-  "company options use visible same-game depots, paginate and ignore obsolete eligibility",
+  "company picker shows name and code, searches both, pages and ignores obsolete eligibility",
   browserCase(["@functional"]),
   async ({ page }) => {
     await mockTrips(page);
@@ -121,6 +122,7 @@ test(
       "55000000-0000-4000-8000-000000000001",
       "55000000-0000-4000-8000-000000000002",
       "55000000-0000-4000-8000-000000000003",
+      "55000000-0000-4000-8000-000000000004",
     ] as const;
     const depotReads: URLSearchParams[] = [];
     await page.route("**/api/v1/catalogs/depots?*", async (route) => {
@@ -128,12 +130,15 @@ test(
       depotReads.push(query);
       const city = query.get("cityId") ?? "";
       const selected = query.get("companyId");
-      const depot = (company: string, name: string, index: 0 | 1 | 2) =>
-        depotRow(
+      const search = query.get("search")?.toLowerCase();
+      const depot = (company: string, name: string, index: 0 | 1 | 2 | 3, code?: string) => {
+        const row = depotRow(
           depotIds[index],
           { id: company, name },
           { id: city, name: names[city] ?? "Fictional city" },
         );
+        return code ? { ...row, company: { ...row.company, code } } : row;
+      };
       if (city === secondCityId && selected) {
         obsoleteStarted = true;
         await waitForObsolete;
@@ -142,28 +147,63 @@ test(
       }
       if (city === secondCityId) return route.fulfill({ json: catalogList([]) });
       const allowed = depot(companyId, "Fictional Freight", 0);
+      // A second company with the same canonical name differs only by its code.
+      const twin = depot(twinCompanyId, "Fictional Freight", 3, "fictional_freight_north");
       if (selected)
         return route.fulfill({ json: catalogList(selected === companyId ? [allowed] : []) });
-      if (query.has("cursor"))
-        return route.fulfill({ json: catalogList([depot(otherCompanyId, "Fictional Bulk", 1)]) });
+      const bulk = depot(otherCompanyId, "Fictional Bulk", 1);
+      if (search)
+        return route.fulfill({
+          json: catalogList(
+            [allowed, twin, bulk].filter(
+              ({ company }) =>
+                company.label.label.toLowerCase().includes(search) || company.code.includes(search),
+            ),
+          ),
+        });
+      if (query.has("cursor")) return route.fulfill({ json: catalogList([bulk]) });
       return route.fulfill({
         json: catalogList(
-          [allowed, { ...depot(otherCompanyId, "Fictional Hidden", 2), hidden: true }],
+          [allowed, twin, { ...depot(otherCompanyId, "Fictional Hidden", 2), hidden: true }],
           city === entityId ? "synthetic-depot-cursor" : null,
+          3,
         ),
       });
     });
     await page.goto("/account/reports/new");
     await catalogLanguage(page);
-    const origin = page.getByLabel("Origin company (optional)", { exact: true });
+    const label = "Origin company (optional)";
+    const origin = page.getByRole("combobox", { name: label, exact: true });
+    const options = page.getByRole("listbox", { name: label, exact: true }).getByRole("option");
     await expect(origin).toBeDisabled();
     await expect(page.getByText("Select a city to see its companies.")).toHaveCount(2);
     await chooseCatalogRow(page, "Origin city", "Fictional city");
-    await expect(origin.getByRole("option", { name: "Fictional Freight" })).toHaveCount(1);
-    await expect(origin.getByRole("option", { name: "Fictional Hidden" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Load more companies", exact: true }).click();
-    await expect(origin.getByRole("option", { name: "Fictional Bulk" })).toHaveCount(1);
-    await origin.selectOption(companyId);
+    await expect(origin).toBeEnabled();
+    await origin.click();
+    // Name on the left, code on the right: the two same-name companies stay distinguishable.
+    await expect(options).toHaveText([
+      "Fictional Freightfictional_freight",
+      "Fictional Freightfictional_freight_north",
+      "Load more",
+    ]);
+    const first = options.first();
+    const [name, code] = await Promise.all([
+      first.locator(".catalog-option-name").boundingBox(),
+      first.locator("code").boundingBox(),
+    ]);
+    expect(name && code && name.x + name.width <= code.x).toBe(true);
+    await expect(options.filter({ hasText: "Fictional Hidden" })).toHaveCount(0);
+    await options.filter({ hasText: "Load more" }).click();
+    await expect(options.filter({ hasText: "Fictional Bulk" })).toHaveCount(1);
+    // The search matches codes too, so a code picks one of the same-name companies.
+    await origin.fill("freight_north");
+    await expect(options).toHaveText(["Fictional Freightfictional_freight_north"]);
+    await expect.poll(() => depotReads.at(-1)?.get("search")).toBe("freight_north");
+    await origin.fill("fictional_freight");
+    await expect(options).toHaveCount(2);
+    await options.first().click();
+    await expect(origin).toHaveValue("Fictional Freight · fictional_freight");
+    await expect(origin).toHaveAttribute("aria-expanded", "false");
     const save = page.getByRole("button", { name: "Save draft", exact: true });
     await expect(save).toBeEnabled();
 
@@ -172,15 +212,17 @@ test(
     await expect(save).toBeDisabled();
     try {
       await chooseCatalogRow(page, "Origin city", "Fictional Third City");
-      await expect(origin).toHaveValue(companyId);
+      await expect(origin).toHaveValue("Fictional Freight · fictional_freight");
       await expect(save).toBeEnabled();
     } finally {
       releaseObsolete();
     }
-    await expect(origin).toHaveValue(companyId);
+    await expect(origin).toHaveValue("Fictional Freight · fictional_freight");
     await chooseCatalogRow(page, "Origin city", "Fictional Second City");
     await expect(origin).toHaveValue("");
-    await expect(page.getByRole("status")).toContainText("The selection was cleared");
+    await expect(
+      page.getByRole("status").filter({ hasText: "The selection was cleared" }),
+    ).toHaveCount(1);
     await expect(save).toBeEnabled();
     expect(
       depotReads.every(

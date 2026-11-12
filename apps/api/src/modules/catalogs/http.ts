@@ -14,6 +14,7 @@ import {
   catalogLists,
   type Game,
   type ImportList,
+  isCanonicalList,
 } from "./config.js";
 import type { Catalogs } from "./service.js";
 
@@ -48,8 +49,9 @@ const inputSchema: Record<CatalogList, string> = {
 const listFilters = {
   includeHidden: { type: "string", enum: ["true", "false"] },
   hidden: { type: "string", const: "only" },
-  untranslated: { type: "string", const: "true" },
 };
+// Canonical lists and depots carry no translation, so they offer no untranslated filter.
+const untranslatedFilter = { untranslated: { type: "string", const: "true" } };
 const multipartOverhead = 16384;
 // A batch part carries its own boundary and headers; this allows for the longest file names.
 const batchOverhead = CATALOG_LOGO_BULK_MAX_FILES * 1024;
@@ -272,6 +274,7 @@ export async function registerCatalogRoutes(
               game,
               search: { type: "string", minLength: 1, maxLength: 128 },
               ...listFilters,
+              ...(isCanonicalList(list) ? {} : untranslatedFilter),
               locale,
               ...(list === "companies" ? { logo: { type: "string", const: "missing" } } : {}),
               ...(list === "dlcs" ? {} : { dlc: { anyOf: [{ const: "base" }, uuid] } }),
@@ -369,7 +372,7 @@ export async function registerCatalogRoutes(
 
   // Depots: a company that operates in a city.
   app.get<{
-    Querystring: ListQuery & { companyId?: string; cityId?: string };
+    Querystring: Omit<ListQuery, "untranslated"> & { companyId?: string; cityId?: string };
   }>(
     "/api/v1/catalogs/depots",
     {
@@ -393,7 +396,10 @@ export async function registerCatalogRoutes(
     async (request) =>
       envelope(
         request,
-        await catalogs.listDepots(await actor(request), normalizeListQuery(request.query)),
+        await catalogs.listDepots(await actor(request), {
+          ...request.query,
+          includeHidden: request.query.includeHidden === "true",
+        }),
       ),
   );
   app.post<{ Body: S["CatalogDepotInput"] }>(

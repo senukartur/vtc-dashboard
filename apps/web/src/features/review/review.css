@@ -43,6 +43,10 @@
   gap: 2px 12px;
   font-size: var(--font-small);
 }
+/* The note on uncounted own trips takes its own line under the totals. */
+.review-queue .review-own-excluded {
+  flex-basis: 100%;
+}
 /* One row of tabs and filters from 1000px of toolbar width (the toolbar sits above the decision
    panel, which does not narrow it); a container query arranges narrower toolbars below. */
 .review-queue .review-toolbar {

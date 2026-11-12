@@ -168,7 +168,8 @@ function extendedRevisionFields(row: Revision): S["ManualReportReadFields"] {
   return { ...fields, ...references, startedAt, completedAt };
 }
 type Page = { limit?: number; cursor?: string };
-type DraftPage = Page & { state?: "editing" };
+/** `locale` overrides the account language of the returned catalog labels only. */
+type DraftPage = Page & { state?: "editing"; locale?: "en" | "ru" };
 const draftLabelFields = [
   ["origin", "city"],
   ["destination", "city"],
@@ -1369,7 +1370,9 @@ export function createManualReports(
     },
     listDrafts(actor: Actor, page: DraftPage = {}) {
       return run(async (tx) => {
-        const { locale } = await authority(tx, actor, true);
+        const account = await authority(tx, actor, true);
+        // Labels never affect the order, so the cursor stays valid across languages.
+        const locale = page.locale ?? account.locale;
         const scope = page.state === "editing" ? "drafts/editing" : "drafts",
           { limit, after } = pageCursor(actor, scope, page);
         const visibleDrafts =
