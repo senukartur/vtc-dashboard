@@ -75,7 +75,7 @@ export function TripListFilters({
               value={filters.game ?? ""}
               onChange={(e) => onChange("game", e.target.value)}
             >
-              <option value="">{t("allGames")}</option>
+              <option value="">{t("all")}</option>
               <option value="ets2">ETS2</option>
               <option value="ats">ATS</option>
             </Select>

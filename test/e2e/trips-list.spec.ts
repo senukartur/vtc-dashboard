@@ -231,7 +231,6 @@ test(
       decision = filters.getByRole("combobox", { name: "Company decision", exact: true }),
       source = filters.getByRole("combobox", { name: "Source", exact: true });
     await expect(game).toHaveValue("");
-    await expect(game.locator("option").first()).toHaveText("ETS2 and ATS");
     await expect(decision.locator("option").first()).toHaveText("Any decision");
     await expect(source).toHaveValue("");
     await expect(source.locator("option")).toHaveText(["Any source", "Telemetry", "Manual report"]);
@@ -316,6 +315,11 @@ test(
           new RegExp(names.at(-1) ?? ""),
         ]);
       }
+      const localizedGame = page.getByRole("combobox", {
+        name: ru ? "Игра" : "Game",
+        exact: true,
+      });
+      await expect(localizedGame.locator("option")).toHaveText([ru ? "Все" : "All", "ETS2", "ATS"]);
       const localizedSource = page.getByRole("combobox", {
         name: ru ? "Источник" : "Source",
         exact: true,
