@@ -44,7 +44,10 @@ const event = (id: string) => `/events/${encodeURIComponent(id)}`;
 const admin = (id: string) => `/admin${event(id)}`;
 const draft = (id: string) => `/admin/events/drafts/${encodeURIComponent(id)}`;
 const mediaItem = (path: string, id: string) => `${path}/media/${encodeURIComponent(id)}`;
-const localPath = (path: string, params: PublishedFilter | AdminFilter | Localized) => {
+const localPath = (
+  path: string,
+  params: PublishedFilter | AdminFilter | Localized | (Page & { view: "stage2" }),
+) => {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) query.set(key, String(value));
@@ -64,10 +67,14 @@ export const eventStage2Reads = {
   publicDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(`/public${event(id)}`, { locale }), "EventStage2EnvelopePublic", "public"),
   memberList: (filter: PublishedFilter = {}) =>
-    readSpec(localPath("/events", filter), "EventStage2EnvelopeMemberList", "company.read"),
+    readSpec(
+      localPath("/events", { ...filter, locale: filter.locale ?? "en" }),
+      "EventStage2EnvelopeMemberList",
+      "company.read",
+    ),
   memberDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(event(id), { locale }), "EventStage2EnvelopeMember", "company.read"),
-  upcoming: (locale?: EventStage2Locale) =>
+  upcoming: (locale: EventStage2Locale = "en") =>
     readSpec(
       localPath("/me/upcoming-event", { locale }),
       "EventStage2EnvelopeUpcoming",
@@ -78,7 +85,7 @@ export const eventStage2Reads = {
   draft: (id: string) => readSpec(draft(id), "EventStage2EnvelopeDraft", "events.manage"),
   attendance: (id: string, page: Page = {}) =>
     readSpec(
-      localPath(`${admin(id)}/attendance`, page),
+      localPath(`${admin(id)}/attendance`, { ...page, view: "stage2" }),
       "EventStage2EnvelopeAttendance",
       "events.manage",
     ),

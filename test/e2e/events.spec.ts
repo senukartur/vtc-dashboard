@@ -17,6 +17,25 @@ import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
+for (const access of ["legacy", "member", "public"] as const) {
+  test(
+    `event fixture advertises Stage 2 only for an opted-in authenticated read (${access})`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      if (access === "legacy") await mockEvents(page);
+      else await mockEventsStage2(page, access);
+      await page.goto("/en");
+      const result = await page.evaluate(async () => {
+        const response = await fetch("/api/v1/me", { cache: "no-store" });
+        return { status: response.status, rollout: response.headers.get("X-VTC-Events-Stage2") };
+      });
+      expect(result).toEqual({
+        status: access === "public" ? 401 : 200,
+        rollout: access === "member" ? "1" : null,
+      });
+    },
+  );
+}
 for (const targetPage of [1, 2]) {
   test(
     `report event selection settles decoded options through page ${targetPage}`,
@@ -231,7 +250,9 @@ test(
             headers: { ETag: `"v${version}"` },
           });
         }
-        const cursor = new URL(request.url()).searchParams.get("cursor");
+        const { searchParams } = new URL(request.url());
+        if (searchParams.get("view") !== "stage2") return route.fulfill({ status: 422 });
+        const cursor = searchParams.get("cursor");
         const nextCursor = `fictional-attendance-v${version}`;
         if (cursor && cursor !== nextCursor) return route.fulfill({ status: 412 });
         const data: Attendance = {
@@ -269,12 +290,18 @@ test(
 
     recorded = "not_attended";
     version = 2;
-    const updated = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" && new URL(response.url()).pathname === path,
-    );
+    const updated = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === path &&
+        !url.searchParams.has("cursor")
+      );
+    });
     await roster.getByRole("button", { name: "First page", exact: true }).click();
-    expect((await updated).headers().etag).toBe('"v2"');
+    const firstPage = await updated;
+    expect(new URL(firstPage.url()).searchParams.getAll("view")).toEqual(["stage2"]);
+    expect(firstPage.headers().etag).toBe('"v2"');
     await expect(targetRow).toHaveCount(0);
     await expect(roster.getByRole("status")).toContainText("Attendance changed");
     await expect(record).toBeDisabled();
@@ -1003,7 +1030,13 @@ for (const role of ["director", "deputy_director"] as const) {
       await expect(show).toBeVisible();
       expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
       await expect(page.getByRole("button", { name: "Cancel event" })).toBeEnabled();
+      const rosterRead = page.waitForRequest(
+        (request) =>
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === `/api/v1/admin${eventPath}/attendance`,
+      );
       await show.click();
+      expect(new URL((await rosterRead).url()).searchParams.getAll("view")).toEqual(["stage2"]);
       const attendance = page.locator(".events-attendance-totals");
       await expect(attendance).toContainText("Total members");
       await expect(attendance.getByText("2", { exact: true })).toBeVisible();

@@ -1137,6 +1137,30 @@ export function createTripDecisions(
         .for("share");
       return new Map(rows.map((row) => [row.tripId, row.eventId]));
     },
+    async eventAttendanceTripIdsInTransaction(
+      tx: TxContext,
+      actor: Actor,
+      eventId: string,
+      game: TripState["game"],
+      memberIds: string[],
+    ) {
+      if (!memberIds.length) return new Map<string, string>();
+      const roots = await ports.trips.eventAttendanceRootsInTransaction(tx, actor, game, memberIds);
+      // Only the current root's committed association qualifies. If a member has
+      // multiple eligible trips, the lowest canonical UUID is the stable tie-break.
+      const rows = await c(tx)
+        .select({
+          memberId: roots.ownerId,
+          tripId: sql<string>`MIN(${tripEventAssociations.tripId})`.mapWith(
+            tripEventAssociations.tripId,
+          ),
+        })
+        .from(tripEventAssociations)
+        .innerJoin(roots, eq(roots.tripId, tripEventAssociations.tripId))
+        .where(eq(tripEventAssociations.eventId, applicationId(eventId)))
+        .groupBy(roots.ownerId);
+      return new Map(rows.map((row) => [row.memberId, row.tripId]));
+    },
     async privateProjectionInTransaction(tx: TxContext, id: string, actor: Actor) {
       const row = await ports.trips.groups.resolve(tx, id, "share");
       return privateProjection(tx, row, actor);

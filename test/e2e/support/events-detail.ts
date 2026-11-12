@@ -223,6 +223,7 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
       if (image) return route.fulfill({ body: image, contentType: "image/png" });
     }
     if (manager && path === `/admin${eventPath}/attendance`) {
+      if (url.searchParams.get("view") !== "stage2") return route.fulfill({ status: 422 });
       const { data } = stage2Fixture("getEventAttendance", "leadership")
         .response as S["EventStage2EnvelopeAttendance"];
       return envelope({
