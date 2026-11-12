@@ -11976,7 +11976,39 @@
         "responseCounts"
       ],
       "additionalProperties": false,
-      "description": "Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons."
+      "description": "Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2Member": {
       "type": "object",
@@ -12129,7 +12161,39 @@
         "myResponse",
         "myResponseVersion"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2AdminPublished": {
       "type": "object",

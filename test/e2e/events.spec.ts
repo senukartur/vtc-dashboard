@@ -1,10 +1,30 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
+import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
+for (const access of ["legacy", "member", "public"] as const) {
+  test(
+    `event fixture advertises Stage 2 only for an opted-in authenticated read (${access})`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      if (access === "legacy") await mockEvents(page);
+      else await mockEventsStage2(page, access);
+      await page.goto("/en");
+      const result = await page.evaluate(async () => {
+        const response = await fetch("/api/v1/me", { cache: "no-store" });
+        return { status: response.status, rollout: response.headers.get("X-VTC-Events-Stage2") };
+      });
+      expect(result).toEqual({
+        status: access === "public" ? 401 : 200,
+        rollout: access === "member" ? "1" : null,
+      });
+    },
+  );
+}
 for (const targetPage of [1, 2]) {
   test(
     `report event selection settles decoded options through page ${targetPage}`,

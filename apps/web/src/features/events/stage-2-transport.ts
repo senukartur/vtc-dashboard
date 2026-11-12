@@ -67,10 +67,14 @@ export const eventStage2Reads = {
   publicDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(`/public${event(id)}`, { locale }), "EventStage2EnvelopePublic", "public"),
   memberList: (filter: PublishedFilter = {}) =>
-    readSpec(localPath("/events", filter), "EventStage2EnvelopeMemberList", "company.read"),
+    readSpec(
+      localPath("/events", { ...filter, locale: filter.locale ?? "en" }),
+      "EventStage2EnvelopeMemberList",
+      "company.read",
+    ),
   memberDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(event(id), { locale }), "EventStage2EnvelopeMember", "company.read"),
-  upcoming: (locale?: EventStage2Locale) =>
+  upcoming: (locale: EventStage2Locale = "en") =>
     readSpec(
       localPath("/me/upcoming-event", { locale }),
       "EventStage2EnvelopeUpcoming",

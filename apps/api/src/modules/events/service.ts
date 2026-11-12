@@ -19,7 +19,6 @@ import {
   eventCommands,
   eventResponseRevisions,
   eventResponses,
-  eventRevisionDetails,
   eventRevisions,
   events,
   gt,
@@ -709,42 +708,39 @@ export function createEvents(
     return responses;
   }
 
-  // This batch projection is the integration point for the VTC-124 route fields.
-  async function stage2PublicDtos(tx: TxContext, revisions: PublicRevision[]) {
-    if (!revisions.length) return [];
-    const details = await c(tx)
-      .select({
-        revisionId: eventRevisionDetails.revisionId,
-        organizerMemberId: eventRevisionDetails.organizerMemberId,
-      })
-      .from(eventRevisionDetails)
-      .where(
-        inArray(
-          eventRevisionDetails.revisionId,
-          revisions.map((r) => r.id),
-        ),
-      );
-    const organizers = new Map(details.map((row) => [row.revisionId, row.organizerMemberId]));
-    const labels = await routeLabels(tx, revisions);
-    return Promise.all(
-      revisions.map(async (r) => {
-        const organizerMemberId = organizers.get(r.id) ?? null;
-        const base = await publicDto(tx, r, labels);
-        const event: S["EventStage2Public"] = {
-          ...base,
-          description: base.description.trim() ? base.description : null,
-          route: base.route.trim() ? base.route : null,
-          meetingLocation: base.meetingLocation.trim() ? base.meetingLocation : null,
-          platform: null,
-          originDepot: null,
-          destinationDepot: null,
-          distanceKm: null,
-          requiredDlcs: [],
-          hasCover: false,
-        };
-        return { event, organizerMemberId, visibility: r.visibility };
-      }),
+  async function publishedEventDtos(
+    tx: TxContext,
+    revisions: readonly PublicRevision[],
+    locale: EventLocale,
+    privateRefs: { kind: "cargo" | "trailer"; id: string }[] = [],
+  ) {
+    if (!publishedRoutes || !routeCatalogs) throw identityError(422);
+    const refs = revisions.flatMap((r) =>
+      [r.originCityId, r.destinationCityId].flatMap((id) =>
+        id ? [{ kind: "city" as const, id }] : [],
+      ),
     );
+    const labels = await routeCatalogs.labelsInTransaction(tx, [...refs, ...privateRefs], locale);
+    const fields = await publishedRoutes.publicFieldsInTransaction(tx, revisions);
+    const items = revisions.map((r) => {
+      const route = fields.get(r.id);
+      if (!route) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
+      const event: S["EventStage2Public"] = {
+        ...legacyPublicDto(r, labels),
+        ...route.public,
+        description: r.description || null,
+        meetingLocation: r.meetingLocation || null,
+        route: r.route || null,
+      };
+      return { event, organizerMemberId: route.organizerMemberId, visibility: r.visibility };
+    });
+    return { items, labels };
+  }
+
+  function quickResponse(own: OwnResponse | undefined) {
+    return own
+      ? { myResponse: own.response, myResponseVersion: own.version }
+      : { myResponse: null, myResponseVersion: null };
   }
 
   async function attendancePage(tx: TxContext, actor: Actor, event: Event, options: Page) {
@@ -825,26 +821,18 @@ export function createEvents(
     actor: Actor | null,
     receipt?: Receipt,
   ): Promise<S["EventStage2Public"] | S["EventStage2Member"]> {
-    if (!publishedRoutes || !routeCatalogs) throw identityError(422);
-    const details = await publishedRoutes.get(tx, r.id);
-    const refs: { kind: "city" | "cargo" | "trailer"; id: string }[] = [];
-    if (r.originCityId) refs.push({ kind: "city", id: r.originCityId });
-    if (r.destinationCityId) refs.push({ kind: "city", id: r.destinationCityId });
+    const refs: { kind: "cargo" | "trailer"; id: string }[] = [];
     if (actor && r.prescribedCargoId) refs.push({ kind: "cargo", id: r.prescribedCargoId });
     if (actor && r.prescribedTrailerId) refs.push({ kind: "trailer", id: r.prescribedTrailerId });
-    const labels = await routeCatalogs.labelsInTransaction(tx, refs, locale);
-    const event: S["EventStage2Public"] = {
-      ...legacyPublicDto(r, labels),
-      ...(await publishedRoutes.publicFields(tx, r, details)),
-      description: r.description || null,
-      meetingLocation: r.meetingLocation || null,
-      route: r.route || null,
-    };
-    if (!actor) return event;
+    const {
+      items: [projection],
+      labels,
+    } = await publishedEventDtos(tx, [r], locale, refs);
+    if (!projection) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
+    if (!actor) return projection.event;
     return {
-      event,
+      ...projection,
       ...(await ownEventState(tx, r, actor, receipt)),
-      organizerMemberId: details?.organizerMemberId ?? null,
       prescribedCargo: labels.get(r.prescribedCargoId ?? "") ?? null,
       prescribedTrailerType: labels.get(r.prescribedTrailerId ?? "") ?? null,
       responseCounts: receipt?.responseCounts ?? (await readResponseCounts(tx, r.eventId)),
@@ -1484,65 +1472,42 @@ export function createEvents(
         return r ? publicDto(tx, r) : null;
       });
     },
-    async listStage2(actor: Actor, options: ListOptions = {}): Promise<S["EventStage2MemberList"]> {
+    async listStage2(
+      actor: Actor,
+      locale: EventLocale,
+      options: ListOptions = {},
+    ): Promise<S["EventStage2MemberList"]> {
       return run(async (tx) => {
         await authorize(tx, actor);
         const { revisions, nextCursor } = await listRevisions(tx, actor, options);
         const ids = revisions.map((r) => r.eventId);
         const counts = await responseCountsByEvent(tx, ids);
         const own = await ownResponses(tx, actor, ids);
-        const projections = await stage2PublicDtos(tx, revisions);
+        const { items } = await publishedEventDtos(tx, revisions, locale);
         return {
-          items: projections.map((item) => {
-            const response = own?.get(item.event.id);
-            return {
-              ...item,
-              myResponse: response?.response ?? null,
-              myResponseVersion: response?.version ?? null,
-              responseCounts: counts.get(item.event.id) as S["EventResponseCounts"],
-            };
-          }),
+          items: items.map((item) => ({
+            ...item,
+            ...quickResponse(own?.get(item.event.id)),
+            responseCounts: counts.get(item.event.id) as S["EventResponseCounts"],
+          })),
           nextCursor,
         };
       });
     },
-    async getStage2(
+    async nearestStage2(
       actor: Actor,
-      id: string,
-    ): Promise<{ data: S["EventStage2Member"]; version: number }> {
-      return run(async (tx) => {
-        await authorize(tx, actor);
-        const e = await lock(tx, id, false, "share");
-        const r = await revision(tx, e.currentRevisionId as string);
-        const [projection] = await stage2PublicDtos(tx, [r]);
-        if (!projection) throw new Error("EVENT_REVISION_MISSING");
-        const facts = await ownEventState(tx, r, actor);
-        const counts = await responseCountsByEvent(tx, [id]);
-        return {
-          data: {
-            ...projection,
-            ...facts,
-            responseCounts: counts.get(id) as S["EventResponseCounts"],
-            prescribedCargo: null,
-            prescribedTrailerType: null,
-          },
-          version: e.version,
-        };
-      });
-    },
-    async nearestStage2(actor: Actor): Promise<S["EventStage2Upcoming"] | null> {
+      locale: EventLocale,
+    ): Promise<S["EventStage2Upcoming"] | null> {
       return run(async (tx) => {
         await authorize(tx, actor);
         const r = await nearestRevision(tx);
         if (!r) return null;
-        const [projection] = await stage2PublicDtos(tx, [r]);
-        if (!projection) throw new Error("EVENT_REVISION_MISSING");
+        const {
+          items: [projection],
+        } = await publishedEventDtos(tx, [r], locale);
+        if (!projection) throw new Error("EVENT_ROUTE_PROJECTION_MISSING");
         const own = (await ownResponses(tx, actor, [r.eventId]))?.get(r.eventId);
-        return {
-          event: projection.event,
-          myResponse: own?.response ?? null,
-          myResponseVersion: own?.version ?? null,
-        };
+        return { event: projection.event, ...quickResponse(own) };
       });
     },
     async myResponse(actor: Actor, id: string) {

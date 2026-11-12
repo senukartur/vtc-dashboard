@@ -198,6 +198,8 @@ test("Director/Deputy manage, additive Driver/trainee respond, dispatcher denied
 
 test("staged member list, detail and upcoming share safe organizer and current own response facts", async () => {
   await control.query("DELETE FROM identity_limits");
+  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const routes = createEvents(unit, { ...config, routeEnabled: true }, { identity, catalogs }, now);
   const legacy = await create({
     title: "Fictional legacy event",
     visibility: "public",
@@ -205,25 +207,23 @@ test("staged member list, detail and upcoming share safe organizer and current o
   });
   const created = await create({ title: "Fictional upcoming event" });
   const id = created.data.event.id;
-  const organizer = "Fictional organizer snapshot";
-  await service.update(director, id, newId(), 1, input({ organizer }));
+  const organizer = "Fictional Event Member";
+  await routes.updatePublished(
+    director,
+    id,
+    newId(),
+    1,
+    stagedInput({
+      organizerMemberId: deputy.userId,
+      description: null,
+      route: null,
+      meetingLocation: null,
+    }),
+    "en",
+  );
   const draftId = newId();
   await unit.run(async (tx) => {
     const db = unit.client(tx);
-    const [event] = await db
-      .select({ revisionId: events.currentRevisionId })
-      .from(events)
-      .where(eq(events.id, id));
-    if (!event?.revisionId) throw new Error("SYNTHETIC_EVENT_REVISION_MISSING");
-    await db
-      .update(eventRevisions)
-      .set({ description: "", route: "", meetingLocation: "" })
-      .where(eq(eventRevisions.id, event.revisionId));
-    await db.insert(eventRevisionDetails).values({
-      revisionId: event.revisionId,
-      organizerMemberId: deputy.userId,
-      platform: "haulmp",
-    });
     await db.insert(eventMetadata).values({ id: draftId, createdAt: now().toISOString() });
     await db.insert(eventDrafts).values({
       eventId: draftId,
@@ -238,7 +238,7 @@ test("staged member list, detail and upcoming share safe organizer and current o
   await service.respond(driver, id, newId(), 1, { response: "declined", reason: otherReason });
   await service.respond(driver, legacy.data.event.id, newId(), 1, { response: "participating" });
 
-  const first = await service.listStage2(trainee, { limit: 1 });
+  const first = await routes.listStage2(trainee, "ru", { limit: 1 });
   expect(first.items).toHaveLength(1);
   expect(first.items[0]).toMatchObject({
     event: {
@@ -257,7 +257,10 @@ test("staged member list, detail and upcoming share safe organizer and current o
   });
   expect(first.items[0]?.event).not.toHaveProperty("organizerMemberId");
   expect(first.nextCursor).toBeTruthy();
-  const next = await service.listStage2(trainee, { limit: 1, cursor: first.nextCursor as string });
+  const next = await routes.listStage2(trainee, "ru", {
+    limit: 1,
+    cursor: first.nextCursor as string,
+  });
   expect(next.items).toHaveLength(1);
   expect(next.items[0]).toMatchObject({
     event: { id: legacy.data.event.id, organizer: legacy.data.event.organizer },
@@ -268,27 +271,62 @@ test("staged member list, detail and upcoming share safe organizer and current o
   });
   expect(next.nextCursor).toBeNull();
   const unavailable = { ...dispatcher, capabilities: ["events.respond"] };
-  expect((await service.listStage2(unavailable)).items[0]).toMatchObject({
+  expect((await routes.listStage2(unavailable, "ru")).items[0]).toMatchObject({
     myResponse: null,
     myResponseVersion: null,
   });
-  expect(await service.nearestStage2(unavailable)).toMatchObject({
+  expect(await routes.nearestStage2(unavailable, "ru")).toMatchObject({
     event: { id },
     myResponse: null,
     myResponseVersion: null,
   });
-  expect(await service.nearestStage2(trainee)).toMatchObject({
+  expect(await routes.nearestStage2(trainee, "ru")).toMatchObject({
     event: { id },
     myResponse: "unanswered",
     myResponseVersion: 1,
   });
-  await expect(service.getStage2(trainee, draftId)).rejects.toMatchObject({ statusCode: 404 });
+  await expect(routes.getPublished(trainee, draftId, "en")).rejects.toMatchObject({
+    statusCode: 404,
+  });
   await expect(service.get(null, id)).rejects.toMatchObject({ statusCode: 404 });
   expect((await service.list(null)).items).toEqual([legacy.data.event]);
 
-  const app = await createApp({ identity, events: service, checkReadiness: async () => true });
+  const app = await createApp({ identity, events: routes, checkReadiness: async () => true });
   const ownReason = "Fictional confidential reason for the current member";
   try {
+    const cookie = { cookie: traineeCookie };
+    const list = await app.inject({ url: "/api/v1/events?locale=ru&limit=1", headers: cookie });
+    expect(list.statusCode).toBe(200);
+    expect(list.headers["cache-control"]).toBe("no-store");
+    const listData = list.json().data as components["schemas"]["EventStage2MemberList"];
+    expect(listData).toEqual(first);
+    const upcoming = await app.inject({
+      url: "/api/v1/me/upcoming-event?locale=en",
+      headers: cookie,
+    });
+    expect(upcoming.statusCode).toBe(200);
+    expect(upcoming.json().data).toMatchObject({
+      event: { id },
+      myResponse: "unanswered",
+      myResponseVersion: 1,
+    });
+
+    for (const path of ["/api/v1/events", "/api/v1/me/upcoming-event"]) {
+      const legacyRead = await app.inject({ url: path, headers: cookie });
+      expect(legacyRead.statusCode).toBe(200);
+      const data = legacyRead.json().data;
+      const event = data.items?.[0] ?? data;
+      expect(event).toMatchObject({ id, description: "\u2014" });
+      expect(event).not.toHaveProperty("myResponseVersion");
+      expect((await app.inject({ url: `${path}?locale=fr`, headers: cookie })).statusCode).toBe(
+        422,
+      );
+    }
+    for (const query of ["?period=past", "?locale=ru&period=past"]) {
+      const empty = await app.inject({ url: `/api/v1/events${query}`, headers: cookie });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json().data).toEqual({ items: [], nextCursor: null });
+    }
     const csrf = (
       await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: traineeCookie } })
     ).json().data.token;
@@ -300,19 +338,19 @@ test("staged member list, detail and upcoming share safe organizer and current o
         origin,
         "x-csrf-token": csrf,
         "idempotency-key": newId(),
-        "if-match": `"v${first.items[0]?.myResponseVersion}"`,
+        "if-match": `"v${listData.items[0]?.myResponseVersion}"`,
       },
       payload: { response: "declined", reason: ownReason },
     });
     expect(decline.statusCode).toBe(200);
     expect(decline.headers.etag).toBe('"v2"');
-    const nearest = await service.nearestStage2(trainee);
+    const nearest = await routes.nearestStage2(trainee, "ru");
     expect(nearest).toMatchObject({
       event: { id },
       myResponse: "declined",
       myResponseVersion: 2,
     });
-    const detail = await service.getStage2(trainee, id);
+    const detail = await routes.getPublished(trainee, id, "ru");
     expect(detail).toMatchObject({
       version: 2,
       data: {
@@ -336,18 +374,24 @@ test("staged member list, detail and upcoming share safe organizer and current o
     });
     expect(cleared.statusCode).toBe(200);
     expect(cleared.headers.etag).toBe('"v3"');
-    expect(await service.nearestStage2(trainee)).toMatchObject({
+    expect(await routes.nearestStage2(trainee, "ru")).toMatchObject({
       event: { id },
       myResponse: "unanswered",
       myResponseVersion: 3,
     });
-    const refreshed = await service.listStage2(trainee);
+    const refreshed = await routes.listStage2(trainee, "ru");
     expect(refreshed.items[0]).toMatchObject({
       myResponse: "unanswered",
       myResponseVersion: 3,
       responseCounts: { participating: 0, declined: 1 },
     });
     expect(JSON.stringify(refreshed)).not.toContain("confidential reason");
+    instant = Date.parse("2026-10-22T14:30:00.000Z");
+    for (const query of ["", "?locale=en"]) {
+      const empty = await app.inject({ url: `/api/v1/me/upcoming-event${query}`, headers: cookie });
+      expect(empty.statusCode).toBe(200);
+      expect(empty.json().data).toBeNull();
+    }
   } finally {
     await app.close();
   }
@@ -415,6 +459,18 @@ test("leadership nonresponders filter current response eligibility before paging
     expect(items).toEqual([expect.objectContaining({ id: cleared.userId, formerMember: false })]);
     expect(allowed.body).not.toContain("confidential");
     expect(nextCursor).toBeTruthy();
+    const invalidPage = await app.inject({
+      url: `/api/v1/admin/events/${id}/nonresponders?limit=0`,
+      headers: { cookie: directorCookie },
+    });
+    expect(invalidPage.statusCode).toBe(422);
+    expect(invalidPage.json().error.code).toBe("INVALID_PAYLOAD");
+    const invalidCursor = await app.inject({
+      url: `${url}&cursor=tampered`,
+      headers: { cookie: directorCookie },
+    });
+    expect(invalidCursor.statusCode).toBe(409);
+    expect(invalidCursor.json().error.code).toBe("VERSION_CONFLICT");
     const next = await app.inject({
       url: `${url}&cursor=${encodeURIComponent(nextCursor)}`,
       headers: { cookie: directorCookie },
@@ -1118,6 +1174,14 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     expect(self.statusCode).toBe(200);
     expect(eventWireValidator.validate(browserSchemaRef("EnvelopeSelf"), self.json())).toBe(true);
     expect(self.headers[eventsStage2Header]).toBeUndefined();
+    for (const path of ["/api/v1/events", "/api/v1/me/upcoming-event"]) {
+      const headers = { cookie: traineeCookie };
+      const normal = await app.inject({ url: path, headers });
+      expect(normal.statusCode).toBe(200);
+      const data = normal.json().data;
+      expect(data.items?.[0] ?? data).toMatchObject({ id });
+      expect((await app.inject({ url: `${path}?locale=en`, headers })).statusCode).toBe(422);
+    }
     const own = await app.inject({
       url: `/api/v1/events/${id}/my-response`,
       headers: { cookie: traineeCookie },
@@ -1449,7 +1513,6 @@ import {
   eventDrafts,
   eventMetadata,
   eventResponseRevisions,
-  eventRevisionDetails,
   eventRevisions,
   events,
 } from "@vtc/db/events-schema";
@@ -1673,7 +1736,17 @@ async function convoyCatalog() {
 test("opted-in published route HTTP serves localized canonical selections and preserves the live wire", async () => {
   await control.query("DELETE FROM identity_limits");
   const { id, ats, companyId, originDepot, destinationDepot, atsDepot } = await convoyCatalog();
-  const catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const catalogService = createCatalogs(unit, catalogConfig(), { identity }, now);
+  const lookedUpGames: string[] = [];
+  const catalogs = {
+    ...catalogService,
+    eventRouteCatalogInTransaction: (
+      ...args: Parameters<typeof catalogService.eventRouteCatalogInTransaction>
+    ) => {
+      lookedUpGames.push(args[1]);
+      return catalogService.eventRouteCatalogInTransaction(...args);
+    },
+  };
   const routes = createEvents(unit, { ...config, routeEnabled: true }, { identity, catalogs }, now);
   const app = await createApp({ identity, events: routes, checkReadiness: async () => true });
   const value = stagedInput({
@@ -1863,6 +1936,67 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     );
     expect(zero.statusCode, zero.body).toBe(200);
     expect(zero.json().data.event).toMatchObject({ distanceKm: "0", description });
+    const later = await routes.createPublished(
+      director,
+      newId(),
+      stagedInput({
+        startsAt: "2026-10-22T14:00:00.000Z",
+        originCityId: id("stage2_destination"),
+        requiredDlcIds: [id("stage2_manual_dlc")],
+      }),
+      "en",
+    );
+    const american = await routes.createPublished(
+      director,
+      newId(),
+      stagedInput({
+        game: "ats",
+        startsAt: "2026-10-22T15:00:00.000Z",
+        originCityId: ats("stage2_origin"),
+        originDepotId: atsDepot,
+        requiredDlcIds: [ats("stage2_city_dlc")],
+      }),
+      "en",
+    );
+    lookedUpGames.length = 0;
+    const headers = { cookie: traineeCookie };
+    const list = await app.inject({ url: "/api/v1/events?locale=ru", headers });
+    expect(list.statusCode).toBe(200);
+    expect(lookedUpGames).toHaveLength(2);
+    expect(new Set(lookedUpGames)).toEqual(new Set(["ats", "ets2"]));
+    const [first, second, third] = list.json().data.items;
+    expect(first).toMatchObject({
+      event: {
+        id: eventId,
+        platform: "haulmp",
+        distanceKm: "0",
+        requiredDlcs: member.event.requiredDlcs,
+        origin: { label: "Fictional translated origin", requestedLocale: "ru" },
+        originDepot: member.event.originDepot,
+      },
+      organizerMemberId: trainee.userId,
+    });
+    expect(second.event).toMatchObject({
+      id: later.data.event.id,
+      requiredDlcs: [{ id: id("stage2_manual_dlc"), sources: ["manual"] }],
+    });
+    expect(third.event).toMatchObject({
+      id: american.data.event.id,
+      originDepot: { id: atsDepot, name: "Fictional American Freight" },
+      requiredDlcs: [{ id: ats("stage2_city_dlc"), sources: ["manual"] }],
+    });
+    const nearest = await app.inject({ url: "/api/v1/me/upcoming-event?locale=en", headers });
+    expect(nearest.statusCode).toBe(200);
+    expect(nearest.json().data).toMatchObject({
+      event: {
+        id: eventId,
+        distanceKm: "0",
+        requiredDlcs: member.event.requiredDlcs,
+        origin: { label: "Fictional Origin", requestedLocale: "en" },
+      },
+      myResponse: "unanswered",
+      myResponseVersion: 1,
+    });
     const withoutOriginDepot = {
       ...value,
       originDepotId: null,

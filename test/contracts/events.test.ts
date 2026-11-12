@@ -213,6 +213,8 @@ test("Stage 2 quick response projections require a nullable own RSVP version", (
     delete missing.myResponseVersion;
     for (const invalid of [
       missing,
+      { ...item, myResponse: null, myResponseVersion: 2 },
+      { ...item, myResponse: "participating", myResponseVersion: null },
       { ...item, myResponseVersion: 0 },
       { ...item, myResponseVersion: 1.5 },
       { ...item, myResponseVersion: Number.MAX_SAFE_INTEGER + 1 },

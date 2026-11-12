@@ -8305,6 +8305,9 @@
       "operationId": "listEvents",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "items": [
@@ -8481,6 +8484,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "ru"
+      },
       "response": {
         "data": {
           "event": {
@@ -8549,6 +8555,9 @@
       "operationId": "getUpcomingEvent",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "locale": "en"
+      },
       "response": {
         "data": null,
         "meta": {
