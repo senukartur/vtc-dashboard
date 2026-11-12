@@ -73,6 +73,13 @@ const en = {
   refresh: "Check latest version",
   draftConflict: "The saved definition changed. Your edits are still here.",
   latest: "Latest saved title",
+  latestValue: "Latest value",
+  localValue: "Your value",
+  overlapHelp:
+    "Review the fields changed in both versions. Keeping your edits will use your values for these fields.",
+  reselectHelp:
+    "The latest game or city makes these edits incompatible. The latest values will be kept. You can choose again after reviewing the update.",
+  wrongGame: "Choose a value for the selected game.",
   keepEdits: "Use my edits with the latest version",
   useSaved: "Load the latest saved fields",
   retryAttempt: "Retry the same request",
@@ -196,6 +203,13 @@ const ru: Record<keyof typeof en, string> = {
   refresh: "Проверить последнюю версию",
   draftConflict: "Сохранённое событие изменилось. Ваши правки остались в редакторе.",
   latest: "Последнее сохранённое название",
+  latestValue: "Последнее значение",
+  localValue: "Ваше значение",
+  overlapHelp:
+    "Проверьте поля, изменённые в обеих версиях. Если сохранить ваши правки, в этих полях будут использованы ваши значения.",
+  reselectHelp:
+    "Эти правки несовместимы с игрой или городом в последней версии. Сохранятся значения из последней версии. После обновления можно выбрать значения заново.",
+  wrongGame: "Выберите значение для выбранной игры.",
   keepEdits: "Применить мои правки к последней версии",
   useSaved: "Загрузить последние сохранённые поля",
   retryAttempt: "Повторить тот же запрос",

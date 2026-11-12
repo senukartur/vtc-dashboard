@@ -8,6 +8,7 @@ import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
 import { type EditorStep, eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { type DraftFields, eventRevisionTag, type OpenEventDraft } from "./draft.js";
 import { eventDefinitionSeed } from "./model.js";
+import type { EventEditorRebase } from "./rebase.js";
 import { useEditorText } from "./text.js";
 
 type Published = { kind: "published"; member: DTO["EventStage2Member"]; etag: string | null };
@@ -194,11 +195,13 @@ export function useDefinitionActions(source: EditorDefinition, onPublished?: Pub
 export function DefinitionFeedback({
   actions,
   blocked,
-  onLoadLatest,
+  rebase,
+  onResolveLatest,
 }: {
   actions: ReturnType<typeof useDefinitionActions>;
   blocked?: boolean | undefined;
-  onLoadLatest: (source: SavedDefinition) => void;
+  rebase: EventEditorRebase | null;
+  onResolveLatest: (keepEdits: boolean) => void;
 }) {
   const { text } = useEditorText();
   const { latest } = actions;
@@ -228,15 +231,40 @@ export function DefinitionFeedback({
               <p>
                 {text.latest} · {definitionFields(latest)?.title || text.untitled}
               </p>
+              {rebase && rebase.overlaps.length > 0 && (
+                <div className="stack">
+                  <p>{text.overlapHelp}</p>
+                  <dl className="event-editor-conflict-values">
+                    {rebase.overlaps.map(({ field, local, saved }) => (
+                      <div key={field}>
+                        <dt>{text[field]}</dt>
+                        <dd>
+                          <strong>{text.latestValue}</strong> · {saved ?? text.noValue}
+                        </dd>
+                        <dd>
+                          <strong>{text.localValue}</strong> · {local ?? text.noValue}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              )}
+              {rebase && rebase.skipped.length > 0 && (
+                <div className="stack">
+                  <p>{text.reselectHelp}</p>
+                  <ul>
+                    {rebase.skipped.map((field) => (
+                      <li key={field}>{text[field]}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="event-editor-inline">
                 <Button
                   type="button"
                   variant="outline"
                   disabled={blocked}
-                  onClick={() => {
-                    onLoadLatest(latest);
-                    actions.acceptLatest();
-                  }}
+                  onClick={() => onResolveLatest(false)}
                 >
                   {text.useSaved}
                 </Button>
@@ -244,7 +272,7 @@ export function DefinitionFeedback({
                   type="button"
                   variant="outline"
                   disabled={blocked}
-                  onClick={actions.acceptLatest}
+                  onClick={() => onResolveLatest(true)}
                 >
                   {text.keepEdits}
                 </Button>

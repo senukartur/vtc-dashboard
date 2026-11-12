@@ -12,7 +12,7 @@ import {
   eventStage2Reads,
   readEventStage2,
 } from "../stage-2-transport.js";
-import { useEditorCommands } from "./commands.js";
+import { eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { eventRevisionTag } from "./draft.js";
 import { eventScreenshotAccept, eventScreenshotError, eventScreenshotLimit } from "./model.js";
 import { useEditorText } from "./text.js";
@@ -37,6 +37,11 @@ export function useEditorGallery(
   const { refetch } = query;
   const writes = useEditorCommands<GalleryEnvelope>();
   const [committed, setCommitted] = useState<Snapshot | null>(null);
+  const [captionEdits, setCaptionEdits] = useState<{
+    eventId: string;
+    values: Map<string, string>;
+  } | null>(null);
+  const { discardRetry, retry } = writes;
   const [file, setFile] = useState<File | null>(null);
   const [fileVersion, setFileVersion] = useState(0);
   const [preparing, setPreparing] = useState(false);
@@ -52,11 +57,22 @@ export function useEditorGallery(
       ? { eventId, gallery: query.data.data.data, etag: fetchedEtag }
       : null;
   const received = committed?.eventId === eventId ? committed : null;
-  const snapshot = query.isError
-    ? null
-    : fetched && (!received || fetched.gallery.version >= received.gallery.version)
-      ? fetched
-      : received;
+  const error = prepareError ?? writes.failure;
+  const terminalRead = eventEditorAccessLost(query.error);
+  const terminalWrite = eventEditorAccessLost(error);
+  const terminal = terminalRead || terminalWrite;
+  const failureKind = error instanceof AccountFailure ? error.kind : undefined;
+  const accessLost =
+    terminalRead ||
+    failureKind === "forbidden" ||
+    failureKind === "unauthorized" ||
+    (terminalWrite && operation === "upload");
+  const snapshot =
+    query.isError || terminal
+      ? null
+      : fetched && (!received || fetched.gallery.version >= received.gallery.version)
+        ? fetched
+        : received;
   const items = snapshot?.gallery.items ?? [];
   const fileError = file ? eventScreenshotError(file, items.length, maxBytes) : undefined;
   const ready = items
@@ -65,11 +81,21 @@ export function useEditorGallery(
   const processing = items.some(({ state }) => state === "processing");
   const cover = ready.find(({ isCover }) => isCover) ?? null;
   const busy = preparing || writes.pending;
-  const error = prepareError ?? writes.failure;
-  const failureKind = error instanceof AccountFailure ? error.kind : undefined;
   const conflict = failureKind === "conflict";
-  const denied = failureKind === "forbidden" || failureKind === "unauthorized";
-  const locked = busy || !!writes.retry || conflict || denied;
+  const locked = busy || !!writes.retry || conflict || terminal;
+  const captions = captionEdits?.eventId === eventId ? captionEdits.values : undefined;
+
+  useEffect(() => {
+    if (terminalRead && retry) discardRetry();
+  }, [terminalRead, retry, discardRetry]);
+  useEffect(() => {
+    if (terminal) setCommitted((previous) => (previous?.eventId === eventId ? null : previous));
+  }, [eventId, terminal]);
+  useEffect(() => {
+    setCaptionEdits((previous) =>
+      previous && previous.eventId === eventId && !accessLost ? previous : null,
+    );
+  }, [eventId, accessLost]);
 
   useEffect(() => () => firstRead.current?.abort(), []);
   useEffect(() => {
@@ -83,6 +109,7 @@ export function useEditorGallery(
   }, [processing, query.isError, refetch]);
 
   function choose(value: File | null) {
+    if (locked) return;
     setFile(value);
     setStatus(false);
     setPrepareError(null);
@@ -145,6 +172,15 @@ export function useEditorGallery(
     }
   }
 
+  function editCaption(mediaId: string, value: string) {
+    if (!eventId || locked || !snapshot) return;
+    setCaptionEdits((previous) => {
+      const values = new Map(previous?.eventId === eventId ? previous.values : undefined);
+      values.set(mediaId, value);
+      return { eventId, values };
+    });
+  }
+
   function update(mediaId: string, value: MediaEdit | null, onSaved?: () => void) {
     if (locked || !snapshot || !eventId) return;
     setStatus(false);
@@ -158,6 +194,14 @@ export function useEditorGallery(
       commit({ data: { data }, etag }) {
         if (!("items" in data)) throw new AccountFailure("uncertain");
         setCommitted({ eventId, gallery: data, etag });
+        if (value === null || value.caption !== undefined) {
+          setCaptionEdits((previous) => {
+            if (previous?.eventId !== eventId || !previous.values.has(mediaId)) return previous;
+            const values = new Map(previous.values);
+            values.delete(mediaId);
+            return { eventId, values };
+          });
+        }
         setStatus(true);
         onSaved?.();
         return undefined;
@@ -167,8 +211,12 @@ export function useEditorGallery(
 
   async function refresh() {
     if (!eventId) return;
-    const fresh = await refetch();
+    const fresh = await refetch({ cancelRefetch: false });
     if (!fresh.isError && eventRevisionTag(fresh.data?.etag)) {
+      if (terminal) {
+        setCommitted(null);
+        discardRetry();
+      }
       setPrepareError(null);
       writes.clearFailure();
     }
@@ -182,6 +230,7 @@ export function useEditorGallery(
     policyPending,
     items,
     ready,
+    captions,
     cover,
     busy,
     locked,
@@ -189,15 +238,18 @@ export function useEditorGallery(
     lastUploadState: items.find(({ id }) => id === lastUpload)?.state,
     status,
     error,
-    conflict,
+    accessError: terminalRead ? query.error : terminalWrite ? error : null,
+    conflict: conflict && !terminal,
+    refreshing: query.isFetching,
     refusedUpload: operation === "upload" && failureKind === "invalid",
-    loading: !!eventId && !snapshot && query.isPending,
-    readError: !!eventId && !snapshot && !query.isPending,
+    loading: !!eventId && !snapshot && query.isPending && !terminal,
+    readError: !!eventId && !snapshot && (terminal || !query.isPending),
     canUpload: !eventId || !!snapshot,
-    retry: writes.retry,
+    retry: terminal ? null : writes.retry,
     coolingDown: writes.coolingDown,
     choose,
     upload,
+    editCaption,
     update,
     refresh,
     retryRequest: async () => {
@@ -256,6 +308,8 @@ function ReadyScreenshot({
   media,
   earlier,
   later,
+  caption,
+  onCaptionChange,
   update,
   onRemoved,
 }: {
@@ -263,19 +317,18 @@ function ReadyScreenshot({
   media: Media;
   earlier: number | undefined;
   later: number | undefined;
+  caption: string;
+  onCaptionChange: (value: string) => void;
   update: ReturnType<typeof useEditorGallery>["update"];
   onRemoved: () => void;
 }) {
   const { text } = useEditorText();
   const id = useId();
-  const [draftCaption, setDraftCaption] = useState<string | null>(null);
-  const caption = draftCaption ?? media.caption ?? "";
   const changed = caption.trim() !== (media.caption ?? "");
   const captionInput = useRef<HTMLInputElement>(null);
 
   function saveCaption() {
-    if (changed)
-      void update(media.id, { caption: caption.trim() || null }, () => setDraftCaption(null));
+    if (changed) void update(media.id, { caption: caption.trim() || null });
   }
 
   function move(position: number) {
@@ -315,7 +368,7 @@ function ReadyScreenshot({
                   saveCaption();
                 }
               }}
-              onChange={(event) => setDraftCaption(event.target.value)}
+              onChange={(event) => onCaptionChange(event.target.value)}
             />
           </div>
           <Button
@@ -405,13 +458,17 @@ export function EditorGallery({
       {gallery.loading && <p role="status">{text.galleryLoading}</p>}
       {gallery.readError && (
         <div className="event-editor-inline">
-          <p role="alert" className="field-error">
-            {text.galleryUnavailable}
-          </p>
+          {gallery.accessError ? (
+            <EventFailureView error={gallery.accessError} />
+          ) : (
+            <p role="alert" className="field-error">
+              {text.galleryUnavailable}
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"
-            disabled={disabled || gallery.busy}
+            disabled={disabled || gallery.busy || gallery.refreshing}
             onClick={() => void gallery.refresh()}
           >
             {text.retry}
@@ -431,6 +488,8 @@ export function EditorGallery({
                 media={media}
                 earlier={gallery.ready[index - 1]?.position}
                 later={gallery.ready[index + 1]?.position}
+                caption={gallery.captions?.get(media.id) ?? media.caption ?? ""}
+                onCaptionChange={(value) => gallery.editCaption(media.id, value)}
                 update={gallery.update}
                 onRemoved={restoreFocus}
               />
@@ -501,7 +560,7 @@ export function EditorGallery({
           <Button
             type="button"
             variant="outline"
-            disabled={disabled || gallery.busy}
+            disabled={disabled || gallery.busy || gallery.refreshing}
             onClick={() => void gallery.refresh()}
           >
             {text.refresh}
@@ -511,9 +570,9 @@ export function EditorGallery({
         <p className="field-error" role="alert">
           {text.galleryUploadInvalid}
         </p>
-      ) : (
+      ) : !gallery.accessError ? (
         <EventFailureView error={gallery.error} />
-      )}
+      ) : null}
       {gallery.retry && (
         <Button
           type="button"

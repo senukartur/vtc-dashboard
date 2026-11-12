@@ -275,3 +275,15 @@
     top: 16px;
   }
 }
+.event-stage2-editor .event-editor-conflict-values {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.event-stage2-editor .event-editor-conflict-values dt {
+  color: var(--secondary);
+}
+.event-stage2-editor .event-editor-conflict-values dd {
+  margin-inline-start: 0;
+  white-space: pre-wrap;
+}

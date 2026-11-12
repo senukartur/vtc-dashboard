@@ -275,7 +275,8 @@ export function OrganizerField({
   const options = query.isError
     ? []
     : (query.data?.items.filter(({ formerMember }) => !formerMember) ?? []);
-  const current = profile.isError ? undefined : profile.data?.member.nickname;
+  const member = profile.isError ? undefined : profile.data?.member;
+  const current = member?.id === value ? member.nickname : undefined;
   const name = hint ?? current;
   return (
     <fieldset className="event-editor-section">

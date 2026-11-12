@@ -46,7 +46,8 @@ export function useEditorCatalogItem(list: CatalogList, id: string | null, local
     itemSchema,
     !!id,
   );
-  return query.data?.data.data;
+  const item = query.data?.data.data;
+  return item?.id === id ? item : undefined;
 }
 
 export function useRetainedDepot(
@@ -287,12 +288,14 @@ export function useEditorDlcs(
     })),
   });
   return entries.map((entry, index) => {
-    const item = catalog[index]?.data?.data.data;
+    const found = catalog[index]?.data?.data.data;
+    const item = found?.id === entry.id ? found : undefined;
     const saved = retained.find(({ id }) => id === entry.id);
     return {
       ...entry,
       label: item?.nameEn ?? saved?.name,
       code: item?.code ?? saved?.code,
+      game: item?.game,
     };
   });
 }

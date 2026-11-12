@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccountFailure } from "../../account/transport.js";
 import type { DTO } from "../model.js";
 import { useEventStage2Command } from "../stage-2-queries.js";
@@ -63,6 +63,11 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     }
   }
 
+  const discardRetry = useCallback(() => {
+    setRetry(null);
+    setWaitUntil(0);
+  }, []);
+
   return {
     pending,
     failure,
@@ -70,6 +75,7 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     coolingDown: !!waitUntil,
     run,
     clearFailure: () => setFailure(null),
+    discardRetry,
     retryRequest: () => retry && run(retry),
   };
 }

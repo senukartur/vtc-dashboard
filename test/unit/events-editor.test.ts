@@ -9,6 +9,7 @@ import {
   resolveDepotChoice,
   validateEventEditor,
 } from "../../apps/web/src/features/events/editor/model.ts";
+import { rebaseEventEditor } from "../../apps/web/src/features/events/editor/rebase.ts";
 import type { DTO } from "../../apps/web/src/features/events/model.ts";
 import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 
@@ -170,6 +171,12 @@ test("depot resolution uses the exact visible company and city pair", () => {
       companyId,
     ),
   ).toBeUndefined();
+  const incompatible = validateEventEditor({
+    ...completeForm(),
+    origin: { cityId, depotId: depot.id, depot: { ...depot, game: "ats" } },
+  });
+  expect(incompatible.draftErrors.originDepotId).toBe("resolveDepot");
+  expect(incompatible.complete).toBeUndefined();
   const pending = validateEventEditor(completeForm(), ["origin"]);
   expect(pending.draftErrors.originDepotId).toBe("resolveDepot");
   expect(pending.complete).toBeUndefined();
@@ -184,4 +191,90 @@ test("screenshot validation uses 10 slots, two image types and only the known by
   expect(eventScreenshotError({ type: "image/jpeg", size: 100 }, 0, 100)).toBeUndefined();
   expect(eventScreenshotError({ type: "image/webp", size: 1 }, 0, 100)).toBe("galleryType");
   expect(eventScreenshotError({ type: "image/jpeg", size: 0 }, 0, 100)).toBe("galleryType");
+});
+
+test("rebasing a local title preserves the refreshed canonical depot, distance and description", () => {
+  const base = completeForm();
+  const local = { ...base, title: "Fictional local title", distanceKm: "0,000" };
+  const saved = {
+    ...base,
+    title: "Fictional concurrent title",
+    description: "Fictional concurrent description",
+    distanceKm: "55",
+    origin: { ...base.origin, depotId: "e1320000-0000-4000-8000-000000000019" },
+  };
+  const result = rebaseEventEditor(base, local, saved);
+  expect(result.overlaps).toEqual([{ field: "title", local: local.title, saved: saved.title }]);
+  expect(result.skipped).toEqual([]);
+  expect(validateEventEditor(result.form).complete).toMatchObject({
+    title: local.title,
+    description: saved.description,
+    originDepotId: saved.origin.depotId,
+    distanceKm: "55",
+  });
+});
+
+test("rebasing a depot change against a different saved city preserves the new city and depot", () => {
+  const base = completeForm();
+  const local = {
+    ...base,
+    origin: { ...base.origin, depotId: "e1320000-0000-4000-8000-000000000019" },
+  };
+  const saved = {
+    ...base,
+    origin: {
+      cityId: "e1320000-0000-4000-8000-000000000020",
+      depotId: "e1320000-0000-4000-8000-000000000021",
+    },
+  };
+  const result = rebaseEventEditor(base, local, saved);
+  expect(result.form.origin).toEqual(saved.origin);
+  expect(result.skipped).toEqual(["originDepotId"]);
+});
+
+test("a concurrent game change retains its catalog selections and still reapplies independent edits", () => {
+  const base = completeForm();
+  const local = {
+    ...base,
+    title: "Fictional local title",
+    distanceKm: "120",
+    prescribedCargoId: "e1320000-0000-4000-8000-000000000019",
+  };
+  const saved = {
+    ...changeEditorGame(base, "ats"),
+    server: "Fictional ATS server",
+    prescribedCargoId: "e1320000-0000-4000-8000-000000000021",
+  };
+  const result = rebaseEventEditor(base, local, saved);
+  expect(result.form).toEqual({ ...saved, title: local.title });
+  expect(result.skipped).toEqual(["distanceKm", "prescribedCargoId"]);
+});
+
+test("independent manual DLC changes survive rebase", () => {
+  const removed = "e1320000-0000-4000-8000-000000000019";
+  const localId = "e1320000-0000-4000-8000-000000000020";
+  const savedId = "e1320000-0000-4000-8000-000000000021";
+  const base = { ...completeForm(), requiredDlcIds: [removed] };
+  const local = { ...base, requiredDlcIds: [localId] };
+  const saved = { ...base, requiredDlcIds: [removed, savedId] };
+  expect(rebaseEventEditor(base, local, saved).form.requiredDlcIds).toEqual([savedId, localId]);
+});
+
+test("changing to the same game in both versions does not apply old-game resets over new selections", () => {
+  const base = completeForm();
+  const local = changeEditorGame(base, "ats");
+  const saved = {
+    ...local,
+    server: "Fictional ATS server",
+    origin: {
+      cityId: "e1320000-0000-4000-8000-000000000020",
+      depotId: "e1320000-0000-4000-8000-000000000021",
+    },
+    distanceKm: "70",
+  };
+  expect(rebaseEventEditor(base, local, saved)).toMatchObject({
+    form: saved,
+    overlaps: [],
+    skipped: [],
+  });
 });

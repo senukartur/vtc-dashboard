@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "../../../shared/ui/primitives.js";
 import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
@@ -39,6 +39,7 @@ import {
   validateEventEditor,
 } from "./model.js";
 import { EditorPreview } from "./preview.js";
+import { rebaseEventEditor } from "./rebase.js";
 import { useEditorText } from "./text.js";
 import "./editor.css";
 
@@ -148,6 +149,14 @@ function EventEditorForm({
   const { definition, eventId } = actions;
   const member = definition.kind === "published" ? definition.member : null;
   const event = member?.event;
+  const latestForm = actions.latest && initialEventEditor(definitionFields(actions.latest), true);
+  const rebase =
+    latestForm &&
+    rebaseEventEditor(
+      initialEventEditor(definitionFields(definition), definition.kind !== "new"),
+      form,
+      latestForm,
+    );
 
   const origin = useEditorCatalogItem("cities", form.origin.cityId, locale);
   const destination = useEditorCatalogItem("cities", form.destination.cityId, locale);
@@ -180,9 +189,26 @@ function EventEditorForm({
       : []),
   ];
   const dlcs = useEditorDlcs(form.requiredDlcIds, derived, retainedDlcs);
+  const catalogErrors: EditorErrors = {};
+  if (form.game) {
+    for (const [field, item] of [
+      ["originCityId", origin],
+      ["destinationCityId", destination],
+      ["prescribedCargoId", cargo],
+      ["prescribedTrailerTypeId", trailer],
+    ] as const) {
+      if (item && item.game !== form.game) catalogErrors[field] = "wrongGame";
+    }
+    if (
+      dlcs.some(({ game, sources }) => game && game !== form.game && sources.includes("manual"))
+    ) {
+      catalogErrors.requiredDlcIds = "wrongGame";
+    }
+  }
   const validation = validateEventEditor(
     form,
     ends.filter((end) => blockedDepots[end]),
+    catalogErrors,
   );
   const errors =
     attempt === "publish"
@@ -245,8 +271,7 @@ function EventEditorForm({
     void actions.saveDraft(validation.draft);
   }
 
-  function publish(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function publish() {
     if (disableForm) return;
     if (!validation.complete) {
       showErrors("publish", validation.publishErrors);
@@ -254,6 +279,17 @@ function EventEditorForm({
     }
     setAttempt(null);
     void actions.publish(validation.complete);
+  }
+
+  function resolveLatest(keepEdits: boolean) {
+    if (!actions.latest || !latestForm || !rebase) return;
+    const next = keepEdits ? rebase.form : latestForm;
+    setForm(next);
+    if (organizer?.id !== next.organizerMemberId) setOrganizer(null);
+    setAttempt(keepEdits ? (actions.latest.kind === "published" ? "publish" : "draft") : null);
+    setBlockedDepots(clearDepots);
+    setFormVersion((previous) => previous + 1);
+    actions.acceptLatest();
   }
 
   const cityNames = [
@@ -284,7 +320,7 @@ function EventEditorForm({
   return (
     <div className="event-stage2-editor">
       <div className="event-editor-layout">
-        <form className="event-editor-form" onSubmit={publish} noValidate>
+        <form className="event-editor-form" onSubmit={(event) => event.preventDefault()} noValidate>
           <ErrorSummary id={id} errors={errors} />
           <fieldset className="event-editor-controls" disabled={disableForm}>
             <BasicsFields
@@ -412,16 +448,11 @@ function EventEditorForm({
             <DefinitionFeedback
               actions={actions}
               blocked={gallery.busy}
-              onLoadLatest={(latest) => {
-                setForm(initialEventEditor(definitionFields(latest), true));
-                setOrganizer(null);
-                setAttempt(null);
-                setBlockedDepots(clearDepots);
-                setFormVersion((previous) => previous + 1);
-              }}
+              rebase={rebase}
+              onResolveLatest={resolveLatest}
             />
             <div className="event-editor-inline">
-              <Button type="submit" disabled={disableForm}>
+              <Button type="button" disabled={disableForm} onClick={publish}>
                 {text[definition.kind === "published" ? "save" : "publish"]}
               </Button>
               {definition.kind !== "published" && (

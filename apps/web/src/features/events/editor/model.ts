@@ -59,7 +59,8 @@ type Issue =
   | "invalidTime"
   | "meetingAfterStart"
   | "endBeforeStart"
-  | "resolveDepot";
+  | "resolveDepot"
+  | "wrongGame";
 export type EditorErrors = Partial<Record<FieldName, Issue>>;
 
 export function eventDefinitionSeed(member: DTO["EventStage2Member"]): DraftFields {
@@ -161,8 +162,22 @@ const publishFields = [
   "organizerMemberId",
 ] as const;
 
-export function validateEventEditor(form: EditorForm, blockedDepots: readonly RouteEnd[] = []) {
-  const errors: EditorErrors = {};
+export function validateEventEditor(
+  form: EditorForm,
+  blockedDepots: readonly RouteEnd[] = [],
+  catalogErrors: EditorErrors = {},
+) {
+  const errors = { ...catalogErrors };
+  for (const end of ["origin", "destination"] as const) {
+    const { cityId, depotId, depot } = form[end];
+    if (
+      depotId &&
+      (!cityId ||
+        (depot && (depot.id !== depotId || depot.city.id !== cityId || depot.game !== form.game)))
+    ) {
+      errors[`${end}DepotId`] = "resolveDepot";
+    }
+  }
   const times = { meetingAt: null, startsAt: null, endsAt: null } as Record<
     (typeof timeFields)[number],
     string | null
