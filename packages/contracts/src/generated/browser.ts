@@ -737,7 +737,7 @@ export interface paths {
         put?: never;
         /**
          * publishQualificationRules
-         * @description VTC-094 stages an optional reason for later activation. The current implementation still validates RulesInput and requires a reason. Authorization, effective time, and immutable publication history remain as defined.
+         * @description Publishes an immutable qualification rule version. The reason is optional and must be nonblank when supplied. Both promotion threshold keys are required and accept null to disable the corresponding minimum. Authorization and effective-time guards apply.
          */
         post: operations["publishQualificationRules"];
         delete?: never;
