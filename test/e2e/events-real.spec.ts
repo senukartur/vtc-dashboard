@@ -650,15 +650,21 @@ test(
   async ({ browser, page }, info) => {
     test.setTimeout(60000);
     type DTO = components["schemas"];
-    const server = await startStage2EventsServer();
+    const server = await startStage2EventsServer(true);
+    const servers = [server];
     const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
     let legacy: Awaited<ReturnType<typeof staffContext>> | undefined;
     let blocked = 0;
 
-    async function post(request: Page["request"], path: string, data: unknown) {
+    async function post(
+      request: Page["request"],
+      path: string,
+      data: unknown,
+      origin = server.origin,
+    ) {
       return request.post(`/api/v1${path}`, {
         headers: {
-          Origin: server.origin,
+          Origin: origin,
           "X-CSRF-Token": await csrf(request),
           "Idempotency-Key": randomUUID(),
         },
@@ -667,9 +673,9 @@ test(
       });
     }
 
-    async function actor(email: string, credentialKey: string) {
+    async function actor(email: string, credentialKey: string, origin = server.origin) {
       const context = await browser.newContext({
-        baseURL: server.origin,
+        baseURL: origin,
         locale: "en-GB",
         timezoneId: "UTC",
         serviceWorkers: "block",
@@ -677,14 +683,14 @@ test(
       contexts.push(context);
       await context.route("**/*", (route) => {
         const url = new URL(route.request().url());
-        if (url.origin === server.origin && !url.username && !url.password) return route.continue();
+        if (url.origin === origin && !url.username && !url.password) return route.continue();
         blocked++;
         return route.abort("blockedbyclient");
       });
       const password = createHmac("sha256", guardedAllocation().token)
         .update(credentialKey)
         .digest("base64url");
-      const login = await post(context.request, "/auth/login", { email, password });
+      const login = await post(context.request, "/auth/login", { email, password }, origin);
       expect(login.status()).toBe(200);
       return context.newPage();
     }
@@ -704,6 +710,7 @@ test(
         expect(response.status()).toBe(200);
         expect(response.headers()["x-vtc-events-stage2"]).toBe("1");
       }
+      expect(managerSelf.headers()["x-vtc-events-drafts"]).toBe("1");
       const organizer = ((await managerSelf.json()) as DTO["EnvelopeSelf"]).data.member.id;
       const suffix = randomUUID().slice(0, 8);
       const title = `Fictional Stage 2 convoy ${suffix}`;
@@ -746,10 +753,57 @@ test(
         throw new Error("STAGE_2_SAVED_DRAFT_MISSING");
       const draftPath = `/api/v1/admin/events/drafts/${draft.id}`;
 
+      const publishedOnlyServer = await startStage2EventsServer(false);
+      servers.push(publishedOnlyServer);
+      const publishedOnly = await actor(
+        "browser@example.invalid",
+        "browser-identity-password",
+        publishedOnlyServer.origin,
+      );
+      const publishedOnlySelf = await publishedOnly.request.get("/api/v1/me");
+      expect(publishedOnlySelf.status()).toBe(200);
+      expect(publishedOnlySelf.headers()["x-vtc-events-stage2"]).toBe("1");
+      expect(publishedOnlySelf.headers()["x-vtc-events-drafts"]).toBeUndefined();
+      let draftReads = 0;
+      publishedOnly.on("request", (request) => {
+        if (
+          request.method() === "GET" &&
+          new URL(request.url()).pathname.startsWith("/api/v1/admin/events")
+        )
+          draftReads++;
+      });
+      const publishedOnlyList = publishedOnly.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await publishedOnly.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
+      await catalogLanguage(publishedOnly);
+      const fallbackList = await publishedOnlyList;
+      expect(fallbackList.status()).toBe(200);
+      const fallbackSearch = new URL(fallbackList.url()).searchParams;
+      expect(fallbackSearch.has("locale")).toBe(true);
+      expect(fallbackSearch.get("period")).toBe("upcoming");
+      expect(fallbackSearch.has("cursor")).toBe(false);
+      await expect(
+        publishedOnly.getByRole("main").getByRole("link", { name: title, exact: true }),
+      ).toBeVisible();
+      await expect(
+        publishedOnly.getByRole("heading", { name: draftTitle, exact: true }),
+      ).toHaveCount(0);
+      await expect(publishedOnly.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(
+        publishedOnly.getByRole("link", { name: "Create event", exact: true }),
+      ).toBeVisible();
+      expect(draftReads).toBe(0);
+
       legacy = await staffContext();
       const legacySelf = await legacy.get("/api/v1/me");
       expect(legacySelf.status()).toBe(200);
       expect(legacySelf.headers()["x-vtc-events-stage2"]).toBeUndefined();
+      expect(legacySelf.headers()["x-vtc-events-drafts"]).toBeUndefined();
       await page.context().addCookies((await legacy.storageState()).cookies);
       const legacyRead = page.waitForResponse(
         (response) =>
@@ -860,7 +914,7 @@ test(
       try {
         await Promise.all([...contexts.map((context) => context.close()), legacy?.dispose()]);
       } finally {
-        await server.close();
+        await Promise.all(servers.map((item) => item.close()));
       }
     }
   },

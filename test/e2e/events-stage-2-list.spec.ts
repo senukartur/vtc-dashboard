@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
+import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import {
   stage2DraftId,
   stage2EventId,
@@ -15,6 +16,21 @@ type DTO = components["schemas"];
 const memberList = /\/api\/v1\/events(?:\?|$)/;
 const draftList = /\/api\/v1\/admin\/events\?/;
 const discardPath = `/api/v1/admin/events/${stage2DraftId}`;
+
+async function mockDraftsEnabled(page: Page, access: "member" | "manager" = "manager") {
+  const events = await mockEventsStage2(page, access);
+  await page.route("**/api/v1/me", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const self = accountFixture("en");
+    if (access === "manager") self.data.capabilities.push("events.manage");
+    self.data.preferences.displayTimezone = "Europe/Warsaw";
+    return route.fulfill({
+      json: self,
+      headers: { ETag: '"v1"', "X-VTC-Events-Stage2": "1", "X-VTC-Events-Drafts": "1" },
+    });
+  });
+  return events;
+}
 
 function projection() {
   return stage2Fixture("listEvents", "own-response")
@@ -247,26 +263,39 @@ test(
   },
 );
 
-test(
-  "a member cannot request drafts by bookmarking the tab",
-  browserCase(["@functional"]),
-  async ({ page }) => {
-    await mockEventsStage2(page, "member");
-    const reads = recordReads(page);
-    await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
-    await expect(
-      page.getByRole("main").getByRole("link", { name: "Fictional northern convoy" }),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Upcoming" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(reads.filter(({ pathname }) => pathname === "/api/v1/admin/events")).toEqual([]);
-    const list = reads.find(({ pathname }) => pathname === "/api/v1/events");
-    expect(list?.searchParams.get("period")).toBe("upcoming");
-    expect(list?.searchParams.has("cursor")).toBe(false);
-  },
-);
+for (const access of ["member", "manager"] as const) {
+  test(
+    access === "member"
+      ? "a member cannot request drafts by bookmarking the enabled tab"
+      : "a manager without the draft rollout opens Upcoming from a draft bookmark",
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      if (access === "member") await mockDraftsEnabled(page, access);
+      else await mockEventsStage2(page, access);
+      const reads = recordReads(page);
+      await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
+      await expect(
+        page.getByRole("main").getByRole("link", { name: "Fictional northern convoy" }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Upcoming" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(page.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Continue", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Discard draft:/ })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: "Create event", exact: true })).toHaveCount(
+        access === "manager" ? 1 : 0,
+      );
+      expect(reads.filter(({ pathname }) => pathname.startsWith("/api/v1/admin/events"))).toEqual(
+        [],
+      );
+      const list = reads.find(({ pathname }) => pathname === "/api/v1/events");
+      expect(list?.searchParams.get("period")).toBe("upcoming");
+      expect(list?.searchParams.has("cursor")).toBe(false);
+    },
+  );
+}
 
 test(
   "a rejected cursor can be reset from the keyboard",
@@ -293,7 +322,7 @@ test(
   "a manager confirms discarding an incomplete draft and retries the exact attempt",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    await mockEventsStage2(page, "manager");
+    await mockDraftsEnabled(page);
     const reads = recordReads(page);
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
@@ -356,7 +385,7 @@ test(
   "a stale draft discard refreshes authority and requires a new confirmation",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const mock = await mockEventsStage2(page, "manager");
+    const mock = await mockDraftsEnabled(page);
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
     const entry = drafts.data.items[0];

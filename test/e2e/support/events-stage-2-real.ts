@@ -8,16 +8,16 @@ import { accountSecret } from "./account.ts";
 import { browserTripConfig } from "./trip-config.ts";
 
 const host = "127.0.0.1";
-const port = 4174;
-const origin = `http://${host}:${port}`;
 
 function built<T>(file: string): Promise<T> {
   return import(pathToFileURL(resolve(`apps/api/dist/${file}.js`)).href);
 }
 
 /** Start the compiled Stage 2 variant beside the legacy browser server, on the owned test DB. */
-export async function startStage2EventsServer() {
+export async function startStage2EventsServer(draftsEnabled: boolean) {
   const settings = guardedSettings();
+  const port = draftsEnabled ? 4174 : 4175;
+  const origin = `http://${host}:${port}`;
   const [{ createApp }, { readConfig }, { composeIdentity }] = await Promise.all([
     built<typeof import("../../../apps/api/src/app.ts")>("app"),
     built<typeof import("../../../apps/api/src/platform/config/env.ts")>("platform/config/env"),
@@ -39,6 +39,7 @@ export async function startStage2EventsServer() {
       .digest("hex"),
     EVENTS_ENABLED: "true",
     EVENTS_ROUTE_ENABLED: "true",
+    EVENTS_DRAFTS_ENABLED: String(draftsEnabled),
     EVENTS_CURSOR_KEY: browserTripConfig().events.cursorKey,
     MYSQL_HOST: settings.host,
     MYSQL_PORT: String(settings.port),

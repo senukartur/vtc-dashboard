@@ -9,6 +9,7 @@ import { EventDraftList } from "./EventDraftList.js";
 import { EventListCard } from "./EventListCard.js";
 import { eventListCopy } from "./event-list-copy.js";
 import { useEventListLocale } from "./event-list-queries.js";
+import { isEventDraftsEnabled } from "./event-stage-2-mode.js";
 import { periodFrom } from "./model.js";
 import { useEventStage2Query } from "./stage-2-queries.js";
 import { eventStage2Reads } from "./stage-2-transport.js";
@@ -26,13 +27,13 @@ export function MemberEventsPage() {
   const heading = useRef<HTMLHeadingElement>(null);
   const canRead = self?.capabilities.includes("company.read") === true;
   const canManage = self?.capabilities.includes("events.manage") === true;
+  const canBrowseDrafts = canManage && isEventDraftsEnabled(session);
   const canRespond = self?.capabilities.includes("events.respond") === true;
   const requestedPeriod = search.get("period");
   const publishedPeriod = periodFrom(requestedPeriod);
-  const isDrafts = canManage && requestedPeriod === "drafts";
+  const isDrafts = canBrowseDrafts && requestedPeriod === "drafts";
   const period = isDrafts ? "drafts" : publishedPeriod;
-  // Discard cursors from a draft view after a privilege change. Otherwise the API owns cursor
-  // validation, so expired or malformed bookmarks retain the first-page recovery action.
+  // Drop draft cursors when the draft view is unavailable. The API validates other cursors.
   const cursor = requestedPeriod === "drafts" && !isDrafts ? null : search.get("cursor");
   const filter = { limit: 12, locale, ...(cursor ? { cursor } : {}) };
   const member = useEventStage2Query(
@@ -51,7 +52,7 @@ export function MemberEventsPage() {
   const options = [
     { value: "upcoming", label: t("upcoming") },
     { value: "past", label: t("past") },
-    ...(canManage ? [{ value: "drafts", label: eventListCopy[locale].drafts }] : []),
+    ...(canBrowseDrafts ? [{ value: "drafts", label: eventListCopy[locale].drafts }] : []),
   ];
 
   return (
