@@ -4,6 +4,7 @@ import { useSession } from "../../app/Session.js";
 import type { Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import { useUpcomingEventCard } from "../events/event-list-queries.js";
 import { RecentTripsWidget, UpcomingEventWidget } from "./blocks.js";
 import {
   ActualDistanceChart,
@@ -28,7 +29,6 @@ import {
   useRecentCompanyTrips,
   useReportingTimezoneSource,
   useReviewQueueTrips,
-  useUpcomingEvent,
 } from "./queries.js";
 import { untilAnchored } from "./view-model.js";
 import { WorkspaceActions } from "./WorkspaceActions.js";
@@ -105,7 +105,7 @@ function DashboardContent() {
   // keeps its own enabled observer of the nearest event.
   const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
   const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
-  const upcomingEventQuery = useUpcomingEvent({ enabled: anchored });
+  const upcomingEventQuery = useUpcomingEventCard(anchored);
   const reviewTripsQuery = useReviewQueueTrips({ enabled: anchored });
   // Follows the game filter only: the trips list has no date filter for the period.
   const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
@@ -265,6 +265,7 @@ function DashboardContent() {
                 locale={locale}
                 displayTimezone={displayTimezone}
                 canRespond={capabilities.includes("events.respond")}
+                started={upcomingEventQuery.started}
               />
             </>
           )}

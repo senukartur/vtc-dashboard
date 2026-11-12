@@ -10,7 +10,7 @@ import { landingPath, sidebarStorageKey } from "./navigation-model.js";
 import { writeStoredLocale } from "../shared/i18n.js";
 import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
-import { NearestEvent } from "../features/events/components.js";
+import { UpcomingEventChip } from "../features/events/UpcomingEventChip.js";
 import "../features/events/events.css";
 import { publicContent } from "../features/landing/content.js";
 import { LandingFooter } from "../features/landing/LandingFooter.js";
@@ -197,7 +197,7 @@ export function AppLayout({
               <>
                 <Breadcrumb />
                 <div className="topbar-actions">
-                  {session.state === "authenticated" && <NearestEvent variant="chip" />}
+                  {session.state === "authenticated" && <UpcomingEventChip />}
                   {bell}
                   {userMenu && <UserMenu placement="topbar" />}
                   <Navigation

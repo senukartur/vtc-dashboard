@@ -15,9 +15,14 @@ import {
 } from "./stage-2-transport.js";
 
 const prefix = "events-stage-2";
+const upcomingPrefix = "dashboard-upcoming-event";
+
+export function isEventStage2QueryKey(key: readonly unknown[]) {
+  return key[0] === prefix || (key[0] === upcomingPrefix && key[2] === prefix);
+}
 type Session = ReturnType<typeof useSession>;
 
-function sessionScope(session: Session) {
+export function eventStage2SessionScope(session: Session) {
   const self = session.self;
   return self
     ? JSON.stringify([self.member.id, session.generation, self.identityEpoch, self.capabilities])
@@ -54,7 +59,16 @@ function useStage2Read<T>(
   const publicRead = spec.access === "public";
   const allowed = hasAccess(session, spec.access);
   const query = useQuery({
-    queryKey: [prefix, publicRead ? "public" : sessionScope(session), spec.access, spec.path, name],
+    queryKey:
+      name === "EventStage2EnvelopeUpcoming"
+        ? [upcomingPrefix, eventStage2SessionScope(session), prefix, spec.access, spec.path, name]
+        : [
+            prefix,
+            publicRead ? "public" : eventStage2SessionScope(session),
+            spec.access,
+            spec.path,
+            name,
+          ],
     meta: { private: !publicRead },
     enabled: enabled && allowed,
     retry: false,
@@ -110,13 +124,13 @@ export function useEventStage2Image(spec: EventStage2Content, enabled = true) {
 export function useEventStage2Command<K extends EventStage2Envelope>() {
   const session = useSession();
   const client = useQueryClient();
-  const scope = sessionScope(session);
+  const scope = eventStage2SessionScope(session);
   const inFlight = useRef<AbortController | null>(null);
 
   function invalidate() {
     return client.invalidateQueries({
       predicate: (query) =>
-        query.queryKey[0] === prefix &&
+        isEventStage2QueryKey(query.queryKey) &&
         (query.queryKey[1] === scope || query.queryKey[1] === "public"),
     });
   }

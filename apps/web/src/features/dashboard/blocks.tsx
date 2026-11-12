@@ -1,23 +1,19 @@
-import {
-  type FormEvent,
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { useSession } from "../../app/Session.js";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
 import { formatUtc, type Locale } from "../../shared/formatting.js";
-import { Button, Card, Label } from "../../shared/ui/primitives.js";
-import { EventFailureView, KeepFocusButton } from "../events/components.js";
-import { responseInput } from "../events/model.js";
-import { useEventCommand, useEventQuery } from "../events/queries.js";
-import { countsView, type EventPhase, eventPhase, responseTone } from "../events/view-model.js";
+import { Card } from "../../shared/ui/primitives.js";
+import { KeepFocusButton } from "../events/components.js";
+import { EventQuickResponse } from "../events/EventQuickResponse.js";
+import { EventResponseSummary } from "../events/EventResponseSummary.js";
+import {
+  type ResponseProjection,
+  useEventResponseScope,
+  useEventResponseView,
+} from "../events/event-quick-response.js";
+import { useEventQuery } from "../events/queries.js";
+import { countsView } from "../events/view-model.js";
 import { Skeleton } from "./components.js";
 import type { DTO } from "./transport.js";
 import {
@@ -27,13 +23,11 @@ import {
   type QueryView,
   RECENT_TRIPS_LIMIT,
   recentTripRow,
-  responsePressed,
   retainsError,
-  rsvpView,
 } from "./view-model.js";
 import "./dashboard.css";
 
-type EventData = DTO["OptionalEvent"];
+type EventData = DTO["EventStage2Upcoming"] | null;
 type TripListData = DTO["ListTripSummary"];
 
 /**
@@ -183,52 +177,32 @@ export function RecentTripsWidget({
   );
 }
 
-/** Nearest scheduled company event ("convoy"): countdown, participants and the own quick response. */
+/** Nearest scheduled company event ("convoy"): countdown, participants and the member’s response. */
 export function UpcomingEventWidget({
   query,
   locale,
   displayTimezone,
   canRespond,
+  started,
 }: {
   query: QueryView<EventData>;
   locale: Locale;
   displayTimezone: string;
   /** events.respond: presentation only, the server still checks the permission. */
   canRespond: boolean;
+  started: boolean;
 }) {
   const { t } = useTranslation("dashboard");
-  const session = useSession();
   const headingId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const event = query.data ?? null;
-  // One clock drives both the countdown and the response cutoff.
+  const event = query.data?.event;
   const now = useCountdownNow(event?.startsAt ?? null);
-  const phase: EventPhase = event ? eventPhase(event, now) : "open";
   const left = event ? countdown(event.startsAt, now) : null;
   const { retrying, retry } = useBlockRetry(query);
   const view = retrying && query.data === undefined ? "error" : blockView(query, (d) => d === null);
 
-  // At the start the endpoint moves on to the next event; refetch once per event and identity.
-  const refreshed = useRef<string | null>(null);
-  const stamp = event
-    ? JSON.stringify([
-        session.self?.member.id,
-        session.generation,
-        session.self?.identityEpoch,
-        event.id,
-        event.startsAt,
-      ])
-    : null;
-  useEffect(() => {
-    if (phase === "started" && stamp && refreshed.current !== stamp) {
-      refreshed.current = stamp;
-      void query.refetch({ cancelRefetch: false });
-    }
-  }, [phase, stamp, query.refetch]);
-
   let body: ReactNode;
-  if (view === "ready" && event) {
-    const count = <GoingCount id={event.id} />;
+  if (view === "ready" && event && query.data) {
     body = (
       <>
         <div className="dashboard-event-info">
@@ -239,28 +213,21 @@ export function UpcomingEventWidget({
             </time>{" "}
             ({displayTimezone})
           </p>
-          <p className="dashboard-muted dashboard-event-route">{event.route}</p>
+          {event.origin && event.destination ? (
+            <p className="dashboard-muted dashboard-event-route">
+              {event.origin.label} → {event.destination.label}
+            </p>
+          ) : (
+            event.route && <p className="dashboard-muted dashboard-event-route">{event.route}</p>
+          )}
         </div>
-        {canRespond && phase === "open" ? (
-          <ConvoyResponse
-            key={event.id}
-            event={event}
-            phase={phase}
-            heading={heading}
-            onConflict={() => void query.refetch({ cancelRefetch: false })}
-          >
-            {count}
-          </ConvoyResponse>
-        ) : (
-          <div className="dashboard-rsvp">
-            {phase !== "open" && (
-              <Link to="/account/events" className="dashboard-head-link">
-                {t("events:checkUpcoming")}
-              </Link>
-            )}
-            {count}
-          </div>
-        )}
+        <UpcomingResponse
+          key={event.id}
+          projection={query.data}
+          started={started}
+          canRespond={canRespond}
+          focusHeading={() => heading.current?.focus()}
+        />
         <Link to={`/account/events/${event.id}`} className="dashboard-head-link">
           {t("upcomingEvent.viewEvent")}
         </Link>
@@ -324,8 +291,44 @@ export function UpcomingEventWidget({
   );
 }
 
+function UpcomingResponse({
+  projection,
+  started,
+  canRespond,
+  focusHeading,
+}: {
+  projection: ResponseProjection;
+  started: boolean;
+  canRespond: boolean;
+  focusHeading: () => void;
+}) {
+  const { t } = useTranslation("events");
+  const scope = useEventResponseScope();
+  const response = useEventResponseView(projection);
+  const { event } = projection;
+  return (
+    <div className="dashboard-rsvp">
+      {started ? (
+        <Link to="/account/events" className="dashboard-head-link">
+          {t("checkUpcoming")}
+        </Link>
+      ) : canRespond ? (
+        <>
+          <EventResponseSummary response={response.response} />
+          {projection.myResponse !== null &&
+            response.version !== null &&
+            event.status === "scheduled" && (
+              <EventQuickResponse key={scope} projection={projection} focusTarget={focusHeading} />
+            )}
+        </>
+      ) : null}
+      <GoingCount id={event.id} optimistic={response.goingCount} />
+    </div>
+  );
+}
+
 /** Participants of the event; a missing count is "unavailable", never zero. */
-function GoingCount({ id }: { id: string }) {
+function GoingCount({ id, optimistic }: { id: string; optimistic: number | undefined }) {
   const { t } = useTranslation("dashboard");
   // The detail page's path, so a committed response refreshes this count too.
   const counts = useEventQuery(`/events/${id}/response-counts`, "EnvelopeEventResponseCounts");
@@ -337,244 +340,12 @@ function GoingCount({ id }: { id: string }) {
   return (
     <p className="dashboard-going">
       {view.state === "ready" ? (
-        t("upcomingEvent.going", { count: view.participating })
+        t("upcomingEvent.going", { count: optimistic ?? view.participating })
       ) : view.state === "loading" ? (
         <Skeleton className="dashboard-skeleton-inline" />
       ) : (
         t("upcomingEvent.goingUnavailable")
       )}
     </p>
-  );
-}
-
-/**
- * Own quick response while the event is open, for members with events.respond. It reads and
- * writes the detail page's my-response path through the events command hook, so ETag/If-Match,
- * idempotency keys, CSRF, held retries and cache refresh are the same as on the detail page.
- * The decline reason lives only in this component's state.
- */
-function ConvoyResponse({
-  event,
-  phase,
-  heading,
-  onConflict,
-  children,
-}: {
-  event: NonNullable<EventData>;
-  phase: EventPhase;
-  heading: RefObject<HTMLHeadingElement | null>;
-  /**
-   * Refetches the nearest event. The command hook refreshes only the events caches, so after a
-   * cancellation or reschedule the overview would keep showing open controls for a closed event.
-   */
-  onConflict: () => void;
-  /** The participants count, shown at the end of the response row. */
-  children: ReactNode;
-}) {
-  const { t } = useTranslation("dashboard");
-  const id = useId();
-  const path = `/events/${event.id}/my-response`;
-  const query = useEventQuery(path, "EnvelopeRsvp");
-  const command = useEventCommand((failure) => {
-    if (failure.kind === "conflict") onConflict();
-  });
-  // A Retry without data keeps "unavailable" (and focus on Retry) until it settles.
-  const { retrying, retry } = useBlockRetry(query);
-  const view = rsvpView({
-    canRespond: true,
-    phase,
-    query: retrying ? { isError: true, error: null } : query,
-  });
-  const [declining, setDeclining] = useState(false);
-  const [reason, setReason] = useState("");
-  const [invalid, setInvalid] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
-  const cantGo = useRef<HTMLButtonElement>(null);
-
-  // At the start, a permission change or a new nearest event this area unmounts. If focus was
-  // inside, move it to the block heading instead of losing it to the document body.
-  useLayoutEffect(() => {
-    const node = body.current;
-    return () => {
-      if (node?.contains(document.activeElement)) queueMicrotask(() => heading.current?.focus());
-    };
-  }, [heading]);
-
-  const current = view.state === "ready" ? view.current : null;
-  const etag = view.state === "ready" ? view.etag : null;
-  // Unavailable controls stay focusable (aria-disabled); the handlers ignore them.
-  const blocked = phase !== "open" || command.pending || command.seconds > 0 || !etag;
-  const pressed = current ? responsePressed(current.response, declining) : null;
-
-  async function going() {
-    if (blocked || !current) return;
-    setSaved(false);
-    setInvalid(false);
-    setDeclining(false);
-    if (current.response === "participating") return;
-    const result = await command.run(
-      path,
-      { response: "participating" },
-      "EnvelopeRsvp",
-      etag,
-      "PUT",
-    );
-    if (result) setSaved(true);
-  }
-
-  function openDecline() {
-    if (blocked || !current) return;
-    setSaved(false);
-    if (declining) return;
-    setReason(current.declineReason ?? "");
-    setInvalid(false);
-    setDeclining(true);
-  }
-
-  function cancelDecline() {
-    if (command.pending) return;
-    setDeclining(false);
-    setInvalid(false);
-    setSaved(false);
-    cantGo.current?.focus();
-  }
-
-  async function submit(formEvent: FormEvent<HTMLFormElement>) {
-    formEvent.preventDefault();
-    if (blocked) return;
-    const input = responseInput("declined", reason);
-    setInvalid(!input);
-    setSaved(false);
-    if (!input) return;
-    const result = await command.run(path, input, "EnvelopeRsvp", etag, "PUT");
-    if (result) {
-      // Focus the toggle before the form (and its submit button) unmounts.
-      cantGo.current?.focus();
-      setDeclining(false);
-      setSaved(true);
-    }
-  }
-
-  let state: ReactNode;
-  if (view.state === "ready" && current) {
-    const tone = responseTone(current.response);
-    state = (
-      <p className={`dashboard-rsvp-state dashboard-tone-${tone.tone}`}>
-        {command.pending ? (
-          t("events:savingResponse")
-        ) : (
-          <>
-            <span aria-hidden="true">{tone.symbol}</span>{" "}
-            {t(
-              current.response === "participating"
-                ? "events:stateParticipating"
-                : current.response === "declined"
-                  ? "events:stateDeclined"
-                  : "events:stateUnanswered",
-            )}
-          </>
-        )}
-      </p>
-    );
-  } else if (view.state === "unavailable") {
-    state = (
-      <div className="dashboard-block-error">
-        <p>{t("upcomingEvent.responseUnavailable")}</p>
-        <KeepFocusButton
-          variant="outline"
-          focusTarget={() => heading.current?.focus()}
-          onClick={retry}
-        >
-          {t("upcomingEvent.retry")}
-        </KeepFocusButton>
-      </div>
-    );
-  } else if (view.state === "forbidden") {
-    state = <p className="dashboard-muted">{t("upcomingEvent.forbidden")}</p>;
-  } else {
-    state = <p className="dashboard-muted">{t("upcomingEvent.responseLoading")}</p>;
-  }
-
-  const showToggles = view.state === "ready" || view.state === "loading";
-  return (
-    <div className="dashboard-rsvp-body" ref={body}>
-      {state}
-      <div className="dashboard-rsvp">
-        {showToggles && (
-          <fieldset aria-label={t("events:response")} className="dashboard-rsvp-group">
-            <Button
-              type="button"
-              variant="outline"
-              className="dashboard-toggle dashboard-toggle-going"
-              aria-pressed={pressed?.going}
-              aria-disabled={blocked || undefined}
-              onClick={() => void going()}
-            >
-              {t("upcomingEvent.goingButton")}
-            </Button>
-            <Button
-              ref={cantGo}
-              type="button"
-              variant="outline"
-              className="dashboard-toggle dashboard-toggle-decline"
-              aria-pressed={pressed?.cantGo}
-              aria-disabled={blocked || undefined}
-              onClick={openDecline}
-            >
-              {t("upcomingEvent.cantGoButton")}
-            </Button>
-          </fieldset>
-        )}
-        {children}
-      </div>
-      {declining && current && (
-        // noValidate: the translated inline error replaces the browser's required bubble.
-        <form className="dashboard-decline" noValidate onSubmit={(e) => void submit(e)}>
-          <Label htmlFor={`${id}-reason`}>{t("events:declineReason")}</Label>
-          <textarea
-            className="input dashboard-reason"
-            id={`${id}-reason`}
-            required
-            maxLength={2048}
-            aria-describedby={invalid ? `${id}-hint ${id}-error` : `${id}-hint`}
-            aria-invalid={invalid || undefined}
-            value={reason}
-            readOnly={command.pending}
-            onChange={(e) => {
-              setReason(e.target.value);
-              setSaved(false);
-            }}
-          />
-          <p className="dashboard-muted" id={`${id}-hint`}>
-            {t("events:declineHint")}
-          </p>
-          {invalid && (
-            <p className="field-error" id={`${id}-error`} role="alert">
-              {t("upcomingEvent.reasonRequired")}
-            </p>
-          )}
-          <div className="dashboard-decline-actions">
-            <Button type="submit" aria-disabled={blocked || undefined}>
-              {t(command.pending ? "events:savingResponse" : "events:respond")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              aria-disabled={command.pending || undefined}
-              onClick={cancelDecline}
-            >
-              {t("upcomingEvent.cancelDecline")}
-            </Button>
-          </div>
-        </form>
-      )}
-      <EventFailureView error={command.failure} seconds={command.seconds} />
-      {saved && (
-        <p role="status" className="confirmation">
-          {t("events:savedResponse")}
-        </p>
-      )}
-    </div>
   );
 }
