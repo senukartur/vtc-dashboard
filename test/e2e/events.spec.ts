@@ -747,7 +747,7 @@ test.describe("Stage 2 draft entry", () => {
     "a manager opens a draft directly, saves it and reloads without requesting media",
     browserCase(["@functional", "@smoke-events"]),
     async ({ page }) => {
-      await mockEventsStage2(page);
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       const draft = fixture();
       const retained = {
         originCityId: "e1320000-0000-4000-8000-000000000002",
@@ -800,7 +800,7 @@ test.describe("Stage 2 draft entry", () => {
     "conflicting draft saves require explicit review before using a newer ETag",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockEventsStage2(page);
+      await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       const draft = fixture();
       const attempts: { etag: string | undefined; body: typeof draft.data.fields }[] = [];
       await page.route(`**${path}`, async (route) => {
@@ -858,7 +858,7 @@ test.describe("Stage 2 draft entry", () => {
         : "a terminal draft write closes an opened editor",
       browserCase(["@functional"]),
       async ({ page }) => {
-        await mockEventsStage2(page);
+        await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
         const draft = fixture();
         let writes = 0;
         let terminalReads = 0;
@@ -895,7 +895,7 @@ test.describe("Stage 2 draft entry", () => {
     "malformed or repeated draft IDs cannot open a draft or start creation",
     browserCase(["@functional"]),
     async ({ page }) => {
-      const mock = await mockEventsStage2(page);
+      const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       for (const invalid of [
         "?draftId=",
         "?draftId=bad",
@@ -911,11 +911,54 @@ test.describe("Stage 2 draft entry", () => {
     },
   );
 
+  for (const routesEnabled of [false, true]) {
+    test(
+      routesEnabled
+        ? "a manager sees legacy creation when routes are on and drafts are off"
+        : "a manager sees legacy creation when routes and drafts are off",
+      browserCase(["@functional"]),
+      async ({ page }) => {
+        if (routesEnabled) await mockEventsStage2(page);
+        else await mockEvents(page, true);
+        const draftTraffic: string[] = [];
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (
+            path.startsWith("/api/v1/admin/events/drafts/") ||
+            (path === "/api/v1/admin/events" && request.method() === "POST")
+          ) {
+            draftTraffic.push(request.method());
+          }
+        });
+        const [session] = await Promise.all([
+          page.waitForResponse((response) => new URL(response.url()).pathname === "/api/v1/me"),
+          page.goto(url),
+        ]);
+        expect(session.status()).toBe(200);
+        expect(await session.headerValue("x-vtc-events-stage2")).toBe(routesEnabled ? "1" : null);
+        expect(await session.headerValue("x-vtc-events-drafts")).toBeNull();
+        await expect(
+          page.getByRole("alert").filter({ hasText: "Event drafts are unavailable." }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Save draft" })).toHaveCount(0);
+        expect(draftTraffic).toEqual([]);
+
+        await page.goto("/account/events/new");
+        await expect(
+          page.getByRole("heading", { name: "Create event", exact: true }),
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: "Event title" })).toBeVisible();
+        expect(draftTraffic).toEqual([]);
+      },
+    );
+  }
+
   test(
     "a member without event management cannot request a draft",
     browserCase(["@functional"]),
     async ({ page }) => {
-      const mock = await mockEventsStage2(page, "member");
+      const mock = await mockEventsStage2(page, "member", "en", { draftsRollout: true });
       await page.goto(url);
       await expect(
         page.getByRole("alert").filter({ hasText: "You no longer have access to this action." }),
@@ -929,7 +972,7 @@ test.describe("Stage 2 draft entry", () => {
     "an unavailable draft stays on the protected draft entry",
     browserCase(["@functional"]),
     async ({ page }) => {
-      const mock = await mockEventsStage2(page);
+      const mock = await mockEventsStage2(page, "manager", "en", { draftsRollout: true });
       mock.statusByRequest.set(`GET /admin/events/drafts/${stage2DraftId}`, 404);
       await page.goto(url);
       await expect(
