@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApplicationForm } from "../admissions/ApplicationForm.js";
-import { useEventQuery } from "../events/queries.js";
-import { ConvoyChip, ConvoySection, MotionToggle, publicConvoysPath } from "./convoys.js";
+import { useConvoyQuery } from "./convoy-query.js";
+import { ConvoyChip, ConvoySection, MotionToggle } from "./convoys.js";
 import { HeroVideo } from "./HeroVideo.js";
 import { LandingContent } from "./LandingContent.js";
 import { StatsBand } from "./StatsBand.js";
@@ -10,10 +10,10 @@ import { StatsBand } from "./StatsBand.js";
 export function LandingPage() {
   const { i18n } = useTranslation(),
     locale = i18n.resolvedLanguage === "en" ? "en" : "ru",
-    query = useEventQuery(publicConvoysPath, "EnvelopeListEventPublic"),
+    query = useConvoyQuery(),
     [paused, setPaused] = useState(false),
     refreshed = useRef(new Set<string>()),
-    items = query.data?.data.data.items,
+    items = query.data,
     hasScheduled = !!items?.some((event) => event.status === "scheduled"),
     { refetch } = query;
   // A started convoy refreshes the shared list once, so the chip can move to the next one.

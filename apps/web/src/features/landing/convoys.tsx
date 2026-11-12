@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Badge } from "../../shared/ui/primitives.js";
 import { EventState, useEventTimezone } from "../events/components.js";
-import { type DTO, eventTime } from "../events/model.js";
+import { eventTime } from "../events/model.js";
+import { ConvoyCover } from "./ConvoyCover.js";
 import { type PublicLocale, publicContent } from "./content.js";
+import type { Convoy } from "./convoy-query.js";
 import {
   convoyDateParts,
   formatCountdown,
@@ -13,10 +15,6 @@ import {
   nextConvoy,
   routeLabel,
 } from "./model.js";
-
-type Convoy = DTO["EventPublic"];
-/** One shared public read feeds the countdown pill and the cards. */
-export const publicConvoysPath = "/public/events?period=upcoming&limit=3";
 
 /**
  * Departure pill for the next scheduled convoy with a minute countdown. The accessible name is
@@ -115,7 +113,7 @@ export function ConvoySection({
   locale,
 }: {
   query: {
-    data: { data: DTO["EnvelopeListEventPublic"] } | undefined;
+    data: readonly Convoy[] | undefined;
     isPending: boolean;
     isError: boolean;
     error: unknown;
@@ -126,7 +124,7 @@ export function ConvoySection({
   const { t } = useTranslation("events"),
     c = publicContent[locale],
     timezone = useEventTimezone(true),
-    items = query.data?.data.data.items;
+    items = query.data;
   return (
     <section
       id="convoys"
@@ -149,10 +147,14 @@ export function ConvoySection({
           <>
             <ul className="landing-convoy-grid">
               {items.map((event) => {
-                const date = convoyDateParts(event.startsAt, locale, timezone);
+                const date = convoyDateParts(event.startsAt, locale, timezone),
+                  route = routeLabel(event);
                 return (
                   <li key={event.id}>
                     <article className="landing-convoy-card">
+                      {"hasCover" in event && event.hasCover && (
+                        <ConvoyCover id={event.id} title={event.title} />
+                      )}
                       <span className="landing-convoy-date" aria-hidden="true">
                         <strong>{date.day}</strong>
                         <span>{date.month}</span>
@@ -167,7 +169,7 @@ export function ConvoySection({
                         <h3>
                           <Link to={`/events/${event.id}`}>{event.title}</Link>
                         </h3>
-                        <p className="landing-convoy-route">{routeLabel(event)}</p>
+                        {route !== null && <p className="landing-convoy-route">{route}</p>}
                         <p className="landing-convoy-facts">
                           <span className="visually-hidden">{t("startsAt")}: </span>
                           {eventTime(event.startsAt, locale, timezone)}

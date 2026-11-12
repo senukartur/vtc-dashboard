@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto";
 import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { eventTranslations } from "../../apps/web/src/features/events/translations.ts";
 import { publicContent } from "../../apps/web/src/features/landing/content.ts";
+import { stage2EventId, stage2Fixture } from "../fixtures/events-stage-2.ts";
 import { testConnection } from "../persistence/support.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -597,6 +599,255 @@ const liveClock = new Date("2026-10-30T12:00:00.000Z");
 const landingPath = (locale: Locale) => (locale === "en" ? "/en" : "/");
 const noOverflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+
+const coverPath = `/api/v1/public/events/${stage2EventId}/cover`;
+function deferred() {
+  let resolve = () => {};
+  const promise = new Promise<void>((release) => {
+    resolve = release;
+  });
+  return { promise, resolve };
+}
+
+function stage2LandingList(locale: Locale, hasCover: boolean) {
+  const { response } = stage2Fixture("listPublicEvents", "structured-and-legacy");
+  const envelope = response as components["schemas"]["EventStage2EnvelopePublicList"];
+  const [covered, uncovered] = envelope.data.items;
+  if (!covered || !uncovered) throw new Error("Missing synthetic landing convoys");
+  covered.hasCover = hasCover;
+  covered.title = locale === "ru" ? longRuTitle : "Fictional northern convoy";
+  covered.route = "Unused fictional legacy route";
+  uncovered.title = locale === "ru" ? "Вымышленный конвой без обложки" : "Fictional coastal convoy";
+  const missingRoute = {
+    ...uncovered,
+    id: "e1320000-0000-4000-8000-000000000017",
+    title: locale === "ru" ? "Вымышленный конвой без маршрута" : "Fictional convoy without a route",
+    route: null,
+  };
+  envelope.data.items.push(missingRoute);
+  return { envelope, covered, uncovered, missingRoute };
+}
+
+function convoyGeometry(page: Page) {
+  return page.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        "#convoys, .landing-convoy-grid, .landing-convoy-card, .landing-convoy-date, " +
+          ".landing-convoy-body > *, .landing-convoys-note, #events",
+      ),
+      (node) => {
+        const { x, y, width, height } = node.getBoundingClientRect();
+        return { x: x + window.scrollX, y: y + window.scrollY, width, height };
+      },
+    ),
+  );
+}
+
+async function syntheticCover(page: Page) {
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 180;
+    canvas.height = 120;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Missing synthetic artwork canvas");
+    const sky = context.createLinearGradient(0, 0, 180, 120);
+    sky.addColorStop(0, "#2563eb");
+    sky.addColorStop(0.55, "#f8fafc");
+    sky.addColorStop(1, "#fb923c");
+    context.fillStyle = sky;
+    context.fillRect(0, 0, 180, 120);
+    context.fillStyle = "#0f766e";
+    context.beginPath();
+    context.moveTo(0, 105);
+    context.lineTo(48, 45);
+    context.lineTo(86, 86);
+    context.lineTo(130, 34);
+    context.lineTo(180, 95);
+    context.lineTo(180, 120);
+    context.lineTo(0, 120);
+    context.fill();
+    return canvas.toDataURL("image/png").slice("data:image/png;base64,".length);
+  });
+  return Buffer.from(base64, "base64");
+}
+
+for (const locale of ["ru", "en"] as const) {
+  test(
+    `Stage 2 ${locale} landing cover waits for its card and preserves convoy layout`,
+    browserCase(["@layout"]),
+    async ({ page, context, baseURL }, info) => {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.clock.setFixedTime(liveClock);
+      await context.addCookies([
+        { name: "vtc_fictional_probe", value: "fictional", url: baseURL ?? "" },
+      ]);
+      const { envelope, covered, uncovered, missingRoute } = stage2LandingList(locale, false);
+      const listRequests: { path: string; cookie: string | undefined }[] = [];
+      const apiRequests: string[] = [];
+      const secondList = deferred();
+      page.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (pathname.startsWith("/api/v1/")) apiRequests.push(pathname);
+      });
+      await page.route("**/api/v1/public/events?*", async (route) => {
+        const request = route.request();
+        listRequests.push({
+          path: new URL(request.url()).search,
+          cookie: (await request.allHeaders()).cookie,
+        });
+        if (covered.hasCover) await secondList.promise;
+        await route.fulfill({ json: envelope });
+      });
+      const release = deferred();
+      const artwork = await syntheticCover(page);
+      await page.route(`**${coverPath}`, async (route) => {
+        await release.promise;
+        await route.fulfill({ body: artwork, contentType: "image/png" });
+      });
+      await page.goto(landingPath(locale));
+      const convoys = page.getByRole("region", {
+        name: publicContent[locale].convoysTitle,
+        exact: true,
+      });
+      const cards = convoys.getByRole("article");
+      const card = (title: string) =>
+        cards.filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+      const cover = card(covered.title).getByRole("img", { name: covered.title, exact: true });
+      const titleLink = card(covered.title).getByRole("link", { name: covered.title, exact: true });
+      try {
+        await expect(cards).toHaveCount(3);
+        await expect(card(covered.title)).toContainText(
+          "Синтетическая гавань → Синтетическое плато",
+        );
+        await expect(card(covered.title)).not.toContainText(covered.route ?? "");
+        await expect(card(uncovered.title)).toContainText(uncovered.route ?? "");
+        await expect(card(missingRoute.title).locator(".landing-convoy-route")).toHaveCount(0);
+        await expect(chipFor(page, locale, covered.title)).toHaveAttribute(
+          "href",
+          `/events/${covered.id}`,
+        );
+        await expect(convoys.getByRole("img")).toHaveCount(0);
+        await page.evaluate(() => document.fonts.ready);
+        const baseline = await convoyGeometry(page);
+        await capture(page, info, `${locale}-convoys-without-cover`);
+
+        covered.hasCover = true;
+        await page.reload();
+        // A large viewport can show a convoy on arrival. Start away from the cards in every project.
+        await page.locator("#apply").scrollIntoViewIfNeeded();
+        secondList.resolve();
+        await expect(titleLink).toHaveAttribute("href", `/events/${covered.id}`);
+        await page.evaluate(() => document.fonts.ready);
+        const slot = card(covered.title).locator(".landing-convoy-cover");
+        await expect(slot).toBeAttached();
+        await expect(slot).not.toBeInViewport();
+        expect(apiRequests.filter((path) => path.endsWith("/cover"))).toEqual([]);
+        expect(await convoyGeometry(page)).toEqual(baseline);
+
+        const pendingCover = page.waitForRequest(`**${coverPath}`);
+        await slot.scrollIntoViewIfNeeded();
+        const request = await pendingCover;
+        const headers = await request.allHeaders();
+        expect(headers.cookie).toBeUndefined();
+        expect(headers.accept).toBe("image/png, image/jpeg");
+        await expect(cover).toHaveCount(0);
+        expect(await convoyGeometry(page)).toEqual(baseline);
+
+        release.resolve();
+        await expect(cover).toBeVisible();
+        expect(await cover.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(180);
+        await expect(convoys.getByRole("img")).toHaveCount(1);
+        await expect(titleLink).toHaveAccessibleName(covered.title);
+        await titleLink.focus();
+        await expect(titleLink).toBeFocused();
+        expect(await convoyGeometry(page)).toEqual(baseline);
+        expect(await noOverflow(page)).toBe(true);
+        expect(listRequests).toHaveLength(2);
+        for (const request of listRequests) {
+          expect(request.path).toBe("?period=upcoming&limit=3");
+          expect(request.cookie).toContain("vtc_fictional_probe");
+        }
+        expect(apiRequests.filter((path) => path.endsWith("/cover"))).toEqual([coverPath]);
+        expect(
+          apiRequests.filter(
+            (path) =>
+              !["/api/v1/public/events", "/api/v1/public/company-stats", coverPath].includes(path),
+          ),
+        ).toEqual([]);
+        await capture(page, info, `${locale}-convoys-with-cover`);
+      } finally {
+        secondList.resolve();
+        release.resolve();
+      }
+    },
+  );
+}
+
+for (const failure of ["http", "decode"] as const) {
+  test(
+    `Stage 2 ${failure} cover failure leaves the convoy card usable`,
+    browserCase(["@layout"]),
+    async ({ page }) => {
+      const locale = failure === "http" ? "en" : "ru";
+      const { envelope, covered } = stage2LandingList(locale, true);
+      const released = deferred();
+      if (failure === "decode") {
+        await page.exposeFunction("recordCoverRelease", () => released.resolve());
+        await page.addInitScript(() => {
+          const revoke = URL.revokeObjectURL.bind(URL);
+          URL.revokeObjectURL = (url) => {
+            revoke(url);
+            void (
+              window as Window & { recordCoverRelease?: () => Promise<void> }
+            ).recordCoverRelease?.();
+          };
+        });
+      }
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.clock.setFixedTime(liveClock);
+      await page.route("**/api/v1/public/events?*", (route) => route.fulfill({ json: envelope }));
+      const release = deferred();
+      await page.route(`**${coverPath}`, async (route) => {
+        await release.promise;
+        await route.fulfill(
+          failure === "http"
+            ? { status: 404 }
+            : { contentType: "image/png", body: "Corrupt synthetic cover" },
+        );
+      });
+      try {
+        await page.goto(landingPath(locale));
+        const convoys = page.getByRole("region", {
+          name: publicContent[locale].convoysTitle,
+          exact: true,
+        });
+        const card = convoys.getByRole("article").filter({ hasText: covered.title });
+        const titleLink = card.getByRole("link", { name: covered.title, exact: true });
+        await expect(titleLink).toHaveAttribute("href", `/events/${covered.id}`);
+        await page.evaluate(() => document.fonts.ready);
+        const baseline = await convoyGeometry(page);
+        const response = page.waitForResponse(`**${coverPath}`);
+        await card.locator(".landing-convoy-cover").scrollIntoViewIfNeeded();
+        release.resolve();
+        const coverResponse = await response;
+        expect(coverResponse.status()).toBe(failure === "http" ? 404 : 200);
+        await coverResponse.finished();
+        if (failure === "decode") await released.promise;
+        await expect(card.getByRole("img")).toHaveCount(0);
+        await expect(card).toContainText("UTC");
+        await expect(card).toContainText(covered.server);
+        await titleLink.focus();
+        await expect(titleLink).toBeFocused();
+        expect(await convoyGeometry(page)).toEqual(baseline);
+        expect(await noOverflow(page)).toBe(true);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`/events/${covered.id}$`));
+      } finally {
+        release.resolve();
+      }
+    },
+  );
+}
 
 for (const locale of ["ru", "en"] as const) {
   test(
