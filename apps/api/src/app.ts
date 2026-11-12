@@ -198,7 +198,8 @@ export async function createApp(options: AppOptions) {
     },
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
-  if (options.identity) await registerIdentityRoutes(app, options.identity);
+  if (options.identity)
+    await registerIdentityRoutes(app, options.identity, options.events?.publishedRoutesEnabled);
   if (options.identity && options.workspaceSummary)
     await registerWorkspaceSummaryRoutes(app, options.identity, options.workspaceSummary);
   if (options.identity && options.administration)

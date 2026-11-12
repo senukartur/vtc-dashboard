@@ -61,11 +61,11 @@ const readSpec = <K extends EventStage2Envelope>(
 export const eventStage2Reads = {
   publicList: (filter: PublishedFilter = {}) =>
     readSpec(localPath("/public/events", filter), "EventStage2EnvelopePublicList", "public"),
-  publicDetail: (id: string, locale?: EventStage2Locale) =>
+  publicDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(`/public${event(id)}`, { locale }), "EventStage2EnvelopePublic", "public"),
   memberList: (filter: PublishedFilter = {}) =>
     readSpec(localPath("/events", filter), "EventStage2EnvelopeMemberList", "company.read"),
-  memberDetail: (id: string, locale?: EventStage2Locale) =>
+  memberDetail: (id: string, locale: EventStage2Locale = "en") =>
     readSpec(localPath(event(id), { locale }), "EventStage2EnvelopeMember", "company.read"),
   upcoming: (locale?: EventStage2Locale) =>
     readSpec(
@@ -151,7 +151,7 @@ export const eventStage2Commands = {
       etag,
     ),
 
-  cancel: (id: string, input: DTO["ReasonInput"], etag: string, locale?: EventStage2Locale) =>
+  cancel: (id: string, input: DTO["ReasonInput"], etag: string, locale: EventStage2Locale = "en") =>
     command(
       localPath(`${admin(id)}/cancellation`, { locale }),
       "POST",

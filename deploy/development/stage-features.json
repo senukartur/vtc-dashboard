@@ -8,6 +8,7 @@
     "TELEMETRY_ENABLED",
     "MANUAL_REPORTS_ENABLED",
     "EVENTS_ENABLED",
+    "EVENTS_ROUTE_ENABLED",
     "RECONCILIATION_ENABLED",
     "TRIP_DECISIONS_ENABLED",
     "ANALYTICS_ENABLED",
@@ -41,6 +42,8 @@
     "runtime": {
       "audit_entries": ["SELECT"],
       "external_steam_accounts": ["UPDATE(created_at)"],
+      "event_revision_details": ["SELECT", "INSERT"],
+      "event_revision_dlcs": ["SELECT", "INSERT"],
       "catalog_dlcs": ["SELECT", "INSERT", "UPDATE"],
       "catalog_regions": ["SELECT", "INSERT", "UPDATE"],
       "catalog_cities": ["SELECT", "INSERT", "UPDATE"],
@@ -104,6 +107,7 @@
       "event_attendance_revisions": ["SELECT"],
       "event_attendances": ["SELECT"],
       "event_response_revisions": ["SELECT"],
+      "event_revision_details": ["SELECT"],
       "event_responses": ["SELECT"],
       "event_revisions": ["SELECT"],
       "events": [

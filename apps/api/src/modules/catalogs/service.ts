@@ -1690,6 +1690,79 @@ export function createCatalogs(
     },
     resolveInTransaction,
     selectionsInTransaction,
+    /** Published Events need safe canonical route facts without touching company logos. */
+    async eventRouteCatalogInTransaction(
+      tx: TxContext,
+      game: Game,
+      selection: {
+        cities: readonly (string | null)[];
+        depots: readonly (string | null | undefined)[];
+        manualDlcs: readonly string[];
+      },
+    ) {
+      const ids = (values: readonly (string | null | undefined)[]) => [
+        ...new Set(values.flatMap((id) => (id == null ? [] : [applicationId(id)]))),
+      ];
+      const cityIds = ids(selection.cities);
+      const depotIds = ids(selection.depots);
+      const cities = cityIds.length
+        ? await c(tx)
+            .select({ dlcId: catalogCities.dlcId })
+            .from(catalogCities)
+            .where(and(eq(catalogCities.game, game), inArray(catalogCities.id, cityIds)))
+            .for("share")
+        : [];
+      const depots = depotIds.length
+        ? await c(tx)
+            .select({
+              id: catalogCompanyCities.id,
+              cityId: catalogCompanyCities.cityId,
+              dlcId: catalogCompanyCities.dlcId,
+              name: catalogCompanies.nameEn,
+              code: catalogCompanies.code,
+              depotHidden: catalogCompanyCities.hidden,
+              companyHidden: catalogCompanies.hidden,
+              cityHidden: catalogCities.hidden,
+            })
+            .from(catalogCompanyCities)
+            .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+            .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+            .where(
+              and(eq(catalogCompanyCities.game, game), inArray(catalogCompanyCities.id, depotIds)),
+            )
+            .for("share")
+        : [];
+      const derivedDlcIds = new Set(ids([...cities, ...depots].map((row) => row.dlcId)));
+      const dlcIds = ids([...derivedDlcIds, ...selection.manualDlcs]);
+      const dlcs = dlcIds.length
+        ? await c(tx)
+            .select({
+              id: catalogDlcs.id,
+              name: catalogDlcs.nameEn,
+              code: catalogDlcs.code,
+              hidden: catalogDlcs.hidden,
+            })
+            .from(catalogDlcs)
+            .where(and(eq(catalogDlcs.game, game), inArray(catalogDlcs.id, dlcIds)))
+            .for("share")
+        : [];
+      return {
+        depots: new Map(
+          depots.map((row) => [
+            row.id,
+            {
+              id: row.id,
+              cityId: row.cityId,
+              name: row.name,
+              code: row.code.toString(),
+              hidden: row.depotHidden || row.companyHidden || row.cityHidden,
+            },
+          ]),
+        ),
+        dlcs: new Map(dlcs.map((row) => [row.id, { ...row, code: row.code.toString() }])),
+        derivedDlcIds,
+      };
+    },
     async hasVisibleDepotInTransaction(
       tx: TxContext,
       { game, cityId, companyId }: { game: Game; cityId: string; companyId: string },

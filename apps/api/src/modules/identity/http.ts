@@ -77,7 +77,11 @@ export function csrfProtection(config: IdentityConfig, now: () => number = Date.
   };
 }
 
-export async function registerIdentityRoutes(app: FastifyInstance, identity: Identity) {
+export async function registerIdentityRoutes(
+  app: FastifyInstance,
+  identity: Identity,
+  eventsStage2Enabled = false,
+) {
   const ownedRoute = (route: string) =>
     route.startsWith("/api/v1/auth/") ||
     route === "/api/v1/me" ||
@@ -182,11 +186,21 @@ export async function registerIdentityRoutes(app: FastifyInstance, identity: Ide
       return envelope({ id: result.id, version: result.version }, request);
     },
   );
-  app.get("/api/v1/me", { schema: schema("EnvelopeSelf") }, async (request, reply) => {
-    const result = await identity.current(await actor(request));
-    reply.header("ETag", `"v${result.version}"`);
-    return envelope(result.data, request);
-  });
+  app.get(
+    "/api/v1/me",
+    {
+      schema: schema("EnvelopeSelf"),
+      onSend: async (request, reply) => {
+        if (eventsStage2Enabled && request.method === "GET" && reply.statusCode === 200)
+          reply.header("X-VTC-Events-Stage2", "1");
+      },
+    },
+    async (request, reply) => {
+      const result = await identity.current(await actor(request));
+      reply.header("ETag", `"v${result.version}"`);
+      return envelope(result.data, request);
+    },
+  );
   app.post<{ Body: Schemas["PasswordResetRequest"] }>(
     "/api/v1/auth/password-reset-requests",
     { schema: schema("EnvelopeAcknowledged", "PasswordResetRequest", 202) },
