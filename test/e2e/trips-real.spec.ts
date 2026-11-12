@@ -85,7 +85,7 @@ async function pageLocale(page: Page) {
       .catch(() => null),
   );
 }
-async function confirm(page: Page, label: string, commandPath?: string) {
+async function confirm(page: Page, label: string, commandPath?: string, expectedStatus = 201) {
   const actions = {
     "Submit for review": {
       action: "submit-report",
@@ -164,7 +164,7 @@ async function confirm(page: Page, label: string, commandPath?: string) {
         )
       : null;
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
-    if (response) expect((await response).status()).toBe(201);
+    if (response) expect((await response).status()).toBe(expectedStatus);
     await expect(page.getByRole("dialog")).toHaveCount(0);
   } finally {
     page.off("request", start);
@@ -586,7 +586,7 @@ test(
         page.off("response", revisionResponse);
         page.off("requestfailed", revisionFailed);
       };
-      await confirm(page, "Revise and resubmit", revisePath);
+      await confirm(page, "Revise and resubmit", revisePath, 200);
       await expect(page).toHaveURL(new RegExp(`/account/trips/${tripId}$`));
       const revised = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(revised.manualRevision.fields).toMatchObject({
