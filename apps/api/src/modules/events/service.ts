@@ -8,7 +8,6 @@ import {
   type TxContext,
   type UnitOfWork,
   utcDateTime,
-  utcIso,
 } from "@vtc/db";
 import {
   and,
@@ -37,10 +36,12 @@ import type { Catalogs } from "../catalogs/service.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
+import { createEventDrafts } from "./drafts.js";
 import { type Page, pagination } from "./pagination.js";
 import {
   blankLegacyText,
   createPublishedRoutes,
+  eventDate as date,
   definitionFields,
   type EventLocale,
   legacyRouteDetails,
@@ -148,9 +149,11 @@ type MemberProjection<T> = (
 export interface EventsConfig {
   cursorKey: string;
   routeEnabled?: boolean;
+  draftsEnabled?: boolean;
 }
 export function validateEventsConfig(config: EventsConfig) {
-  if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_EVENTS_CONFIG");
+  if (!/^[0-9a-f]{64}$/.test(config.cursorKey) || (config.draftsEnabled && !config.routeEnabled))
+    throw new Error("INVALID_EVENTS_CONFIG");
 }
 interface Ports {
   identity: Pick<
@@ -213,15 +216,6 @@ export function createEvents(
     targets: string[] = [],
     organizerId?: string,
   ) => ports.identity.eventContextInTransaction(tx, actor, targets, capability, organizerId);
-  function date(value: string) {
-    try {
-      const normalized = utcIso(utcDateTime(value));
-      if (normalized !== value) throw new Error("NONCANONICAL_EVENT_TIME");
-      return normalized;
-    } catch {
-      throw identityError(422);
-    }
-  }
   function legacyInput(raw: S["EventInput"]) {
     try {
       closed(raw, [...definitionFields, ...legacyTextFields, "organizer"]);
@@ -378,7 +372,7 @@ export function createEvents(
         if (
           row.version !== (state?.throughVersion ?? 0) + 1 ||
           (!state
-            ? row.category !== "created" || row.status !== "scheduled"
+            ? !["created", "published"].includes(row.category) || row.status !== "scheduled"
             : row.status === "cancelled"
               ? row.category !== "cancelled"
               : row.category !== "updated")
@@ -413,7 +407,21 @@ export function createEvents(
     };
   }
   /** A hidden row is only acceptable when the previous revision already references it. */
-  async function validateReferences(tx: TxContext, r: S["EventInput"], previous: Revision | null) {
+  async function validateReferences(
+    tx: TxContext,
+    r: Pick<
+      S["EventInput"],
+      | "game"
+      | "originCityId"
+      | "destinationCityId"
+      | "prescribedCargoId"
+      | "prescribedTrailerTypeId"
+    >,
+    previous: Pick<
+      Revision,
+      "originCityId" | "destinationCityId" | "prescribedCargoId" | "prescribedTrailerId"
+    > | null,
+  ) {
     const selections = [
       { kind: "city", id: r.originCityId, current: previous?.originCityId },
       { kind: "city", id: r.destinationCityId, current: previous?.destinationCityId },
@@ -754,7 +762,7 @@ export function createEvents(
     actor: Actor,
     e: Event,
     value: S["EventInput"],
-    category: "created" | "updated" | "cancelled",
+    category: Revision["category"],
     previous: Revision | null,
     details: RouteDetails | null,
     priorDetails: RouteDetails | null,
@@ -762,18 +770,18 @@ export function createEvents(
   ) {
     const id = newId();
     if (category !== "cancelled") await validateReferences(tx, value, previous);
-    const version = category === "created" ? 1 : e.version + 1,
-      sequence = category === "created" ? 1 : e.changeSequence + 1;
-    let notificationMaterial =
-      category === "created"
-        ? {
-            schemaVersion: 1 as const,
-            throughVersion: 1,
-            startVersion: 1,
-            routeVersion: 1,
-            statusVersion: 1,
-          }
-        : materialState(e.notificationMaterial, e.version);
+    const first = category === "created" || category === "published";
+    const version = first ? 1 : e.version + 1,
+      sequence = first ? 1 : e.changeSequence + 1;
+    let notificationMaterial = first
+      ? {
+          schemaVersion: 1 as const,
+          throughVersion: 1,
+          startVersion: 1,
+          routeVersion: 1,
+          statusVersion: 1,
+        }
+      : materialState(e.notificationMaterial, e.version);
     if (previous && notificationMaterial?.throughVersion === e.version)
       notificationMaterial = advanceMaterial(
         notificationMaterial,
@@ -843,7 +851,7 @@ export function createEvents(
       "event.changed",
       id,
       version,
-      category,
+      category === "published" ? "created" : category,
       null,
       e.startsAt !== next.startsAt || e.status !== next.status,
     );
@@ -887,8 +895,8 @@ export function createEvents(
     command: DefinitionCommand,
     organizer: string | null,
     prior: Revision | null,
+    category: "created" | "updated" | "published" = prior ? "updated" : "created",
   ) {
-    const category = prior ? "updated" : "created";
     const priorDetails = prior ? ((await publishedRoutes?.get(tx, prior.id)) ?? null) : null;
     if ("legacy" in command) {
       const value = { ...command.legacy };
@@ -935,6 +943,81 @@ export function createEvents(
   function definitionFingerprint(command: DefinitionCommand) {
     return "legacy" in command ? command.legacy : ["published_route", command.published];
   }
+  async function insertDefinition(
+    tx: TxContext,
+    id: string,
+    input: Pick<S["EventInput"], "game" | "visibility" | "startsAt">,
+  ) {
+    const event: Event = {
+      id,
+      version: 1,
+      changeSequence: 1,
+      tripAssessmentPending: false,
+      notificationPending: true,
+      notificationMaterial: null,
+      tripAssessmentGeneration: 0,
+      attendanceVersion: 1,
+      currentRevisionId: null,
+      game: input.game,
+      visibility: input.visibility,
+      status: "scheduled",
+      startsAt: input.startsAt,
+      createdAt: at(),
+    };
+    await c(tx).insert(events).values(event);
+    return event;
+  }
+  const drafts =
+    config.draftsEnabled && publishedRoutes
+      ? createEventDrafts(unit, config.cursorKey, now, {
+          run,
+          authorize: (tx, actor, organizerId) =>
+            authorize(tx, actor, "events.manage", [], organizerId),
+          async validate(tx, next, prior) {
+            if (!next.row.game) return;
+            const route = { ...next.row, game: next.row.game };
+            await validateReferences(
+              tx,
+              route,
+              prior
+                ? {
+                    ...prior.row,
+                    prescribedTrailerId: prior.row.prescribedTrailerTypeId,
+                  }
+                : null,
+            );
+            await publishedRoutes.validate(
+              tx,
+              route,
+              {
+                ...next.row,
+                requiredDlcIds: next.requiredDlcIds,
+              },
+              prior ? { ...prior.row, requiredDlcIds: prior.requiredDlcIds } : null,
+            );
+          },
+          async publish(tx, actor, id, raw, organizer, locale) {
+            const command = { published: input(publishedRouteInput(raw)) };
+            const event = await insertDefinition(tx, id, command.published);
+            const receipt = await writeDefinition(
+              tx,
+              actor,
+              event,
+              command,
+              organizer,
+              null,
+              "published",
+            );
+            const data = await stagedProjection(locale)(
+              tx,
+              await revision(tx, receipt.revisionId),
+              actor,
+              { ...receipt, responseCounts: { participating: 0, declined: 0 } },
+            );
+            return { revisionId: receipt.revisionId, data };
+          },
+        })
+      : null;
   function createDefinition<T>(
     actor: Actor,
     key: string,
@@ -952,6 +1035,7 @@ export function createEvents(
       );
       // The command key is the stable target for a create before the event ID exists.
       const target = applicationId(key);
+      await drafts?.rejectDraftCreateKey(tx, actor, key);
       const result = await once(
         tx,
         actor,
@@ -960,23 +1044,7 @@ export function createEvents(
         key,
         definitionFingerprint(command),
         async () => {
-          const e: Event = {
-            id: newId(),
-            version: 1,
-            changeSequence: 1,
-            tripAssessmentPending: false,
-            notificationPending: true,
-            notificationMaterial: null,
-            tripAssessmentGeneration: 0,
-            attendanceVersion: 1,
-            currentRevisionId: null,
-            game: input.game,
-            visibility: input.visibility,
-            status: "scheduled",
-            startsAt: input.startsAt,
-            createdAt: at(),
-          };
-          await c(tx).insert(events).values(e);
+          const e = await insertDefinition(tx, newId(), input);
           return writeDefinition(tx, actor, e, command, organizer, null);
         },
         "published" in command,
@@ -1172,6 +1240,7 @@ export function createEvents(
         await authorize(tx, actor, manage ? "events.manage" : "company.read");
       }),
     publishedRoutesEnabled: publishedRoutes !== null,
+    drafts,
     async create(actor: Actor, key: string, raw: S["EventInput"]) {
       return createDefinition(actor, key, { legacy: legacyInput(raw) }, memberDto);
     },
