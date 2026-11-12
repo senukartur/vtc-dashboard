@@ -76,6 +76,10 @@ export interface PrivateChallenge {
   emailChangeStage?: "current_email" | "proposed_email";
 }
 export interface IdentityPorts {
+  tripLifetimeTotals?: (
+    tx: TxContext,
+    userId: string,
+  ) => Promise<components["schemas"]["LifetimeTripTotals"]>;
   qualificationsLifecycle?: {
     close(tx: TxContext, userId: string, endedAt: string): Promise<void>;
     reinstate?(
@@ -2042,7 +2046,8 @@ export function createIdentity(
         const qualifications = ports.qualificationsLifecycle?.currentAssignments
           ? await ports.qualificationsLifecycle.currentAssignments(tx, memberRow.id)
           : [];
-        return { member, qualifications };
+        const lifetimeTotals = await ports.tripLifetimeTotals?.(tx, memberRow.id);
+        return { member, qualifications, ...(lifetimeTotals && { lifetimeTotals }) };
       });
     },
   };

@@ -52,6 +52,7 @@ import {
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
+import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
 import {
   type Actor,
@@ -108,6 +109,7 @@ let control: Connection,
   unit: UnitOfWork,
   identity: Identity,
   catalogs: Catalogs,
+  events: Events,
   tripService: Trips,
   manual: ManualReports,
   blobs: PrivateBlobs,
@@ -265,6 +267,7 @@ beforeAll(async () => {
   reviewer = (await setupPhase("reviewer_credentials", () => member(["dispatcher"]))).actor;
   trainee = (await setupPhase("trainee_credentials", () => member(["trainee"]))).actor;
   catalogs = createCatalogs(unit, catalogConfig(), { identity });
+  events = createEvents(unit, { cursorKey: randomBytes(32).toString("hex") }, { identity }, now);
   tripService = createTrips(
     unit,
     { cursorKey: randomBytes(32).toString("hex") },
@@ -274,6 +277,8 @@ beforeAll(async () => {
       manualEvidence: (tx, owner, payload, tripId) =>
         manual.validateSourceInTransaction(tx, owner, payload, tripId),
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
+      manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
+      eventTitles: events.tripTitlesInTransaction,
     },
     now,
   );
@@ -404,6 +409,56 @@ test("partial owner drafts create no trip; submission is atomic/idempotent with 
   ).rejects.toMatchObject({ publicCode: "IDEMPOTENCY_CONFLICT" });
 });
 
+test("manual event fallback omits a wrong-game reference and shows the matching revision title", async () => {
+  const input: S["EventInput"] = {
+    title: "Fictional ATS convoy",
+    description: "Fictional manual association",
+    game: "ats",
+    server: "Synthetic",
+    organizer: "Fictional company",
+    meetingLocation: "Fictional yard",
+    route: "Fictional route",
+    meetingAt: new Date(instant + 1800000).toISOString(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  };
+  const ats = (await events.create(staff, newId(), input)).data.event;
+  const ets2 = (
+    await events.create(staff, newId(), { ...input, title: "Fictional ETS2 convoy", game: "ets2" })
+  ).data.event;
+  const image = await upload();
+  const report = await manual.submitReport(owner, newId(), {
+    fields: { ...fields(image.id), eventId: ats.id },
+  });
+  expect(report.currentRevision.fields.eventId).toBe(ats.id);
+  expect((await tripService.list(owner, { scope: "mine" })).items[0]).toMatchObject({
+    id: report.tripId,
+    event: null,
+  });
+  expect((await tripService.list(reviewer, { scope: "review" })).items[0]).toMatchObject({
+    id: report.tripId,
+    event: null,
+  });
+  expect(await tripService.detail(owner, report.tripId)).toMatchObject({
+    view: "private",
+    summary: { event: null },
+  });
+
+  await manual.reviseReport(owner, report.id, newId(), report.version, {
+    fields: { ...fields(image.id), eventId: ets2.id },
+    expectedTripVersion: report.tripVersion,
+  });
+  const [matching] = (await tripService.list(owner, { scope: "mine" })).items;
+  expect(matching?.id).toBe(report.tripId);
+  expect(matching?.event).toEqual({ id: ets2.id, title: ets2.title });
+});
+
 test("same-ETag revisions race safely, rejected edits retain history, and accepted correction requests preserve effective results", async () => {
   const image = await upload(),
     key = newId(),
@@ -412,6 +467,13 @@ test("same-ETag revisions race safely, rejected edits retain history, and accept
       fields: { ...fields(image.id), actualDistanceM: "20" },
       expectedTripVersion: report.tripVersion,
     };
+  const [first] = (await tripService.list(owner, { scope: "mine" })).items;
+  expect(first).toMatchObject({
+    id: report.tripId,
+    submittedAt: report.currentRevision.submittedAt,
+    gameMode: "unknown",
+  });
+  instant += 1;
   const edits = await Promise.allSettled([
     manual.reviseReport(owner, report.id, newId(), report.version, value),
     manual.reviseReport(owner, report.id, newId(), report.version, value),
@@ -420,6 +482,15 @@ test("same-ETag revisions race safely, rejected edits retain history, and accept
   expect(edits.filter((r) => r.status === "rejected")).toHaveLength(1);
   const revised = await manual.getReport(owner, report.id);
   expect(revised.currentRevision.number).toBe(2);
+  expect(revised.currentRevision.submittedAt).not.toBe(report.currentRevision.submittedAt);
+  const [reviewed] = (await tripService.list(reviewer, { scope: "review" })).items;
+  expect(reviewed).toMatchObject({
+    id: report.tripId,
+    number: first?.number,
+    createdAt: first?.createdAt,
+    submittedAt: revised.currentRevision.submittedAt,
+    review: { manualRevision: { number: 2, submittedAt: revised.currentRevision.submittedAt } },
+  });
   expect(await submit(image.id, key)).toEqual(report);
   const history = await manual.revisions(owner, report.id);
   expect(history).toHaveProperty("items");
@@ -492,8 +563,10 @@ test("current private permissions protect unattached uploads, report history and
   await expect(manual.getReport(other, report.id)).rejects.toMatchObject({ statusCode: 404 });
   await terminal(report);
   const view = await tripService.detail(other, report.tripId);
-  expect(view.view).toBe("summary");
+  expect(view).toMatchObject({ view: "summary", submittedAt: report.currentRevision.submittedAt });
   expect(view).not.toHaveProperty("evidence");
+  expect(view).not.toHaveProperty("event");
+  expect(view).not.toHaveProperty("gameMode");
   const own = await tripService.detail(owner, report.tripId);
   expect(own).toMatchObject({
     view: "private",

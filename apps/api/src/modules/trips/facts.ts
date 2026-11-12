@@ -37,6 +37,14 @@ function legacyGameMode(provenance: unknown): RecordedTelemetry["gameMode"] {
   }
 }
 
+export function effectiveGameMode(
+  evidence: NormalizedTripEvidence | undefined,
+): RecordedTelemetry["gameMode"] {
+  return evidence?.provider === "ets2telemetry"
+    ? (evidence.recordedTelemetry?.gameMode ?? legacyGameMode(evidence.provenance))
+    : "unknown";
+}
+
 export function createFactRepository(unit: UnitOfWork) {
   const c = (tx: TxContext) => unit.client(tx),
     groups = createTripGroups(unit),
@@ -73,7 +81,7 @@ export function createFactRepository(unit: UnitOfWork) {
       if (evidence.provider !== "ets2telemetry") return effectiveFacts(evidence);
       const recorded = evidence.recordedTelemetry ?? {
         jobType: await legacyJobType(tx, evidence.sourceRecordId),
-        gameMode: legacyGameMode(evidence.provenance),
+        gameMode: effectiveGameMode(evidence),
         hardModeResult: "unknown",
       };
       return effectiveFacts(evidence, {

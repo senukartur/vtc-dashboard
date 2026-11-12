@@ -162,6 +162,8 @@ beforeAll(async () => {
       manualProjection: (tx, ids) => manual.projectionInTransaction(tx, ids),
       manualRevisions: (tx, ids) => manual.revisionSummariesInTransaction(tx, ids),
       decisionProjection: (tx, id, actor) => service.privateProjectionInTransaction(tx, id, actor),
+      eventTitles: (tx, ids, actor) => events.tripTitlesInTransaction(tx, ids, actor),
+      eventAssociations: (tx, ids) => service.eventAssociationsInTransaction(tx, ids),
       correctionRequested: (tx, id, requestId, actor, reason) =>
         service.correctionRequestedInTransaction(tx, id, requestId, actor, reason),
     },
@@ -1277,6 +1279,10 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
         { eventId },
       ),
       stale = await service.getProposal(dispatcher, r.tripId, rsvp.data.id);
+    expect((await tripsService.list(who, { scope: "mine" })).items[0]).toMatchObject({
+      id: r.tripId,
+      event: null,
+    });
     instant += 3600000;
     await events.setAttendance(director, eventId, newId(), 1, {
       members: [{ memberId: who.userId, attendance: "attended", note: null }],
@@ -1317,6 +1323,18 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
     expect(accepted.data.reasonCodes).not.toContain("accepted_over_limits");
     expect(accepted.data.basis.eventId).toBe(eventId);
     expect((await credit(r.tripId))?.credited).toBe(true);
+    expect((await tripsService.list(who, { scope: "mine" })).items[0]).toMatchObject({
+      id: r.tripId,
+      event: { id: eventId, title: eventInput.title },
+    });
+    expect(await tripsService.detail(dispatcher, r.tripId)).toMatchObject({
+      summary: { event: { id: eventId, title: eventInput.title } },
+    });
+    const publicRead = (await tripsService.list(who, { scope: "company", ownerId: who.userId }))
+      .items[0];
+    expect(publicRead?.id).toBe(r.tripId);
+    expect(publicRead).not.toHaveProperty("event");
+    expect(publicRead).not.toHaveProperty("gameMode");
     const mismatch = payload();
     if (mismatch.snapshot.job.cargoMass.available) mismatch.snapshot.job.cargoMass.value = 22000;
     const other = await receive(mismatch, who),
@@ -1343,9 +1361,16 @@ test("current attendance prescribed-load exception rejects RSVP/mismatch, fences
     expect(rejected.data.outcome).toBe("rejected");
     expect((await credit(other.tripId))?.credited).toBe(false);
     const before = await credit(r.tripId);
+    const renamed = "Fictional updated convoy title";
     await events.update(director, eventId, newId(), 1, {
       ...eventInput,
+      title: renamed,
       prescribedMassKg: "22000",
+    });
+    const ownerTrips = await tripsService.list(who, { scope: "mine" });
+    expect(ownerTrips.items.find((item) => item.id === r.tripId)?.event).toEqual({
+      id: eventId,
+      title: renamed,
     });
     await runPass(createQueue(unit, [service.handler]), new AbortController().signal);
     expect(await credit(r.tripId)).toEqual(before);
@@ -2997,7 +3022,12 @@ test("HTTP over-limit review, decision, replay and history serialize the strict 
     });
     expect(queue.statusCode).toBe(200);
     for (const item of queue.json().data.items) expect(item.review.hold).toBe(true);
-    for (const query of ["scope=company&hold=true", "scope=review&hold=maybe", "order=asc"])
+    const company = await app.inject({
+      url: "/api/v1/trips?order=asc",
+      headers: { cookie: directorCookie },
+    });
+    expect(company.statusCode).toBe(200);
+    for (const query of ["scope=company&hold=true", "scope=review&hold=maybe", "order=ascending"])
       expect(
         (await app.inject({ url: `/api/v1/trips?${query}`, headers: { cookie: directorCookie } }))
           .statusCode,
@@ -3941,4 +3971,52 @@ test("production workspace HTTP composes real sources with current role, ownersh
   } finally {
     await app.close();
   }
+});
+
+test("trip reads omit a persisted wrong-game event candidate", async () => {
+  const who = await member();
+  const created = await events.create(director, newId(), {
+    title: "Fictional other-game convoy",
+    description: "Fictional invalid association",
+    game: "ats",
+    server: "Synthetic",
+    organizer: "Fictional company",
+    meetingLocation: "Fictional yard",
+    route: "Fictional route",
+    meetingAt: new Date(instant + 1800000).toISOString(),
+    startsAt: new Date(instant + 3600000).toISOString(),
+    endsAt: null,
+    visibility: "members",
+    originCityId: null,
+    destinationCityId: null,
+    prescribedCargoId: null,
+    prescribedMassKg: null,
+    prescribedTrailerTypeId: null,
+  });
+  const eventId = created.data.event.id;
+  const submitted = await report(who, manual, { eventId });
+  const [saved] = await unit.run((tx) =>
+    unit
+      .client(tx)
+      .select({ eventId: tripEventAssociations.eventId })
+      .from(tripEventAssociations)
+      .where(eq(tripEventAssociations.tripId, submitted.tripId)),
+  );
+  expect(saved).toEqual({ eventId });
+  const trip = await state(submitted.tripId);
+  expect(trip).toMatchObject({ game: "ets2", decision: "pending_review" });
+  const q = String(trip?.number);
+  expect((await tripsService.list(who, { scope: "mine", q })).items[0]).toMatchObject({
+    id: submitted.tripId,
+    event: null,
+  });
+  expect((await tripsService.list(dispatcher, { scope: "review", q })).items[0]).toMatchObject({
+    id: submitted.tripId,
+    event: null,
+  });
+  expect(await tripsService.detail(who, submitted.tripId)).toMatchObject({
+    view: "private",
+    summary: { event: null },
+  });
+  expect((await service.review(dispatcher, submitted.tripId)).data.trip.summary.event).toBeNull();
 });

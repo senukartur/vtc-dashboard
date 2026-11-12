@@ -27,6 +27,7 @@ import {
   SCHEMA_SETUP_TIMEOUT_MS,
   simpleCatalogsPriorFolder,
   testConnection,
+  tripNumberPriorFolder,
 } from "./support.ts";
 
 let recoveryRunning = false;
@@ -126,7 +127,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 26);
+      assert.equal(await runMigrations(settings), 27);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -183,7 +184,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 26);
+      assert.equal(await runMigrations(settings), 27);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -366,7 +367,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 26);
+      assert.equal(await runMigrations(guardedSettings()), 27);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -461,7 +462,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 26);
+        assert.equal(await runMigrations(settings), 27);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -519,7 +520,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 26);
+      assert.equal(await runMigrations(guardedSettings()), 27);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -574,7 +575,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 26);
+      assert.equal(await runMigrations(guardedSettings()), 27);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -628,7 +629,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 26);
+      assert.equal(await runMigrations(guardedSettings()), 27);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -711,7 +712,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 26);
+      assert.equal(await runMigrations(settings), 27);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1155,7 +1156,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 7);
+      assert.equal(await runMigrations(settings), 8);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1238,7 +1239,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 26);
+      assert.equal(history.length, 27);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -1740,8 +1741,13 @@ await recoveryTest(
           { state: "submitted", ordinal: 2 },
         ],
       );
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      const manualDraftDiscard = await tripNumberPriorFolder();
+      try {
+        assert.equal(await runMigrations(settings, { folder: manualDraftDiscard }), 1);
+        assert.equal(await runMigrations(settings, { folder: manualDraftDiscard }), 0);
+      } finally {
+        await rm(manualDraftDiscard, { recursive: true });
+      }
 
       const afterSchema = await schema();
       assert.ok(afterSchema.includes(index));
@@ -1760,6 +1766,158 @@ await recoveryTest(
         [discarded],
       );
       assert.deepEqual(saved, [{ state: "discarded", ordinal: 3 }]);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+const tripNumberId = (n: number) => "11500000-0000-4000-8000-" + String(n).padStart(12, "0");
+
+async function seedTripNumberRows(connection: Connection) {
+  const owner = tripNumberId(1);
+  const earliest = tripNumberId(6);
+  const alias = tripNumberId(3);
+  const root = tripNumberId(4);
+  const latest = tripNumberId(2);
+  const firstTime = "2026-01-01 00:00:00.000";
+  const tieTime = "2026-01-02 00:00:00.000";
+  const lastTime = "2026-01-03 00:00:00.000";
+  await connection.execute(
+    "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Synthetic author','number-upgrade@example.invalid',?,?)",
+    [owner, firstTime, firstTime],
+  );
+  await connection.execute(
+    "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+    [owner],
+  );
+  const insert = (id: string, createdAt: string, aliasOf: string | null = null) =>
+    connection.execute(
+      "INSERT INTO trips (id,owner_id,game,version,outcome,recording,decision,review_reasons,created_at,reporting_at,alias_of) VALUES (?,?,'ets2',1,'delivered','complete','accepted',JSON_ARRAY(),?,?,?)",
+      [id, owner, createdAt, createdAt, aliasOf],
+    );
+  await insert(latest, lastTime);
+  await insert(root, tieTime);
+  await insert(alias, tieTime, root);
+  await insert(earliest, firstTime);
+  await connection.execute(
+    "INSERT INTO manual_reports (id,owner_id,trip_id,version,revision_number,created_at) VALUES (?,?,?,1,1,?)",
+    [tripNumberId(7), owner, root, firstTime],
+  );
+  return { expected: [earliest, alias, root, latest], insert, lastTime };
+}
+
+await recoveryTest(
+  "trip numbering upgrades the populated 0025 prefix in deterministic order and preserves UUID links",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    async function rows(sql: string) {
+      const [result] = await connection.query<RowDataPacket[]>(sql);
+      return result;
+    }
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await tripNumberPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 26);
+      const { expected, insert, lastTime } = await seedTripNumberRows(connection);
+      const tripSql = "SELECT * FROM trips ORDER BY id";
+      const linkSql = "SELECT * FROM manual_reports ORDER BY id";
+      const constraintsSql =
+        "SELECT * FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND (TABLE_NAME='trips' OR REFERENCED_TABLE_NAME='trips') ORDER BY TABLE_NAME,CONSTRAINT_NAME";
+      const ledgerSql = "SELECT version,hash,state FROM _vtc_migrations ORDER BY version";
+      const trips = await rows(tripSql);
+      const links = await rows(linkSql);
+      const constraints = await rows(constraintsSql);
+      const ledger = await rows(ledgerSql);
+      assert.ok(constraints.some((row) => row.TABLE_NAME === "trips"));
+      assert.ok(constraints.some((row) => row.TABLE_NAME === "manual_reports"));
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+
+      const newLedger = await rows(ledgerSql);
+      assert.deepEqual(newLedger.slice(0, -1), ledger);
+      assert.equal(newLedger.at(-1)?.state, "applied");
+      const numbered = await rows(tripSql);
+      assert.deepEqual(
+        numbered.map(({ number: _, ...trip }) => trip),
+        trips,
+      );
+      assert.deepEqual(await rows(linkSql), links);
+      assert.deepEqual(await rows(constraintsSql), constraints);
+      const [column] = await rows(
+        "SELECT COLUMN_TYPE type,IS_NULLABLE nullable,EXTRA extra FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trips' AND COLUMN_NAME='number'",
+      );
+      assert.deepEqual(column, { type: "int unsigned", nullable: "NO", extra: "auto_increment" });
+      const indexes = await rows(
+        "SELECT INDEX_NAME name,NON_UNIQUE nonunique,GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) columns_ FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='trips' AND INDEX_NAME IN ('PRIMARY','trip_number_unique','trip_owner_reporting') GROUP BY INDEX_NAME,NON_UNIQUE ORDER BY INDEX_NAME",
+      );
+      assert.deepEqual(indexes, [
+        { name: "PRIMARY", nonunique: 0, columns_: "id" },
+        { name: "trip_number_unique", nonunique: 0, columns_: "number" },
+        { name: "trip_owner_reporting", nonunique: 1, columns_: "owner_id,reporting_at,id" },
+      ]);
+      const numberingSql = "SELECT CAST(id AS CHAR) id,`number` FROM trips ORDER BY `number`";
+      assert.deepEqual(
+        await rows(numberingSql),
+        expected.map((id, i) => ({ id, number: i + 1 })),
+      );
+      const next = tripNumberId(8);
+      await insert(next, lastTime);
+      assert.deepEqual((await rows(numberingSql)).at(-1), { id: next, number: 5 });
+      await assert.rejects(
+        connection.execute("UPDATE trips SET `number`=1 WHERE id=?", [next]),
+        hasCode("ER_DUP_ENTRY"),
+      );
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "trip numbering interruption after backfill stays dirty and refuses replay",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await tripNumberPriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 26);
+      const { expected } = await seedTripNumberRows(connection);
+      const journal = JSON.parse(
+        await readFile(join(migrationFolder, "meta/_journal.json"), "utf8"),
+      );
+      const entry = journal.entries[26];
+      assert.match(entry.tag, /^0026_/);
+      const sql = await readFile(join(migrationFolder, entry.tag + ".sql"), "utf8");
+      const phases = sql.split("--> statement-breakpoint");
+      assert.equal(phases.length, 3);
+      await writeFile(
+        join(folder, entry.tag + ".sql"),
+        phases.slice(0, 2).join("--> statement-breakpoint") +
+          "--> statement-breakpoint\nALTER TABLE synthetic_trip_number_missing ADD COLUMN fault INT;\n",
+      );
+      await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));
+      await assert.rejects(runMigrations(settings, { folder }), hasCode("ER_NO_SUCH_TABLE"));
+      const [ledger] = await connection.query<RowDataPacket[]>(
+        "SELECT state,applied_at FROM _vtc_migrations ORDER BY version DESC LIMIT 1",
+      );
+      assert.deepEqual(ledger, [{ state: "applying", applied_at: null }]);
+      const [numbered] = await connection.query<RowDataPacket[]>(
+        "SELECT CAST(id AS CHAR) id,`number` FROM trips ORDER BY `number`",
+      );
+      assert.deepEqual(
+        numbered,
+        expected.map((id, i) => ({ id, number: i + 1 })),
+      );
+      await assert.rejects(runMigrations(settings, { folder }), /MIGRATION_RECOVERY_REQUIRED/);
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });

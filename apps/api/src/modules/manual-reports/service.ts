@@ -2057,15 +2057,20 @@ export function createManualReports(
     },
     validateSourceInTransaction: validateSource,
     projectionInTransaction: projection,
-    // Queue reads need only the current revision number/time, never evidence: an evidence row
-    // being deleted must not fail a whole review page.
+    // Summary reads need current revision metadata without opening private evidence.
     async revisionSummariesInTransaction(tx: TxContext, tripIds: string[]) {
       if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
-      const result = new Map<string, { number: number; submittedAt: string }>();
+      const result = new Map<
+        string,
+        { number: number; submittedAt: string; eventId: string | null }
+      >();
       if (!tripIds.length) return result;
-      for (const [tripId, revision] of (await currentRevisions(tx, tripIds)).current)
-        if (revision)
-          result.set(tripId, { number: revision.number, submittedAt: revision.submittedAt });
+      const { current, eventIds } = await currentRevisions(tx, tripIds, true);
+      for (const [tripId, revision] of current)
+        if (revision) {
+          const { number, submittedAt } = revision;
+          result.set(tripId, { number, submittedAt, eventId: eventIds.get(tripId) ?? null });
+        }
       return result;
     },
     async reconciliationGuardInTransaction(tx: TxContext, tripIds: string[], actorId?: string) {
@@ -2228,8 +2233,10 @@ export function createManualReports(
     await evidenceGate(tx, ownerId, expected.evidenceIds, true);
   }
   // Current revision per requested trip across its canonical group, newest report first.
-  async function currentRevisions(tx: TxContext, tripIds: string[]) {
-    const members = await ports.trips.groups.members(tx, tripIds, "share");
+  async function currentRevisions(tx: TxContext, tripIds: string[], rootsOnly = false) {
+    const members = rootsOnly
+      ? await ports.trips.groups.membersOfRoots(tx, tripIds, "share")
+      : await ports.trips.groups.members(tx, tripIds, "share");
     const group = new Map(members.map((t) => [t.id, t.aliasOf ?? t.id]));
     const originalIds = members.map((t) => t.id);
     const reports = await c(tx)
@@ -2246,24 +2253,41 @@ export function createManualReports(
             .where(inArray(manualRevisions.id, ids))
             .for("share")
         : [];
-    const current = new Map<string, Revision | null>();
-    for (const tripId of tripIds) {
-      const report = reports.find((r) => group.get(r.tripId) === group.get(tripId));
-      current.set(
-        tripId,
-        (report && revisions.find((r) => r.id === report.currentRevisionId)) ?? null,
-      );
+    const byRevisionId = new Map(revisions.map((revision) => [revision.id, revision]));
+    const byRoot = new Map<string, Revision | null>();
+    const eventByRoot = new Map<string, string | null>();
+    for (const report of reports) {
+      const root = group.get(report.tripId);
+      if (!root) throw new Error("MANUAL_TRIP_GROUP_MISSING");
+      const revision = report.currentRevisionId
+        ? (byRevisionId.get(report.currentRevisionId) ?? null)
+        : null;
+      if (!byRoot.has(root)) byRoot.set(root, revision);
+      // Ambiguous manual references do not establish an association.
+      const eventId = revision ? (revision.fields as S["ManualReportFields"]).eventId : null;
+      if (eventId) {
+        const saved = eventByRoot.get(root);
+        eventByRoot.set(root, saved === undefined || saved === eventId ? eventId : null);
+      }
     }
-    return { group, originalIds, current };
+    const current = new Map(tripIds.map((id) => [id, byRoot.get(group.get(id) ?? id) ?? null]));
+    const eventIds = new Map(
+      tripIds.map((id) => [id, eventByRoot.get(group.get(id) ?? id) ?? null]),
+    );
+    return { group, originalIds, current, eventIds };
   }
   async function projection(tx: TxContext, tripIds: string[]) {
     if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
     const result = new Map<
       string,
-      { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
+      {
+        manualRevision: S["ManualRevisionRead"] | null;
+        evidence: S["Evidence"][];
+        eventId: string | null;
+      }
     >();
     if (!tripIds.length) return result;
-    const { group, originalIds, current } = await currentRevisions(tx, tripIds);
+    const { group, originalIds, current, eventIds } = await currentRevisions(tx, tripIds);
     const refs = await c(tx)
       .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
       .from(manualEvidenceReferences)
@@ -2280,6 +2304,7 @@ export function createManualReports(
       result.set(tripId, {
         manualRevision: revision ? revisionDto(revision) : null,
         evidence: [...unique.values()].map(evidenceDto),
+        eventId: eventIds.get(tripId) ?? null,
       });
     }
     return result;

@@ -31,6 +31,7 @@ export const trips = mysqlTable(
   "trips",
   {
     id: idColumn("id").primaryKey(),
+    number: int("number", { unsigned: true }).autoincrement().notNull(),
     ownerId: idColumn("owner_id")
       .notNull()
       .references(() => membership.userId, { onDelete: "restrict" }),
@@ -60,12 +61,14 @@ export const trips = mysqlTable(
     createdAt: utcColumn("created_at").notNull(),
   },
   (t) => [
+    uniqueIndex("trip_number_unique").on(t.number),
     index("trip_group_members").on(t.aliasOf, t.id),
     index("trip_assessment_pending").on(t.assessmentPending, t.aliasOf, t.id),
     index("trip_match_owner").on(t.ownerId, t.game, t.aliasOf, t.id),
     check("trip_alias_distinct", sql`${t.aliasOf} IS NULL OR ${t.aliasOf} <> ${t.id}`),
     index("trip_company_page").on(t.decision, t.createdAt, t.id),
     index("trip_owner_page").on(t.ownerId, t.createdAt, t.id),
+    index("trip_owner_reporting").on(t.ownerId, t.reportingAt, t.id),
     index("trip_game_page").on(t.game, t.decision, t.createdAt, t.id),
     index("trip_analytics_reporting").on(t.decision, t.reportingAt, t.game, t.ownerId),
     index("trip_review_queue").on(t.reviewHold, t.aliasOf, t.createdAt, t.id),

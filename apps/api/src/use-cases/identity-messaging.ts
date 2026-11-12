@@ -114,6 +114,14 @@ export function composeIdentity(
     : undefined;
   identity = createIdentity(unit, identityConfig, {
     accessEvents: identityAccessEvents(unit, outbox),
+    ...(tripsConfig
+      ? {
+          tripLifetimeTotals: (tx, id) => {
+            if (!trips) throw new Error("TRIPS_COMPOSITION_INCOMPLETE");
+            return trips.lifetimeTotalsInTransaction(tx, id);
+          },
+        }
+      : {}),
     qualificationsLifecycle: createQualificationInitialization(unit, outbox),
     ...(telemetryConfig
       ? { invalidateTelemetryCredentials: (tx, id) => invalidateTelemetryCredentials(unit, tx, id) }
@@ -164,6 +172,10 @@ export function composeIdentity(
                 if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                 return tripDecisions.privateProjectionInTransaction(tx, id, actor);
               },
+              eventAssociations: (tx, ids) => {
+                if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
+                return tripDecisions.eventAssociationsInTransaction(tx, ids);
+              },
               correctionRequested: async (tx, id, requestId, actor, reason) => {
                 if (!tripDecisions) throw new Error("TRIP_DECISIONS_COMPOSITION_INCOMPLETE");
                 await tripDecisions.correctionRequestedInTransaction(
@@ -177,6 +189,14 @@ export function composeIdentity(
             }
           : {}),
         ...(catalogs ? { catalogs } : {}),
+        ...(eventsConfig
+          ? {
+              eventTitles: (tx, ids, actor) => {
+                if (!events) throw new Error("EVENTS_COMPOSITION_INCOMPLETE");
+                return events.tripTitlesInTransaction(tx, ids, actor);
+              },
+            }
+          : {}),
         ...(manualConfig
           ? {
               manualEvidence: (tx, owner, payload, tripId) => {

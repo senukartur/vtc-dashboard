@@ -9,6 +9,7 @@ import {
   sourceMessages,
   sourcePayloads,
   sourceTrips,
+  sql,
   tripFacts,
   tripFactTrailers,
   tripHistory,
@@ -24,6 +25,7 @@ import {
 } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
+import { createEvents } from "../../apps/api/src/modules/events/service.ts";
 import {
   type Actor,
   createIdentity,
@@ -33,6 +35,7 @@ import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/cano
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
 import { createTripActivity } from "../../apps/api/src/modules/trips/activity.ts";
+import { tripSearchCondition } from "../../apps/api/src/modules/trips/list-query.ts";
 import {
   createTrips,
   type SourceContext,
@@ -916,6 +919,10 @@ test("null/before/at expiry, holds and current review gate only raw payload clea
   expect(payload?.content).toBeNull();
   expect(payload?.expiredAt).toBe(now().toISOString());
   expect(await service.detail(owner, result.tripId)).toMatchObject(legacy("unknown"));
+  expect((await service.list(owner, { scope: "mine" })).items[0]).toMatchObject({
+    id: result.tripId,
+    gameMode: "truckersmp",
+  });
   expect((await totals()).facts).toBe(1);
   expect((await totals()).trips).toBe(1);
   const eventContext = await unit.run((tx) =>
@@ -1022,6 +1029,11 @@ test("owner, reviewer and company views filter private facts before serializatio
     });
     expect(ownerResponse.statusCode).toBe(200);
     expect(ownerResponse.json().data.effectiveFacts.recordedTelemetry).toEqual(recordedTelemetry);
+    expect(ownerResponse.json().data.summary).toMatchObject({
+      gameMode: "haulmp",
+      event: null,
+      submittedAt: null,
+    });
     expect(JSON.stringify(ownerResponse.json())).not.toMatch(
       /"snapshot"|"sourceRecordId"|"eventId"|"ambiguous"/,
     );
@@ -1139,8 +1151,12 @@ test("decision counts partition own trips and active/correction axes deliberatel
     counts: { unassessed: 1, pendingReview: 1, accepted: 1, rejected: 1 },
     activeTrips: 4,
     correctionPending: 1,
+    lifetimeTotals: { acceptedTrips: 1, actualDistanceM: "0" },
   });
-  expect((await service.status(other)).counts.accepted).toBe(0);
+  expect((await service.status(other)).lifetimeTotals).toEqual({
+    acceptedTrips: 0,
+    actualDistanceM: "0",
+  });
 });
 test("restrictive relationships retain historical ownership and normalized evidence", async () => {
   const result = await receive(fixture());
@@ -1542,7 +1558,9 @@ test("review queue filters hold and order, binds them to cursors and projects ma
       await unit.client(tx).update(trips).set({ reviewHold: hold }).where(eq(trips.id, id));
   });
   const calls: string[][] = [],
-    submittedAt = "2026-10-20T11:00:00.000Z";
+    submittedAt = "2026-10-20T11:00:00.000Z",
+    missingEventId = newId();
+  const events = createEvents(unit, config, { identity }, now);
   const queue = createTrips(
     unit,
     config,
@@ -1555,9 +1573,12 @@ test("review queue filters hold and order, binds them to cursors and projects ma
       manualRevisions: async (_tx, ids) => {
         calls.push([...ids]);
         return new Map(
-          ids.filter((id) => id === third).map((id) => [id, { number: 2, submittedAt }]),
+          ids
+            .filter((id) => id === third)
+            .map((id) => [id, { number: 2, submittedAt, eventId: missingEventId }]),
         );
       },
+      eventTitles: events.tripTitlesInTransaction,
     },
     now,
   );
@@ -1579,6 +1600,7 @@ test("review queue filters hold and order, binds them to cursors and projects ma
   });
   expect(next.items.map((item) => item.id)).toEqual([third]);
   expect(next.items[0]?.review?.manualRevision).toEqual({ number: 2, submittedAt });
+  expect(next.items[0]).toMatchObject({ submittedAt, event: null, gameMode: "unknown" });
   expect(next.nextCursor).toBeNull();
   // One batched projection call per page, never one per row.
   expect(calls).toEqual([[first], [third]]);
@@ -1609,7 +1631,6 @@ test("review queue filters hold and order, binds them to cursors and projects ma
     ).rejects.toMatchObject({ statusCode: 409 });
   for (const options of [
     { scope: "company" as const, hold: true },
-    { scope: "mine" as const, order: "asc" as const },
     { scope: "review" as const, hold: "true" as unknown as boolean },
     { scope: "review" as const, order: "up" as unknown as "asc" },
   ])
@@ -1618,10 +1639,15 @@ test("review queue filters hold and order, binds them to cursors and projects ma
   await unit.run((tx) =>
     unit.client(tx).update(trips).set({ decision: "accepted" }).where(eq(trips.id, third)),
   );
-  for (const scope of ["company", "mine"] as const)
-    for (const item of (await queue.list(scope === "mine" ? owner : staff, { scope })).items)
-      expect(item).not.toHaveProperty("review");
-  expect(calls).toEqual([]);
+  const company = await queue.list(staff, { scope: "company" });
+  expect(company.items[0]).toMatchObject({ id: third, submittedAt });
+  expect(company.items[0]).not.toHaveProperty("review");
+  expect(company.items[0]).not.toHaveProperty("gameMode");
+  expect(company.items[0]).not.toHaveProperty("event");
+  const mine = await queue.list(owner, { scope: "mine" });
+  expect(mine.items.find((item) => item.id === third)).toMatchObject({ submittedAt, event: null });
+  for (const item of mine.items) expect(item).not.toHaveProperty("review");
+  expect(calls).toEqual([[third], [fourth, third, second, first]]);
 });
 test("representative mixed history uses bounded ordered company, owner and review queue indexes", async () => {
   const rows = Array.from({ length: 600 }, (_, i) => ({
@@ -1756,14 +1782,12 @@ async function sourceMatrix() {
 }
 type ListArgs = NonNullable<Parameters<Trips["list"]>[1]>;
 const ids = (page: { items: { id: string }[] }) => page.items.map((item) => item.id);
-const binding = (cursor: string) =>
-  JSON.parse(Buffer.from(cursor.split(".")[0] as string, "base64url").toString())
-    .binding as unknown[];
-async function walk(actor: Actor, options: ListArgs, limit: number) {
+async function walk(actor: Actor, options: ListArgs, limit: number, total?: number) {
   const seen: string[] = [];
   let cursor: string | undefined;
   for (let n = 0; n < 50; n++) {
     const page = await service.list(actor, { ...options, limit, ...(cursor ? { cursor } : {}) });
+    if (total !== undefined) expect(page.total).toBe(total);
     seen.push(...ids(page));
     if (!page.nextCursor) {
       expect(page.items.length).toBeLessThanOrEqual(limit);
@@ -1774,6 +1798,258 @@ async function walk(actor: Actor, options: ListArgs, limit: number) {
   }
   throw new Error("CURSOR_WALK_UNBOUNDED");
 }
+test("completion paging keeps missing times last, with directional ties and an unpaged total", async () => {
+  const early = "2026-10-18T08:00:00.000Z";
+  const late = "2026-10-20T08:00:00.000Z";
+  const rows = [late, early, null, late, null].map((actualEnd) => ({
+    ...tripRow(newId(), owner.userId, { decision: "accepted" }),
+    actualEnd,
+  }));
+  await unit.run((tx) => unit.client(tx).insert(trips).values(rows));
+  const knownTies = rows
+    .filter((r) => r.actualEnd === late)
+    .map((r) => r.id)
+    .sort();
+  const missing = rows
+    .filter((r) => r.actualEnd === null)
+    .map((r) => r.id)
+    .sort();
+  const earliest = rows.find((r) => r.actualEnd === early)?.id;
+  expect(await walk(owner, { order: "completion_asc" }, 1, rows.length)).toEqual([
+    earliest,
+    ...knownTies,
+    ...missing,
+  ]);
+  const latestFirst = [...knownTies.reverse(), earliest, ...missing.reverse()];
+  expect(await walk(owner, { scope: "mine", order: "completion_desc" }, 1, rows.length)).toEqual(
+    latestFirst,
+  );
+  expect(ids(await service.list(staff, { scope: "review", order: "completion_desc" }))).toEqual(
+    latestFirst,
+  );
+  const sortedByCreation = rows.map((r) => r.id);
+  expect(ids(await service.list(owner, { scope: "mine", order: "asc" }))).toEqual(sortedByCreation);
+  expect(ids(await service.list(owner, { order: "desc" }))).toEqual(sortedByCreation.reverse());
+});
+
+test("reporting bounds and owner filters intersect current visibility before counting and paging", async () => {
+  const from = "2026-10-20T10:00:00.001Z";
+  const toExclusive = "2026-10-20T10:00:00.002Z";
+  const seed = (actor: Actor, decision: Decision, reportingAt: string | null) => ({
+    ...tripRow(newId(), actor.userId, { decision, hold: true }),
+    reportingAt,
+    actualEnd: "2026-10-18T08:00:00.000Z",
+  });
+  const atLower = seed(other, "accepted", from);
+  const atUpper = seed(other, "accepted", toExclusive);
+  const undated = seed(other, "accepted", null);
+  const privateOther = seed(other, "pending_review", from);
+  const privateOwn = seed(owner, "pending_review", from);
+  await unit.run((tx) =>
+    unit.client(tx).insert(trips).values([atLower, atUpper, undated, privateOther, privateOwn]),
+  );
+  const filter = { ownerId: other.userId };
+  expect(await walk(owner, { ...filter, from }, 1, 2)).toEqual([atUpper.id, atLower.id]);
+  const bounded = await service.list(owner, { ...filter, toExclusive, limit: 1 });
+  expect(ids(bounded)).toEqual([atLower.id]);
+  expect(bounded.total).toBe(1);
+  expect(ids(await service.list(owner, { ...filter, from, toExclusive }))).toEqual([atLower.id]);
+  expect((await service.list(owner, filter)).total).toBe(3);
+  expect(await service.list(owner, { ...filter, scope: "mine" })).toEqual({
+    items: [],
+    nextCursor: null,
+    total: 0,
+  });
+  expect(
+    ids(await service.list(owner, { scope: "mine", ownerId: owner.userId, from, toExclusive })),
+  ).toEqual([privateOwn.id]);
+  expect(
+    ids(await service.list(staff, { ...filter, scope: "review", hold: true, from, toExclusive })),
+  ).toEqual([atLower.id]);
+  expect(
+    ids(await service.list(staff, { scope: "review", hold: true, from, toExclusive })),
+  ).toEqual([privateOwn.id, privateOther.id, atLower.id]);
+  await expect(service.list(owner, { ...filter, scope: "review" })).rejects.toMatchObject({
+    statusCode: 403,
+  });
+  const first = await service.list(owner, { ...filter, from, limit: 1 });
+  for (const changed of [
+    { ownerId: newId() },
+    { from: "2026-10-20T10:00:00.000Z" },
+    { toExclusive },
+    { decision: "accepted" as const },
+    { order: "completion_desc" as const },
+  ])
+    await expect(
+      service.list(owner, { ...filter, from, ...changed, cursor: first.nextCursor as string }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+  for (const bounds of [
+    { from, toExclusive: from },
+    { from: toExclusive, toExclusive: from },
+    { from: "2026-02-30T00:00:00.000Z" },
+    { toExclusive: "2026-10-20T10:00:00.000+00:00" },
+    { ownerId: "not-a-uuid" },
+  ])
+    await expect(service.list(owner, bounds)).rejects.toMatchObject({ statusCode: 422 });
+});
+
+test("number search is exact and allocations survive concurrent creation, replay and rollback", async () => {
+  const firstPayload = fresh();
+  const [received, manual] = await Promise.all([
+    receive(firstPayload),
+    unit.run((tx) => service.reserveManualInTransaction(tx, owner.userId, "ets2")),
+    receive(fresh()),
+  ]);
+  const page = await service.list(owner, { scope: "mine" });
+  const numbers = page.items.map((item) => item.number);
+  expect(numbers).toHaveLength(3);
+  expect(new Set(numbers).size).toBe(3);
+  for (const number of numbers)
+    expect(typeof number === "number" && Number.isSafeInteger(number) && number > 0).toBe(true);
+  const receiptNumber = page.items.find((item) => item.id === received.tripId)?.number;
+  expect((await receive(firstPayload)).duplicate).toBe(true);
+  for (const q of [String(receiptNumber), ` #000${receiptNumber} `]) {
+    const result = await service.list(owner, { scope: "mine", q, locale: "ru" });
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toMatchObject({
+      id: received.tripId,
+      number: receiptNumber,
+      submittedAt: null,
+    });
+  }
+  for (const q of ["0", "#000", "#4294967296", "9".repeat(128)])
+    expect(await service.list(owner, { scope: "mine", q })).toEqual({
+      items: [],
+      nextCursor: null,
+      total: 0,
+    });
+  await expect(
+    unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(trips)
+        .set({ number: receiptNumber as number })
+        .where(eq(trips.id, manual)),
+    ),
+  ).rejects.toSatisfy(hasCode("ER_DUP_ENTRY"));
+
+  let rolledBackNumber: number | undefined;
+  await expect(
+    unit.run(async (tx) => {
+      const id = await service.reserveManualInTransaction(tx, owner.userId, "ets2");
+      const [row] = await unit
+        .client(tx)
+        .select({ number: trips.number })
+        .from(trips)
+        .where(eq(trips.id, id));
+      rolledBackNumber = row?.number;
+      throw new Error("SYNTHETIC_TRIP_ALLOCATION_ROLLBACK");
+    }),
+  ).rejects.toThrow("SYNTHETIC_TRIP_ALLOCATION_ROLLBACK");
+  expect(rolledBackNumber).toBeGreaterThan(0);
+  const afterRollback = await receive(fresh());
+  expect((await state(afterRollback.tripId))?.number).toBeGreaterThan(rolledBackNumber as number);
+  expect((await service.list(owner, { scope: "mine", q: String(rolledBackNumber) })).total).toBe(0);
+});
+
+test("catalog search and labels use the same locale, fallback, hidden names and literal wildcard handling", async () => {
+  const { trips: catalogTrips, rows } = await listedTrips();
+  const nameEn = "Fictional Northern Gate";
+  const nameRu = "Северный порт _%\\!";
+  const initial = await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    const [city] = await db
+      .select()
+      .from(catalogCities)
+      .where(eq(catalogCities.id, rows.id("fixture_north")));
+    const [member] = await db
+      .select({ locale: membership.locale })
+      .from(membership)
+      .where(eq(membership.userId, owner.userId));
+    if (!city || !member) throw new Error("SYNTHETIC_SEARCH_FIXTURE_MISSING");
+    await db.update(catalogCities).set({ nameEn, nameRu }).where(eq(catalogCities.id, city.id));
+    await db.update(membership).set({ locale: "ru" }).where(eq(membership.userId, owner.userId));
+    return { city, locale: member.locale };
+  });
+  try {
+    const [a, b] = await Promise.all([
+      receive(fresh(), catalogTrips),
+      receive(fresh(), catalogTrips),
+    ]);
+    const opts = { scope: "mine" as const, q: "  порт  ", limit: 1 };
+    const first = await catalogTrips.list(owner, opts);
+    expect(first.total).toBe(2);
+    expect(first.items[0]?.origin).toMatchObject({
+      label: nameRu,
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+    });
+    const cursor = first.nextCursor as string;
+    const next = await catalogTrips.list(owner, { ...opts, q: "порт", locale: "ru", cursor });
+    expect(next.total).toBe(2);
+    expect(new Set([...ids(first), ...ids(next)])).toEqual(new Set([a.tripId, b.tripId]));
+    await expect(
+      catalogTrips.list(owner, { ...opts, q: "Северный", cursor }),
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(catalogTrips.list(owner, { ...opts, locale: "en", cursor })).rejects.toMatchObject(
+      { statusCode: 409 },
+    );
+    expect((await catalogTrips.list(owner, { ...opts, q: nameEn })).total).toBe(0);
+    expect(
+      (await catalogTrips.list(owner, { ...opts, q: nameEn, locale: "en" })).items[0]?.origin,
+    ).toMatchObject({ label: nameEn, requestedLocale: "en" });
+    const fallback = await catalogTrips.list(owner, { ...opts, q: "Fictional south" });
+    expect(fallback.total).toBe(2);
+    expect(fallback.items[0]?.destination).toMatchObject({
+      label: "Fictional south",
+      requestedLocale: "ru",
+      renderedLocale: "en",
+      englishFallback: true,
+    });
+    expect((await catalogTrips.list(owner, { ...opts, q: "Fictional crates" })).total).toBe(2);
+    expect((await catalogTrips.list(owner, { ...opts, q: "_%\\!" })).total).toBe(2);
+    expect((await catalogTrips.list(owner, { ...opts, q: "ficti_nal%" })).total).toBe(0);
+    const renamed = "Новое имя";
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(catalogCities)
+        .set({ nameRu: renamed, hidden: true })
+        .where(eq(catalogCities.id, initial.city.id)),
+    );
+    expect((await catalogTrips.list(owner, opts)).total).toBe(0);
+    const hidden = await catalogTrips.list(owner, { ...opts, q: renamed });
+    expect(hidden.total).toBe(2);
+    expect(hidden.items[0]?.origin).toMatchObject({ label: renamed, hidden: true });
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(membership)
+        .set({ locale: "en" })
+        .where(eq(membership.userId, owner.userId)),
+    );
+    await expect(catalogTrips.list(owner, { ...opts, cursor })).rejects.toMatchObject({
+      statusCode: 409,
+    });
+  } finally {
+    await unit.run(async (tx) => {
+      const db = unit.client(tx);
+      await db
+        .update(catalogCities)
+        .set({
+          nameEn: initial.city.nameEn,
+          nameRu: initial.city.nameRu,
+          hidden: initial.city.hidden,
+        })
+        .where(eq(catalogCities.id, initial.city.id));
+      await db
+        .update(membership)
+        .set({ locale: initial.locale })
+        .where(eq(membership.userId, owner.userId));
+    });
+  }
+});
+
 test("source filter matches the canonical group per scope, combines with filters and keeps omitted unchanged", async () => {
   const m = await sourceMatrix();
   // Omitted: no source predicate, sourceless trips included, alias members never listed.
@@ -1781,9 +2057,7 @@ test("source filter matches the canonical group per scope, combines with filters
   expect(ids(all)).toEqual([...m.F, m.T5, m.T4, m.T3, m.T2, m.T1]);
   expect(all.items.find((item) => item.id === m.T4)?.sourceKinds).toEqual([]);
   const omitted = await service.list(owner, { scope: "mine", limit: 2 });
-  expect(binding(omitted.nextCursor as string).some((part) => /^source:/.test(String(part)))).toBe(
-    false,
-  );
+  expect(omitted.nextCursor).not.toBeNull();
   expect(
     ids(
       await service.list(owner, { scope: "mine", limit: 2, cursor: omitted.nextCursor as string }),
@@ -1844,7 +2118,7 @@ test("source filter applies before keyset limits and binds the cursor to the sou
   const manual = await service.list(owner, { scope: "mine", source: "manual", limit: 1 }),
     plain = await service.list(owner, { scope: "mine", limit: 1 }),
     held = await service.list(staff, { scope: "review", hold: true, source: "manual", limit: 1 });
-  expect(binding(manual.nextCursor as string)).toContain("source:manual");
+  expect(manual.nextCursor).not.toBeNull();
   const replays: [Actor, ListArgs][] = [
     [owner, { scope: "mine", source: "ets2telemetry", cursor: manual.nextCursor as string }],
     [owner, { scope: "mine", cursor: manual.nextCursor as string }],
@@ -1950,7 +2224,7 @@ test("source filter keeps each scope's page index with ref probes and no outer f
         hold: extra.hold,
         source,
         order: extra.order,
-        after: extra.after ? { createdAt: last.createdAt, id: last.id } : null,
+        after: extra.after ? { instant: last.createdAt, id: last.id } : null,
       });
       return db
         .select()
@@ -1994,6 +2268,114 @@ test("source filter keeps each scope's page index with ref probes and no outer f
   // Review without hold has no page index today; its source probes must still be ref lookups.
   const { table: unheld } = await plan("review", "ets2telemetry");
   for (const row of unheld.slice(1)) expect(row.type).toBe("ref");
+});
+
+test("EXPLAIN covers owner reporting bounds, completion and localized page and count", async () => {
+  const { catalogs, trips: catalogTrips } = await listedTrips();
+  const matched = await receive(fresh(), catalogTrips);
+  const rows = Array.from({ length: 600 }, (_, i) => {
+    const row = tripRow(newId(), i % 10 === 1 ? owner.userId : other.userId, {
+      game: i % 3 ? "ets2" : "ats",
+      decision: i % 4 ? "accepted" : "unassessed",
+    });
+    return {
+      ...row,
+      reportingAt: i % 7 ? row.createdAt : null,
+      actualEnd: i % 5 ? row.createdAt : null,
+    };
+  });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.update(trips).set({ decision: "accepted" }).where(eq(trips.id, matched.tripId));
+    await db.insert(trips).values(rows);
+  });
+  await control.query("ANALYZE TABLE trips, trip_facts, catalog_cities, catalog_cargoes");
+
+  const first = rows[0] as (typeof rows)[number];
+  const upper = rows[31] as (typeof rows)[number];
+  const queries = await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    const base = { scope: "company" as const, viewerId: owner.userId };
+    const ownerReporting = tripListQuery(db, {
+      ...base,
+      ownerId: owner.userId,
+      from: first.createdAt,
+      toExclusive: upper.createdAt,
+    });
+    const completion = tripListQuery(db, {
+      ...base,
+      order: "completion_asc",
+      after: { instant: upper.actualEnd, id: upper.id },
+    });
+    const localized = tripListQuery(db, {
+      ...base,
+      searchCondition: tripSearchCondition(
+        unit,
+        tx,
+        catalogs.labelSearchCondition,
+        { label: "Fictional north" },
+        "ru",
+      ),
+    });
+    const page = (query: ReturnType<typeof tripListQuery>) =>
+      db
+        .select()
+        .from(trips)
+        .where(query.where)
+        .orderBy(...query.orderBy)
+        .limit(26)
+        .toSQL();
+    return {
+      ownerReporting: page(ownerReporting),
+      completion: page(completion),
+      localizedPage: page(localized),
+      localizedCount: db
+        .select({ total: sql<string>`COUNT(*)` })
+        .from(trips)
+        .where(localized.filtered)
+        .toSQL(),
+    };
+  });
+  const explain = async (query: { sql: string; params: unknown[] }) => {
+    const [plan] = await control.query<RowDataPacket[]>(`EXPLAIN ${query.sql}`, query.params);
+    return plan;
+  };
+  const [ownerPlan, completionPlan, labelPagePlan, labelCountPlan] = await Promise.all([
+    explain(queries.ownerReporting),
+    explain(queries.completion),
+    explain(queries.localizedPage),
+    explain(queries.localizedCount),
+  ]);
+  const ownerAccess = ownerPlan.find((row) => row.table === "trips");
+  const possible = String(ownerAccess?.possible_keys ?? "").split(",");
+  expect([...possible, ownerAccess?.key]).toContain("trip_owner_reporting");
+  expect(completionPlan.some((row) => row.table === "trips")).toBe(true);
+  expect(queries.completion.sql).toMatch(
+    /order by `trips`\.`actual_end` is null asc, `trips`\.`actual_end` asc, `trips`\.`id` asc/i,
+  );
+  for (const plan of [labelPagePlan, labelCountPlan])
+    expect(plan.map((row) => row.table)).toEqual(
+      expect.arrayContaining(["trips", "trip_facts", "catalog_cities", "catalog_cargoes"]),
+    );
+  expect(queries.localizedCount.sql).not.toMatch(/order by|limit/i);
+
+  const accesses = (plan: RowDataPacket[]) =>
+    plan.map((row) => ({
+      table: row.table,
+      access: row.type,
+      index: row.key,
+      estimatedRows: row.rows,
+      filesort: /filesort/i.test(String(row.Extra ?? "")),
+    }));
+  console.log(
+    JSON.stringify({
+      event: "trip_list_explain",
+      ownerReporting: accesses(ownerPlan),
+      completion: accesses(completionPlan),
+      localizedPage: accesses(labelPagePlan),
+      localizedCount: accesses(labelCountPlan),
+    }),
+  );
 });
 
 test("private normalized telemetry facts retain supported actual timing, zero, planned distance and unknown completeness", async () => {

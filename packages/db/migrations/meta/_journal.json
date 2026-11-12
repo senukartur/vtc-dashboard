@@ -183,6 +183,13 @@
       "when": 1794433441207,
       "tag": "0025_fixed_wolverine",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1794433702755,
+      "tag": "0026_yielding_deathbird",
+      "breakpoints": true
     }
   ]
 }
