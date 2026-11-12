@@ -70,8 +70,12 @@ for (const locale of ["en", "ru"] as const) {
       await page.goto("/account/events");
       if (locale === "ru") await catalogLanguage(page, locale);
       const main = page.getByRole("main");
-      const structured = main.getByRole("listitem").filter({ hasText: first.event.title });
-      const older = main.getByRole("listitem").filter({ hasText: legacy.event.title });
+      const structured = main.getByRole("listitem").filter({
+        has: page.locator(`a[href="/account/events/${stage2EventId}"]`),
+      });
+      const older = main.getByRole("listitem").filter({
+        has: page.locator(`a[href="/account/events/${stage2LegacyEventId}"]`),
+      });
 
       await expect(structured.getByRole("link", { name: first.event.title })).toHaveAttribute(
         "href",
@@ -85,6 +89,9 @@ for (const locale of ["en", "ru"] as const) {
       expect(
         await structured.locator("img").evaluate((node) => (node as HTMLImageElement).naturalWidth),
       ).toBeGreaterThan(0);
+      const cover = await structured.locator("img").boundingBox();
+      expect(cover?.width).toBeGreaterThanOrEqual(58);
+      expect(cover?.height).toBeGreaterThanOrEqual(42);
       await expect(older).toContainText(legacy.event.route ?? "");
       await expect(older).toContainText(locale === "en" ? "No DLC required" : "DLC не нужны");
       await expect(older.locator(".event-list-placeholder")).toBeVisible();
