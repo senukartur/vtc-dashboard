@@ -163,7 +163,11 @@ function EventHeading({
             <Badge className={`events-status events-status-${event.status}`}>
               {t(event.status)}
             </Badge>
-            {visibility && <span>{t(visibility)}</span>}
+            {visibility && (
+              <span>
+                {t("visibility")}: {t(visibility)}
+              </span>
+            )}
           </p>
           <h1>{event.title}</h1>
           <p className="events-header-time">
