@@ -8,7 +8,6 @@ import {
   ladderFor,
   monthLabel,
   nextLevel,
-  ownTrips,
   sourceKeys,
   tripsPath,
   twelveMonthWindow,
@@ -186,44 +185,19 @@ describe("driver profile model", () => {
   });
 
   describe("trip requests", () => {
-    it("uses the exact own scope and the bounded company window, never an owner parameter", () => {
-      expect(tripsPath({ isSelf: true })).toBe("/trips?scope=mine&decision=accepted&limit=10");
-      expect(tripsPath({ isSelf: true, game: "ats" })).toBe(
-        "/trips?scope=mine&decision=accepted&limit=10&game=ats",
+    it("uses one completion-ordered page and restricts company history to the requested driver", () => {
+      expect(tripsPath(selfId, { isSelf: true })).toBe(
+        "/trips?scope=mine&decision=accepted&limit=10&order=completion_desc",
       );
-      expect(tripsPath({ isSelf: false })).toBe("/trips?scope=company&decision=accepted&limit=100");
-      expect(tripsPath({ isSelf: false, game: "ets2" })).toBe(
-        "/trips?scope=company&decision=accepted&limit=100&game=ets2",
+      expect(tripsPath(selfId, { isSelf: true, game: "ats" })).toBe(
+        "/trips?scope=mine&decision=accepted&game=ats&limit=10&order=completion_desc",
       );
-      for (const path of [tripsPath({ isSelf: true }), tripsPath({ isSelf: false })])
-        expect(path).not.toMatch(/owner|member/);
-    });
-
-    it("keeps only the member's trips in order and caps them at ten", () => {
-      const items = tripsFixture(new URLSearchParams("scope=company")).data.items;
-      const own = ownTrips(items, alphaId);
-      expect(own.truncated).toBe(false);
-      expect(own.items.map((trip) => trip.owner.id)).toEqual(Array(5).fill(alphaId));
-      expect(own.items.map((trip) => trip.id)).toEqual(
-        items.filter((trip) => trip.owner.id === alphaId).map((trip) => trip.id),
+      expect(tripsPath(alphaId, { isSelf: false })).toBe(
+        `/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc`,
       );
-      expect(ownTrips(items, betaId, 1)).toMatchObject({ truncated: false });
-      expect(ownTrips(items, betaId, 1).items).toHaveLength(1);
-    });
-
-    it("caps more than ten owner matches and reports the truncation", () => {
-      const bulk = tripsFixture(new URLSearchParams("scope=company"), { bulk: true }).data.items;
-      expect(bulk.filter((trip) => trip.owner.id === alphaId)).toHaveLength(12);
-      const own = ownTrips(bulk, alphaId);
-      expect(own.items).toHaveLength(10);
-      expect(own.truncated).toBe(true);
-      expect(own.items.map((trip) => trip.id)).toEqual(
-        bulk
-          .filter((trip) => trip.owner.id === alphaId)
-          .slice(0, 10)
-          .map((trip) => trip.id),
+      expect(tripsPath(alphaId, { isSelf: false, game: "ets2" })).toBe(
+        `/trips?scope=company&ownerId=${alphaId}&game=ets2&limit=10&order=completion_desc`,
       );
-      expect(ownTrips(bulk.slice(0, 7), alphaId).truncated).toBe(false);
     });
 
     it("names the sources and falls back to unknown", () => {

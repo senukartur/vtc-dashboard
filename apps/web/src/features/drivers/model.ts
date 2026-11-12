@@ -17,10 +17,7 @@ export const LEVEL_ORDER: readonly Level["code"][] = [
   "driver_ii",
   "driver_i",
 ];
-/** Exact own-trip page shown on the profile. */
-export const OWN_TRIPS_LIMIT = 10;
-/** Latest accepted company trips scanned for another member (contract maximum). */
-export const COMPANY_TRIPS_WINDOW = 100;
+const RECENT_TRIPS_LIMIT = 10;
 
 /**
  * Rolling window of twelve calendar months ending with the current one. Like the overview's
@@ -72,28 +69,22 @@ export function assignmentFor(profile: DTO["MemberProfile"], game: Game): Assign
   return profile.qualifications.find((assignment) => assignment.game === game) ?? null;
 }
 
-/**
- * Own trips use the exact `mine` scope. Other members have no owner filter in the contract, so
- * the profile scans the latest accepted company trips and discloses that bounded window.
- */
-export function tripsPath({ isSelf, game }: { isSelf: boolean; game?: Game | undefined }): string {
-  const search = new URLSearchParams({
+export function driverTripFilters(
+  memberId: string,
+  { isSelf, game }: { isSelf: boolean; game?: Game | undefined },
+) {
+  return new URLSearchParams({
     scope: isSelf ? "mine" : "company",
-    decision: "accepted",
-    limit: String(isSelf ? OWN_TRIPS_LIMIT : COMPANY_TRIPS_WINDOW),
+    ...(isSelf ? { decision: "accepted" } : { ownerId: memberId }),
     ...(game ? { game } : {}),
   });
-  return `/trips?${search.toString()}`;
 }
 
-/** The member's trips in server order, capped; `truncated` when more matches were dropped. */
-export function ownTrips(
-  items: readonly TripSummary[],
-  memberId: string,
-  max = OWN_TRIPS_LIMIT,
-): { items: TripSummary[]; truncated: boolean } {
-  const matches = items.filter((trip) => trip.owner.id === memberId);
-  return { items: matches.slice(0, max), truncated: matches.length > max };
+export function tripsPath(memberId: string, params: { isSelf: boolean; game?: Game | undefined }) {
+  const search = driverTripFilters(memberId, params);
+  search.set("limit", String(RECENT_TRIPS_LIMIT));
+  search.set("order", "completion_desc");
+  return `/trips?${search.toString()}`;
 }
 
 /** Translation keys for the trip sources, deduplicated; an empty list is "unknown". */

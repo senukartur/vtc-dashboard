@@ -189,7 +189,8 @@ function DriverProfileContent({ memberId }: { memberId: string }) {
               query={tripsQuery}
               isSelf={isSelf}
               game={effectiveGame}
-              nickname={profile.member.nickname}
+              member={profile.member}
+              lifetime={profile.lifetimeTotals}
               locale={locale}
               displayTimezone={displayTimezone}
             />

@@ -38,10 +38,10 @@ export interface DriverMockState {
   failures: Partial<Record<DriverEndpoint, number>>;
   /** Full `/me` capability list; undefined keeps the default member fixture plus company.read. */
   capabilities: string[] | undefined;
-  /** Next cursor on the first trips page (company window incomplete / more own trips). */
+  /** Simulate a next cursor on the first accepted trips page. */
   tripsNextCursor: boolean;
   emptyTrips: boolean;
-  /** Twelve trips by AlphaHauler in the company window (more than the profile shows). */
+  /** Twelve trips by AlphaHauler to exercise the ten-row profile limit. */
   bulkTrips: boolean;
   emptyAnalytics: boolean;
   /** Zone in the public company stats; null returns the unavailable month. */

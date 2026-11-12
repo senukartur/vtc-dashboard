@@ -124,6 +124,9 @@ export function RecentTripsWidget({
                     ) : (
                       row.countedAt
                     )}
+                    {trip.reportingAt && trip.reportingBasis === "manual_confirmation" && (
+                      <> · {t("trips:manual_confirmation")}</>
+                    )}
                   </span>
                 </div>
               </li>

@@ -92,7 +92,16 @@ export function assignmentsOf(id: string): DTO["Assignment"][] {
 }
 
 export function profileFixture(id: string): DTO["EnvelopeMemberProfile"] {
-  return { data: { member: member(id), qualifications: assignmentsOf(id) }, meta };
+  const lifetimeTotals =
+    id === alphaId ? { acceptedTrips: 253, actualDistanceM: "64585250" } : undefined;
+  return {
+    data: {
+      member: member(id),
+      qualifications: assignmentsOf(id),
+      ...(lifetimeTotals ? { lifetimeTotals } : {}),
+    },
+    meta,
+  };
 }
 
 /** Public progress (no review fields): the shape `/members/{id}/qualification-progress` returns. */
@@ -248,7 +257,9 @@ function trip(seed: TripSeed, index: number): DTO["TripSummary"] {
     recording: "complete",
     reportingBasis: seed.sources.includes("ets2telemetry")
       ? "actual_completion"
-      : "manual_confirmation",
+      : seed.sources.includes("manual")
+        ? "manual_confirmation"
+        : "unknown",
   };
 }
 
@@ -319,7 +330,7 @@ const companySeeds: TripSeed[] = [
   },
 ];
 
-/** Seven more ETS2 trips by AlphaHauler, so the company window holds twelve of theirs. */
+/** Seven more ETS2 trips by AlphaHauler, so the owner filter has more than one page. */
 const bulkSeeds: TripSeed[] = Array.from({ length: 7 }, (_, index) => ({
   owner: alphaId,
   game: "ets2" as const,
@@ -351,10 +362,7 @@ const ownSeeds: TripSeed[] = [
   },
 ];
 
-/**
- * Accepted trip page. `company` mixes owners like the real latest-company window; `mine` holds
- * only the viewer's trips. The game filter applies before paging, as on the server.
- */
+/** Accepted fixture page with owner/game filters applied before limit. */
 export function tripsFixture(
   search: URLSearchParams,
   options: { nextCursor?: boolean; empty?: boolean; bulk?: boolean } = {},
@@ -368,11 +376,22 @@ export function tripsFixture(
       : options.bulk
         ? [...companySeeds, ...bulkSeeds]
         : companySeeds;
-  const items = seeds
+  const ownerId = search.get("ownerId");
+  const matches = seeds
     .map((seed, index) => trip(seed, own ? index + 50 : index))
-    .filter((item) => !game || item.game === game);
+    .filter((item) => (!game || item.game === game) && (!ownerId || item.owner.id === ownerId));
+  if (search.get("order") === "completion_desc") {
+    const completion = (item: DTO["TripSummary"]) =>
+      item.reportingBasis === "actual_completion" ? (item.reportingAt ?? "") : "";
+    matches.sort((a, b) => completion(b).localeCompare(completion(a)));
+  }
+  const limit = Number(search.get("limit") ?? 100);
   return {
-    data: { items, nextCursor: options.nextCursor ? "NONFUNCTIONAL_CURSOR" : null },
+    data: {
+      items: matches.slice(0, limit),
+      total: matches.length,
+      nextCursor: options.nextCursor || matches.length > limit ? "NONFUNCTIONAL_CURSOR" : null,
+    },
     meta,
   };
 }

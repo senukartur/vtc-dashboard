@@ -1,4 +1,3 @@
-import { inertNotifications } from "./notifications.ts";
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { accountFixture } from "../../../apps/web/src/features/account/fixtures.ts";
@@ -13,6 +12,7 @@ import {
   mockCatalogs,
 } from "./catalogs.ts";
 import { expect } from "./fixtures.ts";
+import { inertNotifications } from "./notifications.ts";
 
 export const id = "41000000-0000-4000-8000-000000000001",
   cargoId = "63000000-0000-4000-8000-000000000021",
@@ -44,6 +44,8 @@ export async function mockTrips(page: Page) {
         item = catalogItem(selectedId, `Fictional ${label}`, locale);
       return route.fulfill({ json: catalogRow[2] ? envelope(item) : catalogList([item]) });
     }
+    if (path === "/api/v1/me/trip-status-summary")
+      return route.fulfill({ json: example("getMyTripStatusSummary:success") });
     if (path === "/api/v1/trips") {
       const trip = example("getTrip:success").data;
       trip.origin = {

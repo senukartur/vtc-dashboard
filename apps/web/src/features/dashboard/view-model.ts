@@ -12,11 +12,10 @@ import type { DTO } from "./transport.js";
 export const RECENT_TRIPS_LIMIT = 5;
 
 /**
- * Latest accepted company trips. Company scope is accepted-only on the server and rejects review
- * ordering, so the path never carries decision, order or cursor.
+ * Latest accepted company trips ordered by effective actual completion.
  */
 export function recentTripsPath(game?: "ets2" | "ats") {
-  return `/trips?scope=company&limit=${RECENT_TRIPS_LIMIT}${game ? `&game=${game}` : ""}`;
+  return `/trips?scope=company&limit=${RECENT_TRIPS_LIMIT}&order=completion_desc${game ? `&game=${game}` : ""}`;
 }
 
 export type BlockState = "ready" | "empty" | "loading" | "error" | "forbidden";
