@@ -88,7 +88,7 @@ function refreshPublicDetail(client: QueryClient, id: string) {
 export function EventDetailPage({ publicView = false }: { publicView?: boolean }) {
   const { eventId = "" } = useParams();
   const session = useSession();
-  const stage2Enabled = "eventsStage2Enabled" in session && session.eventsStage2Enabled === true;
+  const stage2Enabled = session.eventsStage2Enabled;
   return publicView ? (
     <PublicDetail key={eventId} id={eventId} />
   ) : (
