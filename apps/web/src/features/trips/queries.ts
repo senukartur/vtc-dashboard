@@ -68,7 +68,7 @@ export function useTripQuery<K extends keyof DTO>(
   });
   return { ...query, data: query.isError ? undefined : query.data };
 }
-export function useTripCommand() {
+export function useTripCommand(onConflict?: () => void) {
   const session = useSession(),
     client = useQueryClient(),
     active = useRef(true),
@@ -96,7 +96,7 @@ export function useTripCommand() {
     body: unknown,
     name: K,
     etag?: string | null,
-    method: "POST" | "PUT" = "POST",
+    method: "POST" | "PUT" | "DELETE" = "POST",
     fingerprint?: string,
   ): Promise<{ data: DTO[K]; etag: string | null } | undefined> {
     if (!active.current || controller.current || waitUntil > Date.now()) return;
@@ -120,10 +120,14 @@ export function useTripCommand() {
           Accept: "application/json",
           "X-CSRF-Token": csrf.data.data.token,
           "Idempotency-Key": attempt.current.key,
-          ...(body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+          ...(body === undefined || body instanceof FormData
+            ? {}
+            : { "Content-Type": "application/json" }),
           ...(etag ? { "If-Match": etag } : {}),
         },
-        body: body instanceof FormData ? body : JSON.stringify(body),
+        ...(body === undefined
+          ? {}
+          : { body: body instanceof FormData ? body : JSON.stringify(body) }),
       });
       if (![200, 201, 202].includes(response.status)) fail(response);
       const parsed = schema(name).safeParse(await response.json());
@@ -152,11 +156,13 @@ export function useTripCommand() {
           setWaitUntil(Date.now() + safe.retryAfter * 1000);
           setNow(Date.now());
         }
-        if (safe.kind === "conflict")
+        if (safe.kind === "conflict") {
+          onConflict?.();
           await client.invalidateQueries({
             queryKey: ["trip-workspace"],
             predicate: (query) => commandAffects(path, String(query.queryKey[6] ?? "")),
           });
+        }
         if (!["uncertain", "unavailable", "limited"].includes(safe.kind)) attempt.current = null;
       }
     } finally {

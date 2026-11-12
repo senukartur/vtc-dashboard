@@ -14,6 +14,7 @@ import {
 } from "../../shared/ui/dialog.js";
 import { Badge, Button, Card } from "../../shared/ui/primitives.js";
 import type { AccountFailure } from "../account/transport.js";
+import { referenceFields } from "../manual-reports/model.js";
 import { type DTO, revisionFields, TripFailure } from "./transport.js";
 export function Failure({ error, seconds = 0 }: { error: unknown; seconds?: number }) {
   const { t } = useTranslation("trips");
@@ -63,6 +64,9 @@ export function Confirm({
   failure,
   variant = "outline",
   describedBy,
+  title,
+  description,
+  destructiveLabel,
 }: {
   label: string;
   guard: string;
@@ -74,6 +78,9 @@ export function Confirm({
   variant?: "default" | "outline";
   /** Id of text that explains the trigger, for example why it is disabled. */
   describedBy?: string | undefined;
+  title?: string;
+  description?: string;
+  destructiveLabel?: string;
 }) {
   const { t } = useTranslation("trips"),
     [snapshot, setSnapshot] = useState<{
@@ -91,11 +98,18 @@ export function Confirm({
     )
       setSnapshot(null);
   }, [guard, failure, snapshot]);
+  const cancel = (
+    <DialogClose asChild>
+      <Button variant="ghost" disabled={pending}>
+        {t("cancel")}
+      </Button>
+    </DialogClose>
+  );
   return (
     <Dialog
       open={!!snapshot}
       onOpenChange={(open) => {
-        if (!open) setSnapshot(null);
+        if (!open && !(destructiveLabel && pending)) setSnapshot(null);
       }}
     >
       <DialogTrigger asChild>
@@ -103,19 +117,25 @@ export function Confirm({
           type="button"
           variant={variant}
           aria-describedby={describedBy}
-          disabled={disabled || pending}
-          onClick={() => setSnapshot({ guard, run: onConfirm, content: children, failure })}
+          disabled={disabled || (pending && !destructiveLabel)}
+          aria-disabled={pending && destructiveLabel ? true : undefined}
+          onClick={(event) => {
+            // Keep the deletion trigger focusable when a conflict closes the dialog before refresh.
+            if (pending) event.preventDefault();
+            else setSnapshot({ guard, run: onConfirm, content: children, failure });
+          }}
         >
           {label}
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogTitle>{t("confirmTitle")}</DialogTitle>
-        <DialogDescription>{t("confirmHelp")}</DialogDescription>
+        <DialogTitle>{title ?? t("confirmTitle")}</DialogTitle>
+        <DialogDescription>{description ?? t("confirmHelp")}</DialogDescription>
         <div className="stack trip-wrap">
           {snapshot?.content}
-          <Failure error={failure} />
+          <Failure error={destructiveLabel && failure === snapshot?.failure ? null : failure} />
           <div className="trip-actions">
+            {destructiveLabel && cancel}
             <Button
               disabled={pending || !snapshot || snapshot.guard !== guard}
               onClick={async () => {
@@ -123,13 +143,9 @@ export function Confirm({
                 if (result) setSnapshot(null);
               }}
             >
-              {pending ? t("loading") : t("confirm")}
+              {pending ? t("loading") : (destructiveLabel ?? t("confirm"))}
             </Button>
-            <DialogClose asChild>
-              <Button variant="ghost" disabled={pending}>
-                {t("cancel")}
-              </Button>
-            </DialogClose>
+            {!destructiveLabel && cancel}
           </div>
         </div>
       </DialogContent>
@@ -345,18 +361,20 @@ export function Revision({
         }}
       />
       {(!lineage || (revision.number > 1 && !prior)) && <p>{t("comparisonUnavailable")}</p>}
-      {Object.entries(fields).map(([k, v]) => (
-        <div key={k}>
-          <strong>{t(k)}: </strong>
-          <span>{display(v)}</span>
-          {prior && JSON.stringify(prior[k as keyof typeof prior]) !== JSON.stringify(v) && (
-            <p className="trip-change">
-              {t("compare")}: <del>{display(prior[k as keyof typeof prior])}</del> →{" "}
-              <ins>{display(v)}</ins>
-            </p>
-          )}
-        </div>
-      ))}
+      {Object.entries(fields)
+        .filter(([key]) => !referenceFields.some((name) => name === key))
+        .map(([k, v]) => (
+          <div key={k}>
+            <strong>{t(k)}: </strong>
+            <span>{display(v)}</span>
+            {prior && JSON.stringify(prior[k as keyof typeof prior]) !== JSON.stringify(v) && (
+              <p className="trip-change">
+                {t("compare")}: <del>{display(prior[k as keyof typeof prior])}</del> →{" "}
+                <ins>{display(v)}</ins>
+              </p>
+            )}
+          </div>
+        ))}
     </section>
   );
 }

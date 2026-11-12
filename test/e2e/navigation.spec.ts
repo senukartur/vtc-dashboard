@@ -35,6 +35,10 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
       );
     if (path === "/api/v1/me/upcoming-event")
       return route.fulfill({ json: { data: eventFixture(), meta } });
+    if (path === "/api/v1/me/manual-drafts")
+      return route.fulfill({
+        json: { data: { items: [], nextCursor: null, editingCount: 0 }, meta },
+      });
     if (path === "/api/v1/me/email-change")
       return route.fulfill({ json: { data: { pending: null }, meta } });
     if (path === "/api/v1/auth/logout")
@@ -376,7 +380,7 @@ test("pages no longer repeat shell navigation", browserCase(["@layout"]), async 
   ).toHaveCount(0);
   await page.goto("/account/trips");
   const main = page.getByRole("main");
-  await expect(main.getByRole("link", { name: "Saved drafts", exact: true })).toBeVisible();
+  await expect(main.getByRole("tab", { name: "Drafts (0)", exact: true })).toBeVisible();
   await expect(main.getByRole("link", { name: "New report", exact: true })).toBeVisible();
   await expect(
     main.getByRole("link", {

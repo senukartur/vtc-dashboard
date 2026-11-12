@@ -6,12 +6,13 @@ import { pngBytes } from "../fixtures/manual-images.ts";
 import { origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { tripBrowserFixture } from "./support/trips.ts";
+import { manualReferenceTimes } from "./support/manual-reference.ts";
 import {
   diagnosticLocale,
   TripReadLedger,
   type TripReadSnapshot,
 } from "./support/trip-read-diagnostics.ts";
+import { tripBrowserFixture } from "./support/trips.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
 
@@ -201,12 +202,7 @@ async function confirm(page: Page, label: string, commandPath?: string) {
     );
   }
 }
-async function fill(
-  page: Page,
-  fixture: Awaited<ReturnType<typeof tripBrowserFixture>>,
-  unresolved = false,
-  initialReads?: TripReadSnapshot,
-) {
+async function fill(page: Page, unresolved = false, initialReads?: TripReadSnapshot) {
   const lifecycle = observeTripPage(page),
     started = Date.now(),
     initialLocale = await pageLocale(page);
@@ -245,6 +241,12 @@ async function fill(
     await page.getByLabel("Cargo mass (kg)", { exact: true }).fill("18000");
     step = "distance";
     await page.getByLabel("Actual driven distance (m)", { exact: true }).fill("123400");
+    await page
+      .getByLabel("Trip start", { exact: true })
+      .fill(manualReferenceTimes.startedAt.slice(0, 16));
+    await page
+      .getByLabel("Trip completion", { exact: true })
+      .fill(manualReferenceTimes.completedAt.slice(0, 16));
     step = "selection";
     // Selecting an option starts a separate current-entity read. Settle this
     // setup before measuring upload, including reads queued by the shared lane.
@@ -266,6 +268,7 @@ async function fill(
         }),
       ).toHaveCount(0);
     }
+    await expect(page.locator(".manual-company-field [role=status]")).toHaveCount(0);
     step = "file";
     await page
       .getByLabel("Choose completion screenshot", { exact: true })
@@ -397,6 +400,60 @@ async function approve(
   await confirm(page, "Approve proposal");
 }
 test(
+  "real dated direct submission uses ready evidence and persists optional company and zero damage",
+  browserCase(["@real"]),
+  async ({ page }) => {
+    test.setTimeout(60000);
+    await resetAccountLimits();
+    const fixture = await tripBrowserFixture();
+    try {
+      const catalogs = fixture.composed.catalogs;
+      if (!catalogs) throw Error("TRIP_BROWSER_COMPOSITION_MISSING");
+      const company = await catalogs.create(fixture.staff, "companies", randomUUID(), {
+        game: "ets2",
+        code: `synthetic-${randomUUID()}`,
+        nameEn: "Fictional North Depot",
+      });
+      await catalogs.createDepot(fixture.staff, randomUUID(), {
+        game: "ets2",
+        cityId: fixture.fields.origin.entityId,
+        companyId: company.id,
+      });
+      const login = await write(page.request, "/auth/login", {
+        email: fixture.email,
+        password: fixture.password,
+      });
+      expect(login.status()).toBe(200);
+      await page.goto("/account/reports/new");
+      await catalogLanguage(page);
+      await fill(page);
+      await page.getByLabel("Origin company (optional)", { exact: true }).selectOption(company.id);
+      await page.getByLabel("Cargo damage (%) (optional)", { exact: true }).fill("0");
+      await confirm(page, "Submit for review", "/api/v1/manual-reports");
+      await expect(page).toHaveURL(/\/account\/trips\/[0-9a-f-]{36}$/);
+      const tripId = new URL(page.url()).pathname.split("/").at(-1);
+      const response = await page.request.get(`/api/v1/trips/${tripId}`);
+      expect(response.status()).toBe(200);
+      const trip = ((await response.json()) as Schemas["EnvelopeTripView"]).data;
+      if (trip.view !== "private") throw Error("TRIP_PRIVATE_VIEW_MISSING");
+      expect(trip.summary.sourceKinds).toEqual(["manual"]);
+      expect(trip.manualRevision?.fields).toMatchObject({
+        ...manualReferenceTimes,
+        originCompanyId: company.id,
+        cargoDamagePercent: 0,
+      });
+      expect(trip.manualRevision?.fields).not.toHaveProperty("destinationCompanyId");
+      expect(trip.evidence[0]?.state).toBe("ready");
+      await expect(
+        page.getByRole("region", { name: "Driver-reported reference facts" }),
+      ).toContainText("Fictional North Depot");
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
+test(
   "real report draft upload unresolved cargo stale review rejection revision acceptance correction attachment and reversible reconciliation",
   browserCase(["@real"]),
   async ({ page, browser }) => {
@@ -456,6 +513,8 @@ test(
       await page
         .getByLabel("Comment (optional)", { exact: true })
         .fill("Fictional durable partial draft");
+      const tripStart = page.getByLabel("Trip start", { exact: true });
+      await tripStart.fill(manualReferenceTimes.startedAt.slice(0, 16));
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       await expect(page).toHaveURL(/\/account\/reports\/drafts\//);
       await page.reload();
@@ -463,15 +522,18 @@ test(
       await expect(page.getByLabel("Comment (optional)", { exact: true })).toHaveValue(
         "Fictional durable partial draft",
       );
+      await expect(tripStart).toHaveValue(manualReferenceTimes.startedAt.slice(0, 16));
+      await expect(page.getByLabel("Trip completion", { exact: true })).toHaveValue("");
       await resetAccountLimits();
       phase = "UPLOAD_SUBMIT";
-      await fill(page, fixture, true, mainReads.snapshot());
-      await expect(page.locator('input[type="date"],input[type="datetime-local"]')).toHaveCount(0);
-      await confirm(page, "Submit for review");
+      await fill(page, true, mainReads.snapshot());
+      const draftId = new URL(page.url()).pathname.split("/").at(-1);
+      await confirm(page, "Submit for review", `/api/v1/me/manual-drafts/${draftId}/submission`);
       await expect(page).toHaveURL(/\/account\/trips\//);
       const tripId = new URL(page.url()).pathname.split("/").at(-1) as string;
       let current = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
       expect(current.summary.decision).toBe("pending_review");
+      expect(current.manualRevision.fields).toMatchObject(manualReferenceTimes);
       const reportId = current.manualRevision.reportId,
         evidenceIds = current.manualRevision.fields.evidenceIds;
       expect((await fixture.composed.trips?.status(fixture.author))?.counts.accepted).toBe(0);
@@ -487,6 +549,10 @@ test(
       await page
         .getByLabel("Comment (optional)", { exact: true })
         .fill("Fictional edit after staff opened review");
+      const revisedCompletion = "2025-01-12T11:15:00.000Z";
+      await page
+        .getByLabel("Trip completion", { exact: true })
+        .fill(revisedCompletion.slice(0, 16));
       const revisePath = `/api/v1/manual-reports/${reportId}/revisions`;
       let observedRevision: Request | null = null;
       const revisionRequest = (request: Request) => {
@@ -520,7 +586,13 @@ test(
         page.off("response", revisionResponse);
         page.off("requestfailed", revisionFailed);
       };
-      await confirm(page, "Revise and resubmit");
+      await confirm(page, "Revise and resubmit", revisePath);
+      await expect(page).toHaveURL(new RegExp(`/account/trips/${tripId}$`));
+      const revised = (await (await page.request.get(`/api/v1/trips/${tripId}`)).json()).data;
+      expect(revised.manualRevision.fields).toMatchObject({
+        startedAt: manualReferenceTimes.startedAt,
+        completedAt: revisedCompletion,
+      });
       stopRevise();
       await staffPage
         .getByRole("dialog")
@@ -640,7 +712,7 @@ test(
       attachmentStep = "language";
       await catalogLanguage(page);
       attachmentStep = "fill";
-      await fill(page, fixture, false, mainReads.snapshot());
+      await fill(page, false, mainReads.snapshot());
       attachmentStep = "draft";
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       await expect(page).toHaveURL(/\/account\/reports\/drafts\//);
@@ -693,7 +765,7 @@ test(
       const manual = fixture.composed.manualReports;
       if (!manual) throw Error("TRIP_BROWSER_COMPOSITION_MISSING");
       const duplicate = await manual.submitReport(fixture.author, randomUUID(), {
-        fields: { ...fixture.fields, evidenceIds },
+        fields: { ...fixture.fields, ...manualReferenceTimes, evidenceIds },
       });
       await expect
         .poll(
@@ -983,7 +1055,12 @@ test(
           "image/png",
         );
       const report = await manual.submitReport(fixture.author, randomUUID(), {
-        fields: { ...fixture.fields, cargoMassKg: "21000", evidenceIds: [image.id] },
+        fields: {
+          ...fixture.fields,
+          ...manualReferenceTimes,
+          cargoMassKg: "21000",
+          evidenceIds: [image.id],
+        },
       });
       const start = new Date(Date.now() + 12000).toISOString(),
         event = await events.create(fixture.staff, randomUUID(), {
@@ -1110,7 +1187,12 @@ test(
         );
       // The fixture level allows 20 t; the report declares 21 t.
       const report = await manual.submitReport(fixture.author, randomUUID(), {
-        fields: { ...fixture.fields, cargoMassKg: "21000", evidenceIds: [image.id] },
+        fields: {
+          ...fixture.fields,
+          ...manualReferenceTimes,
+          cargoMassKg: "21000",
+          evidenceIds: [image.id],
+        },
       });
       const nickname = (await (await staff.get("/api/v1/me")).json()).data.member
         .nickname as string;
@@ -1198,7 +1280,7 @@ test(
           "image/png",
         );
       const own = await manual.submitReport(fixture.staff, randomUUID(), {
-        fields: { ...fixture.fields, evidenceIds: [image.id] },
+        fields: { ...fixture.fields, ...manualReferenceTimes, evidenceIds: [image.id] },
       });
       await context.addCookies((await staff.storageState()).cookies);
       await page.goto(`/account/review/${own.tripId}`);

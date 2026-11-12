@@ -164,7 +164,7 @@ export function canonicalDecimal(value: string): string | undefined {
   if (!/^(0|[1-9]\d*)(\.\d+)?$/.test(clean) || clean.length > 64) return undefined;
   return clean.includes(".") ? clean.replace(/0+$/, "").replace(/\.$/, "") : clean;
 }
-export function revisionFields(revision: DTO["ManualRevisionRead"]): DTO["ManualSubmissionFields"] {
+export function revisionFields(revision: DTO["ManualRevisionRead"]): DTO["ManualReportReadFields"] {
   if ("representation" in revision) return revision.fields;
   const f = revision.fields,
     pin = (entityId: string): DTO["ManualResolvedSelection"] => ({

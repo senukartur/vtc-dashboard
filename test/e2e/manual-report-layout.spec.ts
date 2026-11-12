@@ -26,6 +26,8 @@ const text = {
       "Trailer type",
       "Cargo mass (kg)",
       "Actual driven distance (m)",
+      "Trip start",
+      "Trip completion",
       "A ready completion screenshot",
     ],
     mass: "Cargo mass (kg)",
@@ -49,6 +51,8 @@ const text = {
       "Тип прицепа",
       "Масса груза (кг)",
       "Фактический пробег (м)",
+      "Начало рейса",
+      "Завершение рейса",
       "Готовый скриншот завершения рейса",
     ],
     mass: "Масса груза (кг)",
@@ -190,11 +194,16 @@ test(
     const expected = [
       "manual-game",
       "field:Origin city",
+      "originCompanyId",
       "field:Destination city",
+      "destinationCompanyId",
       "field:Cargo",
       "field:Trailer type",
       "cargoMassKg",
       "actualDistanceM",
+      "startedAt",
+      "completedAt",
+      "cargoDamagePercent",
       "report-event",
       "Past events",
       "manual-comment",
@@ -222,11 +231,22 @@ test(
     expect(order.filter((key) => expected.includes(key))).toEqual(expected);
     for (const [from, to] of [
       ["#cargoMassKg", "#actualDistanceM"],
-      ["#actualDistanceM", "#report-event"],
+      ["#actualDistanceM", "#startedAt"],
+      ["#startedAt", "#completedAt"],
+      ["#completedAt", "#cargoDamagePercent"],
+      ["#cargoDamagePercent", "#report-event"],
       ["#manual-comment", "#manual-file"],
     ] as const) {
-      await page.locator(from).focus();
+      const control = page.locator(from);
+      await control.focus();
       await page.keyboard.press("Tab");
+      // Chromium exposes the segments of a native date/time input as separate tab stops.
+      if ((await control.getAttribute("type")) === "datetime-local") {
+        for (let segment = 0; segment < 8; segment++) {
+          if (!(await control.evaluate((input) => document.activeElement === input))) break;
+          await page.keyboard.press("Tab");
+        }
+      }
       await expect(page.locator(to)).toBeFocused();
     }
     // No CSS reordering: every section follows the previous one visually.

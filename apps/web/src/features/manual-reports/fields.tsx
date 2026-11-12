@@ -5,11 +5,42 @@ import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
 import { formatUtc } from "../../shared/formatting.js";
-import { Button, Input, Label } from "../../shared/ui/primitives.js";
+import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import { AccountFailure } from "../account/transport.js";
 import { Failure, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import type { DTO } from "../trips/transport.js";
+export function ReferenceTimeField({
+  name,
+  value,
+  noteId,
+  error,
+  onChange,
+}: {
+  name: "startedAt" | "completedAt";
+  value: string;
+  noteId: string;
+  error: "referenceInvalid" | "referenceFuture" | "referenceOrder" | undefined;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation("trips");
+  const errorId = `manual-${name}-error`;
+  return (
+    <div className="field">
+      <Label htmlFor={name}>{t(name)}</Label>
+      <Input
+        id={name}
+        type="datetime-local"
+        value={value}
+        aria-required="true"
+        aria-invalid={!!error || undefined}
+        aria-describedby={error ? `${noteId} ${errorId}` : noteId}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <FieldError id={errorId}>{error && t(error)}</FieldError>
+    </div>
+  );
+}
 export function ManualCatalogField({
   name,
   game,

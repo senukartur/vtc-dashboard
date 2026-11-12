@@ -1,0 +1,240 @@
+import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
+import { useSession } from "../../app/Session.js";
+import { formatUtc } from "../../shared/formatting.js";
+import { Button, Card } from "../../shared/ui/primitives.js";
+import { Confirm, Failure, PageNav, State } from "../trips/components.js";
+import { useTripCommand, useTripQuery } from "../trips/queries.js";
+import { CatalogName, GameChip } from "../trips/TripTable.js";
+import { type DTO, queryString, rejectedCursor } from "../trips/transport.js";
+import { displayTimezone } from "./reference-time.js";
+import "./manual-reports.css";
+
+export const draftsLocation = "/account/trips?tab=drafts";
+
+export function useManualDrafts(enabled: boolean, cursor?: string | null) {
+  return useTripQuery(
+    `/me/manual-drafts?${queryString({ state: "editing", limit: 25, cursor })}`,
+    "EnvelopeListManualDraft",
+    enabled,
+  );
+}
+
+export function DraftFeedback({ kind }: { kind: "draftDeleted" | "draftDeleteConflict" | null }) {
+  const { t } = useTranslation("trips");
+  if (!kind) return null;
+  return kind === "draftDeleted" ? (
+    <p role="status">{t(kind)}</p>
+  ) : (
+    <p role="alert" className="field-error">
+      {t(kind)}
+    </p>
+  );
+}
+
+export function DeleteDraft({
+  id,
+  etag,
+  descriptionId,
+  disabled,
+  onDeleted,
+  onConflict,
+}: {
+  id: string;
+  etag: string | null | undefined;
+  descriptionId?: string;
+  disabled?: boolean;
+  onDeleted: () => void;
+  onConflict: () => void;
+}) {
+  const { t } = useTranslation("trips");
+  const command = useTripCommand(onConflict);
+  const conflict = command.failure?.kind === "conflict";
+  return (
+    <>
+      {!conflict && <Failure error={command.failure} seconds={command.seconds} />}
+      <Confirm
+        label={t("deleteDraft")}
+        title={t("deleteDraftTitle")}
+        description={t("deleteDraftHelp")}
+        destructiveLabel={t("deleteDraft")}
+        describedBy={descriptionId}
+        guard={etag ?? ""}
+        pending={command.pending}
+        failure={command.failure}
+        disabled={!etag || disabled || command.seconds > 0}
+        onConfirm={async () => {
+          if (!etag) return;
+          const result = await command.run(
+            `/me/manual-drafts/${id}`,
+            undefined,
+            "EnvelopeCommandResult",
+            etag,
+            "DELETE",
+          );
+          if (result) onDeleted();
+          return result;
+        }}
+      >
+        {null}
+      </Confirm>
+    </>
+  );
+}
+
+const firstPage = { cursor: null, previous: [] };
+
+export function DraftList({
+  first,
+  headingLevel = 2,
+}: {
+  first: ReturnType<typeof useManualDrafts>;
+  headingLevel?: 1 | 2;
+}) {
+  const { t, i18n } = useTranslation("trips");
+  const session = useSession();
+  const location = useLocation();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  const timezone = displayTimezone(session.self?.preferences.displayTimezone);
+  const [page, setPage] = useState<{
+    cursor: string | null;
+    previous: (string | null)[];
+  }>(firstPage);
+  const [notice, setNotice] = useState<"draftDeleted" | "draftDeleteConflict" | null>(
+    location.state?.draftDeleted === true ? "draftDeleted" : null,
+  );
+  const [focusAfter, setFocusAfter] = useState<{ removed: string; neighbor?: string } | null>(null);
+  const next = useManualDrafts(!!page.cursor, page.cursor);
+  const query = page.cursor ? next : first;
+  const list = query.data?.data.data;
+  const items = list?.items;
+  if (rejectedCursor(page.cursor, query.error) || (page.cursor && items?.length === 0))
+    setPage(firstPage);
+
+  useLayoutEffect(() => {
+    if (!focusAfter || !items || items.some(({ id }) => id === focusAfter.removed)) return;
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === document.body) {
+        const neighbor =
+          focusAfter.neighbor && document.getElementById(`draft-resume-${focusAfter.neighbor}`);
+        (neighbor || heading.current)?.focus();
+      }
+      setFocusAfter(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusAfter, items]);
+
+  const Heading = headingLevel === 1 ? "h1" : "h2";
+  return (
+    <section className="manual-drafts stack" aria-labelledby={headingId}>
+      <Heading ref={heading} id={headingId} tabIndex={-1}>
+        {t("drafts")}
+      </Heading>
+      <DraftFeedback kind={notice} />
+      <State query={query} />
+      {items?.length === 0 && <p>{t("draftsEmpty")}</p>}
+      {!!items?.length && (
+        <div className="manual-draft-list">
+          {items.map((draft, index) => {
+            const rowId = `draft-route-${draft.id}`;
+            const neighbor = items[index + 1]?.id ?? items[index - 1]?.id;
+            const setFeedback = (kind: "draftDeleted" | "draftDeleteConflict") => {
+              setNotice(kind);
+              setFocusAfter({ removed: draft.id, ...(neighbor ? { neighbor } : {}) });
+            };
+            return (
+              <article className="manual-draft-row" key={draft.id} aria-labelledby={rowId}>
+                <div className="manual-draft-facts">
+                  {draft.fields.game && <GameChip game={draft.fields.game} />}
+                  <h3 id={rowId}>
+                    <DraftCatalogName draft={draft} name="origin" /> →{" "}
+                    <DraftCatalogName draft={draft} name="destination" />
+                  </h3>
+                  <p>
+                    {t("cargo")} · <DraftCatalogName draft={draft} name="cargo" />
+                  </p>
+                  <p className="muted">
+                    {t("draftUpdated")}{" "}
+                    <time dateTime={draft.updatedAt}>
+                      {formatUtc(draft.updatedAt, locale, timezone)}
+                    </time>
+                    {" · "}
+                    {timezone}
+                  </p>
+                </div>
+                <div className="trip-actions manual-draft-actions">
+                  <Button asChild variant="outline">
+                    <Link
+                      id={`draft-resume-${draft.id}`}
+                      to={`/account/reports/drafts/${draft.id}`}
+                    >
+                      {t("useDraft")}
+                    </Link>
+                  </Button>
+                  <DeleteDraft
+                    id={draft.id}
+                    etag={`"v${draft.version}"`}
+                    descriptionId={rowId}
+                    onDeleted={() => setFeedback("draftDeleted")}
+                    onConflict={() => setFeedback("draftDeleteConflict")}
+                  />
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {(list?.nextCursor || page.previous.length > 0) && (
+        <PageNav
+          next={list?.nextCursor}
+          hasPrevious={page.previous.length > 0}
+          onNext={(cursor) => setPage({ cursor, previous: [...page.previous, page.cursor] })}
+          onPrevious={() =>
+            setPage({ cursor: page.previous.at(-1) ?? null, previous: page.previous.slice(0, -1) })
+          }
+        />
+      )}
+    </section>
+  );
+}
+
+function DraftCatalogName({
+  draft,
+  name,
+}: {
+  draft: DTO["ManualDraft"];
+  name: "origin" | "destination" | "cargo";
+}) {
+  const { t } = useTranslation("trips");
+  const value = draft.fields[name];
+  if (!value) return t("notSpecified");
+  if (value.status === "unresolved") return value.label;
+  return <CatalogName value={draft.labels?.[name] ?? null} />;
+}
+
+export function ReportsPage() {
+  const { t } = useTranslation("trips");
+  const session = useSession();
+  const enabled = !!session.self?.capabilities.includes("trips.submit_own");
+  const first = useManualDrafts(enabled);
+  return enabled ? (
+    <div className="stack trip-page">
+      <div className="trip-actions">
+        <Button asChild>
+          <Link to="/account/reports/new">{t("newReport")}</Link>
+        </Button>
+        <Button asChild variant="ghost">
+          <Link to="/account/trips">{t("back")}</Link>
+        </Button>
+      </div>
+      <DraftList first={first} headingLevel={1} />
+    </div>
+  ) : (
+    <Card>
+      <p>{t("forbidden")}</p>
+    </Card>
+  );
+}

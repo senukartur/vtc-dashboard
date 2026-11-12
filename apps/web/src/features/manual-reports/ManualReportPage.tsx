@@ -1,107 +1,51 @@
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useCallback, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { cityNameText } from "../../shared/catalog-selectors/native-name.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
-import { Confirm, Failure, Fields, PageNav, State } from "../trips/components.js";
+import { Confirm, Failure, Fields, State } from "../trips/components.js";
 import { useTripCommand, useTripQuery } from "../trips/queries.js";
 import { canonicalDecimal, type DTO, revisionFields, schema, validId } from "../trips/transport.js";
-import { EventSelect, EvidenceUpload, ManualCatalogField } from "./fields.js";
-import { missingRequirements } from "./model.js";
+import { DepotCompanyField, useDepotCompany } from "./DepotCompanyField.js";
+import { DeleteDraft, DraftFeedback, draftsLocation } from "./Drafts.js";
+import { EventSelect, EvidenceUpload, ManualCatalogField, ReferenceTimeField } from "./fields.js";
+import {
+  damagePercent,
+  formatDamage,
+  missingRequirements,
+  type Requirement,
+  submissionTimeErrors,
+} from "./model.js";
+import { displayTimezone, referenceInstant, referenceLocalValue } from "./reference-time.js";
 import "../trips/trips.css";
 import "./manual-reports.css";
-export function ReportsPage() {
-  const { t } = useTranslation("trips"),
-    session = useSession(),
-    [cursor, setCursor] = useState<string | null>(null),
-    [history, setHistory] = useState<string[]>([]),
-    query = useTripQuery(
-      `/me/manual-drafts?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-      "EnvelopeListManualDraft",
-      !!session.self?.capabilities.includes("trips.submit_own"),
-    );
-  if (!session.self?.capabilities.includes("trips.submit_own"))
-    return (
-      <Card>
-        <p>{t("forbidden")}</p>
-      </Card>
-    );
-  return (
-    <div className="stack trip-page">
-      <header className="trip-heading">
-        <h1>{t("drafts")}</h1>
-        <Button asChild>
-          <Link to="/account/reports/new">{t("newReport")}</Link>
-        </Button>
-      </header>
-      <Card className="stack">
-        <State query={query} />
-        {query.data && (
-          <>
-            {!query.data.data.data.items.length && <p>{t("empty")}</p>}
-            {query.data.data.data.items.map((d) => (
-              <article className="trip-row" key={d.id}>
-                <Fields
-                  values={{
-                    game: d.fields.game ?? null,
-                    version: d.version,
-                    submittedAt: d.updatedAt,
-                  }}
-                />
-                <Button asChild variant="outline">
-                  <Link
-                    to={
-                      d.submittedReportId
-                        ? `/account/reports/${d.submittedReportId}/edit`
-                        : `/account/reports/drafts/${d.id}`
-                    }
-                  >
-                    {t(d.submittedReportId ? "viewReport" : "useDraft")}
-                  </Link>
-                </Button>
-              </article>
-            ))}
-            <PageNav
-              next={query.data.data.data.nextCursor}
-              hasPrevious={history.length > 0}
-              onNext={(c) => {
-                setHistory([...history, cursor ?? ""]);
-                setCursor(c);
-              }}
-              onPrevious={() => {
-                setCursor(history.at(-1) || null);
-                setHistory(history.slice(0, -1));
-              }}
-            />
-          </>
-        )}
-      </Card>
-    </div>
-  );
-}
+
+export { ReportsPage } from "./Drafts.js";
 export function ManualReportPage({ kind }: { kind: "new" | "draft" | "report" }) {
   const { t } = useTranslation("trips"),
     session = useSession(),
     { draftId, reportId } = useParams(),
+    [conflictId, setConflictId] = useState<string | undefined>(),
     id = kind === "draft" ? draftId : reportId,
-    valid = kind === "new" || validId(id);
+    valid = kind === "new" || validId(id),
+    canSubmit = !!session.self?.capabilities.includes("trips.submit_own");
   const draft = useTripQuery(
       `/me/manual-drafts/${id}`,
       "EnvelopeManualDraft",
-      kind === "draft" && valid,
+      kind === "draft" && valid && canSubmit,
     ),
     report = useTripQuery(
       `/manual-reports/${id}`,
       "EnvelopeManualReport",
-      kind === "report" && valid,
+      kind === "report" && valid && canSubmit,
     );
   const tripId = report.data?.data.data.tripId,
     trip = useTripQuery(`/trips/${tripId}`, "EnvelopeTripView", !!tripId),
     view = trip.data?.data.data,
     summary = view?.view === "private" ? view.summary : view;
   const title = t(kind === "report" ? "revise" : "newReport");
-  if (!session.self?.capabilities.includes("trips.submit_own"))
+  if (!canSubmit || !session.self)
     return (
       <ReportFrame title={title}>
         <Card>
@@ -119,18 +63,23 @@ export function ManualReportPage({ kind }: { kind: "new" | "draft" | "report" })
     );
   if (kind === "new") return <ManualEditor key="new" />;
   if (kind === "draft") {
+    const conflict = !!draftId && conflictId === draftId;
+    const feedback = <DraftFeedback kind={conflict ? "draftDeleteConflict" : null} />;
     if (!draft.data)
       return (
         <ReportFrame title={title}>
           <Card>
+            {feedback}
             <State query={draft} />
+            {draft.isError && <Link to={draftsLocation}>{t("backToDrafts")}</Link>}
           </Card>
         </ReportFrame>
       );
     if (draft.data.data.data.submittedReportId)
       return (
         <ReportFrame title={title}>
-          <Card>
+          <Card className="stack">
+            {feedback}
             <Button asChild>
               <Link to={`/account/reports/${draft.data.data.data.submittedReportId}/edit`}>
                 {t("viewReport")}
@@ -139,7 +88,15 @@ export function ManualReportPage({ kind }: { kind: "new" | "draft" | "report" })
           </Card>
         </ReportFrame>
       );
-    return <ManualEditor key={id} draft={draft.data.data.data} draftEtag={draft.data.etag} />;
+    return (
+      <ManualEditor
+        key={id}
+        draft={draft.data.data.data}
+        draftEtag={draft.data.etag}
+        draftConflict={conflict}
+        onDraftConflict={() => setConflictId(draftId)}
+      />
+    );
   }
   if (!report.data || !summary)
     return (
@@ -181,6 +138,8 @@ function ReportFrame({ title, children }: { title: string; children: ReactNode }
 function ManualEditor({
   draft,
   draftEtag,
+  draftConflict = false,
+  onDraftConflict,
   report,
   reportEtag,
   tripVersion,
@@ -188,6 +147,8 @@ function ManualEditor({
 }: {
   draft?: DTO["ManualDraft"];
   draftEtag?: string | null;
+  draftConflict?: boolean;
+  onDraftConflict?: () => void;
   report?: DTO["ManualReport"];
   reportEtag?: string | null;
   tripVersion?: number;
@@ -195,14 +156,28 @@ function ManualEditor({
 }) {
   const { t } = useTranslation("trips"),
     navigate = useNavigate(),
+    location = useLocation(),
     session = useSession(),
     command = useTripCommand(),
-    initial = report ? revisionFields(report.currentRevision) : (draft?.fields ?? {}),
-    [fields, setFields] = useState<DTO["ManualDraftFields"]>(initial),
+    [initial] = useState<DTO["ManualDraftEditableFields"]>(() =>
+      report ? revisionFields(report.currentRevision) : (draft?.fields ?? {}),
+    ),
+    [timezone] = useState(() => displayTimezone(session.self?.preferences.displayTimezone)),
+    [fields, setFields] = useState(initial),
+    [times, setTimes] = useState(() => ({
+      startedAt: referenceLocalValue(initial.startedAt, timezone),
+      completedAt: referenceLocalValue(initial.completedAt, timezone),
+    })),
+    [initialDamage] = useState(() =>
+      initial.cargoDamagePercent === undefined
+        ? ""
+        : formatDamage(initial.cargoDamagePercent, "en"),
+    ),
+    [damage, setDamage] = useState(initialDamage),
     [target, setTarget] = useState<DTO["ManualTelemetryTarget"] | null>(draft?.targetTrip ?? null),
     [ready, setReady] = useState(false),
     [invalid, setInvalid] = useState(false),
-    [saved, setSaved] = useState(false);
+    [saved, setSaved] = useState(location.state?.manualDraftSaved === true);
   const game = fields.game ?? "ets2";
   const [cursor, setCursor] = useState<string | null>(null),
     targets = useTripQuery(
@@ -217,12 +192,55 @@ function ManualEditor({
   );
   const selectedView = selectedTarget.data?.data.data,
     targetSummary = selectedView?.view === "private" ? selectedView.summary : selectedView;
-  function patch(value: Partial<DTO["ManualDraftFields"]>) {
-    setFields((prev) => ({ ...prev, ...value }));
+  const changed = useCallback(() => {
     setInvalid(false);
     setSaved(false);
+  }, []);
+  function update<K extends keyof DTO["ManualDraftEditableFields"]>(
+    name: K,
+    value: DTO["ManualDraftEditableFields"][K],
+  ) {
+    setFields((prev) => {
+      const next = { ...prev };
+      if (value === undefined) delete next[name];
+      else next[name] = value;
+      return next;
+    });
+    changed();
   }
-  const payload = () => ({
+  const clearOriginCompany = useCallback(() => {
+    setFields(({ originCompanyId: _, ...rest }) => rest);
+    changed();
+  }, [changed]);
+  const clearDestinationCompany = useCallback(() => {
+    setFields(({ destinationCompanyId: _, ...rest }) => rest);
+    changed();
+  }, [changed]);
+  const originCompany = useDepotCompany(
+    game,
+    fields.origin,
+    fields.originCompanyId,
+    clearOriginCompany,
+  );
+  const destinationCompany = useDepotCompany(
+    game,
+    fields.destination,
+    fields.destinationCompanyId,
+    clearDestinationCompany,
+  );
+  const startedAt = referenceInstant(times.startedAt, timezone, initial.startedAt);
+  const completedAt = referenceInstant(times.completedAt, timezone, initial.completedAt);
+  const cargoDamagePercent =
+    damage === initialDamage ? initial.cargoDamagePercent : damagePercent(damage);
+  const timeErrors = submissionTimeErrors(startedAt, completedAt, Date.now());
+  const startError = times.startedAt && !startedAt ? "referenceInvalid" : timeErrors.startedAt;
+  const endError = times.completedAt && !completedAt ? "referenceInvalid" : timeErrors.completedAt;
+  const damageInvalid = damage !== "" && cargoDamagePercent === undefined;
+  const companyPending = originCompany.blocked || destinationCompany.blocked;
+  const partialInvalid =
+    (!!times.startedAt && !startedAt) || (!!times.completedAt && !completedAt) || damageInvalid;
+
+  const submission: DTO["ManualDraftEditableFields"] = {
     ...fields,
     game,
     ...(fields.cargoMassKg !== undefined
@@ -232,10 +250,18 @@ function ManualEditor({
       ? { actualDistanceM: canonicalDecimal(fields.actualDistanceM) ?? fields.actualDistanceM }
       : {}),
     comment: fields.comment?.trim() || null,
-  });
+    ...(startedAt === undefined ? {} : { startedAt }),
+    ...(completedAt === undefined ? {} : { completedAt }),
+    ...(cargoDamagePercent === undefined ? {} : { cargoDamagePercent }),
+  };
+  // References are derived from the controls. Empty inputs must clear any saved values.
+  if (startedAt === undefined) delete submission.startedAt;
+  if (completedAt === undefined) delete submission.completedAt;
+  if (cargoDamagePercent === undefined) delete submission.cargoDamagePercent;
   async function save() {
-    const input = { fields: payload(), targetTrip: target };
-    if (!schema("ManualDraftInput").safeParse(input).success) {
+    if (companyPending) return;
+    const input: DTO["ManualDraftWriteInput"] = { fields: submission, targetTrip: target };
+    if (partialInvalid || !schema("ManualDraftWriteInput").safeParse(input).success) {
       setInvalid(true);
       return;
     }
@@ -248,7 +274,11 @@ function ManualEditor({
     );
     if (result) {
       setSaved(true);
-      if (!draft) navigate(`/account/reports/drafts/${result.data.data.id}`, { replace: true });
+      if (!draft)
+        navigate(`/account/reports/drafts/${result.data.data.id}`, {
+          replace: true,
+          state: { manualDraftSaved: true },
+        });
     }
     return result;
   }
@@ -256,8 +286,14 @@ function ManualEditor({
     !!draft &&
     (target?.tripId !== draft.targetTrip?.tripId ||
       target?.expectedVersion !== draft.targetTrip?.expectedVersion);
-  const submission = payload(),
-    complete = schema("ManualSubmissionFields").safeParse(submission).success && ready;
+  const localIssues: Requirement[] = [];
+  if (startError) localIssues.push("startedAt");
+  if (endError) localIssues.push("completedAt");
+  if (damageInvalid) localIssues.push("cargoDamagePercent");
+  if (originCompany.blocked) localIssues.push("originCompanyId");
+  if (destinationCompany.blocked) localIssues.push("destinationCompanyId");
+  const missing = missingRequirements(submission, ready, localIssues),
+    complete = missing.length === 0;
   const guard = JSON.stringify([
     submission,
     target,
@@ -267,16 +303,16 @@ function ManualEditor({
     tripVersion,
     accepted,
   ]);
-  const missing = complete ? [] : missingRequirements(submission, ready),
-    nextId = useId(),
-    missingId = useId();
+  const nextId = useId(),
+    missingId = useId(),
+    referenceNoteId = useId();
   return (
     <div className="stack trip-page manual-report">
       <header className="manual-report-header">
         <h1>{t(report ? "revise" : "newReport")}</h1>
-        <p className="muted">{t("noDate")}</p>
         {report && <p className="muted">{t("pendingEdit")}</p>}
       </header>
+      <DraftFeedback kind={draftConflict ? "draftDeleteConflict" : null} />
       {accepted && report && (
         <Card className="stack">
           <p>{t("acceptedEdit")}</p>
@@ -306,6 +342,9 @@ function ManualEditor({
                       evidenceIds: fields.evidenceIds ?? [],
                       comment: fields.comment ?? null,
                     });
+                    originCompany.clearNotice();
+                    destinationCompany.clearNotice();
+                    changed();
                     setTarget(null);
                     setCursor(null);
                   }}
@@ -316,21 +355,38 @@ function ManualEditor({
               </div>
             </div>
             <div className="manual-report-section manual-report-fields">
-              {(["origin", "destination", "cargo", "trailerType"] as const).map((name) => (
+              {(["origin", "destination"] as const).map((name) => {
+                const companyName = name === "origin" ? "originCompanyId" : "destinationCompanyId";
+                const choices = name === "origin" ? originCompany : destinationCompany;
+                return (
+                  <div className="manual-route-stop" key={name}>
+                    <ManualCatalogField
+                      name={name}
+                      game={game}
+                      value={fields[name]}
+                      onChange={(value) => {
+                        choices.clearNotice();
+                        update(name, value);
+                      }}
+                    />
+                    <DepotCompanyField
+                      name={companyName}
+                      value={fields[companyName]}
+                      choices={choices}
+                      onChange={(value) => update(companyName, value)}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="manual-report-section manual-report-fields">
+              {(["cargo", "trailerType"] as const).map((name) => (
                 <ManualCatalogField
                   key={name}
                   name={name}
                   game={game}
                   value={fields[name]}
-                  onChange={(value) => {
-                    if (value) patch({ [name]: value });
-                    else
-                      setFields((prev) => {
-                        const next = { ...prev };
-                        delete next[name];
-                        return next;
-                      });
-                  }}
+                  onChange={(value) => update(name, value)}
                 />
               ))}
               {(["cargoMassKg", "actualDistanceM"] as const).map((name) => (
@@ -342,24 +398,56 @@ function ManualEditor({
                     aria-describedby={`${name}-help`}
                     value={fields[name] ?? ""}
                     maxLength={64}
-                    onChange={(e) => {
-                      if (e.target.value) patch({ [name]: e.target.value });
-                      else
-                        setFields((prev) => {
-                          const next = { ...prev };
-                          delete next[name];
-                          return next;
-                        });
-                    }}
+                    onChange={(e) => update(name, e.target.value || undefined)}
                   />
                   <p id={`${name}-help`} className="manual-report-hint">
                     {t(name === "cargoMassKg" ? "cargoMassHelp" : "distanceHelp")}
                   </p>
                 </div>
               ))}
+            </div>
+            <div className="manual-report-section manual-report-fields">
+              <p id={referenceNoteId} className="manual-report-hint manual-reference-note">
+                {t("referenceHelp", { timezone })}
+              </p>
+              {(["startedAt", "completedAt"] as const).map((name) => (
+                <ReferenceTimeField
+                  key={name}
+                  name={name}
+                  value={times[name]}
+                  noteId={referenceNoteId}
+                  error={name === "startedAt" ? startError : endError}
+                  onChange={(value) => {
+                    setTimes((previous) => ({ ...previous, [name]: value }));
+                    changed();
+                  }}
+                />
+              ))}
+              <div className="field">
+                <Label htmlFor="cargoDamagePercent">{t("cargoDamagePercentOptional")}</Label>
+                <Input
+                  id="cargoDamagePercent"
+                  inputMode="decimal"
+                  maxLength={64}
+                  value={damage}
+                  aria-invalid={damageInvalid || undefined}
+                  aria-describedby={damageInvalid ? "manual-damage-error" : undefined}
+                  onChange={(event) => {
+                    setDamage(event.target.value);
+                    changed();
+                  }}
+                />
+                {damageInvalid && (
+                  <p id="manual-damage-error" className="field-error" role="alert">
+                    {t("damageInvalid")}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="manual-report-section manual-report-fields">
               <EventSelect
                 value={fields.eventId ?? null}
-                onChange={(eventId) => patch({ eventId })}
+                onChange={(eventId) => update("eventId", eventId)}
                 game={game}
               />
               <div className="field">
@@ -369,7 +457,7 @@ function ManualEditor({
                   id="manual-comment"
                   maxLength={4000}
                   value={fields.comment ?? ""}
-                  onChange={(e) => patch({ comment: e.target.value || null })}
+                  onChange={(e) => update("comment", e.target.value || null)}
                 />
               </div>
             </div>
@@ -381,8 +469,7 @@ function ManualEditor({
                     ...previous,
                     evidenceIds: update(previous.evidenceIds ?? []),
                   }));
-                  setInvalid(false);
-                  setSaved(false);
+                  changed();
                 }}
                 onReady={setReady}
               />
@@ -401,6 +488,7 @@ function ManualEditor({
                         (t) => t.id === e.target.value,
                       );
                       setTarget(item ? { tripId: item.id, expectedVersion: item.version } : null);
+                      changed();
                     }}
                   >
                     <option value="">{t("noTarget")}</option>
@@ -499,7 +587,7 @@ function ManualEditor({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={command.pending || command.seconds > 0}
+                    disabled={companyPending || command.pending || command.seconds > 0}
                     onClick={() => void save()}
                   >
                     {t("save")}
@@ -519,12 +607,18 @@ function ManualEditor({
                     command.seconds > 0
                   }
                   onConfirm={async () => {
-                    if (targetNeedsSave) return;
-                    const body = report
-                      ? { fields: submission, expectedTripVersion: tripVersion }
-                      : draft
-                        ? { fields: submission }
-                        : { fields: submission, targetTrip: target };
+                    if (targetNeedsSave || !complete) return;
+                    const final = schema("ManualDatedSubmissionFields").safeParse(submission);
+                    if (!final.success) return;
+                    const body: DTO[
+                      | "ManualReportResubmissionInput"
+                      | "ManualDraftFinalSubmissionInput"
+                      | "ManualReportCreationInput"] =
+                      report && tripVersion !== undefined
+                        ? { fields: final.data, expectedTripVersion: tripVersion }
+                        : draft
+                          ? { fields: final.data }
+                          : { fields: final.data, targetTrip: target };
                     const path = report
                       ? `/manual-reports/${report.id}/revisions`
                       : draft
@@ -551,8 +645,21 @@ function ManualEditor({
                     }}
                   />
                 </Confirm>
+                {draft && onDraftConflict && (
+                  <DeleteDraft
+                    id={draft.id}
+                    etag={draftEtag}
+                    disabled={command.pending}
+                    onConflict={onDraftConflict}
+                    onDeleted={() =>
+                      navigate(draftsLocation, { replace: true, state: { draftDeleted: true } })
+                    }
+                  />
+                )}
                 <Button asChild variant="ghost">
-                  <Link to="/account/trips">{t("back")}</Link>
+                  <Link to={draft ? draftsLocation : "/account/trips"}>
+                    {t(draft ? "backToDrafts" : "back")}
+                  </Link>
                 </Button>
               </div>
             </div>

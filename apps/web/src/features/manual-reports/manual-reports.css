@@ -1,5 +1,4 @@
-/* Compact manual report form (VTC-060). Every rule is scoped to .manual-report; the portaled
-   Confirm dialog keeps the global trips.css rules. */
+/* Manual report editor, private reference facts and draft list. */
 .trip-page.manual-report {
   /* trips.css breaks anywhere; Russian report copy wraps only between words. */
   overflow-wrap: break-word;
@@ -236,5 +235,76 @@
   }
   .manual-report .manual-upload-picker > .button {
     flex: 1 1 auto;
+  }
+}
+
+.manual-report .manual-route-stop {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.manual-report .manual-company-field .input,
+.manual-report input[type="datetime-local"] {
+  width: 100%;
+  min-width: 0;
+}
+.manual-report .manual-company-field > .button {
+  justify-self: start;
+}
+.manual-report .manual-reference-note {
+  grid-column: 1 / -1;
+}
+.manual-reference-facts {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.trip-page .manual-reference-facts > h3,
+.trip-page .manual-reference-facts > p {
+  margin: 0;
+}
+.manual-drafts {
+  min-width: 0;
+}
+.trip-page .manual-drafts > h2 {
+  font-size: var(--font-body);
+}
+.manual-drafts > :is(h1, h2, p),
+.manual-draft-facts > :is(h3, p) {
+  margin: 0;
+}
+.manual-draft-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.manual-draft-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 18px;
+  padding: 10px 12px;
+}
+.manual-draft-row + .manual-draft-row {
+  border-top: 1px solid var(--border);
+}
+.manual-draft-facts {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  min-width: 0;
+}
+.manual-draft-row .manual-draft-facts h3 {
+  font-size: var(--font-body);
+}
+.manual-draft-row .manual-draft-facts p {
+  font-size: var(--font-small);
+}
+.manual-draft-actions {
+  flex: 0 0 auto;
+}
+@media (max-width: 760px) {
+  .manual-draft-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
