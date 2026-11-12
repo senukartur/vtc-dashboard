@@ -1,7 +1,11 @@
 import { type Query, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useSession } from "../../app/Session.js";
-import { type CacheRead, stage2EventProjection } from "./event-projection-cache.js";
+import {
+  type CacheRead,
+  isColdStage2EventProjection,
+  stage2EventProjection,
+} from "./event-projection-cache.js";
 import type { DTO } from "./model.js";
 import { useEventCommand } from "./queries.js";
 import { eventStage2SessionScope } from "./stage-2-queries.js";
@@ -102,9 +106,14 @@ export function useEventQuickCommand(projection: ResponseProjection) {
       return { ...current, myResponse: confirmed.response, myResponseVersion: confirmed.version };
     }
 
-    // Cancel only matching stale reads that could overwrite the committed response.
+    // A first read has no rows to patch and can still publish the pre-write version.
+    const cold = new Set(
+      client.getQueryCache().findAll({
+        predicate: (query) => isColdStage2EventProjection(query, scope),
+      }),
+    );
     const predicate = (query: Query) => eligible(query) !== undefined;
-    await client.cancelQueries({ predicate });
+    await client.cancelQueries({ predicate: (query) => cold.has(query) || predicate(query) });
     for (const query of client.getQueryCache().findAll({ predicate })) {
       const projection = eligible(query);
       if (!projection) continue;
@@ -140,6 +149,12 @@ export function useEventQuickCommand(projection: ResponseProjection) {
       // Changing the response is independent of any pending definition or lifecycle refresh.
       if (isInvalidated)
         void client.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+    }
+    if (cold.size) {
+      await client.refetchQueries(
+        { type: "active", predicate: (query) => cold.has(query) && query.state.data === undefined },
+        { cancelRefetch: false },
+      );
     }
   }
 

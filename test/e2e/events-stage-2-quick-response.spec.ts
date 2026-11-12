@@ -328,3 +328,118 @@ test(
     expect(ownReads).toBe(detailOwnReads);
   },
 );
+
+test(
+  "a header response replaces an in-flight first list read with current authority",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const nearest = upcomingProjection();
+    const list = stage2Fixture("listEvents", "own-response")
+      .response as DTO["EventStage2EnvelopeMemberList"];
+    const row = list.data.items[0];
+    if (!nearest.data || !row) throw new Error("Missing Stage 2 projections");
+    test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
+
+    await mockEventsStage2(page, "member");
+    let response: DTO["Rsvp"]["response"] = "unanswered";
+    let version = 7;
+    let listReads = 0;
+    const preconditions: (string | undefined)[] = [];
+    let releaseOld = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldSettled = false;
+
+    await page.route(listPath, async (route) => {
+      const json = {
+        ...list,
+        data: {
+          ...list.data,
+          items: [
+            {
+              ...row,
+              myResponse: response,
+              myResponseVersion: version,
+              responseCounts: {
+                participating: response === "participating" ? 2 : 1,
+                declined: response === "declined" ? 1 : 0,
+              },
+            },
+          ],
+        },
+      };
+      if (++listReads !== 1) return route.fulfill({ json });
+      await oldGate;
+      // The browser may already have detached the aborted request.
+      await route.fulfill({ json }).catch(() => undefined);
+      oldSettled = true;
+    });
+    await page.route(upcomingPath, (route) =>
+      route.fulfill({
+        json: {
+          ...nearest,
+          data: { ...nearest.data, myResponse: response, myResponseVersion: version },
+        },
+      }),
+    );
+    await page.route(`**${responsePath}`, async (route) => {
+      const request = route.request();
+      const precondition = request.headers()["if-match"];
+      preconditions.push(precondition);
+      if (request.method() !== "PUT" || precondition !== `"v${version}"`)
+        return route.fulfill({ status: 412 });
+      const body = request.postDataJSON() as DTO["RsvpInput"];
+      response = body.response;
+      version++;
+      return route.fulfill({
+        headers: { ETag: `"v${version}"` },
+        json: {
+          data: {
+            response,
+            version,
+            declineReason: body.response === "declined" ? body.reason : null,
+          },
+          meta: nearest.meta,
+        },
+      });
+    });
+
+    try {
+      const firstRead = page.waitForRequest((request) => listPath.test(request.url()));
+      await page.goto("/account/events");
+      const oldRequest = await firstRead;
+      await expect.poll(() => listReads).toBe(1);
+      const header = page.locator(".event-nearest");
+      const card = page
+        .getByRole("main")
+        .getByRole("listitem")
+        .filter({ hasText: row.event.title });
+      await expect(card).toHaveCount(0);
+      await header.getByRole("button", { name: "Going" }).click();
+      await expect(card).toContainText("Your response: Participating");
+      await expect(card).toContainText("Participating: 2");
+      await expect.poll(() => oldRequest.failure()).not.toBeNull();
+      expect(listReads).toBe(2);
+
+      releaseOld();
+      await expect.poll(() => oldSettled).toBe(true);
+      await expect(card.getByRole("button", { name: "Going" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await card.getByRole("button", { name: "Can't go" }).click();
+      await card
+        .getByRole("textbox", { name: "Private decline reason" })
+        .fill("Fictional scheduling conflict");
+      await card.getByRole("button", { name: "Save response" }).click();
+      await expect(card.getByText("Response saved.")).toBeVisible();
+      await expect(card).toContainText("Participating: 1");
+      await expect(card).toContainText("Can't attend: 1");
+      expect(preconditions).toEqual(['"v7"', '"v8"']);
+      expect(listReads).toBe(2);
+    } finally {
+      releaseOld();
+    }
+  },
+);

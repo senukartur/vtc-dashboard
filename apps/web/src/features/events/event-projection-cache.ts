@@ -35,6 +35,16 @@ export function stage2EventProjection(query: Query, scope: string | null) {
   return undefined;
 }
 
+/** A pre-write read is active but has no rows to match until its first response. */
+export function isColdStage2EventProjection(query: Query, scope: string | null) {
+  return (
+    query.state.data === undefined &&
+    query.state.fetchStatus === "fetching" &&
+    query.isActive() &&
+    projectionKind(query, scope) !== undefined
+  );
+}
+
 /** An old in-flight read must not become the authority after a replay, conflict or detail write. */
 export async function refreshStage2EventResponse(
   client: QueryClient,
@@ -43,19 +53,9 @@ export async function refreshStage2EventResponse(
 ) {
   const targets = new Set(
     client.getQueryCache().findAll({
-      predicate: (query) => {
-        if (query.state.data === undefined) {
-          // The read began before the write settled and has no rows to match yet.
-          return (
-            query.state.fetchStatus === "fetching" &&
-            query.isActive() &&
-            projectionKind(query, scope) !== undefined
-          );
-        }
-        return (
-          stage2EventProjection(query, scope)?.rows.some(({ event }) => event.id === id) === true
-        );
-      },
+      predicate: (query) =>
+        isColdStage2EventProjection(query, scope) ||
+        stage2EventProjection(query, scope)?.rows.some(({ event }) => event.id === id) === true,
     }),
   );
   const predicate = (query: Query) => targets.has(query);
