@@ -412,6 +412,7 @@ def core():
         ops.atomic_json(base / 'state/notification-proof-database.json', rehearsal_database_identity(ops, revision, image_id))
     with rehearsal_phase('initial-migration'):
         compose(['run', '--rm', '--no-deps', 'migrate'], revision=revision)
+        assert not ops.activation.has_published_route_history(ops, revision, image_id, fenced=True)
     with rehearsal_phase('core-production-codec-grants'):
         notification_account_cleanup_proof(ops, revision, image_id)
         ops.jobs_grants_locked(revision)

@@ -36,7 +36,8 @@ export async function registerEventRoutes(
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
   const stage2 = events.publishedRoutesEnabled;
-  const localized = object(stage2 ? { locale: { type: "string", enum: ["en", "ru"] } } : {});
+  const localeQuery = object({ locale: { type: "string", enum: ["en", "ru"] } });
+  const localized = stage2 ? localeQuery : object({});
   const wire = (legacy: string, staged: string) =>
     stage2 ? { oneOf: [ref(legacy), ref(staged)] } : ref(legacy);
   const owned = (p: string) =>
@@ -107,7 +108,7 @@ export async function registerEventRoutes(
       {
         schema: {
           params,
-          querystring: localized,
+          querystring: publicOnly ? localeQuery : localized,
           response: {
             200: publicOnly
               ? wire("EnvelopeEventPublic", "EventStage2EnvelopePublic")
@@ -117,9 +118,10 @@ export async function registerEventRoutes(
       },
       async (r, reply) => {
         const viewer = publicOnly ? null : await actor(r);
-        const result = r.query.locale
-          ? await events.getPublished(viewer, r.params.eventId, r.query.locale)
-          : await events.get(viewer, r.params.eventId);
+        const result =
+          stage2 && r.query.locale
+            ? await events.getPublished(viewer, r.params.eventId, r.query.locale)
+            : await events.get(viewer, r.params.eventId);
         reply.header("ETag", `"v${result.version}"`);
         return envelope(r, result.data);
       },

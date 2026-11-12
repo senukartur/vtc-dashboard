@@ -11,6 +11,7 @@ import {
 import { catalogCities, catalogCompanies, catalogCompanyCities } from "@vtc/db/catalogs-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
 import type { components } from "@vtc/contracts";
+import { browserSchemaRef } from "@vtc/contracts/runtime";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { beforeEach, expect, test, afterAll as after, beforeAll as before } from "vitest";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
@@ -25,6 +26,7 @@ import {
 } from "../../apps/api/src/modules/identity/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { createEventWorkspace } from "../../apps/api/src/modules/events/workspace.ts";
+import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import {
   guardedSettings,
@@ -738,6 +740,9 @@ test("validation rejects blank reasons, invalid UTC/calendar/decimal and unavail
     denied.create(director, newId(), input({ originCityId: newId() })),
   ).rejects.toMatchObject({ statusCode: 422 });
 });
+const eventsStage2Header = "x-vtc-events-stage2";
+const eventWireValidator = createSchemaValidator();
+
 test("HTTP actual composition enforces auth, CSRF, strong separate ETags and closed responses", async () => {
   // All tests share one fixed clock window; start this request budget from zero.
   await control.query("DELETE FROM identity_limits");
@@ -800,6 +805,21 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     const pub = await app.inject({ url: `/api/v1/public/events/${id}` });
     expect(pub.statusCode).toBe(200);
     expect(pub.json().data).not.toHaveProperty("myResponse");
+    for (const locale of ["en", "ru"]) {
+      const localized = await app.inject({ url: `/api/v1/public/events/${id}?locale=${locale}` });
+      expect(localized.statusCode).toBe(200);
+      expect(
+        eventWireValidator.validate(browserSchemaRef("EnvelopeEventPublic"), localized.json()),
+      ).toBe(true);
+      expect(localized.json().data).toEqual(pub.json().data);
+    }
+    expect((await app.inject({ url: `/api/v1/public/events/${id}?locale=fr` })).statusCode).toBe(
+      422,
+    );
+    const self = await app.inject({ url: "/api/v1/me", headers: { cookie: traineeCookie } });
+    expect(self.statusCode).toBe(200);
+    expect(eventWireValidator.validate(browserSchemaRef("EnvelopeSelf"), self.json())).toBe(true);
+    expect(self.headers[eventsStage2Header]).toBeUndefined();
     const own = await app.inject({
       url: `/api/v1/events/${id}/my-response`,
       headers: { cookie: traineeCookie },
@@ -1466,6 +1486,38 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     );
     const publicDetail = await app.inject({ url: `${publicPath}?locale=en` });
     expect(publicDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(
+        browserSchemaRef("EventStage2EnvelopePublic"),
+        publicDetail.json(),
+      ),
+    ).toBe(true);
+    expect((await app.inject({ url: `${publicPath}?locale=fr` })).statusCode).toBe(422);
+    const russianDetail = await app.inject({ url: `${publicPath}?locale=ru` });
+    expect(russianDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(
+        browserSchemaRef("EventStage2EnvelopePublic"),
+        russianDetail.json(),
+      ),
+    ).toBe(true);
+    expect(russianDetail.json().data.origin).toMatchObject({
+      label: "Fictional translated origin",
+      requestedLocale: "ru",
+    });
+    const legacyDetail = await app.inject({ url: publicPath });
+    expect(legacyDetail.statusCode).toBe(200);
+    expect(
+      eventWireValidator.validate(browserSchemaRef("EnvelopeEventPublic"), legacyDetail.json()),
+    ).toBe(true);
+    const self = await app.inject({ url: "/api/v1/me", headers: { cookie: traineeCookie } });
+    expect(self.statusCode).toBe(200);
+    expect(eventWireValidator.validate(browserSchemaRef("EnvelopeSelf"), self.json())).toBe(true);
+    expect(self.headers[eventsStage2Header]).toBe("1");
+    const anonymousSelf = await app.inject({ url: "/api/v1/me" });
+    expect(anonymousSelf.statusCode).toBe(401);
+    expect(anonymousSelf.headers[eventsStage2Header]).toBeUndefined();
+    expect(publicDetail.headers[eventsStage2Header]).toBeUndefined();
     expect(publicDetail.json().data.origin).toMatchObject({
       label: "Fictional Origin",
       requestedLocale: "en",
@@ -1560,6 +1612,14 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     const legacyCancelReplay = await write("POST", cancelPath, reason, cancelKey, '"v3"');
     expect(legacyCancelReplay.headers.etag).toBe('"v4"');
     expect(legacyCancelReplay.json().data.event).not.toHaveProperty("platform");
+    await control.query("DELETE FROM identity_limits");
+    const headSelf = await app.inject({
+      method: "HEAD",
+      url: "/api/v1/me",
+      headers: { cookie: traineeCookie },
+    });
+    expect(headSelf.statusCode).toBe(200);
+    expect(headSelf.headers[eventsStage2Header]).toBeUndefined();
   } finally {
     await app.close();
   }
@@ -1659,6 +1719,32 @@ test("legacy writers carry compatible route details and staged failures leave no
       requiredDlcs: [],
     },
   });
+});
+
+test("the fenced route-history probe observes the first committed marker after an earlier empty read", async () => {
+  const event = await create();
+  const guard = await testConnection();
+  try {
+    await guard.beginTransaction();
+    const [early] = await guard.query<RowDataPacket[]>(
+      "SELECT EXISTS(SELECT 1 FROM event_revision_details) AS present",
+    );
+    expect(Number(early[0]?.present)).toBe(0);
+    await control.execute(
+      "INSERT INTO event_revision_details (revision_id) SELECT current_revision_id FROM events WHERE id=?",
+      [event.data.event.id],
+    );
+    const [fenced] = await guard.query<RowDataPacket[]>(
+      "SELECT EXISTS(SELECT revision_id FROM event_revision_details LIMIT 1 FOR SHARE) AS present",
+    );
+    expect(Number(fenced[0]?.present)).toBe(1);
+  } finally {
+    try {
+      await guard.rollback();
+    } finally {
+      await guard.end();
+    }
+  }
 });
 
 test("a newly inactive organizer blocks selection while a committed command still replays", async () => {
