@@ -2996,6 +2996,17 @@
             }
           },
           {
+            "name": "depotId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "description": "Exact depot row ID for restoring a saved selection. Requires cityId (422 if missing). The game, city and visibility filters still apply. Returns zero or one row with a null nextCursor."
+            }
+          },
+          {
             "name": "search",
             "in": "query",
             "schema": {
