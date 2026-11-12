@@ -515,7 +515,7 @@ function Applications() {
     cursor = search.get("cursor");
   const query = useWorkspaceQuery(
     `/admin/applications?status=${status}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-    "EnvelopeListApplication",
+    "EnvelopeListAdminApplication",
   );
   const items = query.data?.data.data.items,
     columns = [

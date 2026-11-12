@@ -25,6 +25,7 @@ import {
   sql,
   user,
 } from "@vtc/db/identity-schema";
+import type { SQL, SQLWrapper } from "drizzle-orm";
 import { int, mysqlTable, varchar } from "drizzle-orm/mysql-core";
 import {
   engine,
@@ -45,6 +46,7 @@ import { SUCCESSION_WINDOW_MS, successionWindow } from "./succession-limits.js";
 
 type Self = components["schemas"]["Self"];
 type Member = typeof membership.$inferSelect;
+type AdministrationMemberFilters = { role?: Role | undefined; search?: string | undefined };
 const company = mysqlTable("identity_company", {
   singleton: int("singleton").primaryKey(),
   id: idColumn("id").notNull(),
@@ -131,6 +133,27 @@ const canonical = (input: unknown): string =>
   );
 const normalizedEmail = (email: string): string => email.toLowerCase();
 const isFailure = (value: SafeResult): value is Failed => typeof value.failure === "number";
+
+function administrationMemberPredicate(
+  directorUserId: string,
+  filters: AdministrationMemberFilters,
+) {
+  const { role } = filters,
+    term = filters.search?.trim();
+  if (role !== undefined && role !== "director" && !assignableRoles.includes(role))
+    throw identityError(422);
+  if (term !== undefined && (!term || term.length > 128)) throw identityError(422);
+  // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
+  const escaped = term?.replace(/[\\%_]/g, (value) => `\\${value}`);
+  return and(
+    role === "director"
+      ? eq(user.id, directorUserId)
+      : role
+        ? sql`EXISTS (SELECT 1 FROM ${roles} WHERE ${roles.userId} = ${user.id} AND ${roles.role} = ${role})`
+        : undefined,
+    escaped !== undefined ? sql`${user.name} LIKE ${`%${escaped}%`}` : undefined,
+  );
+}
 
 export function createIdentity(
   unit: UnitOfWork,
@@ -1582,23 +1605,22 @@ export function createIdentity(
     async administrationMembersInTransaction(
       tx: TxContext,
       actor: Actor,
-      after: string | null,
-      limit: number,
-      status?: "active" | "inactive",
-      targetId?: string,
-      filters: { role?: Role | undefined; search?: string | undefined } = {},
+      options: AdministrationMemberFilters & {
+        after: string | null;
+        limit: number;
+        status?: "active" | "inactive" | undefined;
+        targetId?: string | undefined;
+        reportingActivity?: ((ownerRef: SQLWrapper, countedAt: string) => SQL) | undefined;
+      },
     ) {
+      const { after, limit, status, targetId, reportingActivity } = options;
       const current = await lockCompany(tx);
       await checkActor(tx, actor, current);
       requireCapability(actor, "members.manage");
       if (!Number.isInteger(limit) || limit < 1 || limit > 101) throw identityError(422);
-      const { role } = filters,
-        term = filters.search?.trim();
-      if (role !== undefined && role !== "director" && !assignableRoles.includes(role))
-        throw identityError(422);
-      if (term !== undefined && (!term || term.length > 128)) throw identityError(422);
-      // Same LIKE escaping as catalog search; the name column's collation is case-insensitive.
-      const escaped = term?.replace(/[\\%_]/g, (value) => `\\${value}`);
+      const matchingMembers = administrationMemberPredicate(current.directorUserId, options);
+      const matchingStatus = status ? eq(membership.status, status) : undefined;
+      const countedAt = targetId ? null : now().toISOString();
       const rows = await client(tx)
         .select({
           id: user.id,
@@ -1614,14 +1636,9 @@ export function createIdentity(
         .where(
           and(
             after ? gt(user.id, applicationId(after)) : undefined,
-            status ? eq(membership.status, status) : undefined,
+            matchingStatus,
             targetId ? eq(user.id, applicationId(targetId)) : undefined,
-            role === "director"
-              ? eq(user.id, current.directorUserId)
-              : role
-                ? sql`EXISTS (SELECT 1 FROM ${roles} WHERE ${roles.userId} = ${user.id} AND ${roles.role} = ${role})`
-                : undefined,
-            escaped !== undefined ? sql`${user.name} LIKE ${`%${escaped}%`}` : undefined,
+            matchingMembers,
           ),
         )
         .orderBy(user.id)
@@ -1639,13 +1656,48 @@ export function createIdentity(
             )
             .for("share")
         : [];
-      return rows.map((row) => ({
+      const items = rows.map((row) => ({
         ...row,
         roles: [
           ...assigned.filter((r) => r.userId === row.id).map((r) => r.role),
           ...(current.directorUserId === row.id ? ["director" as const] : []),
         ].sort(),
       }));
+      if (countedAt === null) return { rows: items };
+
+      const recentlyActive =
+        reportingActivity && actor.capabilities.includes("company.read")
+          ? and(matchingStatus, reportingActivity(user.id, countedAt))
+          : undefined;
+      const [totals] = await client(tx)
+        .select({
+          inCompany: sql<
+            number | string
+          >`count(case when ${membership.status} = 'active' then 1 end)`,
+          left: sql<number | string>`count(case when ${membership.status} = 'inactive' then 1 end)`,
+          ...(recentlyActive
+            ? {
+                droveLast30Days: sql<
+                  number | string
+                >`count(case when ${recentlyActive} then 1 end)`,
+              }
+            : {}),
+        })
+        .from(user)
+        .innerJoin(membership, eq(membership.userId, user.id))
+        .where(matchingMembers);
+      return {
+        rows: items,
+        counts: {
+          countedAt,
+          currentCapabilities: actor.capabilities,
+          statusCounts: {
+            inCompany: Number(totals?.inCompany ?? 0),
+            left: Number(totals?.left ?? 0),
+            ...(recentlyActive ? { droveLast30Days: Number(totals?.droveLast30Days ?? 0) } : {}),
+          },
+        },
+      };
     },
     async companySettingsInTransaction(tx: TxContext, actor: Actor) {
       const current = await lockCompany(tx);

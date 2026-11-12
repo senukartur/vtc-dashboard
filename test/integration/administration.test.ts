@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
+import { applications } from "@vtc/db/admissions-schema";
 import { eq, membership, user, company, roles as identityRoles } from "@vtc/db/identity-schema";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
 import { qualificationAssignments } from "@vtc/db/qualifications-schema";
@@ -9,6 +10,7 @@ import {
   beforeEach,
   expect,
   test,
+  vi,
   beforeAll as vitestBeforeAll,
   afterAll as vitestAfterAll,
 } from "vitest";
@@ -22,6 +24,7 @@ import {
   createQualificationInitialization,
   structuralLevels,
 } from "../../apps/api/src/modules/qualifications/initialization.ts";
+import { createTripActivity } from "../../apps/api/src/modules/trips/activity.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
@@ -819,49 +822,50 @@ test("director and deputy cannot change the serving director's roles, membership
   }
 });
 
+const activityTrip = (
+  ownerId: string,
+  decision: "unassessed" | "pending_review" | "accepted" | "rejected",
+  reportingAt: string | null,
+  aliasOf: string | null = null,
+) => ({
+  id: newId(),
+  ownerId,
+  game: "ets2" as const,
+  aliasOf,
+  version: 1,
+  outcome: "delivered" as const,
+  recording: "complete" as const,
+  decision,
+  assessmentPending: decision === "unassessed",
+  correctionPending: false,
+  reviewHold: false,
+  reviewReasons: [],
+  actualDistanceM: "100000",
+  reportingAt,
+  createdAt: "2026-10-01T00:00:00.000Z",
+});
+
 test("member administration reports the latest accepted canonical trip without per-row reads", async () => {
   const latest = await member(["driver"]),
     undated = await member(["trainee"]),
     idle = await member(["driver"]),
     former = await member(["driver"]);
-  const trip = (
-    ownerId: string,
-    decision: "unassessed" | "pending_review" | "accepted" | "rejected",
-    reportingAt: string | null,
-    aliasOf: string | null = null,
-  ) => ({
-    id: newId(),
-    ownerId,
-    game: "ets2" as const,
-    aliasOf,
-    version: 1,
-    outcome: "delivered" as const,
-    recording: "complete" as const,
-    decision,
-    assessmentPending: decision === "unassessed",
-    correctionPending: false,
-    reviewHold: false,
-    reviewReasons: [],
-    actualDistanceM: "100000",
-    reportingAt,
-    createdAt: "2026-10-01T00:00:00.000Z",
-  });
-  const older = trip(latest.id, "accepted", "2026-09-10T08:00:00.000Z");
+  const older = activityTrip(latest.id, "accepted", "2026-09-10T08:00:00.000Z");
   await unit.run((tx) =>
     unit
       .client(tx)
       .insert(trips)
       .values([
         older,
-        trip(latest.id, "accepted", "2026-10-12T19:45:30.123Z"),
-        trip(latest.id, "accepted", null),
-        trip(latest.id, "pending_review", "2026-10-20T10:00:00.000Z"),
-        trip(latest.id, "rejected", "2026-10-21T10:00:00.000Z"),
-        trip(latest.id, "unassessed", "2026-10-22T10:00:00.000Z"),
-        trip(latest.id, "accepted", "2026-10-25T10:00:00.000Z", older.id),
-        trip(undated.id, "accepted", null),
-        trip(undated.id, "pending_review", "2026-10-20T10:00:00.000Z"),
-        trip(former.id, "accepted", "2026-08-01T00:00:00.000Z"),
+        activityTrip(latest.id, "accepted", "2026-10-12T19:45:30.123Z"),
+        activityTrip(latest.id, "accepted", null),
+        activityTrip(latest.id, "pending_review", "2026-10-20T10:00:00.000Z"),
+        activityTrip(latest.id, "rejected", "2026-10-21T10:00:00.000Z"),
+        activityTrip(latest.id, "unassessed", "2026-10-22T10:00:00.000Z"),
+        activityTrip(latest.id, "accepted", "2026-10-25T10:00:00.000Z", older.id),
+        activityTrip(undated.id, "accepted", null),
+        activityTrip(undated.id, "pending_review", "2026-10-20T10:00:00.000Z"),
+        activityTrip(former.id, "accepted", "2026-08-01T00:00:00.000Z"),
       ]),
   );
   await composed.identity.administer(director, former.id, newId(), 1, { kind: "deactivate" });
@@ -876,6 +880,7 @@ test("member administration reports the latest accepted canonical trip without p
       const detail = await app.inject({ url: `/api/v1/admin/members/${subject.id}`, headers });
       expect(detail.statusCode).toBe(200);
       expect(detail.json().data.lastAcceptedTripAt).toBe(expected);
+      expect(detail.json().data).not.toHaveProperty("statusCounts");
     }
     const lists = new Map<string, unknown>();
     for (const status of ["active", "inactive"]) {
@@ -922,6 +927,168 @@ test("member administration reports the latest accepted canonical trip without p
   }
 });
 
+test("member counters share a snapshot time and count accepted canonical activity across the full filtered population", async () => {
+  const lower = await member(["driver"], "Fictional Activity 742%_ Lower"),
+    upper = await member(["driver"], "Fictional Activity 742%_ Upper"),
+    excluded = await member(["driver"], "Fictional Activity 742%_ Excluded"),
+    trainee = await member(["trainee"], "Fictional Activity 742%_ Trainee"),
+    former = await member(["driver"], "Fictional Activity 742%_ Former"),
+    decoy = await member(["driver"], "Fictional Activity 742xx Decoy");
+  await composed.identity.administer(director, former.id, newId(), 1, { kind: "deactivate" });
+
+  const admissions = composed.admissions;
+  if (!admissions) throw new Error("SYNTHETIC_ADMISSIONS_REQUIRED");
+  for (const nickname of ["Fictional Activity 742%_ Guest", "Fictional Activity 742xx Guest"]) {
+    const email = `${newId()}@example.invalid`;
+    await admissions.submit(`pre:${newId()}`, newId(), {
+      nickname,
+      email,
+      games: ["ets2"],
+      steamProfileUrl: "https://steamcommunity.com/id/fictional-driver",
+    });
+    const [application] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ id: applications.id })
+        .from(applications)
+        .where(eq(applications.openEmail, email)),
+    );
+    if (!application) throw new Error("SYNTHETIC_APPLICATION_REQUIRED");
+    await admissions.decide(director, application.id, newId(), 1, { decision: "approve" });
+  }
+
+  const countedAtMs = Date.now();
+  const countedAt = new Date(countedAtMs).toISOString();
+  const fromMs = countedAtMs - 30 * 24 * 60 * 60 * 1000;
+  const fromInclusive = new Date(fromMs).toISOString();
+  const before = new Date(fromMs - 1).toISOString();
+  const after = new Date(countedAtMs + 1).toISOString();
+  const excludedRoot = activityTrip(excluded.id, "accepted", before);
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .insert(trips)
+      .values([
+        activityTrip(lower.id, "accepted", fromInclusive),
+        activityTrip(lower.id, "accepted", fromInclusive),
+        activityTrip(lower.id, "accepted", after),
+        activityTrip(upper.id, "accepted", countedAt),
+        activityTrip(trainee.id, "accepted", countedAt),
+        activityTrip(former.id, "accepted", countedAt),
+        activityTrip(decoy.id, "accepted", countedAt),
+        excludedRoot,
+        activityTrip(excluded.id, "accepted", countedAt, excludedRoot.id),
+        activityTrip(excluded.id, "accepted", after),
+        activityTrip(excluded.id, "accepted", null),
+        activityTrip(excluded.id, "pending_review", countedAt),
+        activityTrip(excluded.id, "rejected", countedAt),
+      ]),
+  );
+
+  const identity = createIdentity(unit, cfg, {}, () => new Date(countedAtMs));
+  const reportingActivity = vi.fn(createTripActivity(unit).hasAcceptedReportingActivity);
+  const usableInvitations = vi.fn(admissions.usableInvitationCountInTransaction);
+  const sources = {
+    tripActivity: { hasAcceptedReportingActivity: reportingActivity },
+    admissions: { usableInvitationCountInTransaction: usableInvitations },
+  };
+  const administration = createAdministration(unit, identity, enabled, true, sources);
+  const actor = { ...director, capabilities: [] };
+  const search = "  ACTIVITY 742%_ ";
+  const first = await administration.members(actor, { status: "active", search, limit: 1 });
+  expect(first.items).toHaveLength(1);
+  expect(first.statusCounts).toEqual({ inCompany: 4, left: 1, droveLast30Days: 3, invited: 1 });
+  expect(reportingActivity).toHaveBeenCalledExactlyOnceWith(
+    expect.any(Object),
+    expect.any(Object),
+    fromInclusive,
+    countedAt,
+  );
+  expect(usableInvitations).toHaveBeenCalledExactlyOnceWith(
+    reportingActivity.mock.calls[0]?.[0],
+    actor,
+    countedAt,
+    search,
+  );
+  expect(first).not.toHaveProperty("countedAt");
+
+  const inviteReads = usableInvitations.mock.calls.length;
+  const drivers = { role: "driver", status: "active", search, limit: 1 } as const;
+  const driverPage = await administration.members(actor, drivers);
+  expect(driverPage.statusCounts).toEqual({
+    inCompany: 3,
+    left: 0,
+    droveLast30Days: 2,
+    invited: 0,
+  });
+  if (!driverPage.nextCursor) throw new Error("SYNTHETIC_MEMBER_CURSOR_REQUIRED");
+  const next = await administration.members(actor, { ...drivers, cursor: driverPage.nextCursor });
+  expect(next.statusCounts).toEqual(driverPage.statusCounts);
+  expect(usableInvitations).toHaveBeenCalledTimes(inviteReads);
+
+  expect(
+    (await administration.members(actor, { status: "inactive", search })).statusCounts,
+  ).toEqual({
+    inCompany: 4,
+    left: 1,
+    droveLast30Days: 1,
+    invited: 1,
+  });
+  expect((await administration.members(actor, { search })).statusCounts).toEqual({
+    inCompany: 4,
+    left: 1,
+    droveLast30Days: 4,
+    invited: 1,
+  });
+  expect(
+    (await administration.members(actor, { search: "Fictional no match" })).statusCounts,
+  ).toEqual({
+    inCompany: 0,
+    left: 0,
+    droveLast30Days: 0,
+    invited: 0,
+  });
+
+  const callsBeforeDetail = [
+    reportingActivity.mock.calls.length,
+    usableInvitations.mock.calls.length,
+  ];
+  const detail = await administration.members(actor, {}, lower.id);
+  expect(detail.statusCounts).toBeUndefined();
+  expect(detail.items[0]?.lastAcceptedTripAt).toBe(after);
+  await expect(
+    administration.members(
+      {
+        ...trainee.actor,
+        capabilities: ["members.manage", "applications.manage"],
+      },
+      { search },
+    ),
+  ).rejects.toMatchObject({ statusCode: 403 });
+  expect([reportingActivity.mock.calls.length, usableInvitations.mock.calls.length]).toEqual(
+    callsBeforeDetail,
+  );
+
+  const withTrips = createAdministration(
+    unit,
+    identity,
+    { ...enabled, admissions: false },
+    true,
+    sources,
+  );
+  const withAdmissions = createAdministration(unit, identity, enabled, false, sources);
+  expect((await withTrips.members(actor, { search })).statusCounts).toEqual({
+    inCompany: 4,
+    left: 1,
+    droveLast30Days: 4,
+  });
+  expect((await withAdmissions.members(actor, { search })).statusCounts).toEqual({
+    inCompany: 4,
+    left: 1,
+    invited: 1,
+  });
+});
+
 test("member list role and search filters run in SQL and bind the cursor", async () => {
   const dispatcher = await member(["driver", "dispatcher"], "Fictional Filter Kestrel Dispatcher"),
     trainee = await member(["trainee"], "Fictional Filter Kestrel Trainee"),
@@ -934,10 +1101,11 @@ test("member list role and search filters run in SQL and bind the cursor", async
   });
   const { app, headers } = await browser();
   type Row = { status: string; profile: { member: { id: string; roles: string[] } } };
-  async function list(query: string) {
+  async function list(query: string, counts?: { inCompany: number; left: number }) {
     const response = await app.inject({ url: `/api/v1/admin/members?limit=100&${query}`, headers });
     expect(response.statusCode, query).toBe(200);
     expect(response.json().data.nextCursor).toBeNull();
+    if (counts) expect(response.json().data.statusCounts).toMatchObject(counts);
     return response.json().data.items as Row[];
   }
   const ids = (rows: Row[]) => rows.map((row) => row.profile.member.id).sort();
@@ -950,7 +1118,7 @@ test("member list role and search filters run in SQL and bind the cursor", async
     expect(ids(trainees)).toContain(trainee.id);
     expect(ids(trainees)).not.toContain(dispatcher.id);
     for (const row of trainees) expect(row.profile.member.roles).toContain("trainee");
-    const directors = await list("role=director");
+    const directors = await list("role=director", { inCompany: 1, left: 0 });
     expect(ids(directors)).toEqual([director.userId]);
     expect(directors[0]?.profile.member.roles).toContain("director");
     expect(ids(await list("search=kestrel&status=active"))).toEqual(
@@ -960,15 +1128,52 @@ test("member list role and search filters run in SQL and bind the cursor", async
       [dispatcher.id, trainee.id, formerKestrel.id].sort(),
     );
     expect(ids(await list(`search=${encodeURIComponent("сокол")}`))).toEqual([cyrillic.id]);
-    expect(ids(await list(`search=${encodeURIComponent("100%_")}`))).toEqual([literal.id]);
+    expect(
+      ids(await list(`search=${encodeURIComponent("100%_")}`, { inCompany: 1, left: 0 })),
+    ).toEqual([literal.id]);
     expect(ids(await list(`search=${encodeURIComponent("100")}`))).toEqual(
       [literal.id, decoy.id].sort(),
     );
     expect(ids(await list("role=dispatcher&search=Kestrel&status=active"))).toEqual([
       dispatcher.id,
     ]);
-    expect(ids(await list("search=Kestrel&status=inactive"))).toEqual([formerKestrel.id]);
-    expect(ids(await list("role=dispatcher&search=Kestrel&status=inactive"))).toEqual([]);
+    expect(ids(await list("search=Kestrel&status=inactive", { inCompany: 2, left: 1 }))).toEqual([
+      formerKestrel.id,
+    ]);
+    expect(
+      ids(await list("role=dispatcher&search=Kestrel&status=inactive", { inCompany: 1, left: 0 })),
+    ).toEqual([]);
+    const pagedUrl = "/api/v1/admin/members?limit=1&search=Kestrel&status=active";
+    const firstActive = await app.inject({ url: pagedUrl, headers });
+    expect(firstActive.statusCode).toBe(200);
+    expect(firstActive.json().data.items).toHaveLength(1);
+    expect(firstActive.json().data.statusCounts).toMatchObject({ inCompany: 2, left: 1 });
+    const activeCursor = firstActive.json().data.nextCursor as string;
+    expect(activeCursor).toBeTruthy();
+    const secondActive = await app.inject({
+      url: `${pagedUrl}&cursor=${encodeURIComponent(activeCursor)}`,
+      headers,
+    });
+    expect(secondActive.statusCode).toBe(200);
+    expect(secondActive.json().data.items).toHaveLength(1);
+    expect(secondActive.json().data.nextCursor).toBeNull();
+    expect(secondActive.json().data.statusCounts).toEqual(firstActive.json().data.statusCounts);
+    expect(ids(firstActive.json().data.items)).not.toEqual(ids(secondActive.json().data.items));
+
+    const withoutSources = createAdministration(unit, composed.identity, {
+      ...enabled,
+      admissions: false,
+    });
+    expect(
+      await withoutSources.members(director, {
+        role: "director",
+        status: "inactive",
+      }),
+    ).toEqual({
+      items: [],
+      nextCursor: null,
+      statusCounts: { inCompany: 1, left: 0 },
+    });
     await resetLimits();
     const blank = await app.inject({
       url: `/api/v1/admin/members?search=${encodeURIComponent("   ")}`,
