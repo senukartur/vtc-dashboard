@@ -1,9 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
+import { withReadSlot } from "../../shared/read-scheduler.js";
+import { AccountFailure } from "../account/transport.js";
 import type { DetailEvent, DetailMember } from "./EventDetailContent.js";
 import type { DTO } from "./model.js";
 import { useEventQuery } from "./queries.js";
 import { useEventStage2Query } from "./stage-2-queries.js";
 import { type EventStage2Locale, eventStage2Reads } from "./stage-2-transport.js";
-import { EventFailure, schema } from "./transport.js";
+import { EventFailure, fail, schema } from "./transport.js";
 
 function legacySelectorRejected(id: string, error: unknown) {
   // Flag-off deployments reject the locale query before reading the event.
@@ -35,18 +38,50 @@ function legacyMember(member: DTO["EventMember"]): DetailMember {
   };
 }
 
+async function readPublicDetail(
+  spec: ReturnType<typeof eventStage2Reads.publicDetail>,
+  signal: AbortSignal,
+): Promise<DetailEvent> {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
+  try {
+    return await withReadSlot(bounded, async () => {
+      const response = await fetch(`/api/v1${spec.path}`, {
+        credentials: "omit",
+        cache: "no-store",
+        signal: bounded,
+        headers: { Accept: "application/json" },
+      });
+      try {
+        if (response.status !== 200) fail(response);
+        const body: unknown = await response.json();
+        bounded.throwIfAborted();
+        const staged = schema(spec.schema).safeParse(body);
+        if (staged.success) return staged.data.data;
+        const legacy = schema("EnvelopeEventPublic").safeParse(body);
+        if (legacy.success) return legacyEvent(legacy.data.data);
+        throw new AccountFailure("unavailable");
+      } finally {
+        if (!response.bodyUsed) await response.body?.cancel().catch(() => undefined);
+      }
+    });
+  } catch (error) {
+    if (error instanceof AccountFailure) throw error;
+    throw new AccountFailure("unavailable");
+  }
+}
+
 export function usePublicDetailRead(id: string, locale: EventStage2Locale) {
-  const staged = useEventStage2Query(eventStage2Reads.publicDetail(id, locale));
-  const fallback = legacySelectorRejected(id, staged.error);
-  const legacy = useEventQuery(
-    `/public/events/${encodeURIComponent(id)}`,
-    "EnvelopeEventPublic",
-    fallback,
-  );
-  return {
-    query: fallback ? legacy : staged,
-    event: fallback ? legacy.data && legacyEvent(legacy.data.data.data) : staged.data?.data.data,
-  };
+  const spec = eventStage2Reads.publicDetail(id, locale);
+  const query = useQuery({
+    // The Stage 2 namespace lets management and media commands invalidate this read.
+    queryKey: ["events-stage-2", "public", spec.access, spec.path, "compatible-public-detail"],
+    meta: { private: false },
+    retry: false,
+    gcTime: 300000,
+    staleTime: 30000,
+    queryFn: ({ signal }) => readPublicDetail(spec, signal),
+  });
+  return { query, event: query.isError ? undefined : query.data };
 }
 
 export function useMemberDetailRead(id: string, locale: EventStage2Locale, allowed: boolean) {

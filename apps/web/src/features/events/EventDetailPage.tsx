@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ReactNode,
   type RefObject,
@@ -51,6 +51,7 @@ import { useEventStage2Command } from "./stage-2-queries.js";
 import {
   type EventStage2Command,
   eventStage2Commands,
+  eventStage2Content,
   eventStage2Reads,
 } from "./stage-2-transport.js";
 import {
@@ -73,6 +74,15 @@ function stagedReadsAt(...paths: string[]) {
   const targets = paths.map((path) => path.split("?")[0]);
   return ({ queryKey }: { queryKey: readonly unknown[] }) =>
     queryKey[0] === "events-stage-2" && targets.includes(String(queryKey.at(-2)).split("?")[0]);
+}
+
+function refreshPublicDetail(client: QueryClient, id: string) {
+  return client.invalidateQueries({
+    predicate: stagedReadsAt(
+      eventStage2Reads.publicDetail(id).path,
+      eventStage2Content.publicCover(id).path,
+    ),
+  });
 }
 
 export function EventDetailPage({ publicView = false }: { publicView?: boolean }) {
@@ -379,8 +389,8 @@ function LegacyEdit({
   const session = useSession();
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
-  // Let the legacy command's definition invalidation refresh the staged detail after
-  // writes and stale conflicts, without a second read when the editor opens.
+  // Bridge the legacy command's invalidation to the Stage 2 cache after edits
+  // and conflicts, without a second read when the editor opens.
   useQuery({
     queryKey: [
       "events",
@@ -388,22 +398,17 @@ function LegacyEdit({
       session.generation,
       session.self?.identityEpoch,
       session.self?.capabilities.join(","),
-      `/events/${member.event.id}`,
+      eventStage2Reads.publicDetail(member.event.id).path,
       "legacy-editor-refresh",
     ],
     meta: { private: true },
-    enabled: staged && open,
+    enabled: open,
     initialData: true,
     staleTime: Infinity,
     gcTime: 0,
     retry: false,
     queryFn: async () => {
-      await Promise.all([
-        refreshDetail(),
-        client.invalidateQueries({
-          predicate: stagedReadsAt(eventStage2Reads.publicDetail(member.event.id).path),
-        }),
-      ]);
+      await Promise.all([staged && refreshDetail(), refreshPublicDetail(client, member.event.id)]);
       return true;
     },
   });
@@ -820,7 +825,10 @@ function CancelEvent({
   const [now, setNow] = useState(Date.now);
   const trigger = useRef<HTMLButtonElement>(null);
   const prepared = useRef<{ reason: string; locale: string; attempt: Cancellation } | null>(null);
-  const legacy = useEventCommand();
+  const client = useQueryClient();
+  const legacy = useEventCommand((error) => {
+    if (error.kind === "conflict") void refreshPublicDetail(client, id);
+  });
   const pending = staged ? stagedPending : legacy.pending;
   const seconds = staged ? Math.max(0, Math.ceil((waitUntil - now) / 1000)) : legacy.seconds;
   useEffect(() => {
@@ -866,7 +874,10 @@ function CancelEvent({
                 "EnvelopeEventMember",
                 etag,
               );
-              if (result) setOpen(false);
+              if (result) {
+                setOpen(false);
+                await refreshPublicDetail(client, id);
+              }
               return;
             }
             setFailure(null);

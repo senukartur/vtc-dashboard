@@ -1,5 +1,5 @@
 import { writeFile } from "node:fs/promises";
-import type { Page, TestInfo } from "@playwright/test";
+import type { Page, Request, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { stage2Fixture, stage2LegacyEventId, stage2MediaId } from "../fixtures/events-stage-2.ts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
@@ -755,38 +755,93 @@ test(
   },
 );
 
+function trackGuestReads(page: Page) {
+  const requests: Request[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname.startsWith("/api/v1/")) requests.push(request);
+  });
+  return requests;
+}
+
+function guestRequestPaths(requests: Request[]) {
+  return requests.map((request) => {
+    const { pathname, search } = new URL(request.url());
+    return `${request.method()} ${pathname}${search}`;
+  });
+}
+
 test(
-  "anonymous detail requests only the advertised public cover and uses legacy organizer text",
+  "public detail reads one strict Stage 2 response and only the advertised cover",
   browserCase(["@functional"]),
-  async ({ page }) => {
-    const state = await mockStructuredDetail(page, "en");
+  async ({ page, baseURL }) => {
+    if (!baseURL) throw new Error("The public detail test requires a base URL");
+    await page
+      .context()
+      .addCookies([{ name: "fictional_public_cookie", value: "fictional", url: baseURL }]);
+    const state = await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
     await page.goto(eventPath);
-    await catalogLanguage(page, "en");
-    await expect(page.getByRole("img", { name: "Event cover" })).toBeVisible();
-    const organizer = page.getByRole("region", { name: "Organizer" });
+    await expect(page.getByRole("img", { name: "Обложка события" })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
     await expect(organizer).toContainText(state.member.event.organizer);
     await expect(organizer.getByRole("link")).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Your response" })).toHaveCount(0);
-    await expect(page.getByText("Fictional Cargo", { exact: true })).toHaveCount(0);
-    expect(state.requests.some((url) => url.pathname === `/api/v1/public${eventPath}/cover`)).toBe(
-      true,
-    );
-    expect(
-      state.requests.filter((url) => /\/api\/v1\/(?:catalogs|admin|events)\//.test(url.pathname)),
-    ).toEqual([]);
+    await expect(page.getByRole("region", { name: "Ваш ответ" })).toHaveCount(0);
+    await expect(page.getByText("Синтетический груз", { exact: true })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public${eventPath}?locale=ru`,
+      `GET /api/v1/public${eventPath}/cover`,
+    ]);
+    for (const request of reads) expect(await request.headerValue("cookie")).toBeNull();
+  },
+);
+
+test(
+  "public detail reads one strict legacy response at the same localized URL",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, false, "ru");
+    state.session = false;
+    state.event.origin = {
+      entityId: "e0350000-0000-4000-8000-000000000093",
+      label: "Фиктивная северная гавань",
+      englishFallback: false,
+      requestedLocale: "ru",
+      renderedLocale: "ru",
+      hidden: false,
+    };
+    const reads = trackGuestReads(page);
+    await page.goto(`/events/${eventId}`);
+    await expect(page.getByRole("heading", { name: state.event.title })).toBeVisible();
+    await expect(page.getByText("Фиктивная северная гавань", { exact: true })).toBeVisible();
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(state.event.organizer);
+    await expect(organizer.getByRole("link")).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    await expect(page.getByText("Не нужны, хватит базовой карты")).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+  },
+);
+
+test(
+  "public detail renders a Stage 2 legacy row with organizer text and no cover",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockStructuredDetail(page, "ru");
+    const reads = trackGuestReads(page);
     await page.goto(`/events/${stage2LegacyEventId}`);
-    await catalogLanguage(page, "en");
-    await expect(page.getByText("Base map is enough", { exact: true })).toBeVisible();
+    await expect(page.getByText("Не нужны, хватит базовой карты", { exact: true })).toBeVisible();
     const legacy = (
       stage2Fixture("listPublicEvents", "structured-and-legacy")
         .response as components["schemas"]["EventStage2EnvelopePublicList"]
     ).data.items[1];
-    await expect(organizer).toContainText(legacy?.organizer ?? "");
+    if (!legacy) throw new Error("Missing legacy row fixture");
+    const organizer = page.getByRole("region", { name: "Организатор" });
+    await expect(organizer).toContainText(legacy.organizer);
     await expect(organizer.getByRole("link")).toHaveCount(0);
-    await expect(page.getByRole("img", { name: "Event cover" })).toHaveCount(0);
-    expect(
-      state.requests.some((url) => url.pathname.endsWith(`${stage2LegacyEventId}/cover`)),
-    ).toBe(false);
+    await expect(page.getByRole("img", { name: "Обложка события" })).toHaveCount(0);
+    expect(guestRequestPaths(reads)).toEqual([
+      `GET /api/v1/public/events/${stage2LegacyEventId}?locale=ru`,
+    ]);
   },
 );
 
@@ -975,28 +1030,45 @@ test(
 
 for (const status of [401, 403, 404, 422] as const) {
   test(
-    `public detail does not negotiate a legacy read for ${status === 422 ? "an invalid event ID" : status}`,
+    `public detail stops after one GET for ${status === 404 ? "a missing or private event" : status}`,
     browserCase(["@functional"]),
     async ({ page }) => {
-      const state = await mockEventDetail(page);
-      state.stage2Status = status;
+      const state = await mockEvents(page, false, "ru");
+      state.status = status;
       state.session = false;
-      const id = status === 422 ? "invalid-id" : eventId;
-      const path = `/api/v1/public/events/${id}`;
-      const reads: (string | null)[] = [];
-      page.on("request", (request) => {
-        const url = new URL(request.url());
-        if (request.method() === "GET" && url.pathname === path)
-          reads.push(url.searchParams.get("locale"));
-      });
-      if (status === 422)
-        await page.route(
-          (url) => url.pathname === path,
-          (route) => route.fulfill({ status }),
-        );
-      await page.goto(`/events/${id}`);
+      const reads = trackGuestReads(page);
+      await page.goto(`/events/${eventId}`);
       await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
-      expect(reads).toEqual(["ru"]);
+      expect(guestRequestPaths(reads)).toEqual([`GET /api/v1/public/events/${eventId}?locale=ru`]);
+    },
+  );
+}
+
+for (const projection of ["legacy", "Stage 2"] as const) {
+  test(
+    `public detail rejects a private field in the ${projection} response`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      const data =
+        projection === "legacy"
+          ? eventFixture()
+          : (
+              stage2Fixture("getPublicEvent", "structured")
+                .response as components["schemas"]["EventStage2EnvelopePublic"]
+            ).data;
+      const path = `/api/v1/public/events/${data.id}`;
+      const reads = trackGuestReads(page);
+      await page.route(
+        (url) => url.pathname === path,
+        (route) =>
+          route.fulfill({
+            json: envelope({ ...data, organizerMemberId: "e0350000-0000-4000-8000-000000000094" }),
+          }),
+      );
+      await page.goto(`/events/${data.id}`);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      await expect(page.getByRole("heading", { name: data.title })).toHaveCount(0);
+      expect(guestRequestPaths(reads)).toEqual([`GET ${path}?locale=ru`]);
     },
   );
 }
