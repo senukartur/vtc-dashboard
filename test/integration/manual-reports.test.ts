@@ -1390,6 +1390,99 @@ test("equal-time revision keysets retain every immutable revision exactly once",
   expect(history.find((row) => row.id === next.currentRevision.id)).toEqual(next.currentRevision);
 });
 
+test("workspace joins only current author revisions, including multiple reports for the same trip", async () => {
+  const trip = await unit.run(async (tx) => {
+    const telemetry = await tripService.storeInTransaction(
+      tx,
+      "ets2telemetry",
+      telemetryFixture("completed"),
+      {
+        ownerUserId: owner.userId,
+        connection: { state: "unknown", referenceId: null },
+      },
+    );
+    const [stored] = await tripService.statesInTransaction(tx, [telemetry.tripId]);
+    if (!stored) throw Error("SYNTHETIC_TELEMETRY_TRIP_REQUIRED");
+    return stored;
+  });
+  const image = await upload();
+  const original = await manual.submitReport(owner, newId(), {
+    fields: fields(image.id),
+    targetTrip: { tripId: trip.id, expectedVersion: trip.version },
+  });
+  instant += 1000;
+  const revised = await manual.reviseReport(owner, original.id, newId(), original.version, {
+    fields: { ...fields(image.id), actualDistanceM: "2" },
+    expectedTripVersion: original.tripVersion,
+  });
+  instant += 1000;
+  const second = await manual.submitReport(owner, newId(), {
+    fields: fields(image.id),
+    targetTrip: { tripId: trip.id, expectedVersion: revised.tripVersion },
+  });
+  const foreignImage = await manual.upload(other, newId(), "synthetic.png", bytes(), "image/png");
+  const foreign = await manual.submitReport(other, newId(), { fields: fields(foreignImage.id) });
+  expect(second.tripId).toBe(original.tripId);
+  expect(revised.currentRevision.submittedAt).not.toBe(original.createdAt);
+
+  await unit.run(async (tx) => {
+    await identity.authorizeInTransaction(tx, owner, "trips.read_own_private");
+    const db = unit.client(tx);
+    const relation = manual.workspaceCurrentAuthorRevisionsRelation(tx, owner.userId);
+    const read = () =>
+      db
+        .select({
+          tripId: trips.id,
+          reportTripId: relation.reportTripId,
+          reportId: relation.reportId,
+          revisionId: relation.revisionId,
+          reportCreatedAt: relation.reportCreatedAt,
+          revisionNumber: manualRevisions.number,
+        })
+        .from(trips)
+        .leftJoin(relation, eq(relation.reportTripId, trips.id))
+        .leftJoin(manualRevisions, eq(manualRevisions.id, relation.revisionId))
+        .orderBy(relation.reportCreatedAt, relation.reportId);
+    const unmatched = {
+      tripId: foreign.tripId,
+      reportTripId: null,
+      reportId: null,
+      revisionId: null,
+      reportCreatedAt: null,
+      revisionNumber: null,
+    };
+    const own = [
+      {
+        tripId: original.tripId,
+        reportTripId: original.tripId,
+        reportId: original.id,
+        revisionId: revised.currentRevision.id,
+        reportCreatedAt: original.createdAt,
+        revisionNumber: revised.currentRevision.number,
+      },
+      {
+        tripId: second.tripId,
+        reportTripId: second.tripId,
+        reportId: second.id,
+        revisionId: second.currentRevision.id,
+        reportCreatedAt: second.createdAt,
+        revisionNumber: second.currentRevision.number,
+      },
+    ];
+    expect(await read()).toEqual([unmatched, ...own]);
+    await db
+      .update(manualReports)
+      .set({ currentRevisionId: null })
+      .where(eq(manualReports.id, original.id));
+    expect(await read()).toEqual([unmatched, own[1]]);
+    await db
+      .update(manualReports)
+      .set({ currentRevisionId: revised.currentRevision.id })
+      .where(eq(manualReports.id, original.id));
+    expect(await read()).toEqual([unmatched, ...own]);
+  });
+});
+
 test("draft list pages editing and submitted states with owner-bound cursors and an unpaged editing count", async () => {
   expect(await manual.listDrafts(owner, { state: "editing" })).toEqual({
     items: [],
