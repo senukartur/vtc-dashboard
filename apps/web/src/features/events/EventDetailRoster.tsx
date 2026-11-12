@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
@@ -119,7 +119,7 @@ function Attendance({
   refreshDetail: RefreshDetail;
 }) {
   type Row = DTO["AttendanceInput"]["members"][number];
-  type Draft = Row & { nickname: string };
+  type Draft = Row & { nickname: string; reviewedEtag: string | null };
   const started = useEventStarted(event.startsAt);
   const submission = useRef<{
     body: DTO["AttendanceInput"];
@@ -131,11 +131,12 @@ function Attendance({
     headingId = useId(),
     [cursor, setCursor] = useState<string | null>(null),
     [changes, setChanges] = useState<Record<string, Draft>>({}),
-    [needsReview, setNeedsReview] = useState(false),
-    [reviewed, setReviewed] = useState<Record<string, string>>({}),
     [saved, setSaved] = useState(false),
     command = useEventCommand((failure) => {
-      if (failure instanceof EventFailure && failure.status === 412) recoverCursor(true);
+      // Keep the original authority only while the command also retains its idempotency key.
+      if (!["uncertain", "unavailable", "limited"].includes(failure.kind))
+        submission.current = null;
+      if (failure instanceof EventFailure && failure.status === 412) recoverCursor();
       if (staged && failure.kind === "conflict") {
         if (!cursor) void query.refetch();
         void refreshDetail();
@@ -151,39 +152,44 @@ function Attendance({
       !staged,
     ),
     query = staged ? stageQuery : legacyQuery;
-  const totals = staged ? stageQuery.data?.data.data.totals : undefined,
-    data = query.data?.data.data,
-    closed = event.status === "cancelled" || !started,
-    hintId = useId(),
-    etag = query.data?.etag && /^"v[1-9][0-9]*"$/.test(query.data.etag) ? query.data.etag : null,
-    body = {
-      members: Object.values(changes).map(({ memberId, attendance, note }) => ({
-        memberId,
-        attendance,
-        note,
-      })),
-    },
-    signature = JSON.stringify(body),
-    retrySubmission = submission.current?.signature === signature ? submission.current : null,
-    reviewComplete =
-      !!retrySubmission ||
-      !needsReview ||
-      Object.keys(changes).every((memberId) => reviewed[memberId] === etag),
-    blocked =
-      closed ||
-      command.pending ||
-      command.seconds > 0 ||
-      !Object.keys(changes).length ||
-      !reviewComplete ||
-      (!etag && !retrySubmission);
-  function recoverCursor(rejected = false) {
-    if (rejected) submission.current = null;
-    if (Object.keys(changes).length && !submission.current) {
-      setNeedsReview(true);
-      setReviewed({});
+  const totals = staged ? stageQuery.data?.data.data.totals : undefined;
+  const data = query.data?.data.data;
+  const closed = event.status === "cancelled" || !started;
+  const hintId = useId();
+  const etag =
+    query.data?.etag && /^"v[1-9][0-9]*"$/.test(query.data.etag) ? query.data.etag : null;
+  const drafts = Object.values(changes);
+  const body = {
+    members: drafts.map(({ memberId, attendance, note }) => ({ memberId, attendance, note })),
+  };
+  const signature = JSON.stringify(body);
+  const retrySubmission = submission.current?.signature === signature ? submission.current : null;
+  const needsReview =
+    !!etag && !retrySubmission && drafts.some((draft) => draft.reviewedEtag !== etag);
+  const locked = closed || command.pending;
+  const blocked =
+    locked || command.seconds > 0 || !drafts.length || needsReview || (!etag && !retrySubmission);
+
+  useEffect(() => {
+    const title = heading.current;
+    title?.focus({ preventScroll: true });
+    title?.scrollIntoView({ block: "center" });
+  }, []);
+
+  function recoverCursor() {
+    if (!submission.current) {
+      setChanges((previous) =>
+        Object.fromEntries(
+          Object.entries(previous).map(([memberId, draft]) => [
+            memberId,
+            { ...draft, reviewedEtag: null },
+          ]),
+        ),
+      );
     }
     setCursor(null);
   }
+
   return (
     <form
       className="stack"
@@ -191,29 +197,25 @@ function Attendance({
       onSubmit={async (e) => {
         e.preventDefault();
         // The unavailable Record button stays focusable (aria-disabled); ignore it here.
-        if (blocked) return;
+        const submitted = retrySubmission ?? (etag ? { body, etag, signature } : null);
+        if (blocked || !submitted) return;
         setSaved(false);
-        if (!closed && Object.keys(changes).length && (retrySubmission || etag) && reviewComplete) {
-          const submitted = retrySubmission ?? { body, etag: etag as string, signature };
-          submission.current = submitted;
-          const result = await command.run(
-            `/admin/events/${id}/attendance`,
-            submitted.body,
-            "EnvelopeCommandResult",
-            submitted.etag,
-            "PUT",
-          );
-          if (result) {
-            setChanges({});
-            submission.current = null;
-            setNeedsReview(false);
-            setReviewed({});
-            setCursor(null);
-            setSaved(true);
-            if (staged) {
-              if (!cursor) void query.refetch();
-              await refreshDetail();
-            }
+        submission.current = submitted;
+        const result = await command.run(
+          `/admin/events/${id}/attendance`,
+          submitted.body,
+          "EnvelopeCommandResult",
+          submitted.etag,
+          "PUT",
+        );
+        if (result) {
+          setChanges({});
+          submission.current = null;
+          setCursor(null);
+          setSaved(true);
+          if (staged) {
+            if (!cursor) void query.refetch();
+            await refreshDetail();
           }
         }
       }}
@@ -222,11 +224,11 @@ function Attendance({
         {t("attendance")}
       </h2>
       <p>{t("attendanceHelp")}</p>
-      {Object.keys(changes).length > 0 && (
+      {drafts.length > 0 && (
         <section className="stack" aria-label={t("attendanceDrafts")}>
           <h3>{t("attendanceDrafts")}</h3>
           {needsReview && <p role="status">{t("reviewAttendance")}</p>}
-          {Object.values(changes).map((draft) => (
+          {drafts.map((draft) => (
             <div key={draft.memberId}>
               <p>
                 {draft.nickname}: {t(draft.attendance)}
@@ -235,7 +237,7 @@ function Attendance({
               <Button
                 type="button"
                 variant="ghost"
-                disabled={command.pending}
+                disabled={locked}
                 onClick={() => {
                   setSaved(false);
                   setChanges((previous) => {
@@ -276,102 +278,115 @@ function Attendance({
           </div>
         </dl>
       )}
-      {data?.items.map((row) => (
-        <fieldset className="stack event-attendance-row" key={row.member.id}>
-          <legend>{row.member.nickname}</legend>
-          <p className="events-roster-line">
-            <span>
-              {t("memberResponse")}:{" "}
-              <span className={`events-tone-${row.response.response}`}>
-                <span aria-hidden="true">{responseTone(row.response.response).symbol}</span>{" "}
-                {t(responseChoiceKey(row.response.response))}
+      {data?.items.map((row) => {
+        const draft = changes[row.member.id];
+        return (
+          <fieldset className="stack event-attendance-row" key={row.member.id}>
+            <legend>{row.member.nickname}</legend>
+            <p className="events-roster-line">
+              <span>
+                {t("memberResponse")}:{" "}
+                <span className={`events-tone-${row.response.response}`}>
+                  <span aria-hidden="true">{responseTone(row.response.response).symbol}</span>{" "}
+                  {t(responseChoiceKey(row.response.response))}
+                </span>
               </span>
-            </span>
-            <span>
-              {t("attendance")}: {t(row.attendance)}
-            </span>
-          </p>
-          {row.response.declineReason && (
-            <p className="events-reason">
-              {t("declineReason")}: {row.response.declineReason}
+              <span>
+                {t("attendance")}: {t(row.attendance)}
+              </span>
             </p>
-          )}
-          {staged && "tripId" in row && typeof row.tripId === "string" && (
-            <Link className="events-detail-link" to={`/account/trips/${row.tripId}`}>
-              {t("attendanceTrip", { name: row.member.nickname })}
-            </Link>
-          )}
-          {row.note && (
-            <p className="events-reason">
-              {t("note")}: {row.note}
-            </p>
-          )}
-          <Label htmlFor={`attendance-${row.member.id}`}>
-            {t("attendance")} · {row.member.nickname}
-          </Label>
-          <select
-            className="input"
-            id={`attendance-${row.member.id}`}
-            disabled={closed || command.pending}
-            value={changes[row.member.id]?.attendance ?? ""}
-            onChange={(e) => {
-              setSaved(false);
-              const value = e.target.value;
-              setChanges((previous) => {
-                const next = { ...previous };
-                if (!value) delete next[row.member.id];
-                else
-                  next[row.member.id] = {
-                    memberId: row.member.id,
-                    nickname: row.member.nickname,
-                    attendance: value as "attended" | "not_attended",
-                    note: previous[row.member.id]?.note ?? null,
-                  };
-                return next;
-              });
-            }}
-          >
-            <option value="">{t("unchanged")}</option>
-            <option value="attended">{t("attended")}</option>
-            <option value="not_attended">{t("not_attended")}</option>
-          </select>
-          {changes[row.member.id] && (
-            <>
-              <Label htmlFor={`note-${row.member.id}`}>
-                {t("note")} · {row.member.nickname}
-              </Label>
-              <Input
-                id={`note-${row.member.id}`}
-                maxLength={2048}
-                disabled={command.pending}
-                value={changes[row.member.id]?.note ?? ""}
-                onChange={(e) => {
-                  setSaved(false);
-                  setChanges((previous) => ({
-                    ...previous,
-                    [row.member.id]: {
-                      ...(previous[row.member.id] as Draft),
-                      note: e.target.value || null,
-                    },
-                  }));
-                }}
-              />
-            </>
-          )}
-          {needsReview && changes[row.member.id] && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!etag || command.pending || reviewed[row.member.id] === etag}
-              onClick={() => {
-                if (etag) setReviewed((previous) => ({ ...previous, [row.member.id]: etag }));
+            {row.response.declineReason && (
+              <p className="events-reason">
+                {t("declineReason")}: {row.response.declineReason}
+              </p>
+            )}
+            {staged && "tripId" in row && typeof row.tripId === "string" && (
+              <Link className="events-detail-link" to={`/account/trips/${row.tripId}`}>
+                {t("attendanceTrip", { name: row.member.nickname })}
+              </Link>
+            )}
+            {row.note && (
+              <p className="events-reason">
+                {t("note")}: {row.note}
+              </p>
+            )}
+            <Label htmlFor={`attendance-${row.member.id}`}>
+              {t("attendance")} · {row.member.nickname}
+            </Label>
+            <select
+              className="input"
+              id={`attendance-${row.member.id}`}
+              disabled={locked || !etag}
+              value={draft?.attendance ?? ""}
+              onChange={(e) => {
+                if (locked || !etag) return;
+                setSaved(false);
+                const value = e.target.value;
+                setChanges((previous) => {
+                  const previousDraft = previous[row.member.id];
+                  const next = { ...previous };
+                  if (!value) delete next[row.member.id];
+                  else
+                    next[row.member.id] = {
+                      memberId: row.member.id,
+                      nickname: row.member.nickname,
+                      attendance: value as "attended" | "not_attended",
+                      note: previousDraft?.note ?? null,
+                      reviewedEtag: previousDraft ? previousDraft.reviewedEtag : etag,
+                    };
+                  return next;
+                });
               }}
             >
-              {t(reviewed[row.member.id] === etag ? "draftReviewed" : "keepAttendanceDraft")}
-            </Button>
-          )}
-        </fieldset>
-      ))}
+              <option value="">{t("unchanged")}</option>
+              <option value="attended">{t("attended")}</option>
+              <option value="not_attended">{t("not_attended")}</option>
+            </select>
+            {draft && (
+              <>
+                <Label htmlFor={`note-${row.member.id}`}>
+                  {t("note")} · {row.member.nickname}
+                </Label>
+                <Input
+                  id={`note-${row.member.id}`}
+                  maxLength={2048}
+                  disabled={locked || !etag}
+                  value={draft.note ?? ""}
+                  onChange={(e) => {
+                    if (locked || !etag) return;
+                    setSaved(false);
+                    const note = e.target.value || null;
+                    setChanges((previous) => {
+                      const current = previous[row.member.id];
+                      return current
+                        ? { ...previous, [row.member.id]: { ...current, note } }
+                        : previous;
+                    });
+                  }}
+                />
+              </>
+            )}
+            {needsReview && draft && draft.reviewedEtag !== etag && (
+              <KeepFocusButton
+                variant="outline"
+                disabled={locked || !etag}
+                focusTarget={() => document.getElementById(`attendance-${row.member.id}`)?.focus()}
+                onClick={() => {
+                  if (locked || !etag) return;
+                  setChanges((previous) => {
+                    const draft = previous[row.member.id];
+                    return draft
+                      ? { ...previous, [row.member.id]: { ...draft, reviewedEtag: etag } }
+                      : previous;
+                  });
+                }}
+              >
+                {t("keepAttendanceDraft")}
+              </KeepFocusButton>
+            )}
+          </fieldset>
+        );
+      })}
       <div className="events-pager">
         {cursor && (
           <KeepFocusButton

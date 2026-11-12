@@ -194,6 +194,122 @@ test(
   },
 );
 test(
+  "Stage 2 attendance requires reviewing an off-page draft against the newer roster",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    state.member.event.meetingAt = "2020-10-25T12:00:00.000Z";
+    state.member.event.startsAt = "2020-10-25T13:00:00.000Z";
+    type Attendance = components["schemas"]["EventStage2Attendance"];
+    const fixture = stage2Fixture("getEventAttendance", "leadership")
+      .response as components["schemas"]["EventStage2EnvelopeAttendance"];
+    const first = fixture.data.items[0];
+    if (!first) throw new Error("Missing synthetic attendance row");
+    const target = {
+      ...first.member,
+      id: "e1320000-0000-4000-8000-000000000098",
+      nickname: "Fictional Attendance Driver",
+    };
+    const path = `/api/v1/admin${eventPath}/attendance`;
+    let version = 1;
+    let recorded: Attendance["items"][number]["attendance"] = "unconfirmed";
+    const writes: { etag: string | undefined; body: unknown }[] = [];
+    await page.route(
+      (url) => url.pathname === path,
+      (route) => {
+        const request = route.request();
+        if (request.method() === "PUT") {
+          const etag = request.headers()["if-match"];
+          const body = request.postDataJSON();
+          writes.push({ etag, body });
+          if (etag !== `"v${version}"`) return route.fulfill({ status: 412 });
+          recorded = body.members[0].attendance;
+          version++;
+          return route.fulfill({
+            json: envelope({ id: state.member.event.id, version }),
+            headers: { ETag: `"v${version}"` },
+          });
+        }
+        const cursor = new URL(request.url()).searchParams.get("cursor");
+        const nextCursor = `fictional-attendance-v${version}`;
+        if (cursor && cursor !== nextCursor) return route.fulfill({ status: 412 });
+        const data: Attendance = {
+          items: cursor
+            ? [{ ...first, member: target, attendance: recorded, tripId: null }]
+            : [first],
+          totals: {
+            total: 2,
+            attended: 1 + Number(recorded === "attended"),
+            notAttended: Number(recorded === "not_attended"),
+            unconfirmed: Number(recorded === "unconfirmed"),
+          },
+          nextCursor: cursor ? null : nextCursor,
+        };
+        return route.fulfill({
+          json: envelope(data),
+          headers: { ETag: `"v${version}"` },
+        });
+      },
+    );
+    await page.goto(detailsPath);
+    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
+    const roster = page.getByRole("form", { name: "Actual attendance", exact: true });
+    const next = roster.getByRole("button", { name: "Next page", exact: true });
+    const record = roster.getByRole("button", { name: "Record attendance", exact: true });
+    const targetRow = roster.getByRole("group", { name: target.nickname, exact: true });
+    const decision = targetRow.getByRole("combobox");
+    const note = targetRow.getByRole("textbox", {
+      name: `Private staff note · ${target.nickname}`,
+    });
+    await next.click();
+    await decision.selectOption("attended");
+    await note.fill("Fictional draft at v1");
+    await expect(record).toBeEnabled();
+
+    recorded = "not_attended";
+    version = 2;
+    const updated = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" && new URL(response.url()).pathname === path,
+    );
+    await roster.getByRole("button", { name: "First page", exact: true }).click();
+    expect((await updated).headers().etag).toBe('"v2"');
+    await expect(targetRow).toHaveCount(0);
+    await expect(roster.getByRole("status")).toContainText("Attendance changed");
+    await expect(record).toBeDisabled();
+    await record.press("Enter");
+
+    await next.click();
+    await expect(targetRow).toContainText("Actual attendance: Did not attend");
+    await expect(decision).toHaveValue("attended");
+    await expect(note).toHaveValue("Fictional draft at v1");
+    await note.fill("Fictional note after checking the current row");
+    await expect(record).toBeDisabled();
+    expect(writes).toEqual([]);
+    await targetRow
+      .getByRole("button", { name: "Keep this draft after review", exact: true })
+      .click();
+    await expect(record).toBeEnabled();
+    await record.click();
+    await expect(roster.getByText("Attendance recorded.", { exact: true })).toBeVisible();
+    expect(writes).toEqual([
+      {
+        etag: '"v2"',
+        body: {
+          members: [
+            {
+              memberId: target.id,
+              attendance: "attended",
+              note: "Fictional note after checking the current row",
+            },
+          ],
+        },
+      },
+    ]);
+  },
+);
+test(
   "changing own RSVP from participants page two resets to the current first page",
   browserCase(["@functional"]),
   async ({ page }) => {

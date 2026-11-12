@@ -407,8 +407,13 @@ test(
   async ({ page }, info) => {
     const state = await openDetail(page, "en", () => {}, true);
     await settledDetail(page);
-    await page.getByRole("button", { name: "View responses and attendance", exact: true }).click();
-    const roster = workspace(page).locator(".events-roster");
+    await page
+      .getByRole("button", { name: "View responses and attendance", exact: true })
+      .press("Enter");
+    const roster = page.getByRole("form", { name: "Actual attendance", exact: true });
+    const heading = roster.getByRole("heading", { name: "Actual attendance", exact: true });
+    await expect(heading).toBeFocused();
+    await expect(heading).toBeInViewport();
     await expect(roster.locator(".event-attendance-row")).toHaveCount(1);
     await expect(roster).toContainText("✕ Can't attend");
     await expect(roster).toContainText("Fictional private RSVP reason");
