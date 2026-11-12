@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import { type Attempt, commandAttempt, type DTO } from "./model.js";
@@ -182,6 +183,8 @@ export function useEventCommand(onFailure?: (failure: AccountFailure) => void) {
       if (!parsed.success) throw new AccountFailure("uncertain");
       attempt.current = null;
       if (active.current) {
+        if (!path.endsWith("/attendance"))
+          void refreshWorkspaceSummary(client, session).catch(() => undefined);
         await refresh(path, { data: parsed.data, etag: response.headers.get("ETag") }, replay);
         return { data: parsed.data, etag: response.headers.get("ETag") };
       }

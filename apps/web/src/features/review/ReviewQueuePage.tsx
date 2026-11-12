@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { isPlainSelfClick } from "../../app/Navigation.js";
 import { useSession } from "../../app/Session.js";
+import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import { Button, Card, Label, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { PageNav, State } from "../trips/components.js";
@@ -22,6 +23,13 @@ import "../trips/trips.css";
 import "../trips/trips-list.css";
 import "./review.css";
 
+function queueAge(seconds: number, locale: string) {
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "always" });
+  if (seconds >= 3600) return formatter.format(-Math.floor(seconds / 3600), "hour");
+  if (seconds >= 60) return formatter.format(-Math.floor(seconds / 60), "minute");
+  return formatter.format(-seconds, "second");
+}
+
 /**
  * Dispatch review queue (VTC-059): Awaiting (held, oldest first) and Decided tabs, game, source
  * (VTC-077), decision and order filters, cursor pages and, from 1200px, a decision panel beside the
@@ -29,7 +37,7 @@ import "./review.css";
  * restarts paging and closes the panel; switching tabs keeps the game and source.
  */
 export function ReviewQueuePage() {
-  const { t } = useTranslation("trips"),
+  const { t, i18n } = useTranslation("trips"),
     session = useSession(),
     location = useLocation(),
     wide = useWideLayout(),
@@ -50,6 +58,9 @@ export function ReviewQueuePage() {
     "EnvelopeListTripSummary",
     staff,
   );
+  const summary = useWorkspaceSummary();
+  const totals = summary.data?.reviewQueue;
+  const locale = i18n.resolvedLanguage ?? "ru";
   // A cursor the server no longer accepts restarts at the first page of the same filters. The
   // reset happens during render, so the rejected page never shows its error.
   if (rejectedCursor(cursor, query.error)) setPage({ key: filterKey, cursor: null, cursors: [] });
@@ -130,6 +141,20 @@ export function ReviewQueuePage() {
       <header className="review-queue-header">
         <h1>{t("review")}</h1>
         <p className="review-muted">{t("queueIntro")}</p>
+        {totals ? (
+          <div className="review-queue-totals">
+            <strong>
+              {t("queueOverall", { total: new Intl.NumberFormat(locale).format(totals.count) })}
+            </strong>
+            <span className="review-muted">
+              {totals.oldestAgeSeconds === null
+                ? t("queueNoneWaiting")
+                : t("queueOldest", { age: queueAge(totals.oldestAgeSeconds, locale) })}
+            </span>
+          </div>
+        ) : !summary.isPending ? (
+          <p className="review-muted">{t("queueTotalsUnavailable")}</p>
+        ) : null}
       </header>
       <div className="review-toolbar">
         <SegmentedControl

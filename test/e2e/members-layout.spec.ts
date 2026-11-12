@@ -11,6 +11,32 @@ import {
   sentinel,
 } from "./support/members.ts";
 
+test(
+  "member tabs and usable invitation count keep distinct populations",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await open(
+      page,
+      { statusCounts: { inCompany: 32, left: 9, invited: 4, droveLast30Days: 17 } },
+      "en",
+      "?status=active&search=Fictional",
+    );
+    const tabs = page.getByRole("navigation", { name: "Status", exact: true });
+    await expect(tabs.getByRole("link")).toHaveCount(2);
+    await expect(tabs.getByRole("link", { name: "Active (32)", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.getByText("Usable invitations: 4", { exact: true })).toBeVisible();
+    await tabs.getByRole("link", { name: "Former (9)", exact: true }).click();
+    await expect(page).toHaveURL(/\?status=inactive&search=Fictional$/);
+    await expect(tabs.getByRole("link", { name: "Former (9)", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  },
+);
+
 const text = {
   en: {
     title: "Members",

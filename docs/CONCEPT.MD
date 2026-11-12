@@ -8,7 +8,7 @@ A visitor learns about the company and its public convoys and applies to join. A
 
 Drivers submit trips through the companion telemetry app or as a manual report with a screenshot. The dashboard keeps the source evidence, recognizes cities, cargo and trailers from game catalogs, checks qualification rules, and accepts, rejects or sends the trip to staff review. Only accepted trips count toward statistics and promotion.
 
-Members see company and personal statistics, driver profiles and trip history, sign up for convoys, and get in-app updates while the site is open. Administrators review applications and reports, configure qualifications, confirm promotions and event attendance, and manage members.
+Members browse company and personal stats, driver profiles and trips, RSVP to convoys and get in-app updates. Admins review reports and applications, manage qualifications and members, and confirm promotions and event attendance.
 
 ## Roles
 
@@ -32,6 +32,7 @@ Roles are additive and separate from ETS2/ATS qualifications. Nobody may approve
 - **Analytics**: accepted trip counts and actual distance for company and driver, in one reporting timezone. Browse recent trips, filter by date, search or follow driver history links.
 - **Events**: public and private convoys with RSVP. Members see who signed up and who declined; declining requires a reason visible only to its author and administrators. Reminder one hour before start; the nearest event is shown in the header and on the overview with a quick response; attendance is recorded separately from the response. Confirmed event trips may carry the prescribed load beyond qualification limits.
 - **Notifications**: in-app history and updates while the site is open.
+- **Workspace attention**: counts and actions by permission.
 - **Administration**: members and roles, qualification limits and thresholds, company settings and integrations. Leadership transfer is done only by the serving Director, confirmed with a ten-minute email code.
 
 ## Not in the MVP

@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import {
@@ -130,6 +131,8 @@ export function useTripCommand() {
       if (!parsed.success) throw new AccountFailure("uncertain");
       attempt.current = null;
       if (active.current) {
+        if (path !== "/evidence")
+          void refreshWorkspaceSummary(client, session).catch(() => undefined);
         await client.invalidateQueries({
           queryKey: ["trip-workspace"],
           predicate: (query) => commandAffects(path, String(query.queryKey[6] ?? "")),

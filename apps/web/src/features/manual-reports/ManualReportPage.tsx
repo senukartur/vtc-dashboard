@@ -1,6 +1,6 @@
 import { type ReactNode, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
 import { cityNameText } from "../../shared/catalog-selectors/native-name.js";
 import { Button, Card, Input, Label } from "../../shared/ui/primitives.js";
@@ -12,12 +12,18 @@ import { missingRequirements } from "./model.js";
 import "../trips/trips.css";
 import "./manual-reports.css";
 export function ReportsPage() {
+  const [search] = useSearchParams();
+  const editing = search.get("state") === "editing";
+  return <DraftList key={editing ? "editing" : "all"} editing={editing} />;
+}
+
+function DraftList({ editing }: { editing: boolean }) {
   const { t } = useTranslation("trips"),
     session = useSession(),
     [cursor, setCursor] = useState<string | null>(null),
     [history, setHistory] = useState<string[]>([]),
     query = useTripQuery(
-      `/me/manual-drafts?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/me/manual-drafts?limit=25${editing ? "&state=editing" : ""}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       "EnvelopeListManualDraft",
       !!session.self?.capabilities.includes("trips.submit_own"),
     );
@@ -30,7 +36,7 @@ export function ReportsPage() {
   return (
     <div className="stack trip-page">
       <header className="trip-heading">
-        <h1>{t("drafts")}</h1>
+        <h1>{t(editing ? "editingDrafts" : "drafts")}</h1>
         <Button asChild>
           <Link to="/account/reports/new">{t("newReport")}</Link>
         </Button>

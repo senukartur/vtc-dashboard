@@ -93,6 +93,7 @@ export type MembersOptions = {
   pageSize?: number;
   /** Members sharing `names.repeated`, listed between the deputy and Fictional Kestrel. */
   repeatedNicknames?: number;
+  statusCounts?: S["AdminMemberStatusCounts"];
 };
 /**
  * Synthetic members API: a deputy (or the serving director) session with members.manage, six
@@ -219,6 +220,7 @@ export async function mockMembers(page: Page, options: MembersOptions = {}) {
         json: envelope({
           items,
           nextCursor: start + state.pageSize < rows.length ? String(start + state.pageSize) : null,
+          ...(options.statusCounts ? { statusCounts: options.statusCounts } : {}),
         }),
       });
     }

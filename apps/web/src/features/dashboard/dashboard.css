@@ -167,6 +167,42 @@
 .dashboard-page .dashboard-side-card .dashboard-head-link {
   justify-self: start;
 }
+.dashboard-page .dashboard-actions {
+  grid-column: 1 / -1;
+  min-block-size: 78px;
+  overflow-wrap: anywhere;
+}
+.dashboard-page .dashboard-action-group {
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+.dashboard-page .dashboard-action-group h3 {
+  margin: 0;
+  font-size: var(--font-small);
+  font-weight: 600;
+}
+.dashboard-page .dashboard-action-group a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+}
+.dashboard-page .dashboard-action-group ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dashboard-page .dashboard-action-group li {
+  display: grid;
+  justify-items: start;
+  min-width: 0;
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--border);
+}
+.dashboard-page .dashboard-action-reason {
+  white-space: pre-wrap;
+}
 
 /* Distance card: the body keeps one height in every view and state. */
 .dashboard-page .dashboard-meta {

@@ -36,6 +36,13 @@
 .review-queue .review-queue-header p {
   margin: 0;
 }
+.review-queue .review-queue-totals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  font-size: var(--font-small);
+}
 /* One row of tabs and filters from 1000px of toolbar width (the toolbar sits above the decision
    panel, which does not narrow it); a container query arranges narrower toolbars below. */
 .review-queue .review-toolbar {

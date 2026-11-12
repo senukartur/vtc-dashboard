@@ -1,4 +1,5 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { capabilities, type Role } from "../../apps/api/src/modules/identity/permissions.ts";
 import { accountFixture, fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { eventFixture } from "./support/events.ts";
@@ -16,14 +17,26 @@ import {
 import { inertNotifications } from "./support/notifications.ts";
 
 const meta = { requestId: "synthetic-navigation" };
+const computedAt = "2026-11-12T08:00:00.000Z";
+const summaryPath = "/api/v1/me/workspace-summary";
+type Summary = components["schemas"]["WorkspaceSummary"];
 const error = (status: number) => ({ status, json: { error: { code: "PRIVATE_SENTINEL" } } });
 // Synthetic shell fixture: one fictional member whose roles map through the real server capabilities.
 async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "en" | "ru" = "en") {
-  const state = { me: 200, logout: 200 };
   const self = accountFixture(locale);
   self.data.member.roles = [...roles];
   self.data.capabilities = capabilities(roles);
-  await page.route("**/api/v1/**", (route) => {
+  const state = {
+    self,
+    me: 200,
+    logout: 200,
+    summaryStatus: 200,
+    summaryReads: 0,
+    summary: { computedAt } as Summary,
+    summaryGate: undefined as Promise<void> | undefined,
+    onSummary: undefined as (() => void) | undefined,
+  };
+  await page.route("**/api/v1/**", async (route) => {
     const notification = inertNotifications(route);
     if (notification) return notification;
     const path = new URL(route.request().url()).pathname;
@@ -35,6 +48,16 @@ async function mockWorkspace(page: Page, roles: Role[] = ["trainee"], locale: "e
       );
     if (path === "/api/v1/me/upcoming-event")
       return route.fulfill({ json: { data: eventFixture(), meta } });
+    if (path === summaryPath) {
+      state.summaryReads += 1;
+      const response =
+        state.summaryStatus === 200
+          ? { json: { data: state.summary, meta } }
+          : error(state.summaryStatus);
+      state.onSummary?.();
+      await state.summaryGate;
+      return route.fulfill(response);
+    }
     if (path === "/api/v1/me/email-change")
       return route.fulfill({ json: { data: { pending: null }, meta } });
     if (path === "/api/v1/auth/logout")
@@ -129,6 +152,206 @@ const management = ["Applications", "Members and roles", "Game catalogs", "Compa
 const reporterBar = ["Overview", "My trips", "New report", "Events"];
 const reviewerBar = ["Overview", "My trips", "Review", "Events"];
 const phoneCompany = ["Drivers", "Qualifications"];
+
+for (const role of ["driver", "dispatcher", "deputy_director", "director"] as const) {
+  test(
+    `workspace attention names and destinations for ${role}`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const state = await mockWorkspace(page, [role]);
+      const canReview = role !== "driver";
+      const canManage = role === "director" || role === "deputy_director";
+      state.summary = {
+        computedAt,
+        tripsNeedingFixes: { count: 125, items: [] },
+        ...(role === "driver" ? { unansweredUpcomingEvents: { count: 4, items: [] } } : {}),
+        ...(canReview ? { reviewQueue: { count: 2, oldestAgeSeconds: 0 } } : {}),
+        ...(canManage ? { newApplicationsCount: 3 } : {}),
+      };
+      await page.goto("/account/dashboard");
+      await expect(
+        page.getByRole("region", { name: "Needs attention", exact: true }),
+      ).toContainText("Trips returned for fixes (125)");
+      expect(state.summaryReads).toBe(1);
+      const onPhone = phone(page);
+      for (const locale of ["en", "ru"] as const) {
+        if (locale === "ru") await switchLanguage(page, locale);
+        const russian = locale === "ru";
+        const tripName = russian
+          ? "Мои рейсы (на исправление: 125)"
+          : "My trips (125 returned for fixes)";
+        const eventName = russian ? "События" : "Events";
+        const eventCountName = russian
+          ? "События (ждут вашего ответа: 4)"
+          : "Events (4 awaiting your response)";
+        const reviewName = onPhone
+          ? russian
+            ? "Проверка"
+            : "Review"
+          : russian
+            ? "Диспетчерская"
+            : "Dispatch";
+        const appsName = russian
+          ? "Заявки (на рассмотрении: 3)"
+          : "Applications (3 awaiting review)";
+        const main = async (nav: Locator) => {
+          const trips = nav.getByRole("link", { name: tripName, exact: true });
+          await expect(trips).toHaveAttribute("href", "/account/trips");
+          await expect(trips.getByText("99+", { exact: true })).toBeVisible();
+          const events = nav.getByRole("link", {
+            name: role === "driver" ? eventCountName : eventName,
+            exact: true,
+          });
+          await expect(events).toHaveAttribute("href", "/account/events");
+          const review = nav.getByRole("link", {
+            name: `${reviewName} ${russian ? "(ждут решения: 2)" : "(2 awaiting decision)"}`,
+            exact: true,
+          });
+          if (canReview) await expect(review).toHaveAttribute("href", "/account/review");
+          else await expect(review).toHaveCount(0);
+          if (info.project.name !== "mobile-chromium") {
+            await trips.focus();
+            await expect(trips).toBeFocused();
+          }
+        };
+        if (onPhone) {
+          await main(bottomBar(page));
+          if (role === "director") await capture(page, info, `attention-bottom-${locale}`);
+        }
+        await inNavigation(page, async (nav) => {
+          if (!onPhone) await main(nav);
+          const apps = nav.getByRole("link", { name: appsName, exact: true });
+          if (canManage) await expect(apps).toHaveAttribute("href", "/account/admin/applications");
+          else await expect(apps).toHaveCount(0);
+          if (role === "director") await capture(page, info, `attention-navigation-${locale}`);
+        });
+        if (wide(page) && role === "director") {
+          await page.getByRole("button", { name: /^(Collapse sidebar|Свернуть меню)$/ }).click();
+          await main(mainNavigation(page));
+          await capture(page, info, `attention-collapsed-${locale}`);
+          await page.getByRole("button", { name: /^(Expand sidebar|Развернуть меню)$/ }).click();
+        }
+      }
+      expect(state.summaryReads).toBe(1);
+    },
+  );
+}
+
+test(
+  "visible focus coalesces reads and keeps navigation geometry for zero and omitted counts",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    const state = await mockWorkspace(page, ["driver"]);
+    state.summary = { computedAt, tripsNeedingFixes: { count: 125, items: [] } };
+    await page.goto("/account/dashboard");
+    const check = async (nav: Locator) => {
+      const link = nav.locator('a[href="/account/trips"]');
+      await expect(link).toHaveAccessibleName("My trips (125 returned for fixes)");
+      const before = await link.boundingBox();
+      const icon = link.locator(".nav-icon");
+      const beforeIcon = await icon.boundingBox();
+      state.summary = { computedAt, tripsNeedingFixes: { count: 0, items: [] } };
+      let release = () => {};
+      state.summaryGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      try {
+        await page.evaluate(() => {
+          window.dispatchEvent(new Event("focus"));
+          window.dispatchEvent(new Event("focus"));
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+        await expect.poll(() => state.summaryReads).toBe(2);
+        await expect(link).toHaveAccessibleName("My trips (125 returned for fixes)");
+      } finally {
+        release();
+        state.summaryGate = undefined;
+      }
+      await expect(link).toHaveAccessibleName("My trips");
+      await expect(link.locator(".nav-attention-badge")).toHaveCount(0);
+      expect(await link.boundingBox()).toEqual(before);
+      expect(await icon.boundingBox()).toEqual(beforeIcon);
+      state.summary = { computedAt };
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(() => state.summaryReads).toBe(3);
+      await expect(link).toHaveAccessibleName("My trips");
+    };
+    if (phone(page)) await check(bottomBar(page));
+    else await inNavigation(page, check);
+  },
+);
+
+test(
+  "workspace attention waits for company access and drops obsolete authority snapshots",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockWorkspace(page, ["driver"]);
+    await page.goto("/status");
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    expect(state.summaryReads).toBe(0);
+    state.me = 401;
+    await page.goto("/account/dashboard");
+    await expect(
+      page.getByRole("heading", {
+        name: /^(Sign in to open your account|Войдите, чтобы открыть аккаунт)$/,
+      }),
+    ).toBeVisible();
+    expect(state.summaryReads).toBe(0);
+    state.me = 200;
+    state.self.data.capabilities = [];
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Company Overview" })).toBeVisible();
+    expect(state.summaryReads).toBe(0);
+    state.self.data.capabilities = capabilities(["driver"]);
+    state.summary = { computedAt, tripsNeedingFixes: { count: 125, items: [] } };
+    let release = () => {};
+    state.summaryGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(() => state.summaryReads).toBe(1);
+      state.summaryGate = undefined;
+      state.self.data.capabilities = capabilities(["director"]);
+      state.self.data.member.roles = ["director"];
+      state.self.data.identityEpoch += 1;
+      state.summary = { computedAt, newApplicationsCount: 2 };
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(() => state.summaryReads).toBe(2);
+      await expect(
+        mainNavigation(page).getByRole("link", { name: "Applications (2 awaiting review)" }),
+      ).toBeVisible();
+    } finally {
+      release();
+      state.summaryGate = undefined;
+    }
+    await expect(
+      mainNavigation(page).getByRole("link", { name: "My trips", exact: true }),
+    ).toBeVisible();
+    state.summaryStatus = 403;
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      mainNavigation(page).getByRole("link", { name: "Applications", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Could not load your actions.", { exact: true })).toBeVisible();
+    state.summaryStatus = 200;
+    await page
+      .getByRole("region", { name: "Needs attention" })
+      .getByRole("button", { name: "Retry", exact: true })
+      .click();
+    await expect(
+      mainNavigation(page).getByRole("link", { name: "Applications (2 awaiting review)" }),
+    ).toBeVisible();
+    state.summaryStatus = 401;
+    state.onSummary = () => {
+      state.me = 401;
+    };
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByRole("heading", { name: /Sign in/ })).toBeVisible();
+    await expect(page.locator(".nav-attention-badge")).toHaveCount(0);
+  },
+);
+
 for (const { roles, groups, phoneGroups, bar, report } of [
   {
     roles: ["trainee"],
@@ -565,9 +788,16 @@ test(
   async ({ page }) => {
     const state = await mockWorkspace(page);
     state.logout = 503;
+    state.summary = { computedAt, tripsNeedingFixes: { count: 2, items: [] } };
     await page.goto("/account");
     await expect(
       page.getByRole("main").getByText("Fictional Yukon Member", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      mainNavigation(page).getByRole("link", {
+        name: "My trips (2 returned for fixes)",
+        exact: true,
+      }),
     ).toBeVisible();
     await signOutFromMenu(page);
     await expect(page.getByRole("main").getByRole("status")).toContainText(
@@ -579,6 +809,7 @@ test(
     await expect(bottomBar(page)).toHaveCount(0);
     await expect(page.getByText("Fictional Yukon Member", { exact: true })).toHaveCount(0);
     await expect(page.locator(".account-address")).toHaveCount(0);
+    await expect(page.locator(".nav-attention-badge")).toHaveCount(0);
     // With the user menu hidden, the banner select keeps the language switchable.
     await expect(
       page.getByRole("banner").getByRole("combobox", { name: "Language", exact: true }),
@@ -591,6 +822,12 @@ test(
     await page.getByRole("button", { name: "Check session before returning", exact: true }).click();
     await expect(accountEntry(page)).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Security");
+    await expect(
+      mainNavigation(page).getByRole("link", {
+        name: "My trips (2 returned for fixes)",
+        exact: true,
+      }),
+    ).toBeVisible();
     state.logout = 200;
     await signOutFromMenu(page);
     await expect(
@@ -599,6 +836,7 @@ test(
     await expect(page.getByRole("main")).toBeFocused();
     await expect(accountEntry(page)).toHaveCount(0);
     await expect(bottomBar(page)).toHaveCount(0);
+    await expect(page.locator(".nav-attention-badge")).toHaveCount(0);
   },
 );
 

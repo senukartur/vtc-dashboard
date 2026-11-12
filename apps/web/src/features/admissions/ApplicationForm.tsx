@@ -1,7 +1,8 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import { applicationPayload, applicationSchema, type ApplicationFields } from "./schema.js";
 import {
@@ -14,6 +15,7 @@ import "./admissions.css";
 
 export function ApplicationForm() {
   const { t, i18n } = useTranslation("admissions");
+  const client = useQueryClient();
   const {
     register,
     handleSubmit,
@@ -64,6 +66,9 @@ export function ApplicationForm() {
       } finally {
         window.clearTimeout(timer);
       }
+    },
+    onSuccess: () => {
+      void refreshWorkspaceSummary(client).catch(() => undefined);
     },
     onError: (error) => {
       if (error instanceof ApplicationFailure && error.kind === "limited" && error.retryAfter) {

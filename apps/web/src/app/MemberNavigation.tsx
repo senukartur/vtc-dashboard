@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useSignOut } from "../features/account/sign-out.js";
 import { publicPath } from "../features/landing/content.js";
 import { Button } from "../shared/ui/primitives.js";
+import { navAttention } from "./attention-badge.js";
 import { NavIcon } from "./nav-icons.js";
 import {
   canReport,
@@ -16,6 +17,7 @@ import {
 } from "./navigation-model.js";
 import { useSession } from "./Session.js";
 import { UserMenu } from "./UserMenu.js";
+import type { WorkspaceSummary } from "./workspace-summary.js";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>) => void;
 
@@ -27,10 +29,12 @@ export function MemberNavLinks({
   onNavigate,
   collapsed = false,
   variant = "sidebar",
+  attention,
 }: {
   onNavigate?: Navigate | undefined;
   collapsed?: boolean;
   variant?: "sidebar" | "sheet";
+  attention?: WorkspaceSummary | undefined;
 }) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
@@ -94,17 +98,27 @@ export function MemberNavLinks({
               <ul className="nav-list" aria-labelledby={titleId}>
                 {group.items.map((entry) => {
                   const label = t(`nav.items.${entry.id}`);
+                  const badge = navAttention(
+                    attention,
+                    entry.id,
+                    label,
+                    t,
+                    i18n.resolvedLanguage ?? "ru",
+                  );
                   return (
                     <li key={entry.id}>
                       <Link
                         to={paths[entry.route]}
                         onClick={onNavigate}
                         title={tip(label)}
+                        aria-label={badge.label}
+                        data-attention={badge.supported ? "" : undefined}
                         // A detail page is inside the section but is not the section page itself.
                         aria-current={currentMarker(entry, current)}
                       >
                         <NavIcon name={entry.id} />
                         <span className="nav-label">{label}</span>
+                        {badge.badge}
                       </Link>
                     </li>
                   );
@@ -144,9 +158,11 @@ export function Breadcrumb() {
 export function MemberSidebar({
   collapsed,
   onToggle,
+  attention,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  attention?: WorkspaceSummary | undefined;
 }) {
   const { t } = useTranslation("core");
   const session = useSession();
@@ -175,7 +191,9 @@ export function MemberSidebar({
           </button>
         )}
       </div>
-      {session.state !== "checking" && <MemberNavLinks collapsed={collapsed} />}
+      {session.state !== "checking" && (
+        <MemberNavLinks collapsed={collapsed} attention={attention} />
+      )}
       {session.state === "authenticated" && !signOut.active && (
         <div className="sidebar-footer">
           <UserMenu placement="sidebar" />

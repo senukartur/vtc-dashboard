@@ -63,7 +63,7 @@ export function useCountdownNow(startsAt: string | null) {
  * page) shows a newer outcome, the block keeps its error, so a failed retry keeps focus on Retry
  * and success removes it, handing focus to the heading.
  */
-function useBlockRetry(query: {
+export function useBlockRetry(query: {
   data: unknown;
   errorUpdateCount: number;
   refetch: () => Promise<unknown>;

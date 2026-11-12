@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Page, Request, Response } from "@playwright/test";
+import type { APIRequestContext, Page, Request, Response } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
@@ -17,6 +17,220 @@ test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 }
 
 type Schemas = components["schemas"];
 const tripsPath = "/api/v1/trips";
+
+async function workspaceSummary(request: APIRequestContext) {
+  const response = await request.get("/api/v1/me/workspace-summary");
+  expect(response.status()).toBe(200);
+  return ((await response.json()) as Schemas["EnvelopeWorkspaceSummary"]).data;
+}
+
+async function rejectWorkspaceTrip(staff: APIRequestContext, tripId: string, reason: string) {
+  const response = await staff.get(`/api/v1/trips/${tripId}/review`);
+  expect(response.status()).toBe(200);
+  const { data } = (await response.json()) as Schemas["EnvelopeReview"];
+  const revision = data.trip.manualRevision;
+  if (!revision) throw new Error("SYNTHETIC_WORKSPACE_REVISION_REQUIRED");
+  expect(
+    (
+      await write(
+        staff,
+        `/trips/${tripId}/decisions`,
+        {
+          decision: "reject",
+          reviewedRevisionId: revision.id,
+          factRevisionId: data.factRevisionId,
+          proposalId: null,
+          reason,
+        },
+        response.headers().etag,
+      )
+    ).status(),
+  ).toBe(200);
+}
+
+test(
+  "real workspace actions follow the latest report, editing draft, unanswered event and held review",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(90000);
+    await resetAccountLimits();
+    const fixture = await tripBrowserFixture(),
+      staff = await staffContext();
+    try {
+      const { manualReports: manual, events } = fixture.composed;
+      if (!manual || !events) throw new Error("SYNTHETIC_WORKSPACE_SOURCES_REQUIRED");
+      const before = (await workspaceSummary(staff)).reviewQueue;
+      if (!before) throw new Error("SYNTHETIC_REVIEW_SUMMARY_REQUIRED");
+      const evidence = async (actor: typeof fixture.author) => {
+        const image = await manual.upload(
+          actor,
+          randomUUID(),
+          "synthetic-workspace.png",
+          (async function* () {
+            yield pngBytes();
+          })(),
+          "image/png",
+        );
+        return { ...fixture.fields, evidenceIds: [image.id] };
+      };
+      await manual.submitReport(fixture.staff, randomUUID(), {
+        fields: await evidence(fixture.staff),
+      });
+      expect((await workspaceSummary(staff)).reviewQueue?.count).toBe(before.count);
+      const editing = await manual.createDraft(fixture.author, randomUUID(), {
+        fields: { comment: "Fictional editing draft" },
+      });
+      const submitted = await manual.createDraft(fixture.author, randomUUID(), { fields: {} });
+      const held = await manual.submitDraft(
+        fixture.author,
+        submitted.id,
+        randomUUID(),
+        submitted.version,
+        { fields: await evidence(fixture.author) },
+      );
+      const fields = await evidence(fixture.author);
+      const returned = await manual.submitReport(fixture.author, randomUUID(), { fields });
+      const earlierReason = "Fictional earlier return reason";
+      const latestReason = "Fictional latest return reason";
+      await rejectWorkspaceTrip(staff, returned.tripId, earlierReason);
+      const report = await manual.getReport(fixture.author, returned.id);
+      await manual.reviseReport(fixture.author, report.id, randomUUID(), report.version, {
+        fields: { ...fields, comment: "Fictional revised report" },
+        expectedTripVersion: report.tripVersion,
+      });
+      await rejectWorkspaceTrip(staff, returned.tripId, latestReason);
+      const startsAt = Date.now() + 20 * 60_000;
+      const {
+        data: { event },
+      } = await events.create(fixture.staff, randomUUID(), {
+        title: "Fictional workspace RSVP convoy",
+        description: "Synthetic convoy",
+        game: "ets2",
+        server: "Synthetic",
+        organizer: "Fictional company",
+        route: "Synthetic route",
+        meetingLocation: "Synthetic location",
+        meetingAt: new Date(startsAt - 60_000).toISOString(),
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: null,
+        visibility: "members",
+        originCityId: null,
+        destinationCityId: null,
+        prescribedCargoId: null,
+        prescribedMassKg: null,
+        prescribedTrailerTypeId: null,
+      });
+      expect(
+        (
+          await write(page.request, "/auth/login", {
+            email: fixture.email,
+            password: fixture.password,
+          })
+        ).status(),
+      ).toBe(200);
+      const author = await workspaceSummary(page.request);
+      expect(author.tripsNeedingFixes).toEqual({
+        count: 1,
+        items: [{ tripId: returned.tripId, latestReturnReason: latestReason }],
+      });
+      expect(author.unfinishedManualDrafts).toMatchObject({
+        count: 1,
+        items: [{ draftId: editing.id }],
+      });
+      expect(author.unansweredUpcomingEvents?.items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ eventId: event.id })]),
+      );
+      expect(author.reviewQueue).toBeUndefined();
+      expect(author.newApplicationsCount).toBeUndefined();
+      const eventCount = author.unansweredUpcomingEvents?.count ?? 0;
+      await page.goto("/account/dashboard");
+      await catalogLanguage(page);
+      const actions = page.getByRole("region", { name: "Needs attention", exact: true });
+      const nav = page.getByRole("navigation", { name: "Main navigation", exact: true });
+      await expect(
+        nav.getByRole("link", { name: "My trips (1 returned for fixes)", exact: true }),
+      ).toBeVisible();
+      await expect(
+        nav.getByRole("link", {
+          name: `Events (${eventCount} awaiting your response)`,
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(actions.getByText(latestReason, { exact: true })).toBeVisible();
+      await expect(actions.getByText(earlierReason, { exact: true })).toHaveCount(0);
+      await actions.getByRole("link", { name: "Open trip", exact: true }).click();
+      await expect(page).toHaveURL(`${origin}/account/trips/${returned.tripId}`);
+      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      const editingList = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/v1/me/manual-drafts" && url.searchParams.get("state") === "editing"
+        );
+      });
+      await actions.getByRole("link", { name: "Editing drafts (1)", exact: true }).click();
+      expect((await editingList).status()).toBe(200);
+      await expect(page).toHaveURL(`${origin}/account/reports?state=editing`);
+      await expect(page.getByRole("link", { name: "Continue draft", exact: true })).toHaveAttribute(
+        "href",
+        `/account/reports/drafts/${editing.id}`,
+      );
+      await expect(page.locator(`a[href="/account/reports/${held.id}/edit"]`)).toHaveCount(0);
+      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await actions.getByRole("link", { name: /^Continue draft/ }).click();
+      await expect(page).toHaveURL(`${origin}/account/reports/drafts/${editing.id}`);
+      await expect(page.getByLabel("Comment (optional)")).toHaveValue("Fictional editing draft");
+      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await actions.getByRole("link", { name: event.title, exact: true }).click();
+      await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
+      await page
+        .getByRole("group", { name: "Your response", exact: true })
+        .getByRole("button", { name: "Participating", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Save response", exact: true }).click();
+      await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
+      const nextEvents =
+        eventCount === 1 ? "Events" : `Events (${eventCount - 1} awaiting your response)`;
+      await expect(nav.getByRole("link", { name: nextEvents, exact: true })).toBeVisible();
+      expect((await workspaceSummary(page.request)).unansweredUpcomingEvents?.count).toBe(
+        eventCount - 1,
+      );
+      await nav.getByRole("link", { name: "Overview", exact: true }).click();
+      await expect(actions.getByRole("link", { name: event.title, exact: true })).toHaveCount(0);
+
+      const overall = (await workspaceSummary(staff)).reviewQueue;
+      expect(overall?.count).toBe(before.count + 1);
+      expect(overall?.oldestAgeSeconds).not.toBeNull();
+      const total = new Intl.NumberFormat("en").format(overall?.count ?? 0);
+      await context.clearCookies();
+      await context.addCookies((await staff.storageState()).cookies);
+      await page.goto("/account/dashboard");
+      await expect(
+        nav.getByRole("link", { name: `Dispatch (${total} awaiting decision)`, exact: true }),
+      ).toBeVisible();
+      const queueRead = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === tripsPath && url.searchParams.get("limit") === "25";
+      });
+      await actions
+        .getByRole("link", { name: `Awaiting decision (${total})`, exact: true })
+        .click();
+      const queue = new URL((await queueRead).url()).searchParams;
+      expect(queue.get("scope")).toBe("review");
+      expect(queue.get("hold")).toBe("true");
+      await expect(page).toHaveURL(`${origin}/account/review`);
+      await expect(
+        page.getByText(`Awaiting decision overall (${total})`, { exact: true }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Decided", exact: true }).click();
+      await expect(
+        page.getByText(`Awaiting decision overall (${total})`, { exact: true }),
+      ).toBeVisible();
+    } finally {
+      await staff.dispose();
+      await fixture.close();
+    }
+  },
+);
 
 async function nextTripList(page: Page) {
   const response = await page.waitForResponse(

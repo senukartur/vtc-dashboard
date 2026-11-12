@@ -41,6 +41,12 @@ export const core = {
       sections: "Main sections",
       more: "More",
       moreDescription: "Other sections and your account",
+      attention: {
+        myTrips: "{{label}} ({{total}} returned for fixes)",
+        events: "{{label}} ({{total}} awaiting your response)",
+        dispatch: "{{label}} ({{total}} awaiting decision)",
+        applications: "{{label}} ({{total}} awaiting review)",
+      },
       bar: {
         overview: "Overview",
         myTrips: "Trips",
@@ -128,6 +134,12 @@ export const core = {
       sections: "Основные разделы",
       more: "Ещё",
       moreDescription: "Другие разделы и ваш аккаунт",
+      attention: {
+        myTrips: "{{label}} (на исправление: {{total}})",
+        events: "{{label}} (ждут вашего ответа: {{total}})",
+        dispatch: "{{label}} (ждут решения: {{total}})",
+        applications: "{{label}} (на рассмотрении: {{total}})",
+      },
       bar: {
         overview: "Обзор",
         myTrips: "Рейсы",

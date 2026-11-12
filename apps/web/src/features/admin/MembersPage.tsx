@@ -1033,7 +1033,7 @@ function MemberDetail({
 }
 const columns = ["colMember", "colRoles", "colEts2", "colAts", "colLast", "colStatus"] as const;
 function Members() {
-  const { t } = useTranslation("administration"),
+  const { t, i18n } = useTranslation("administration"),
     dates = useDates(),
     [params, setParams] = useSearchParams(),
     filters = parseFilters(params),
@@ -1051,6 +1051,8 @@ function Members() {
   const query = useWorkspaceQuery(path, "EnvelopeListMemberAdmin"),
     options = useWorkspaceQuery("/admin/reinstatement-options", "EnvelopeReinstatementOptions");
   const items = query.data?.data.data.items,
+    counts = query.data?.data.data.statusCounts,
+    number = new Intl.NumberFormat(i18n.resolvedLanguage),
     levelOptions = options.data?.data.data.levels,
     filtered = !!(filters.role || filters.search);
   function apply(next: Partial<Filters>, replace = false) {
@@ -1101,20 +1103,29 @@ function Members() {
         <p className="muted">{t("membersUi.subtitle")}</p>
       </div>
       <nav className="admin-tabs" aria-label={t("status")}>
-        {(["active", "inactive"] as const).map((value) => (
-          <a
-            key={value}
-            href={`?${new URLSearchParams(filterParams({ ...filters, status: value, cursor: null }))}`}
-            aria-current={value === filters.status ? "page" : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              apply({ status: value });
-            }}
-          >
-            {t(`membersUi.tabs.${value}`)}
-          </a>
-        ))}
+        {(["active", "inactive"] as const).map((value) => {
+          const label = t(`membersUi.tabs.${value}`);
+          const count = value === "active" ? counts?.inCompany : counts?.left;
+          return (
+            <a
+              key={value}
+              href={`?${new URLSearchParams(filterParams({ ...filters, status: value, cursor: null }))}`}
+              aria-current={value === filters.status ? "page" : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                apply({ status: value });
+              }}
+            >
+              {count === undefined
+                ? label
+                : t("countedTab", { label, total: number.format(count) })}
+            </a>
+          );
+        })}
       </nav>
+      {!!counts?.invited && (
+        <p className="muted">{t("usableInvitations", { total: number.format(counts.invited) })}</p>
+      )}
       <fieldset className="members-toolbar" aria-label={t("membersUi.filters")}>
         <div className="members-search">
           <Label htmlFor="members-search" className="visually-hidden">

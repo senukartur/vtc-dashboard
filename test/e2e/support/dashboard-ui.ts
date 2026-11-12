@@ -351,6 +351,7 @@ export type DashboardEndpoint =
   | "myResponse"
   | "counts"
   | "rsvp"
+  | "summary"
   | "stats";
 
 /** Planned outcome of the next RSVP PUT: a failure status (with Retry-After) or a network abort. */
@@ -371,6 +372,7 @@ export interface DashboardMockState {
   failures: Partial<Record<DashboardEndpoint, number>>;
   /** Full `/me` capability list; undefined keeps the default staff fixture. */
   capabilities: string[] | undefined;
+  summary: S["WorkspaceSummary"];
   /** Holds company analytics responses until `releaseAnalytics` is called. */
   holdAnalytics(): void;
   releaseAnalytics(): void;
@@ -405,6 +407,7 @@ function endpointOf(method: string, url: URL): DashboardEndpoint | undefined {
   if (path === "/api/v1/analytics/leaderboard") return "leaderboard";
   if (path === "/api/v1/me/qualification-progress") return "progress";
   if (path === "/api/v1/me/upcoming-event") return "event";
+  if (path === "/api/v1/me/workspace-summary") return "summary";
   if (path === "/api/v1/public/company-stats") return "stats";
   if (path === "/api/v1/trips") {
     const scope = url.searchParams.get("scope");
@@ -442,6 +445,13 @@ export async function mockDashboardRoutes(
     requests: [],
     failures: { ...options.failures },
     capabilities: options.capabilities ? [...options.capabilities] : undefined,
+    summary: {
+      computedAt: "2026-11-12T08:00:00.000Z",
+      tripsNeedingFixes: { count: 0, items: [] },
+      unfinishedManualDrafts: { count: 0, items: [] },
+      unansweredUpcomingEvents: { count: 0, items: [] },
+      reviewQueue: { count: 0, oldestAgeSeconds: null },
+    },
     hold(endpoint) {
       if (gates.has(endpoint)) return;
       let release = () => {};
@@ -479,6 +489,7 @@ export async function mockDashboardRoutes(
     const path = url.pathname;
     state.requests.push(url);
     const endpoint = endpointOf(request.method(), url);
+    const summary = state.summary;
     if (endpoint === "rsvp")
       state.commands.push({
         url,
@@ -532,6 +543,7 @@ export async function mockDashboardRoutes(
     if (endpoint === "event") {
       return route.fulfill({ json: makeOptionalEventFixture(state.upcoming) });
     }
+    if (endpoint === "summary") return route.fulfill({ json: { data: summary, meta } });
     if (endpoint === "stats") {
       return route.fulfill({ json: makeCompanyStatsFixture(state.reportingTimezone) });
     }
