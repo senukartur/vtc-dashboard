@@ -8825,6 +8825,9 @@
       "operationId": "getEventAttendance",
       "status": 200,
       "operationExtension": "x-stage-2-operation",
+      "query": {
+        "view": "stage2"
+      },
       "response": {
         "data": {
           "items": [

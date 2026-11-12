@@ -60,6 +60,23 @@ test("browser transport preserves own RSVP versions for member list and upcoming
   });
 });
 
+test("staged attendance requests the leadership projection and reads its collection ETag", async () => {
+  const example = stage2Fixture("getEventAttendance", "leadership");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(example.response, { headers: { ETag: '"v2"' } }));
+  vi.stubGlobal("fetch", fetch);
+  const spec = eventStage2Reads.attendance(stage2EventId, { limit: 2, cursor: "fixture&next" });
+  await expect(readEventStage2(spec, new AbortController().signal)).resolves.toEqual({
+    data: example.response,
+    etag: '"v2"',
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    `/api/v1/admin/events/${stage2EventId}/attendance?limit=2&cursor=fixture%26next&view=stage2`,
+    expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+  );
+});
+
 test("draft commands use the staged closed request schema and preserve prepared input", () => {
   expect(eventStage2Commands.create({ draft: true }).body).toEqual({
     encoding: "json",

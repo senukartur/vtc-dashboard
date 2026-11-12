@@ -7684,6 +7684,18 @@
             },
             {
               "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "view",
+              "in": "query",
+              "required": true,
+              "description": "Selects the Stage 2 attendance projection.",
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "stage2"
+                ]
+              }
             }
           ],
           "responses": {

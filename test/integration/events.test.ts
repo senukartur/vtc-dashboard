@@ -1,44 +1,45 @@
 import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import type { components } from "@vtc/contracts";
 import {
   createUnitOfWork,
   newId,
   runMigrations,
   TransactionCommitOutcomeUnknownError,
-  type UnitOfWork,
   type TxContext,
+  type UnitOfWork,
 } from "@vtc/db";
 import { catalogCities } from "@vtc/db/catalogs-schema";
 import { eq, membership } from "@vtc/db/identity-schema";
-import type { components } from "@vtc/contracts";
 import type { Connection, RowDataPacket } from "mysql2/promise";
-import { beforeEach, expect, test, afterAll as after, beforeAll as before } from "vitest";
-import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
-import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
-import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
+import { afterAll as after, beforeAll as before, beforeEach, expect, test } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
-import {
-  createIdentity,
-  type Actor,
-  type Identity,
-} from "../../apps/api/src/modules/identity/service.ts";
+import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { createEventWorkspace } from "../../apps/api/src/modules/events/workspace.ts";
+import {
+  type Actor,
+  createIdentity,
+  type Identity,
+} from "../../apps/api/src/modules/identity/service.ts";
+import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
+import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
+import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
+import {
+  createSyntheticTripEvidence,
+  knownFact,
+} from "../fixtures/qualification-rules/fixtures.ts";
 import {
   guardedSettings,
   reset,
   SCHEMA_SETUP_TIMEOUT_MS,
   testConnection,
 } from "../persistence/support.ts";
-import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
-import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
-import {
-  createSyntheticTripEvidence,
-  knownFact,
-} from "../fixtures/qualification-rules/fixtures.ts";
 import { deferred } from "../support/concurrency.ts";
+import { schemaLifecycleHooks } from "../support/schema-lifecycle.ts";
+
 const { beforeAll, afterAll } = schemaLifecycleHooks(before, after);
 let control: Connection,
   unit: UnitOfWork,
@@ -145,6 +146,9 @@ beforeEach(async () => {
     "event_attendances",
     "event_attendance_revisions",
     "event_response_revisions",
+    "event_revision_details",
+    "event_drafts",
+    "event_metadata",
     "event_revisions",
     "events",
     "outbox_events",
@@ -185,6 +189,302 @@ test("Director/Deputy manage, additive Driver/trainee respond, dispatcher denied
   await expect(service.attendance(dispatcher, id)).rejects.toMatchObject({ statusCode: 403 });
   expect((await service.nearest(trainee))?.id).toBe(id);
 });
+
+test("staged member list, detail and upcoming share safe organizer and current own response facts", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const legacy = await create({
+    title: "Fictional legacy event",
+    visibility: "public",
+    startsAt: "2026-10-22T14:00:00.000Z",
+  });
+  const created = await create({ title: "Fictional upcoming event" });
+  const id = created.data.event.id;
+  const organizer = "Fictional organizer snapshot";
+  await service.update(director, id, newId(), 1, input({ organizer }));
+  const draftId = newId();
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    const [event] = await db
+      .select({ revisionId: events.currentRevisionId })
+      .from(events)
+      .where(eq(events.id, id));
+    if (!event?.revisionId) throw new Error("SYNTHETIC_EVENT_REVISION_MISSING");
+    await db
+      .update(eventRevisions)
+      .set({ description: "", route: "", meetingLocation: "" })
+      .where(eq(eventRevisions.id, event.revisionId));
+    await db.insert(eventRevisionDetails).values({
+      revisionId: event.revisionId,
+      organizerMemberId: deputy.userId,
+      platform: "haulmp",
+    });
+    await db.insert(eventMetadata).values({ id: draftId, createdAt: now().toISOString() });
+    await db.insert(eventDrafts).values({
+      eventId: draftId,
+      version: 1,
+      updatedBy: director.userId,
+      updatedAt: now().toISOString(),
+      title: "Fictional unpublished event",
+      startsAt: "2026-10-22T12:15:00.000Z",
+    });
+  });
+  const otherReason = "Fictional confidential reason for another member";
+  await service.respond(driver, id, newId(), 1, { response: "declined", reason: otherReason });
+  await service.respond(driver, legacy.data.event.id, newId(), 1, { response: "participating" });
+
+  const first = await service.listStage2(trainee, { limit: 1 });
+  expect(first.items).toHaveLength(1);
+  expect(first.items[0]).toMatchObject({
+    event: {
+      id,
+      version: 2,
+      organizer,
+      description: null,
+      meetingLocation: null,
+      route: null,
+    },
+    organizerMemberId: deputy.userId,
+    visibility: "members",
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+    responseCounts: { participating: 0, declined: 1 },
+  });
+  expect(first.items[0]?.event).not.toHaveProperty("organizerMemberId");
+  expect(first.nextCursor).toBeTruthy();
+  const next = await service.listStage2(trainee, { limit: 1, cursor: first.nextCursor as string });
+  expect(next.items).toHaveLength(1);
+  expect(next.items[0]).toMatchObject({
+    event: { id: legacy.data.event.id, organizer: legacy.data.event.organizer },
+    organizerMemberId: null,
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+    responseCounts: { participating: 1, declined: 0 },
+  });
+  expect(next.nextCursor).toBeNull();
+  const unavailable = { ...dispatcher, capabilities: ["events.respond"] };
+  expect((await service.listStage2(unavailable)).items[0]).toMatchObject({
+    myResponse: null,
+    myResponseVersion: null,
+  });
+  expect(await service.nearestStage2(unavailable)).toMatchObject({
+    event: { id },
+    myResponse: null,
+    myResponseVersion: null,
+  });
+  expect(await service.nearestStage2(trainee)).toMatchObject({
+    event: { id },
+    myResponse: "unanswered",
+    myResponseVersion: 1,
+  });
+  await expect(service.getStage2(trainee, draftId)).rejects.toMatchObject({ statusCode: 404 });
+  await expect(service.get(null, id)).rejects.toMatchObject({ statusCode: 404 });
+  expect((await service.list(null)).items).toEqual([legacy.data.event]);
+
+  const app = await createApp({ identity, events: service, checkReadiness: async () => true });
+  const ownReason = "Fictional confidential reason for the current member";
+  try {
+    const csrf = (
+      await app.inject({ url: "/api/v1/auth/csrf", headers: { cookie: traineeCookie } })
+    ).json().data.token;
+    const decline = await app.inject({
+      method: "PUT",
+      url: `/api/v1/events/${id}/my-response`,
+      headers: {
+        cookie: traineeCookie,
+        origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": newId(),
+        "if-match": `"v${first.items[0]?.myResponseVersion}"`,
+      },
+      payload: { response: "declined", reason: ownReason },
+    });
+    expect(decline.statusCode).toBe(200);
+    expect(decline.headers.etag).toBe('"v2"');
+    const nearest = await service.nearestStage2(trainee);
+    expect(nearest).toMatchObject({
+      event: { id },
+      myResponse: "declined",
+      myResponseVersion: 2,
+    });
+    const detail = await service.getStage2(trainee, id);
+    expect(detail).toMatchObject({
+      version: 2,
+      data: {
+        myResponse: { response: "declined", declineReason: ownReason, version: 2 },
+        responseCounts: { participating: 0, declined: 2 },
+      },
+    });
+    expect(JSON.stringify(detail)).not.toContain(otherReason);
+    expect(JSON.stringify(nearest)).not.toContain(ownReason);
+    const cleared = await app.inject({
+      method: "PUT",
+      url: `/api/v1/events/${id}/my-response`,
+      headers: {
+        cookie: traineeCookie,
+        origin,
+        "x-csrf-token": csrf,
+        "idempotency-key": newId(),
+        "if-match": `"v${nearest?.myResponseVersion}"`,
+      },
+      payload: { response: "unanswered" },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.headers.etag).toBe('"v3"');
+    expect(await service.nearestStage2(trainee)).toMatchObject({
+      event: { id },
+      myResponse: "unanswered",
+      myResponseVersion: 3,
+    });
+    const refreshed = await service.listStage2(trainee);
+    expect(refreshed.items[0]).toMatchObject({
+      myResponse: "unanswered",
+      myResponseVersion: 3,
+      responseCounts: { participating: 0, declined: 1 },
+    });
+    expect(JSON.stringify(refreshed)).not.toContain("confidential reason");
+  } finally {
+    await app.close();
+  }
+});
+
+test("leadership nonresponders filter current response eligibility before paging", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const extra = [
+    (await member(["driver"])).actor,
+    (await member(["trainee", "dispatcher"])).actor,
+    (await member(["trainee"])).actor,
+    (await member(["driver", "deputy_director"])).actor,
+  ].sort((a, b) => a.userId.localeCompare(b.userId));
+  const [participating, declined, cleared, silent] = extra;
+  if (!participating || !declined || !cleared || !silent)
+    throw new Error("SYNTHETIC_ROSTER_MISSING");
+  const inactive = (await member(["driver"])).actor;
+  // Retained inactive memberships stay in actual attendance's roster, but cannot RSVP.
+  await unit.run((tx) =>
+    unit
+      .client(tx)
+      .update(membership)
+      .set({ status: "inactive" })
+      .where(eq(membership.userId, inactive.userId)),
+  );
+  const id = (await create()).data.event.id;
+  const otherId = (await create()).data.event.id;
+  for (const actor of [participating, director, trainee, driver, cleared])
+    await service.respond(actor, id, newId(), 1, { response: "participating" });
+  await service.respond(cleared, id, newId(), 2, { response: "unanswered" });
+  await service.respond(declined, id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional confidential nonresponders test",
+  });
+  const [plan] = await control.query<RowDataPacket[]>(
+    `EXPLAIN SELECT m.user_id FROM identity_memberships m
+      WHERE m.user_id>? AND m.status='active'
+        AND EXISTS (SELECT r.user_id FROM identity_roles r
+          WHERE r.user_id=m.user_id AND r.role IN ('trainee','driver'))
+        AND NOT EXISTS (SELECT er.id FROM event_responses er
+          WHERE er.event_id=? AND er.member_id=m.user_id
+            AND er.status IN ('participating','declined'))
+      ORDER BY m.user_id LIMIT 2`,
+    [participating.userId, id],
+  );
+  const answerPlan = plan.find((row) => row.table === "er");
+  expect(String(answerPlan?.possible_keys)).toContain("event_response_member");
+  console.log(
+    JSON.stringify({
+      event: "events_query_plan",
+      shape: "nonresponders",
+      indexes: plan.map((row) => ({ access: row.type, index: row.key, estimatedRows: row.rows })),
+    }),
+  );
+  const app = await createApp({ identity, events: service, checkReadiness: async () => true });
+  const url = `/api/v1/admin/events/${id}/nonresponders?limit=1`;
+  try {
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    expect((await app.inject({ url, headers: { cookie: traineeCookie } })).statusCode).toBe(403);
+    await expect(service.nonresponders(dispatcher, id)).rejects.toMatchObject({ statusCode: 403 });
+    const allowed = await app.inject({ url, headers: { cookie: directorCookie } });
+    expect(allowed.statusCode).toBe(200);
+    expect(allowed.headers["cache-control"]).toBe("no-store");
+    const { items, nextCursor } = allowed.json().data;
+    expect(items).toEqual([expect.objectContaining({ id: cleared.userId, formerMember: false })]);
+    expect(allowed.body).not.toContain("confidential");
+    expect(nextCursor).toBeTruthy();
+    const next = await app.inject({
+      url: `${url}&cursor=${encodeURIComponent(nextCursor)}`,
+      headers: { cookie: directorCookie },
+    });
+    expect(next.statusCode).toBe(200);
+    expect(next.json().data).toEqual({
+      items: [expect.objectContaining({ id: silent.userId, formerMember: false })],
+      nextCursor: null,
+    });
+    expect((await service.nonresponders(deputy, id)).items.map((m) => m.id)).toEqual([
+      cleared.userId,
+      silent.userId,
+    ]);
+    for (const request of [
+      () => service.nonresponders(deputy, id, { cursor: nextCursor }),
+      () => service.nonresponders(director, otherId, { cursor: nextCursor }),
+      () => service.participants(director, id, { cursor: nextCursor }),
+      () => service.attendance(director, id, { cursor: nextCursor }),
+    ])
+      await expect(request()).rejects.toMatchObject({ statusCode: 409 });
+    await expect(service.nonresponders(director, newId())).rejects.toMatchObject({
+      statusCode: 404,
+    });
+
+    instant = Date.parse(input().startsAt);
+    await service.setAttendance(director, id, newId(), 1, {
+      members: [
+        { memberId: inactive.userId, attendance: "attended", note: null },
+        { memberId: cleared.userId, attendance: "not_attended", note: null },
+      ],
+    });
+    const attendanceUrl = `/api/v1/admin/events/${id}/attendance`;
+    const headers = { cookie: directorCookie };
+    const legacy = await app.inject({ url: `${attendanceUrl}?limit=1`, headers });
+    const staged = await app.inject({ url: `${attendanceUrl}?view=stage2&limit=1`, headers });
+    expect(legacy.statusCode).toBe(200);
+    expect(staged.statusCode).toBe(200);
+    expect(legacy.headers.etag).toBe('"v2"');
+    expect(staged.headers.etag).toBe(legacy.headers.etag);
+    expect(staged.headers["cache-control"]).toBe("no-store");
+    const totals = { total: 10, attended: 1, notAttended: 1, unconfirmed: 8 };
+    const legacyPage = legacy.json().data as components["schemas"]["ListAttendance"];
+    const stagedPage = staged.json().data as components["schemas"]["EventStage2Attendance"];
+    expect(legacyPage).toEqual(
+      await service.attendance(director, id, { limit: 1 }).then((r) => r.data),
+    );
+    expect(stagedPage).toEqual({
+      ...legacyPage,
+      items: legacyPage.items.map((item) => ({ ...item, tripId: null })),
+      totals,
+    });
+    expect(legacyPage).not.toHaveProperty("totals");
+    expect(legacyPage.items[0]).not.toHaveProperty("tripId");
+    expect(stagedPage.nextCursor).toBeTruthy();
+    const stagedNext = await app.inject({
+      url: `${attendanceUrl}?view=stage2&limit=1&cursor=${encodeURIComponent(stagedPage.nextCursor as string)}`,
+      headers,
+    });
+    expect(stagedNext.statusCode).toBe(200);
+    expect(stagedNext.json().data.totals).toEqual(totals);
+    expect((await app.inject({ url: `${attendanceUrl}?view=other`, headers })).statusCode).toBe(
+      422,
+    );
+    expect(
+      (
+        await app.inject({
+          url: `${attendanceUrl}?view=stage2`,
+          headers: { cookie: traineeCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+  } finally {
+    await app.close();
+  }
+});
+
 test("independent event/own response/attendance versions and equivalent responses have no effects", async () => {
   const e = await create(),
     id = e.data.event.id;
@@ -762,15 +1062,13 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     expect(created.statusCode).toBe(201);
     const id = created.json().data.event.id;
 
-    // Stage 2 additions are documented for downstream work but this app still
-    // serves the old request and response contracts.
+    // Other Stage 2 paths remain unmounted and existing paths still serve their legacy shapes.
     const stagedEndpoints = [
       ["GET", "/api/v1/admin/events?period=drafts"],
       ["GET", `/api/v1/admin/events/drafts/${id}`],
       ["PATCH", `/api/v1/admin/events/drafts/${id}`],
       ["DELETE", `/api/v1/admin/events/${id}`],
       ["POST", `/api/v1/admin/events/${id}/publication`],
-      ["GET", `/api/v1/admin/events/${id}/nonresponders`],
       ["GET", `/api/v1/admin/events/${id}/media`],
       ["POST", `/api/v1/admin/events/${id}/media`],
       ["PATCH", `/api/v1/admin/events/${id}/media/${id}`],
@@ -1119,14 +1417,19 @@ test("current role and session revocation precede both saved-command replay and 
   });
   await expect(service.history(current, id)).rejects.toMatchObject({ statusCode: 403 });
 });
+
 import {
   asc,
-  events,
-  eventRevisions,
-  eventResponseRevisions,
-  eventAttendances,
   eventAttendanceRevisions,
+  eventAttendances,
+  eventDrafts,
+  eventMetadata,
+  eventResponseRevisions,
+  eventRevisionDetails,
+  eventRevisions,
+  events,
 } from "@vtc/db/events-schema";
+
 test("representative mixed event histories expose an ordered selective public-page index", async () => {
   const original = await create({ visibility: "public" }),
     id = original.data.event.id;

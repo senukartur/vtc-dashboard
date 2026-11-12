@@ -19,6 +19,7 @@ import {
   eventCommands,
   eventResponseRevisions,
   eventResponses,
+  eventRevisionDetails,
   eventRevisions,
   events,
   gt,
@@ -29,7 +30,7 @@ import {
   or,
   sql,
 } from "@vtc/db/events-schema";
-import type { SQLWrapper } from "drizzle-orm";
+import { notExists, type SQLWrapper } from "drizzle-orm";
 import { alias } from "drizzle-orm/mysql-core";
 import { causes, retryTransaction, unknownCommit } from "../../platform/jobs/queue.js";
 import { type CompanyEvent, closed, createOutbox } from "../../platform/outbox/events.js";
@@ -42,6 +43,28 @@ import { type Page, pagination } from "./pagination.js";
 type S = components["schemas"];
 type Event = Omit<typeof events.$inferSelect, "notificationMaterialPending">;
 type Revision = typeof eventRevisions.$inferSelect;
+const publicRevisionFields = {
+  id: eventRevisions.id,
+  eventId: eventRevisions.eventId,
+  version: eventRevisions.version,
+  title: eventRevisions.title,
+  description: eventRevisions.description,
+  game: eventRevisions.game,
+  server: eventRevisions.server,
+  organizer: eventRevisions.organizer,
+  meetingLocation: eventRevisions.meetingLocation,
+  route: eventRevisions.route,
+  meetingAt: eventRevisions.meetingAt,
+  startsAt: eventRevisions.startsAt,
+  endsAt: eventRevisions.endsAt,
+  status: eventRevisions.status,
+  visibility: eventRevisions.visibility,
+  originCityId: eventRevisions.originCityId,
+  destinationCityId: eventRevisions.destinationCityId,
+};
+type PublicRevision = Pick<Revision, keyof typeof publicRevisionFields>;
+type ListOptions = Page & { period?: "upcoming" | "past" };
+type OwnResponse = Pick<S["Rsvp"], "response" | "version">;
 type NotificationMaterial = Pick<Revision, "status" | "startsAt" | "route" | "meetingLocation">;
 type MaterialState = NonNullable<Event["notificationMaterial"]>;
 function materialState(raw: unknown, version: number): MaterialState | null {
@@ -124,11 +147,22 @@ export function validateEventsConfig(config: EventsConfig) {
 interface Ports {
   identity: Pick<
     Identity,
-    "eventContextInTransaction" | "eventRosterInTransaction" | "memberSummariesInTransaction"
+    | "eventContextInTransaction"
+    | "eventRosterInTransaction"
+    | "eventRosterCountInTransaction"
+    | "eventEligibleMembersInTransaction"
+    | "memberSummariesInTransaction"
   >;
   catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
+  attendanceTripIds?: (
+    tx: TxContext,
+    actor: Actor,
+    eventId: string,
+    game: Event["game"],
+    memberIds: string[],
+  ) => Promise<ReadonlyMap<string, string>>;
   notificationChanged?: (tx: TxContext, eventId: string, memberId: string | null) => Promise<void>;
 }
 export function createEvents(
@@ -405,7 +439,7 @@ export function createEvents(
         throw identityError(422, "CATALOG_SELECTION_HIDDEN");
     }
   }
-  async function routeLabels(tx: TxContext, revisions: readonly Revision[]) {
+  async function routeLabels(tx: TxContext, revisions: readonly PublicRevision[]) {
     const refs = revisions.flatMap((r) =>
       [r.originCityId, r.destinationCityId].flatMap((id) =>
         id ? [{ kind: "city" as const, id }] : [],
@@ -416,7 +450,7 @@ export function createEvents(
   }
   async function publicDto(
     tx: TxContext,
-    r: Revision,
+    r: PublicRevision,
     knownLabels?: Map<string, S["CatalogLabel"]>,
   ): Promise<S["EventPublic"]> {
     const labels = knownLabels ?? (await routeLabels(tx, [r]));
@@ -486,12 +520,12 @@ export function createEvents(
       throw new Error("EVENT_ATTENDANCE_REVISION_MISSING");
     return r;
   }
-  async function memberDto(
+  async function memberFacts(
     tx: TxContext,
     r: Revision,
     actor: Actor,
     receipt?: Receipt,
-  ): Promise<S["EventMember"]> {
+  ): Promise<Omit<S["EventMember"], "event">> {
     let ownResponse: ResponseRevision | null, ownAttendance: AttendanceRevision | null;
     if (receipt) {
       const [rr] = receipt.responseRevisionId
@@ -513,7 +547,6 @@ export function createEvents(
       ownAttendance = await attendance(tx, r.eventId, actor.userId);
     }
     return {
-      event: await publicDto(tx, r),
       visibility: r.visibility,
       myResponse: responseDto(ownResponse),
       myAttendance: ownAttendance?.status ?? "unconfirmed",
@@ -522,6 +555,226 @@ export function createEvents(
       prescribedTrailerTypeId: r.prescribedTrailerId,
     };
   }
+  async function memberDto(
+    tx: TxContext,
+    r: Revision,
+    actor: Actor,
+    receipt?: Receipt,
+  ): Promise<S["EventMember"]> {
+    const facts = await memberFacts(tx, r, actor, receipt);
+    return { event: await publicDto(tx, r), ...facts };
+  }
+
+  async function listRevisions(tx: TxContext, actor: Actor | null, options: ListOptions) {
+    const period = options.period ?? "upcoming";
+    if (!["upcoming", "past"].includes(period)) throw identityError(422);
+    const p = page(actor, ["list", period, actor ? "member" : "public"], options);
+    const rows = await c(tx)
+      .select({ id: events.id, revisionId: events.currentRevisionId, startsAt: events.startsAt })
+      .from(events)
+      .where(
+        and(
+          actor ? undefined : eq(events.visibility, "public"),
+          period === "upcoming"
+            ? gte(events.startsAt, p.boundary)
+            : lt(events.startsAt, p.boundary),
+          p.after
+            ? or(
+                gt(events.startsAt, p.after.time as string),
+                and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(p.limit + 1);
+    const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: r.startsAt }));
+    if (!items.length) return { revisions: [], nextCursor };
+    const revisions = await c(tx)
+      .select(publicRevisionFields)
+      .from(eventRevisions)
+      .where(
+        inArray(
+          eventRevisions.id,
+          items.map((e) => e.revisionId as string),
+        ),
+      );
+    const byId = new Map(revisions.map((r) => [r.id, r]));
+    return {
+      nextCursor,
+      revisions: items.map((e) => {
+        const r = byId.get(e.revisionId as string);
+        if (!r) throw new Error("EVENT_REVISION_MISSING");
+        return r;
+      }),
+    };
+  }
+
+  async function nearestRevision(tx: TxContext) {
+    const [e] = await c(tx)
+      .select({ revisionId: events.currentRevisionId })
+      .from(events)
+      .where(and(eq(events.status, "scheduled"), gte(events.startsAt, at())))
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(1);
+    if (!e) return null;
+    const [r] = await c(tx)
+      .select(publicRevisionFields)
+      .from(eventRevisions)
+      .where(eq(eventRevisions.id, applicationId(e.revisionId as string)))
+      .for("share");
+    if (!r) throw new Error("EVENT_REVISION_MISSING");
+    return r;
+  }
+
+  async function responseCountsByEvent(tx: TxContext, ids: string[]) {
+    const counts = new Map(
+      ids.map((id): [string, S["EventResponseCounts"]] => [id, { participating: 0, declined: 0 }]),
+    );
+    if (!ids.length) return counts;
+    const rows = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        status: eventResponses.status,
+        total: sql<number | string>`COUNT(*)`,
+      })
+      .from(eventResponses)
+      .where(
+        and(
+          inArray(eventResponses.eventId, ids),
+          inArray(eventResponses.status, ["participating", "declined"]),
+        ),
+      )
+      .groupBy(eventResponses.eventId, eventResponses.status);
+    for (const row of rows) {
+      const count = counts.get(row.eventId);
+      if (count && row.status !== "unanswered") count[row.status] = Number(row.total);
+    }
+    return counts;
+  }
+
+  async function ownResponses(tx: TxContext, actor: Actor, ids: string[]) {
+    if (!actor.capabilities.includes("events.respond")) return null;
+    const { response, version } = responseDto(null);
+    const initial = { response, version };
+    const responses = new Map<string, OwnResponse>(ids.map((id) => [id, initial]));
+    if (!ids.length) return responses;
+    const rows = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        response: eventResponses.status,
+        version: eventResponses.version,
+      })
+      .from(eventResponses)
+      .where(and(inArray(eventResponses.eventId, ids), eq(eventResponses.memberId, actor.userId)));
+    for (const { eventId, response, version } of rows)
+      responses.set(eventId, { response, version });
+    return responses;
+  }
+
+  // This batch projection is the integration point for the VTC-124 route fields.
+  async function stage2PublicDtos(tx: TxContext, revisions: PublicRevision[]) {
+    if (!revisions.length) return [];
+    const details = await c(tx)
+      .select({
+        revisionId: eventRevisionDetails.revisionId,
+        organizerMemberId: eventRevisionDetails.organizerMemberId,
+      })
+      .from(eventRevisionDetails)
+      .where(
+        inArray(
+          eventRevisionDetails.revisionId,
+          revisions.map((r) => r.id),
+        ),
+      );
+    const organizers = new Map(details.map((row) => [row.revisionId, row.organizerMemberId]));
+    const labels = await routeLabels(tx, revisions);
+    return Promise.all(
+      revisions.map(async (r) => {
+        const organizerMemberId = organizers.get(r.id) ?? null;
+        const base = await publicDto(tx, r, labels);
+        const event: S["EventStage2Public"] = {
+          ...base,
+          description: base.description.trim() ? base.description : null,
+          route: base.route.trim() ? base.route : null,
+          meetingLocation: base.meetingLocation.trim() ? base.meetingLocation : null,
+          platform: null,
+          originDepot: null,
+          destinationDepot: null,
+          distanceKm: null,
+          requiredDlcs: [],
+          hasCover: false,
+        };
+        return { event, organizerMemberId, visibility: r.visibility };
+      }),
+    );
+  }
+
+  async function attendancePage(tx: TxContext, actor: Actor, event: Event, options: Page) {
+    const id = event.id;
+    const p = page(actor, ["attendance", id, event.attendanceVersion], options);
+    const rows = await ports.identity.eventRosterInTransaction(
+      tx,
+      p.after?.id ?? null,
+      p.limit + 1,
+    );
+    const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: null }));
+    const ids = items.map((r) => r.id);
+    if (!ids.length) return { items: [], nextCursor };
+    const summaries = await ports.identity.memberSummariesInTransaction(tx, ids);
+    const responses = await c(tx)
+      .select({ memberId: eventResponses.memberId, revision: eventResponseRevisions })
+      .from(eventResponses)
+      .innerJoin(
+        eventResponseRevisions,
+        eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
+      )
+      .where(and(eq(eventResponses.eventId, id), inArray(eventResponses.memberId, ids)));
+    const attendances = await c(tx)
+      .select({ memberId: eventAttendances.memberId, revision: eventAttendanceRevisions })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+      )
+      .where(and(eq(eventAttendances.eventId, id), inArray(eventAttendances.memberId, ids)));
+    const responseByMember = new Map(
+      responses.map(({ memberId, revision }) => [memberId, revision]),
+    );
+    const attendanceByMember = new Map(
+      attendances.map(({ memberId, revision }) => [memberId, revision]),
+    );
+    return {
+      items: items.map(({ id }) => {
+        const a = attendanceByMember.get(id);
+        return {
+          member: summaries.get(id) as S["MemberSummary"],
+          response: responseDto(responseByMember.get(id) ?? null),
+          attendance: a?.status ?? ("unconfirmed" as const),
+          note: a?.note ?? null,
+        };
+      }),
+      nextCursor,
+    };
+  }
+
+  async function attendanceTotals(tx: TxContext, id: string) {
+    // Current attendance rows reference the same all-member roster as the page.
+    const total = await ports.identity.eventRosterCountInTransaction(tx);
+    const rows = await c(tx)
+      .select({ status: eventAttendanceRevisions.status, count: sql<number | string>`COUNT(*)` })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+      )
+      .where(eq(eventAttendances.eventId, id))
+      .groupBy(eventAttendanceRevisions.status);
+    const attended = Number(rows.find((row) => row.status === "attended")?.count ?? 0);
+    const notAttended = Number(rows.find((row) => row.status === "not_attended")?.count ?? 0);
+    return { total, attended, notAttended, unconfirmed: total - attended - notAttended };
+  }
+
   function fingerprint(actor: Actor, route: Route, target: string, key: string, value: unknown) {
     return createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
       .update("events/command/v1\0")
@@ -937,62 +1190,83 @@ export function createEvents(
         };
       });
     },
-    async list(actor: Actor | null, options: Page & { period?: "upcoming" | "past" } = {}) {
+    async list(actor: Actor | null, options: ListOptions = {}) {
       return run(async (tx) => {
         if (actor) await authorize(tx, actor);
-        const period = options.period ?? "upcoming";
-        if (!["upcoming", "past"].includes(period)) throw identityError(422);
-        const p = page(actor, ["list", period, actor ? "member" : "public"], options);
-        const rows = await c(tx)
-          .select()
-          .from(events)
-          .where(
-            and(
-              actor ? undefined : eq(events.visibility, "public"),
-              period === "upcoming"
-                ? gte(events.startsAt, p.boundary)
-                : lt(events.startsAt, p.boundary),
-              p.after
-                ? or(
-                    gt(events.startsAt, p.after.time as string),
-                    and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
-                  )
-                : undefined,
-            ),
-          )
-          .orderBy(asc(events.startsAt), asc(events.id))
-          .limit(p.limit + 1);
-        const result = p.finish(rows, (r) => ({ id: r.id, time: r.startsAt }));
-        const ids = result.items.map((e) => e.currentRevisionId as string);
-        if (!ids.length) return { ...result, items: [] };
-        const revisions = await c(tx)
-          .select()
-          .from(eventRevisions)
-          .where(inArray(eventRevisions.id, ids));
+        const { revisions, nextCursor } = await listRevisions(tx, actor, options);
         const labels = await routeLabels(tx, revisions);
-        const byId = new Map(revisions.map((r) => [r.id, r]));
         return {
-          ...result,
-          items: await Promise.all(
-            result.items.map((e) => {
-              const r = byId.get(e.currentRevisionId as string);
-              if (!r) throw new Error("EVENT_REVISION_MISSING");
-              return publicDto(tx, r, labels);
-            }),
-          ),
+          items: await Promise.all(revisions.map((r) => publicDto(tx, r, labels))),
+          nextCursor,
         };
       });
     },
     async nearest(actor: Actor) {
       return run(async (tx) => {
         await authorize(tx, actor);
-        const [e] = await c(tx)
-          .select()
-          .from(events)
-          .where(and(eq(events.status, "scheduled"), gte(events.startsAt, at())))
-          .orderBy(asc(events.startsAt), asc(events.id))
-          .limit(1);
-        return e ? publicDto(tx, await revision(tx, e.currentRevisionId as string)) : null;
+        const r = await nearestRevision(tx);
+        return r ? publicDto(tx, r) : null;
+      });
+    },
+    async listStage2(actor: Actor, options: ListOptions = {}): Promise<S["EventStage2MemberList"]> {
+      return run(async (tx) => {
+        await authorize(tx, actor);
+        const { revisions, nextCursor } = await listRevisions(tx, actor, options);
+        const ids = revisions.map((r) => r.eventId);
+        const counts = await responseCountsByEvent(tx, ids);
+        const own = await ownResponses(tx, actor, ids);
+        const projections = await stage2PublicDtos(tx, revisions);
+        return {
+          items: projections.map((item) => {
+            const response = own?.get(item.event.id);
+            return {
+              ...item,
+              myResponse: response?.response ?? null,
+              myResponseVersion: response?.version ?? null,
+              responseCounts: counts.get(item.event.id) as S["EventResponseCounts"],
+            };
+          }),
+          nextCursor,
+        };
+      });
+    },
+    async getStage2(
+      actor: Actor,
+      id: string,
+    ): Promise<{ data: S["EventStage2Member"]; version: number }> {
+      return run(async (tx) => {
+        await authorize(tx, actor);
+        const e = await lock(tx, id, false, "share");
+        const r = await revision(tx, e.currentRevisionId as string);
+        const [projection] = await stage2PublicDtos(tx, [r]);
+        if (!projection) throw new Error("EVENT_REVISION_MISSING");
+        const facts = await memberFacts(tx, r, actor);
+        const counts = await responseCountsByEvent(tx, [id]);
+        return {
+          data: {
+            ...projection,
+            ...facts,
+            responseCounts: counts.get(id) as S["EventResponseCounts"],
+            prescribedCargo: null,
+            prescribedTrailerType: null,
+          },
+          version: e.version,
+        };
+      });
+    },
+    async nearestStage2(actor: Actor): Promise<S["EventStage2Upcoming"] | null> {
+      return run(async (tx) => {
+        await authorize(tx, actor);
+        const r = await nearestRevision(tx);
+        if (!r) return null;
+        const [projection] = await stage2PublicDtos(tx, [r]);
+        if (!projection) throw new Error("EVENT_REVISION_MISSING");
+        const own = (await ownResponses(tx, actor, [r.eventId]))?.get(r.eventId);
+        return {
+          event: projection.event,
+          myResponse: own?.response ?? null,
+          myResponseVersion: own?.version ?? null,
+        };
       });
     },
     async myResponse(actor: Actor, id: string) {
@@ -1091,68 +1365,80 @@ export function createEvents(
       return run(async (tx) => {
         await authorize(tx, actor);
         await lock(tx, id);
-        const rows = await c(tx)
-          .select({ status: eventResponses.status, total: sql<number | string>`COUNT(*)` })
-          .from(eventResponses)
-          .where(
-            and(
-              eq(eventResponses.eventId, id),
-              inArray(eventResponses.status, ["participating", "declined"]),
-            ),
-          )
-          .groupBy(eventResponses.status);
-        const total = (status: "participating" | "declined") =>
-          Number(rows.find((r) => r.status === status)?.total ?? 0);
         // Counts only: no unanswered total, identities or reasons leave this read.
-        return { participating: total("participating"), declined: total("declined") };
+        return (await responseCountsByEvent(tx, [id])).get(id) as S["EventResponseCounts"];
+      });
+    },
+    async nonresponders(
+      actor: Actor,
+      id: string,
+      options: Page = {},
+    ): Promise<S["EventStage2Nonresponders"]> {
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        await lock(tx, id, false, "share");
+        const p = page(actor, ["nonresponders", id], options);
+        const rows = await ports.identity.eventEligibleMembersInTransaction(
+          tx,
+          p.after?.id ?? null,
+          p.limit + 1,
+          (memberId) =>
+            notExists(
+              c(tx)
+                .select({ id: eventResponses.id })
+                .from(eventResponses)
+                .where(
+                  and(
+                    eq(eventResponses.eventId, id),
+                    eq(eventResponses.memberId, memberId),
+                    inArray(eventResponses.status, ["participating", "declined"]),
+                  ),
+                ),
+            ),
+        );
+        const { items, nextCursor } = p.finish(rows, (r) => ({ id: r.id, time: null }));
+        const summaries = await ports.identity.memberSummariesInTransaction(
+          tx,
+          items.map((r) => r.id),
+        );
+        return {
+          items: items.map((r) => summaries.get(r.id) as S["MemberSummary"]),
+          nextCursor,
+        };
       });
     },
     async attendance(actor: Actor, id: string, options: Page = {}) {
       return run(async (tx) => {
         await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id),
-          p = page(actor, ["attendance", id, e.attendanceVersion], options),
-          rows = await ports.identity.eventRosterInTransaction(
-            tx,
-            p.after?.id ?? null,
-            p.limit + 1,
-          ),
-          result = p.finish(rows, (r) => ({ id: r.id, time: null })),
-          summaries = await ports.identity.memberSummariesInTransaction(
-            tx,
-            result.items.map((r) => r.id),
-          );
-        const ids = result.items.map((r) => r.id);
-        const responses = ids.length
-          ? await c(tx)
-              .select({ memberId: eventResponses.memberId, revision: eventResponseRevisions })
-              .from(eventResponses)
-              .innerJoin(
-                eventResponseRevisions,
-                eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
-              )
-              .where(and(eq(eventResponses.eventId, id), inArray(eventResponses.memberId, ids)))
-          : [];
-        const attendances = ids.length
-          ? await c(tx)
-              .select({ memberId: eventAttendances.memberId, revision: eventAttendanceRevisions })
-              .from(eventAttendances)
-              .innerJoin(
-                eventAttendanceRevisions,
-                eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
-              )
-              .where(and(eq(eventAttendances.eventId, id), inArray(eventAttendances.memberId, ids)))
-          : [];
-        const items = result.items.map((r) => {
-          const a = attendances.find((a) => a.memberId === r.id)?.revision;
-          return {
-            member: summaries.get(r.id) as S["MemberSummary"],
-            response: responseDto(responses.find((a) => a.memberId === r.id)?.revision ?? null),
-            attendance: a?.status ?? ("unconfirmed" as const),
-            note: a?.note ?? null,
-          };
-        });
-        return { data: { items, nextCursor: result.nextCursor }, version: e.attendanceVersion };
+        const e = await lock(tx, id);
+        return { data: await attendancePage(tx, actor, e, options), version: e.attendanceVersion };
+      });
+    },
+    async attendanceStage2(
+      actor: Actor,
+      id: string,
+      options: Page = {},
+    ): Promise<{ data: S["EventStage2Attendance"]; version: number }> {
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        const e = await lock(tx, id, false, "share");
+        const { items, nextCursor } = await attendancePage(tx, actor, e, options);
+        const totals = await attendanceTotals(tx, e.id);
+        const trips = await ports.attendanceTripIds?.(
+          tx,
+          actor,
+          e.id,
+          e.game,
+          items.map((item) => item.member.id),
+        );
+        return {
+          data: {
+            items: items.map((item) => ({ ...item, tripId: trips?.get(item.member.id) ?? null })),
+            nextCursor,
+            totals,
+          },
+          version: e.attendanceVersion,
+        };
       });
     },
     async setAttendance(

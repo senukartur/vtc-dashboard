@@ -5,6 +5,7 @@ import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { Page } from "./pagination.js";
 import type { Events } from "./service.js";
+
 type S = components["schemas"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -211,16 +212,33 @@ export async function registerEventRoutes(
     },
   );
   app.get<{ Params: { eventId: string }; Querystring: Page }>(
-    "/api/v1/admin/events/:eventId/attendance",
+    "/api/v1/admin/events/:eventId/nonresponders",
     {
       schema: {
         params,
         querystring: object(page),
-        response: { 200: ref("EnvelopeListAttendance") },
+        response: { 200: ref("EventStage2EnvelopeNonresponders") },
+      },
+    },
+    async (r) => envelope(r, await events.nonresponders(await actor(r), r.params.eventId, r.query)),
+  );
+  app.get<{ Params: { eventId: string }; Querystring: Page & { view?: "stage2" } }>(
+    "/api/v1/admin/events/:eventId/attendance",
+    {
+      schema: {
+        params,
+        querystring: object({ ...page, view: { type: "string", enum: ["stage2"] } }),
+        response: {
+          200: { anyOf: [ref("EnvelopeListAttendance"), ref("EventStage2EnvelopeAttendance")] },
+        },
       },
     },
     async (r, reply) => {
-      const result = await events.attendance(await actor(r), r.params.eventId, r.query);
+      const a = await actor(r);
+      const result =
+        r.query.view === "stage2"
+          ? await events.attendanceStage2(a, r.params.eventId, r.query)
+          : await events.attendance(a, r.params.eventId, r.query);
       reply.header("ETag", `"v${result.version}"`);
       return envelope(r, result.data);
     },
