@@ -32,6 +32,7 @@ try {
             config.tripDecisions,
             config.analytics,
             config.notifications,
+            config.eventMedia,
           ),
         }
       : {}),

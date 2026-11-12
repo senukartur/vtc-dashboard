@@ -1,19 +1,20 @@
 import { createUnitOfWork } from "@vtc/db";
+import { sql } from "@vtc/db/platform-schema";
 import { cleanupAdmissions } from "./modules/admissions/service.js";
+import { mediaJobKinds } from "./modules/events/media-jobs.js";
 import { manualCleanupPending } from "./modules/manual-reports/service.js";
 import { cleanupMail } from "./modules/messaging/service.js";
+import {
+  acceptanceDiagnostic,
+  acceptanceSentinelMatches,
+  acceptanceWorkerPhase,
+  acceptanceWorkerScope,
+} from "./notifications-acceptance-diagnostics.js";
 import { BlobFailure } from "./platform/blob-storage/filesystem.js";
 import { readConfig } from "./platform/config/env.js";
 import { passOrigin, workerWatchdogMs } from "./platform/jobs/deadline.js";
 import { createQueue, unknownCommit } from "./platform/jobs/queue.js";
 import { runPass } from "./platform/jobs/runner.js";
-import { sql } from "@vtc/db/platform-schema";
-import {
-  acceptanceDiagnostic,
-  acceptanceWorkerScope,
-  acceptanceWorkerPhase,
-  acceptanceSentinelMatches,
-} from "./notifications-acceptance-diagnostics.js";
 import { composeIdentity } from "./use-cases/identity-messaging.js";
 
 // Only the worker process evaluates this module and the application graph it imports; jobs.ts
@@ -76,6 +77,7 @@ export async function runJobsWorker(): Promise<void> {
           config.tripDecisions,
           config.analytics,
           config.notifications,
+          config.eventMedia,
         )
       : undefined;
     phase("jobs_trip_catchup");
@@ -124,6 +126,27 @@ export async function runJobsWorker(): Promise<void> {
       console.error(
         JSON.stringify({ event: "manual_cleanup_pending", category: "worker_configuration" }),
       );
+    if (mode === "run" && composed?.eventMedia) {
+      phase("jobs_event_media_maintenance");
+      try {
+        await composed.eventMedia.initialize();
+        await composed.eventMedia.maintenance(abort.signal);
+      } catch (error) {
+        if (
+          !(error instanceof BlobFailure) ||
+          error.category !== "unavailable" ||
+          abort.signal.aborted
+        )
+          throw error;
+        console.error(
+          JSON.stringify({
+            event: "event_media_maintenance_failed",
+            category: "storage_unavailable",
+          }),
+        );
+        process.exitCode = 1;
+      }
+    }
     const queue =
       composed?.jobsQueue ??
       createQueue(unit, [], [], undefined, [
@@ -134,6 +157,7 @@ export async function runJobsWorker(): Promise<void> {
         "trips.reevaluate",
         "notifications.deliver",
         "notifications.remind",
+        ...mediaJobKinds,
       ]);
     phase("jobs_pass");
     const result =

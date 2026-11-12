@@ -4,6 +4,8 @@ import { type Admissions, createAdmissions } from "../modules/admissions/service
 import { type AnalyticsConfig, createAnalytics } from "../modules/analytics/index.js";
 import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
+import { createEventMedia, type EventMediaConfig } from "../modules/events/media.js";
+import { mediaJobKinds } from "../modules/events/media-jobs.js";
 import { createEvents, type EventsConfig } from "../modules/events/service.js";
 import { createEventWorkspace } from "../modules/events/workspace.js";
 import {
@@ -71,6 +73,7 @@ export function composeIdentity(
   tripDecisionsConfig?: TripDecisionsConfig,
   analyticsConfig?: AnalyticsConfig,
   notificationsConfig?: NotificationsConfig,
+  eventMediaConfig?: EventMediaConfig,
 ) {
   const outbox = createOutbox(unit, { notifications: !!notificationsConfig });
   let identity: Identity;
@@ -270,6 +273,10 @@ export function composeIdentity(
           : {}),
       })
     : undefined;
+  const eventMedia =
+    eventsConfig && eventMediaConfig
+      ? createEventMedia(unit, eventMediaConfig, eventsConfig.cursorKey, identity)
+      : undefined;
   if (tripDecisionsConfig && trips && qualifications && manualReports && events)
     tripDecisions = createTripDecisions(unit, tripDecisionsConfig, {
       identity,
@@ -300,6 +307,7 @@ export function composeIdentity(
       ...(reconciliation ? [reconciliation.handler] : []),
       ...(tripDecisions ? [tripDecisions.handler] : []),
       ...(notifications ? [notifications.handler, notifications.reminderHandler] : []),
+      ...(eventMedia?.handlers ?? []),
     ],
     notifications ? [notifications.subscription] : [],
     undefined,
@@ -308,6 +316,7 @@ export function composeIdentity(
       ...(!reconciliation ? ["reconciliation.search"] : []),
       ...(!tripDecisions ? ["trips.reevaluate"] : []),
       ...(!notifications ? ["notifications.deliver", "notifications.remind"] : []),
+      ...(!eventMedia ? mediaJobKinds : []),
       ...(!manualReports?.config.storage
         ? ["manual.evidence-delete", "manual.generation-delete"]
         : []),
@@ -356,6 +365,7 @@ export function composeIdentity(
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
     ...(events ? { events } : {}),
+    ...(eventMedia ? { eventMedia } : {}),
     ...(tripDecisions ? { tripDecisions } : {}),
     ...(qualifications ? { qualifications } : {}),
     ...(reconciliation ? { reconciliation } : {}),

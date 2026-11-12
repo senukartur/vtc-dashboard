@@ -3,8 +3,10 @@ import { applicationId } from "@vtc/db";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
+import { isEventMediaRoute } from "./media-http.js";
 import type { Page } from "./pagination.js";
 import type { Events } from "./service.js";
+
 type S = components["schemas"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
@@ -31,10 +33,11 @@ export async function registerEventRoutes(
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
   const owned = (p: string) =>
-    p.startsWith("/api/v1/events") ||
-    p.startsWith("/api/v1/public/events") ||
-    p.startsWith("/api/v1/admin/events") ||
-    p === "/api/v1/me/upcoming-event";
+    !isEventMediaRoute(p) &&
+    (p.startsWith("/api/v1/events") ||
+      p.startsWith("/api/v1/public/events") ||
+      p.startsWith("/api/v1/admin/events") ||
+      p === "/api/v1/me/upcoming-event");
   async function actor(request: FastifyRequest) {
     let a = actors.get(request);
     if (!a) {

@@ -156,6 +156,8 @@ Response and actual attendance are distinct facts. Participation is voluntary in
 
 Notify signed-up participants inside the website when the start time or route changes or the event is cancelled. A time change reschedules the one-hour reminder; cancellation removes scheduled reminders. Keep the participation response when an event changes, and allow members to change it until the revised start time.
 
+Only the director and deputies manage event screenshots. Each event holds at most ten ready or processing PNG/JPEG screenshots. Managers can caption, reorder, remove and select one ready screenshot as the cover. Current company members may view ready screenshots for published events. Draft images are restricted to managers. Anonymous visitors can view only the current cover thumbnail of a public published event. Galleries stay with published or cancelled events. A duplicate starts with an empty gallery, and discarding a draft revokes image access and schedules storage cleanup.
+
 ## Membership application fields
 
 The owner approved the following field set for the public membership application.
