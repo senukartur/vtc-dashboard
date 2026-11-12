@@ -13,17 +13,7 @@ import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { tripDecisions, tripEventAssociations } from "@vtc/db/trip-decisions-schema";
 import { catalogCargoes } from "@vtc/db/catalogs-schema";
-import {
-  and,
-  eq,
-  isNull,
-  or,
-  sql,
-  tripContributions,
-  tripFacts,
-  trips,
-} from "@vtc/db/trips-schema";
-import { alias } from "drizzle-orm/mysql-core";
+import { and, eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
@@ -63,6 +53,7 @@ import {
   type ListOptions,
   type Trips,
 } from "../../apps/api/src/modules/trips/service.ts";
+import { createTripWorkspace } from "../../apps/api/src/modules/trips/workspace.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
@@ -3538,27 +3529,8 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
 });
 
 function returnedTripFixture() {
-  const root = alias(trips, "fixture_workspace_root");
-  const groupMember = alias(trips, "fixture_workspace_member");
   return createTripDecisionWorkspace(unit, {
-    rejectedGroupMembers: (tx, viewerId) =>
-      unit
-        .client(tx)
-        .select({
-          canonicalTripId: sql<string>`${root.id}`.as("canonical_trip_id"),
-          groupMemberTripId: sql<string>`${groupMember.id}`.as("group_member_trip_id"),
-        })
-        .from(root)
-        .innerJoin(
-          groupMember,
-          and(
-            or(eq(groupMember.id, root.id), eq(groupMember.aliasOf, root.id)),
-            eq(groupMember.ownerId, root.ownerId),
-            eq(groupMember.game, root.game),
-          ),
-        )
-        .where(and(eq(root.ownerId, viewerId), isNull(root.aliasOf), eq(root.decision, "rejected")))
-        .as("fixture_workspace_groups"),
+    rejectedGroupMembers: createTripWorkspace(unit).rejectedGroupMembers,
     resubmittableRevisions: (tx, viewerId) =>
       unit
         .client(tx)

@@ -1,11 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { createUnitOfWork, newId, runMigrations, type TxContext, type UnitOfWork } from "@vtc/db";
+import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { applications } from "@vtc/db/admissions-schema";
 import { eq, membership, user, company, roles as identityRoles } from "@vtc/db/identity-schema";
 import { steamAccounts, steamLinks } from "@vtc/db/external-identities-schema";
 import { qualificationAssignments } from "@vtc/db/qualifications-schema";
-import { and, isNull, lte, trips } from "@vtc/db/trips-schema";
-import { exists, gte, type SQLWrapper } from "drizzle-orm";
+import { trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import {
   beforeEach,
@@ -25,6 +24,7 @@ import {
   createQualificationInitialization,
   structuralLevels,
 } from "../../apps/api/src/modules/qualifications/initialization.ts";
+import { createTripActivity } from "../../apps/api/src/modules/trips/activity.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { createAdministration } from "../../apps/api/src/use-cases/administration.ts";
 import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
@@ -986,24 +986,7 @@ test("member counters share a snapshot time and count accepted canonical activit
   );
 
   const identity = createIdentity(unit, cfg, {}, () => new Date(countedAtMs));
-  const reportingActivity = vi.fn(
-    (tx: TxContext, ownerRef: SQLWrapper, from: string, through: string) =>
-      exists(
-        unit
-          .client(tx)
-          .select({ id: trips.id })
-          .from(trips)
-          .where(
-            and(
-              eq(trips.ownerId, ownerRef),
-              eq(trips.decision, "accepted"),
-              isNull(trips.aliasOf),
-              gte(trips.reportingAt, from),
-              lte(trips.reportingAt, through),
-            ),
-          ),
-      ),
-  );
+  const reportingActivity = vi.fn(createTripActivity(unit).hasAcceptedReportingActivity);
   const usableInvitations = vi.fn(admissions.usableInvitationCountInTransaction);
   const sources = {
     tripActivity: { hasAcceptedReportingActivity: reportingActivity },
