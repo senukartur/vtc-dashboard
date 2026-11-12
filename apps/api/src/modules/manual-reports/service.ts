@@ -1460,18 +1460,21 @@ export function createManualReports(
     },
     // The caller authorizes trips.read_own_private for viewerId in this transaction.
     workspaceCurrentAuthorRevisionsRelation(tx: TxContext, viewerId: string) {
+      // Drizzle emits references to these SQL aliases unqualified in caller queries.
       return c(tx)
         .select({
           reportTripId: sql<string>`${manualReports.tripId}`
             .mapWith(manualReports.tripId)
-            .as("report_trip_id"),
-          reportId: sql<string>`${manualReports.id}`.mapWith(manualReports.id).as("report_id"),
+            .as("author_report_trip_id"),
+          reportId: sql<string>`${manualReports.id}`
+            .mapWith(manualReports.id)
+            .as("author_report_id"),
           revisionId: sql<string>`${manualRevisions.id}`
             .mapWith(manualRevisions.id)
-            .as("revision_id"),
+            .as("author_revision_id"),
           reportCreatedAt: sql<string>`${manualReports.createdAt}`
             .mapWith(manualReports.createdAt)
-            .as("report_created_at"),
+            .as("author_report_created_at"),
         })
         .from(manualReports)
         .innerJoin(

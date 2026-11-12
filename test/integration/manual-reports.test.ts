@@ -1437,9 +1437,11 @@ test("workspace joins only current author revisions, including multiple reports 
           reportId: relation.reportId,
           revisionId: relation.revisionId,
           reportCreatedAt: relation.reportCreatedAt,
+          revisionNumber: manualRevisions.number,
         })
         .from(trips)
         .leftJoin(relation, eq(relation.reportTripId, trips.id))
+        .leftJoin(manualRevisions, eq(manualRevisions.id, relation.revisionId))
         .orderBy(relation.reportCreatedAt, relation.reportId);
     const unmatched = {
       tripId: foreign.tripId,
@@ -1447,6 +1449,7 @@ test("workspace joins only current author revisions, including multiple reports 
       reportId: null,
       revisionId: null,
       reportCreatedAt: null,
+      revisionNumber: null,
     };
     const own = [
       {
@@ -1455,6 +1458,7 @@ test("workspace joins only current author revisions, including multiple reports 
         reportId: original.id,
         revisionId: revised.currentRevision.id,
         reportCreatedAt: original.createdAt,
+        revisionNumber: revised.currentRevision.number,
       },
       {
         tripId: second.tripId,
@@ -1462,6 +1466,7 @@ test("workspace joins only current author revisions, including multiple reports 
         reportId: second.id,
         revisionId: second.currentRevision.id,
         reportCreatedAt: second.createdAt,
+        revisionNumber: second.currentRevision.number,
       },
     ];
     expect(await read()).toEqual([unmatched, ...own]);
