@@ -13,6 +13,7 @@ import {
   companyCatalogsPriorFolder,
   decisionsPriorFolder,
   EXTENDED_TEST_TIMEOUT_MS,
+  eventStage2PriorFolder,
   fixtureRoot,
   guardedSettings,
   hasCode,
@@ -128,7 +129,7 @@ await recoveryTest(
         "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()",
       );
       assert.equal(String(empty[0]?.count), "0");
-      assert.equal(await runMigrations(settings), 28);
+      assert.equal(await runMigrations(settings), 29);
       assert.equal(await runMigrations(settings), 0);
       const [recovered] = await connection.query<RowDataPacket[]>(
         "SELECT state, applied_at FROM _vtc_migrations",
@@ -185,7 +186,7 @@ await recoveryTest(
       assert.equal(unchanged[0]?.state, "applying");
       assert.equal(unchanged[0]?.applied_at, null);
       await reset(connection);
-      assert.equal(await runMigrations(settings), 28);
+      assert.equal(await runMigrations(settings), 29);
       assert.equal(await runMigrations(settings), 0);
     } finally {
       await connection.end();
@@ -368,7 +369,7 @@ await recoveryTest(
       // Empty is this disposable fixture's consistent pre-deployment baseline. The
       // interrupted schema is never replayed or stamped as applied.
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 28);
+      assert.equal(await runMigrations(guardedSettings()), 29);
       assert.equal(await runMigrations(guardedSettings()), 0);
       const [checks] = await connection.query<RowDataPacket[]>(
         "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME IN ('trip_fact_adr_requires_cargo','trip_trailer_shape')",
@@ -463,7 +464,7 @@ await recoveryTest(
       // Restore only this disposable fixture's known empty baseline; never stamp dirty history.
       await reconciliationPhase("baseline_restore", "reset", () => reset(connection));
       await reconciliationPhase("baseline_restore", "full_migration", async () => {
-        assert.equal(await runMigrations(settings), 28);
+        assert.equal(await runMigrations(settings), 29);
       });
       await reconciliationPhase("baseline_restore", "clean_replay", async () => {
         assert.equal(await runMigrations(settings), 0);
@@ -521,7 +522,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 28);
+      assert.equal(await runMigrations(guardedSettings()), 29);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -576,7 +577,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 28);
+      assert.equal(await runMigrations(guardedSettings()), 29);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -630,7 +631,7 @@ await recoveryTest(
     const connection = await testConnection();
     try {
       await reset(connection);
-      assert.equal(await runMigrations(guardedSettings()), 28);
+      assert.equal(await runMigrations(guardedSettings()), 29);
       assert.equal(await runMigrations(guardedSettings()), 0);
     } finally {
       await connection.end();
@@ -713,7 +714,7 @@ await recoveryTest(
       // Empty is the consistent pre-deployment baseline for this independent owned recovery fixture.
       // This is not a live backup/restore procedure and never stamps or replays the partial schema.
       await reset(connection);
-      assert.equal(await runMigrations(settings), 28);
+      assert.equal(await runMigrations(settings), 29);
       assert.equal(await runMigrations(settings), 0);
       const [columns] = await connection.query<RowDataPacket[]>(
         "SELECT COLUMN_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='events' AND COLUMN_NAME IN ('notification_material','notification_material_pending') ORDER BY COLUMN_NAME",
@@ -1157,7 +1158,7 @@ await recoveryTest(
       assert.equal(await runMigrations(settings, { folder }), 19);
       await seedCatalogUpgradeRows(connection);
       assert.equal(await catalogUpgradeRowCount(connection, "catalog_facts"), 1);
-      assert.equal(await runMigrations(settings), 9);
+      assert.equal(await runMigrations(settings), 10);
       assert.equal(await runMigrations(settings), 0);
 
       for (const table of [
@@ -1240,7 +1241,7 @@ await recoveryTest(
       const [history] = await connection.query<RowDataPacket[]>(
         "SELECT state FROM _vtc_migrations ORDER BY version",
       );
-      assert.equal(history.length, 28);
+      assert.equal(history.length, 29);
       assert.ok(history.every((row) => row.state === "applied"));
     } finally {
       await connection.end();
@@ -1957,6 +1958,7 @@ await recoveryTest(
     };
     const ledgerSql =
       "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version";
+    let manualReferenceFolder: string | undefined;
     const storedReports = () => rows("SELECT * FROM manual_reports ORDER BY id");
     const draftFields =
       "id,owner_id,version,state,CAST(fields AS CHAR) fields,CAST(target_trip AS CHAR) target_trip,submitted_report_id,created_at,updated_at";
@@ -2006,8 +2008,9 @@ await recoveryTest(
       );
       const ledger = await rows(ledgerSql);
 
-      assert.equal(await runMigrations(settings), 1);
-      assert.equal(await runMigrations(settings), 0);
+      manualReferenceFolder = await eventStage2PriorFolder();
+      assert.equal(await runMigrations(settings, { folder: manualReferenceFolder }), 1);
+      assert.equal(await runMigrations(settings, { folder: manualReferenceFolder }), 0);
 
       assert.deepEqual(await storedReports(), reports);
       assert.deepEqual(
@@ -2028,6 +2031,208 @@ await recoveryTest(
       const latest = updatedLedger.at(-1);
       assert.equal(latest?.state, "applied");
       assert.ok(latest?.applied_at);
+    } finally {
+      await connection.end();
+      if (folder) await rm(folder, { recursive: true });
+      if (manualReferenceFolder) await rm(manualReferenceFolder, { recursive: true });
+    }
+  },
+  SCHEMA_SETUP_TIMEOUT_MS,
+);
+
+await recoveryTest(
+  "Stage 2 Events upgrades populated 0027 and retains legacy writes and dormant storage constraints",
+  async () => {
+    const connection = await testConnection();
+    let folder: string | undefined;
+    const id = (n: number) => `e1320000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    const [actor, legacy, draft, otherEvent, atsDlc, etsDlc] = [
+      id(1),
+      id(2),
+      id(3),
+      id(4),
+      id(5),
+      id(6),
+    ];
+    const time = "2099-10-25 12:00:00.000";
+    const insertEvent = (eventId: string) =>
+      connection.execute(
+        "INSERT INTO events (id,version,change_sequence,attendance_version,game,visibility,status,starts_at,created_at) VALUES (?,1,1,1,'ets2','public','scheduled',?,?)",
+        [eventId, time, time],
+      );
+    const insertRevision = (
+      revisionId: string,
+      version: number,
+      category: string,
+      status: string,
+    ) =>
+      connection.execute(
+        "INSERT INTO event_revisions (id,event_id,version,sequence,actor_id,recorded_at,category,status,title,description,game,server,organizer,meeting_location,route,meeting_at,starts_at,visibility) VALUES (?,?,?,?,?,?,?,?,'Fictional convoy','Fictional description','ets2','Fictional server','Fictional organizer','Fictional location','Fictional route',?,?,'public')",
+        [revisionId, legacy, version, version, actor, time, category, status, time, time],
+      );
+    const definitions = () =>
+      connection
+        .query<RowDataPacket[]>(
+          "SELECT version,category,category+0 ordinal,title,description,organizer,meeting_location,route FROM event_revisions ORDER BY version",
+        )
+        .then(([rows]) => rows);
+    const ledger = () =>
+      connection
+        .query<RowDataPacket[]>(
+          "SELECT version,hash,state,started_at,applied_at FROM _vtc_migrations ORDER BY version",
+        )
+        .then(([rows]) => rows);
+    const insertImage = (
+      mediaId: string,
+      eventId: string,
+      key: string,
+      cover: boolean,
+      position: number,
+    ) =>
+      connection.execute(
+        "INSERT INTO event_media (id,event_id,uploader_id,upload_key,state,generation,original_name,content_type,byte_length,width,height,sha256,fingerprint,position,is_cover,next_check_at,created_at,updated_at) VALUES (?,?,?,?,'ready',?,'fictional.png','image/png',512,32,16,?,?,?,?,?,?,?)",
+        [
+          mediaId,
+          eventId,
+          actor,
+          key,
+          id(99),
+          Buffer.alloc(32),
+          Buffer.alloc(32, 1),
+          position,
+          cover,
+          time,
+          time,
+          time,
+        ],
+      );
+
+    try {
+      const settings = guardedSettings();
+      await reset(connection);
+      folder = await eventStage2PriorFolder();
+      assert.equal(await runMigrations(settings, { folder }), 28);
+      await connection.execute(
+        "INSERT INTO identity_users (id,name,email,created_at,updated_at) VALUES (?,'Fictional organizer','event-stage-2@example.invalid',?,?)",
+        [actor, time, time],
+      );
+      await connection.execute(
+        "INSERT INTO identity_memberships (user_id,status) VALUES (?,'active')",
+        [actor],
+      );
+      await insertEvent(legacy);
+      await insertRevision(id(11), 1, "created", "scheduled");
+      await insertRevision(id(12), 2, "updated", "scheduled");
+      await insertRevision(id(13), 3, "cancelled", "cancelled");
+      await connection.execute(
+        "UPDATE events SET current_revision_id=?,version=3,change_sequence=3,status='cancelled' WHERE id=?",
+        [id(13), legacy],
+      );
+      const before = await definitions();
+      const history = await ledger();
+
+      assert.equal(await runMigrations(settings), 1);
+      assert.equal(await runMigrations(settings), 0);
+      const upgraded = await ledger();
+      assert.equal(upgraded.length, 29);
+      assert.deepEqual(upgraded.slice(0, -1), history);
+      assert.equal(upgraded.at(-1)?.state, "applied");
+      assert.ok(upgraded.at(-1)?.applied_at);
+      assert.deepEqual(await definitions(), before);
+      assert.deepEqual(
+        before.map((row) => [row.category, Number(row.ordinal)]),
+        [
+          ["created", 1],
+          ["updated", 2],
+          ["cancelled", 3],
+        ],
+      );
+      const [legacyState] = await connection.execute<RowDataPacket[]>(
+        "SELECT version,status,CAST(current_revision_id AS CHAR) revision FROM events WHERE id=?",
+        [legacy],
+      );
+      assert.deepEqual(legacyState, [{ version: 3, status: "cancelled", revision: id(13) }]);
+      await insertRevision(id(14), 4, "updated", "scheduled");
+      await insertRevision(id(15), 5, "published", "scheduled");
+      assert.deepEqual(
+        (await definitions()).slice(-2).map((row) => [row.category, Number(row.ordinal)]),
+        [
+          ["updated", 2],
+          ["published", 4],
+        ],
+      );
+
+      const [metadata] = await connection.query<RowDataPacket[]>("SELECT id FROM event_metadata");
+      assert.deepEqual(metadata, []);
+      await connection.execute("INSERT INTO event_metadata (id,created_at) VALUES (?,?),(?,?)", [
+        draft,
+        time,
+        otherEvent,
+        time,
+      ]);
+      await connection.execute(
+        "INSERT INTO event_drafts (event_id,version,updated_by,updated_at) VALUES (?,1,?,?)",
+        [draft, actor, time],
+      );
+      const [incomplete] = await connection.execute<RowDataPacket[]>(
+        "SELECT d.title,d.game,d.starts_at,d.distance_km,(e.id IS NOT NULL) published FROM event_drafts d LEFT JOIN events e ON e.id=d.event_id WHERE d.event_id=?",
+        [draft],
+      );
+      assert.deepEqual(
+        incomplete.map((row) => ({ ...row, published: String(row.published) })),
+        [{ title: null, game: null, starts_at: null, distance_km: null, published: "0" }],
+      );
+      await assert.rejects(
+        connection.execute("UPDATE event_drafts SET distance_km=-1 WHERE event_id=?", [draft]),
+        hasCode("ER_CHECK_CONSTRAINT_VIOLATED"),
+      );
+      await assert.rejects(
+        connection.execute("UPDATE event_metadata SET published_event_id=? WHERE id=?", [
+          legacy,
+          draft,
+        ]),
+        hasCode("ER_CHECK_CONSTRAINT_VIOLATED"),
+      );
+      await connection.execute("UPDATE event_drafts SET game='ets2' WHERE event_id=?", [draft]);
+      await connection.execute(
+        "INSERT INTO catalog_dlcs (id,game,code,name_en) VALUES (?,'ats','synthetic_ats','Fictional ATS pack'),(?,'ets2','synthetic_ets','Fictional ETS2 pack')",
+        [atsDlc, etsDlc],
+      );
+      const addDlc = (dlcId: string) =>
+        connection.execute(
+          "INSERT INTO event_draft_dlcs (event_id,dlc_id,game) VALUES (?,?,'ets2')",
+          [draft, dlcId],
+        );
+      await assert.rejects(addDlc(atsDlc), hasCode("ER_NO_REFERENCED_ROW_2"));
+      await addDlc(etsDlc);
+      await assert.rejects(addDlc(etsDlc), hasCode("ER_DUP_ENTRY"));
+
+      await insertImage(id(21), draft, id(31), true, 0);
+      await insertImage(id(22), draft, id(32), false, 1);
+      await assert.rejects(insertImage(id(23), draft, id(33), true, 2), hasCode("ER_DUP_ENTRY"));
+      await assert.rejects(insertImage(id(23), draft, id(31), false, 2), hasCode("ER_DUP_ENTRY"));
+      await assert.rejects(
+        insertImage(id(23), draft, id(33), false, 10),
+        hasCode("ER_CHECK_CONSTRAINT_VIOLATED"),
+      );
+      await insertImage(id(24), otherEvent, id(31), true, 0);
+      await connection.execute(
+        "INSERT INTO event_media_generations (media_id,generation,created_at,updated_at,lease_until,next_check_at) VALUES (?,?,?,?,?,?)",
+        [id(21), id(99), time, time, time, time],
+      );
+      await assert.rejects(
+        connection.execute("DELETE FROM event_media WHERE id=?", [id(21)]),
+        hasCode("ER_ROW_IS_REFERENCED_2"),
+      );
+      await insertEvent(draft);
+      await connection.execute("UPDATE event_metadata SET published_event_id=id WHERE id=?", [
+        draft,
+      ]);
+      const [retained] = await connection.execute<RowDataPacket[]>(
+        "SELECT CAST(m.event_id AS CHAR) event_id,CAST(e.published_event_id AS CHAR) published_event_id FROM event_media m JOIN event_metadata e ON e.id=m.event_id WHERE m.id=?",
+        [id(21)],
+      );
+      assert.deepEqual(retained, [{ event_id: draft, published_event_id: draft }]);
     } finally {
       await connection.end();
       if (folder) await rm(folder, { recursive: true });

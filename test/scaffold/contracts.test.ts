@@ -10,11 +10,13 @@ interface Operation {
   operationId: string;
   responses: Record<string, Content | { $ref: string }>;
   requestBody?: Content;
+  "x-stage-2-operation"?: Omit<Operation, "operationId" | "x-stage-2-operation">;
 }
 interface Fixture {
   id: string;
   operationId: string;
   status: number;
+  operationExtension?: "x-stage-2-operation";
   request?: unknown;
   response: unknown;
 }
@@ -46,7 +48,10 @@ test("the runtime schema engine accepts every reviewed structural browser fixtur
     assert.ok(validate(value), `${label}: ${ajv.errorsText(validate.errors)}`);
   }
   for (const fixture of fixtures.cases) {
-    const operation = operations.get(fixture.operationId);
+    const activeOperation = operations.get(fixture.operationId);
+    const operation = fixture.operationExtension
+      ? activeOperation?.[fixture.operationExtension]
+      : activeOperation;
     assert.ok(operation, fixture.id);
     let response = operation.responses[fixture.status] ?? operation.responses.default;
     assert.ok(response, fixture.id);

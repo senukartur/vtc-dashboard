@@ -761,6 +761,38 @@ test("HTTP actual composition enforces auth, CSRF, strong separate ETags and clo
     });
     expect(created.statusCode).toBe(201);
     const id = created.json().data.event.id;
+
+    // Stage 2 additions are documented for downstream work but this app still
+    // serves the old request and response contracts.
+    const stagedEndpoints = [
+      ["GET", "/api/v1/admin/events?period=drafts"],
+      ["GET", `/api/v1/admin/events/drafts/${id}`],
+      ["PATCH", `/api/v1/admin/events/drafts/${id}`],
+      ["DELETE", `/api/v1/admin/events/${id}`],
+      ["POST", `/api/v1/admin/events/${id}/publication`],
+      ["GET", `/api/v1/admin/events/${id}/nonresponders`],
+      ["GET", `/api/v1/admin/events/${id}/media`],
+      ["POST", `/api/v1/admin/events/${id}/media`],
+      ["PATCH", `/api/v1/admin/events/${id}/media/${id}`],
+      ["DELETE", `/api/v1/admin/events/${id}/media/${id}`],
+      ["GET", `/api/v1/events/${id}/media`],
+      ["GET", `/api/v1/events/${id}/media/${id}/content?size=thumb`],
+      ["GET", `/api/v1/public/events/${id}/cover`],
+    ] as const;
+    for (const [method, url] of stagedEndpoints) {
+      expect(
+        (await app.inject({ method, url, headers: { cookie: directorCookie } })).statusCode,
+      ).toBe(404);
+    }
+    const stagedDraft = await app.inject({
+      method: "POST",
+      url: "/api/v1/admin/events",
+      headers: { cookie: directorCookie, origin, "x-csrf-token": csrf, "idempotency-key": newId() },
+      payload: { draft: true, title: "Fictional draft" },
+    });
+    expect(stagedDraft.statusCode).toBe(422);
+    const [draftRows] = await control.query<RowDataPacket[]>("SELECT id FROM event_metadata");
+    expect(draftRows).toEqual([]);
     const pub = await app.inject({ url: `/api/v1/public/events/${id}` });
     expect(pub.statusCode).toBe(200);
     expect(pub.json().data).not.toHaveProperty("myResponse");

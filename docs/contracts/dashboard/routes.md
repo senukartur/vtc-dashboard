@@ -158,3 +158,24 @@ Generated index of the [OpenAPI](openapi.json); semantics and sensitive response
 | `POST /api/v1/admin/invitations/{invitationId}/email-deliveries` | `requestInvitationEmail` | `applications.manage` | VTC-038 |
 
 VTC-015 adds the permission-filtered `GET /api/v1/admin/applications/{applicationId}/history` with the existing default-25/max-100 signed cursor page contract. It pages retained applications for the referenced application's normalized email and requires current `applications.manage`. See the [admissions implementation](../../development/admissions.md) and authoritative OpenAPI operation `listApplicationHistory`.
+
+
+## Stage 2 Events (VTC-132 Step 1)
+
+The operations below are staged in OpenAPI. Existing methods with new `x-stage-2-operation` projections are the public/member event list and detail, upcoming event, event creation, update and cancellation, and leadership attendance read. Those extensions preserve the live operation schemas until the owning feature lanes coordinate the wire cutover. See [staged semantics and picker handoff](README.md#stage-2-foundation-vtc-132-step-1).
+
+| Method and route | Operation ID | Capability | Feature owner |
+| --- | --- | --- | --- |
+| `GET /api/v1/admin/events?period=drafts` | `listAdminEvents` | `events.manage` | VTC-125 |
+| `GET /api/v1/admin/events/drafts/{eventId}` | `getEventDraft` | `events.manage` | VTC-125 |
+| `PATCH /api/v1/admin/events/drafts/{eventId}` | `updateEventDraft` | `events.manage` | VTC-125 |
+| `DELETE /api/v1/admin/events/{eventId}` | `deleteEventDraft` | `events.manage` | VTC-125 |
+| `POST /api/v1/admin/events/{eventId}/publication` | `publishEventDraft` | `events.manage` | VTC-125 |
+| `GET /api/v1/admin/events/{eventId}/nonresponders` | `listEventNonresponders` | `events.manage` | VTC-126 |
+| `GET /api/v1/admin/events/{eventId}/media` | `listAdminEventMedia` | `events.manage` | VTC-127 |
+| `POST /api/v1/admin/events/{eventId}/media` | `uploadEventMedia` | `events.manage` | VTC-127 |
+| `PATCH /api/v1/admin/events/{eventId}/media/{mediaId}` | `updateEventMedia` | `events.manage` | VTC-127 |
+| `DELETE /api/v1/admin/events/{eventId}/media/{mediaId}` | `deleteEventMedia` | `events.manage` | VTC-127 |
+| `GET /api/v1/events/{eventId}/media` | `listEventMedia` | `company.read` | VTC-127 |
+| `GET /api/v1/events/{eventId}/media/{mediaId}/content?size=thumb\|full` | `getEventMediaContent` | `company.read`, draft restricted to managers | VTC-127 |
+| `GET /api/v1/public/events/{eventId}/cover` | `getPublicEventCover` | `public`, ready cover of a public published event | VTC-127 |

@@ -11122,6 +11122,2225 @@
       ],
       "additionalProperties": false,
       "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
+    },
+    "EventStage2Input": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "members"
+          ]
+        },
+        "originCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedCargoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedMassKg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "meetingLocation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "organizerMemberId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "truckersmp",
+            "haulmp"
+          ]
+        },
+        "originDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDlcIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "distanceKm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+              "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "game",
+        "platform",
+        "server",
+        "organizerMemberId",
+        "meetingAt",
+        "startsAt",
+        "endsAt",
+        "visibility",
+        "originCityId",
+        "destinationCityId",
+        "requiredDlcIds",
+        "prescribedCargoId",
+        "prescribedMassKg",
+        "prescribedTrailerTypeId"
+      ],
+      "additionalProperties": false,
+      "description": "Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility."
+    },
+    "EventStage2DraftInput": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "game": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "public",
+                "members"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedCargoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedMassKg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingLocation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organizerMemberId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "truckersmp",
+                "haulmp"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDlcIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "distanceKm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+              "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "description": "Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules."
+    },
+    "EventStage2Draft": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "lifecycle": {
+          "const": "draft"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "fields": {
+          "$ref": "#/$defs/EventStage2DraftInput"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "lifecycle",
+        "updatedAt",
+        "fields"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2DraftDeletion": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "lifecycle": {
+          "const": "discarded"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "lifecycle"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2PublicationInput": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "EventStage2CanonicalCatalogOption": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "code"
+      ],
+      "additionalProperties": false,
+      "description": "Canonical company, depot or DLC label independent of locale. Display the name on the left and code on the right. A depot uses the company name and code with the depot row ID."
+    },
+    "EventStage2Dlc": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "from_city",
+              "manual"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "code",
+        "sources"
+      ],
+      "additionalProperties": false,
+      "description": "One entry per canonical DLC ID. from_city covers selected cities and depots; keep both provenance values when a derived DLC was also selected manually."
+    },
+    "EventStage2Public": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "cancelled",
+            "completed"
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "organizer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "meetingLocation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "truckersmp",
+                "haulmp"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originDepot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStage2CanonicalCatalogOption"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationDepot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStage2CanonicalCatalogOption"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "distanceKm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+              "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDlcs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2Dlc"
+          }
+        },
+        "hasCover": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "title",
+        "description",
+        "game",
+        "startsAt",
+        "endsAt",
+        "status",
+        "origin",
+        "destination",
+        "server",
+        "organizer",
+        "meetingLocation",
+        "route",
+        "meetingAt",
+        "platform",
+        "originDepot",
+        "destinationDepot",
+        "distanceKm",
+        "requiredDlcs",
+        "hasCover"
+      ],
+      "additionalProperties": false,
+      "description": "Published public projection. Organizer is safe display text, with legacy text fallback when there is no member link. Missing structured fields on older revisions remain null. City labels follow the requested locale."
+    },
+    "EventStage2MemberListItem": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/EventStage2Public"
+        },
+        "organizerMemberId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "members"
+          ]
+        },
+        "myResponse": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unanswered",
+                "participating",
+                "declined"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseCounts": {
+          "$ref": "#/$defs/EventResponseCounts"
+        }
+      },
+      "required": [
+        "event",
+        "organizerMemberId",
+        "visibility",
+        "myResponse",
+        "responseCounts"
+      ],
+      "additionalProperties": false,
+      "description": "Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons."
+    },
+    "EventStage2Member": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/EventStage2Public"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "members"
+          ]
+        },
+        "myResponse": {
+          "$ref": "#/$defs/Rsvp"
+        },
+        "myAttendance": {
+          "type": "string",
+          "enum": [
+            "unconfirmed",
+            "attended",
+            "not_attended"
+          ]
+        },
+        "prescribedCargoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedMassKg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organizerMemberId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedCargo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CatalogLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "responseCounts": {
+          "$ref": "#/$defs/EventResponseCounts"
+        }
+      },
+      "required": [
+        "event",
+        "visibility",
+        "myResponse",
+        "myAttendance",
+        "prescribedCargoId",
+        "prescribedMassKg",
+        "prescribedTrailerTypeId",
+        "organizerMemberId",
+        "prescribedCargo",
+        "prescribedTrailerType",
+        "responseCounts"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2Upcoming": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "#/$defs/EventStage2Public"
+        },
+        "myResponse": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unanswered",
+                "participating",
+                "declined"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "myResponse"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2AdminPublished": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "lifecycle": {
+          "const": "published"
+        },
+        "definition": {
+          "$ref": "#/$defs/EventStage2Member"
+        }
+      },
+      "required": [
+        "id",
+        "lifecycle",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2PublicList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2Public"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2MemberList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2MemberListItem"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2AdminList": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/EventStage2Draft"
+              },
+              {
+                "$ref": "#/$defs/EventStage2AdminPublished"
+              }
+            ]
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2AttendanceRow": {
+      "type": "object",
+      "properties": {
+        "member": {
+          "$ref": "#/$defs/MemberSummary"
+        },
+        "response": {
+          "$ref": "#/$defs/Rsvp"
+        },
+        "attendance": {
+          "type": "string",
+          "enum": [
+            "unconfirmed",
+            "attended",
+            "not_attended"
+          ]
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tripId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "member",
+        "response",
+        "attendance",
+        "note",
+        "tripId"
+      ],
+      "additionalProperties": false,
+      "description": "The linked trip ID comes from the authorized Trips-owned association; null means no readable canonical trip."
+    },
+    "EventStage2Attendance": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2AttendanceRow"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "totals": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "attended": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "notAttended": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "unconfirmed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "total",
+            "attended",
+            "notAttended",
+            "unconfirmed"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor",
+        "totals"
+      ],
+      "additionalProperties": false,
+      "description": "Leadership-only actual attendance totals across all rows in scope, independent of RSVP and pagination."
+    },
+    "EventStage2Nonresponders": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MemberSummary"
+          }
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2Media": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg"
+          ]
+        },
+        "byteLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16000000
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16000000
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "isCover": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "contentType",
+        "byteLength",
+        "width",
+        "height",
+        "caption",
+        "position",
+        "isCover"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2MediaList": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2Media"
+          },
+          "maxItems": 10
+        }
+      },
+      "required": [
+        "version",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2AdminMediaItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "processing",
+            "ready",
+            "rejected"
+          ]
+        },
+        "media": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStage2Media"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "media"
+      ],
+      "additionalProperties": false,
+      "description": "Only ready media have readable image metadata. Uploader identity, storage paths, hashes and generations stay private."
+    },
+    "EventStage2AdminMediaList": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStage2AdminMediaItem"
+          },
+          "maxItems": 10
+        }
+      },
+      "required": [
+        "version",
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2MediaUpload": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "item": {
+          "$ref": "#/$defs/EventStage2AdminMediaItem"
+        }
+      },
+      "required": [
+        "version",
+        "item"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2MediaUploadInput": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "format": "binary",
+          "description": "One PNG or JPEG, subject to the existing manual evidence file-byte and decoded-pixel limits."
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2MediaEditInput": {
+      "type": "object",
+      "properties": {
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "isCover": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "Update any supplied fields. Position is zero-based; the server reorders atomically. A true cover flag replaces the current cover, false clears the cover only if this image is the current cover."
+    },
+    "EventStage2EnvelopeDraft": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2Draft"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeDraftDeletion": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2DraftDeletion"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopePublic": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2Public"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopePublicList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2PublicList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeMember": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2Member"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeMemberList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2MemberList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeAdminList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2AdminList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeAttendance": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2Attendance"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeNonresponders": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2Nonresponders"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeMediaList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2MediaList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeAdminMediaList": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2AdminMediaList"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeMediaUpload": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/EventStage2MediaUpload"
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2EnvelopeUpcoming": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EventStage2Upcoming"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
+    },
+    "EventStage2DraftCreationInput": {
+      "type": "object",
+      "properties": {
+        "draft": {
+          "const": true
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "game": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ets2",
+                "ats"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "public",
+                "members"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedCargoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedMassKg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingLocation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "organizerMemberId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "truckersmp",
+                "haulmp"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDlcIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "distanceKm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+              "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "draft"
+      ],
+      "additionalProperties": false,
+      "description": "Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules."
+    },
+    "EventStage2PublishedCreationInput": {
+      "type": "object",
+      "properties": {
+        "draft": {
+          "const": false
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "game": {
+          "type": "string",
+          "enum": [
+            "ets2",
+            "ats"
+          ]
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "endsAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "members"
+          ]
+        },
+        "originCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationCityId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedCargoId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedMassKg": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+              "maxLength": 64
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prescribedTrailerTypeId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "meetingLocation": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "route": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "meetingAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+        },
+        "organizerMemberId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "truckersmp",
+            "haulmp"
+          ]
+        },
+        "originDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destinationDepotId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requiredDlcIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "uniqueItems": true
+        },
+        "distanceKm": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 39,
+              "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+              "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "game",
+        "platform",
+        "server",
+        "organizerMemberId",
+        "meetingAt",
+        "startsAt",
+        "endsAt",
+        "visibility",
+        "originCityId",
+        "destinationCityId",
+        "requiredDlcIds",
+        "prescribedCargoId",
+        "prescribedMassKg",
+        "prescribedTrailerTypeId"
+      ],
+      "additionalProperties": false,
+      "description": "Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility."
+    },
+    "EventStage2CreationInput": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EventStage2DraftCreationInput"
+        },
+        {
+          "$ref": "#/$defs/EventStage2PublishedCreationInput"
+        }
+      ]
+    },
+    "EventStage2EnvelopeCreation": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EventStage2Draft"
+            },
+            {
+              "$ref": "#/$defs/EventStage2Member"
+            }
+          ]
+        },
+        "meta": {
+          "$ref": "#/$defs/Meta"
+        }
+      },
+      "required": [
+        "data",
+        "meta"
+      ],
+      "additionalProperties": false
     }
   }
 }

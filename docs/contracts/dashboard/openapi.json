@@ -142,7 +142,66 @@
               ]
             }
           }
-        ]
+        ],
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124",
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "period",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "upcoming",
+                  "past"
+                ]
+              }
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopePublicList"
+                  }
+                }
+              },
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
       }
     },
     "/api/v1/public/events/{eventId}": {
@@ -185,7 +244,58 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopePublic"
+                  }
+                }
+              },
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
       }
     },
     "/api/v1/public/applications": {
@@ -6366,7 +6476,66 @@
               ]
             }
           }
-        ]
+        ],
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124 / VTC-126",
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            },
+            {
+              "name": "period",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "upcoming",
+                  "past"
+                ]
+              }
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeMemberList"
+                  }
+                }
+              },
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
       }
     },
     "/api/v1/events/{eventId}": {
@@ -6419,7 +6588,65 @@
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           }
-        ]
+        ],
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124 / VTC-126",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeMember"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong version of the aggregate named by this operation."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
       }
     },
     "/api/v1/events/{eventId}/my-response": {
@@ -6735,6 +6962,47 @@
           "default": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-126",
+          "parameters": [
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeUpcoming"
+                  }
+                }
+              },
+              "headers": {
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
         }
       }
     },
@@ -6783,6 +7051,162 @@
                 "$ref": "#/components/schemas/EventInput"
               }
             }
+          }
+        },
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-125",
+          "parameters": [
+            {
+              "$ref": "#/components/parameters/IdempotencyKey"
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2CreationInput"
+                }
+              }
+            }
+          },
+          "responses": {
+            "201": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeCreation"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong draft version for a draft or event definition version for a published event."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          },
+          "description": "With draft:true, save an incomplete manager-only draft. Otherwise, validate and create a published event. Only publication can notify."
+        }
+      },
+      "get": {
+        "operationId": "listAdminEvents",
+        "tags": [
+          "events"
+        ],
+        "summary": "listAdminEvents",
+        "description": "Only event managers can filter draft or published events. The default filter is published; cursors are scoped to the filter and authority.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-125",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "published",
+                "drafts"
+              ],
+              "default": "published"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeAdminList"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
@@ -6858,6 +7282,179 @@
               }
             }
           }
+        },
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/IfMatch"
+            },
+            {
+              "$ref": "#/components/parameters/IdempotencyKey"
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2Input"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeMember"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong version of the aggregate named by this operation."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEventDraft",
+        "tags": [
+          "events"
+        ],
+        "summary": "deleteEventDraft",
+        "description": "Discard an active draft and fence its media.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-125",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeDraftDeletion"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -6931,6 +7528,81 @@
               }
             }
           }
+        },
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124 / VTC-126",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/IfMatch"
+            },
+            {
+              "$ref": "#/components/parameters/IdempotencyKey"
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonInput"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeMember"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong version of the aggregate named by this operation."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          },
+          "description": "Cancel a published event under its definition ETag. Return the staged projection, including null optional legacy text when unavailable. The cancellation reason stays private."
         }
       }
     },
@@ -6992,7 +7664,59 @@
           {
             "$ref": "#/components/parameters/Cursor"
           }
-        ]
+        ],
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-126",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/Limit"
+            },
+            {
+              "$ref": "#/components/parameters/Cursor"
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeAttendance"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong version of the aggregate named by this operation."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          }
+        }
       },
       "put": {
         "operationId": "setEventAttendance",
@@ -9987,6 +10711,1080 @@
           }
         },
         "description": "Apply source availability and current capabilities, visibility and ownership at computedAt. Count eligible rows before limiting each deterministically sorted preview to five items. All responses use Cache-Control: no-store."
+      }
+    },
+    "/api/v1/admin/events/drafts/{eventId}": {
+      "get": {
+        "operationId": "getEventDraft",
+        "tags": [
+          "events"
+        ],
+        "summary": "getEventDraft",
+        "description": "Read an active draft under its independent draft version.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-125",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeDraft"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateEventDraft",
+        "tags": [
+          "events"
+        ],
+        "summary": "updateEventDraft",
+        "description": "Save an incomplete draft under the draft ETag.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-125",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventStage2DraftInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeDraft"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/events/{eventId}/nonresponders": {
+      "get": {
+        "operationId": "listEventNonresponders",
+        "tags": [
+          "events"
+        ],
+        "summary": "listEventNonresponders",
+        "description": "Current leaders may page eligible members with no current participation or decline response.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-126",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeNonresponders"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/events/{eventId}/media": {
+      "get": {
+        "operationId": "listAdminEventMedia",
+        "tags": [
+          "events"
+        ],
+        "summary": "listAdminEventMedia",
+        "description": "Read media metadata for an accessible draft or published event. The ETag belongs to the media collection.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeAdminMediaList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "uploadEventMedia",
+        "tags": [
+          "events"
+        ],
+        "summary": "uploadEventMedia",
+        "description": "Upload one image under the media collection ETag and a key scoped to the actor and event. Retry the same file and request under the same key. Up to ten images may occupy slots in an event.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/EventStage2MediaUploadInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeMediaUpload"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/events/{eventId}/media/{mediaId}": {
+      "patch": {
+        "operationId": "updateEventMedia",
+        "tags": [
+          "events"
+        ],
+        "summary": "updateEventMedia",
+        "description": "Edit the caption, position or cover under the media collection ETag.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventStage2MediaEditInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeAdminMediaList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteEventMedia",
+        "tags": [
+          "events"
+        ],
+        "summary": "deleteEventMedia",
+        "description": "Remove a media item under the media collection ETag. Removal of the cover clears it.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeAdminMediaList"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/events/{eventId}/media": {
+      "get": {
+        "operationId": "listEventMedia",
+        "tags": [
+          "events"
+        ],
+        "summary": "listEventMedia",
+        "description": "Return ready images for an accessible published event.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "company.read",
+        "x-guards": [],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeMediaList"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/events/{eventId}/media/{mediaId}/content": {
+      "get": {
+        "operationId": "getEventMediaContent",
+        "tags": [
+          "events"
+        ],
+        "summary": "getEventMediaContent",
+        "description": "Members can read ready images on an accessible published event. A current manager may also read ready draft images.",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "company.read",
+        "x-guards": [],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "mediaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "thumb",
+                "full"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized image rendition.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/public/events/{eventId}/cover": {
+      "get": {
+        "operationId": "getPublicEventCover",
+        "tags": [
+          "events"
+        ],
+        "summary": "getPublicEventCover",
+        "description": "Return the selected ready cover thumbnail only while the published event is public. Recheck visibility for each request.",
+        "security": [],
+        "x-module": "events",
+        "x-owner-card": "VTC-127",
+        "x-capability": "public",
+        "x-guards": [],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized image rendition.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "const": "nosniff"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/events/{eventId}/publication": {
+      "post": {
+        "operationId": "publishEventDraft",
+        "tags": [
+          "events"
+        ],
+        "summary": "publishEventDraft",
+        "description": "Validate the saved draft as a complete event and publish under the same event ID. Publication is the first notification-eligible change.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-module": "events",
+        "x-owner-card": "VTC-125",
+        "x-capability": "events.manage",
+        "x-guards": [
+          "current_director_or_deputy"
+        ],
+        "x-contract-stage": "VTC-132 Step 1",
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventStage2PublicationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Staged result; see semantic preconditions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventStage2EnvelopeMember"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^\"v[1-9][0-9]*\"$"
+                },
+                "description": "Strong version of the aggregate named by this operation."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "const": "no-store"
+                },
+                "description": "Do not store this response."
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error"
+          },
+          "428": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     }
   },
@@ -21112,6 +22910,2225 @@
         ],
         "additionalProperties": false,
         "description": "Optional publication reason. A null requiredTrips or requiredDistanceM means there is no minimum for that measure. Both keys are required. Use the separate optional preview action for a sample."
+      },
+      "EventStage2Input": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "members"
+            ]
+          },
+          "originCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedCargoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerTypeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meetingLocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "organizerMemberId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "truckersmp",
+              "haulmp"
+            ]
+          },
+          "originDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDlcIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "uniqueItems": true
+          },
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 39,
+                "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+                "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "game",
+          "platform",
+          "server",
+          "organizerMemberId",
+          "meetingAt",
+          "startsAt",
+          "endsAt",
+          "visibility",
+          "originCityId",
+          "destinationCityId",
+          "requiredDlcIds",
+          "prescribedCargoId",
+          "prescribedMassKg",
+          "prescribedTrailerTypeId"
+        ],
+        "additionalProperties": false,
+        "description": "Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility."
+      },
+      "EventStage2DraftInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ets2",
+                  "ats"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "members"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "originCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedCargoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerTypeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "server": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingLocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizerMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "truckersmp",
+                  "haulmp"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "originDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDlcIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "uniqueItems": true
+          },
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 39,
+                "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+                "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "description": "Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules."
+      },
+      "EventStage2Draft": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "lifecycle": {
+            "const": "draft"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "fields": {
+            "$ref": "#/components/schemas/EventStage2DraftInput"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "lifecycle",
+          "updatedAt",
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2DraftDeletion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "lifecycle": {
+            "const": "discarded"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "lifecycle"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2PublicationInput": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "EventStage2CanonicalCatalogOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code"
+        ],
+        "additionalProperties": false,
+        "description": "Canonical company, depot or DLC label independent of locale. Display the name on the left and code on the right. A depot uses the company name and code with the depot row ID."
+      },
+      "EventStage2Dlc": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "from_city",
+                "manual"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code",
+          "sources"
+        ],
+        "additionalProperties": false,
+        "description": "One entry per canonical DLC ID. from_city covers selected cities and depots; keep both provenance values when a derived DLC was also selected manually."
+      },
+      "EventStage2Public": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "completed"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "organizer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meetingLocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "truckersmp",
+                  "haulmp"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "originDepot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventStage2CanonicalCatalogOption"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationDepot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventStage2CanonicalCatalogOption"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 39,
+                "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+                "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDlcs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2Dlc"
+            }
+          },
+          "hasCover": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "title",
+          "description",
+          "game",
+          "startsAt",
+          "endsAt",
+          "status",
+          "origin",
+          "destination",
+          "server",
+          "organizer",
+          "meetingLocation",
+          "route",
+          "meetingAt",
+          "platform",
+          "originDepot",
+          "destinationDepot",
+          "distanceKm",
+          "requiredDlcs",
+          "hasCover"
+        ],
+        "additionalProperties": false,
+        "description": "Published public projection. Organizer is safe display text, with legacy text fallback when there is no member link. Missing structured fields on older revisions remain null. City labels follow the requested locale."
+      },
+      "EventStage2MemberListItem": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EventStage2Public"
+          },
+          "organizerMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "members"
+            ]
+          },
+          "myResponse": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "participating",
+                  "declined"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "responseCounts": {
+            "$ref": "#/components/schemas/EventResponseCounts"
+          }
+        },
+        "required": [
+          "event",
+          "organizerMemberId",
+          "visibility",
+          "myResponse",
+          "responseCounts"
+        ],
+        "additionalProperties": false,
+        "description": "Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons."
+      },
+      "EventStage2Member": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EventStage2Public"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "members"
+            ]
+          },
+          "myResponse": {
+            "$ref": "#/components/schemas/Rsvp"
+          },
+          "myAttendance": {
+            "type": "string",
+            "enum": [
+              "unconfirmed",
+              "attended",
+              "not_attended"
+            ]
+          },
+          "prescribedCargoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerTypeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizerMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedCargo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "responseCounts": {
+            "$ref": "#/components/schemas/EventResponseCounts"
+          }
+        },
+        "required": [
+          "event",
+          "visibility",
+          "myResponse",
+          "myAttendance",
+          "prescribedCargoId",
+          "prescribedMassKg",
+          "prescribedTrailerTypeId",
+          "organizerMemberId",
+          "prescribedCargo",
+          "prescribedTrailerType",
+          "responseCounts"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2Upcoming": {
+        "type": "object",
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/EventStage2Public"
+          },
+          "myResponse": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "unanswered",
+                  "participating",
+                  "declined"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "event",
+          "myResponse"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2AdminPublished": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "lifecycle": {
+            "const": "published"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/EventStage2Member"
+          }
+        },
+        "required": [
+          "id",
+          "lifecycle",
+          "definition"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2PublicList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2Public"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2MemberList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2MemberListItem"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2AdminList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/EventStage2Draft"
+                },
+                {
+                  "$ref": "#/components/schemas/EventStage2AdminPublished"
+                }
+              ]
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2AttendanceRow": {
+        "type": "object",
+        "properties": {
+          "member": {
+            "$ref": "#/components/schemas/MemberSummary"
+          },
+          "response": {
+            "$ref": "#/components/schemas/Rsvp"
+          },
+          "attendance": {
+            "type": "string",
+            "enum": [
+              "unconfirmed",
+              "attended",
+              "not_attended"
+            ]
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tripId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "member",
+          "response",
+          "attendance",
+          "note",
+          "tripId"
+        ],
+        "additionalProperties": false,
+        "description": "The linked trip ID comes from the authorized Trips-owned association; null means no readable canonical trip."
+      },
+      "EventStage2Attendance": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2AttendanceRow"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "attended": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "notAttended": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "unconfirmed": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              }
+            },
+            "required": [
+              "total",
+              "attended",
+              "notAttended",
+              "unconfirmed"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor",
+          "totals"
+        ],
+        "additionalProperties": false,
+        "description": "Leadership-only actual attendance totals across all rows in scope, independent of RSVP and pagination."
+      },
+      "EventStage2Nonresponders": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemberSummary"
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2Media": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg"
+            ]
+          },
+          "byteLength": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 67108864
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16000000
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16000000
+          },
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          },
+          "isCover": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "contentType",
+          "byteLength",
+          "width",
+          "height",
+          "caption",
+          "position",
+          "isCover"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2MediaList": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2Media"
+            },
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "version",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2AdminMediaItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "ready",
+              "rejected"
+            ]
+          },
+          "media": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventStage2Media"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "media"
+        ],
+        "additionalProperties": false,
+        "description": "Only ready media have readable image metadata. Uploader identity, storage paths, hashes and generations stay private."
+      },
+      "EventStage2AdminMediaList": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventStage2AdminMediaItem"
+            },
+            "maxItems": 10
+          }
+        },
+        "required": [
+          "version",
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2MediaUpload": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4294967295
+          },
+          "item": {
+            "$ref": "#/components/schemas/EventStage2AdminMediaItem"
+          }
+        },
+        "required": [
+          "version",
+          "item"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2MediaUploadInput": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "One PNG or JPEG, subject to the existing manual evidence file-byte and decoded-pixel limits."
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2MediaEditInput": {
+        "type": "object",
+        "properties": {
+          "caption": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          },
+          "isCover": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "Update any supplied fields. Position is zero-based; the server reorders atomically. A true cover flag replaces the current cover, false clears the cover only if this image is the current cover."
+      },
+      "EventStage2EnvelopeDraft": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2Draft"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeDraftDeletion": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2DraftDeletion"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopePublic": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2Public"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopePublicList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2PublicList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeMember": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2Member"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeMemberList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2MemberList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeAdminList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2AdminList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeAttendance": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2Attendance"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeNonresponders": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2Nonresponders"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeMediaList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2MediaList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeAdminMediaList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2AdminMediaList"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeMediaUpload": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EventStage2MediaUpload"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2EnvelopeUpcoming": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventStage2Upcoming"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "EventStage2DraftCreationInput": {
+        "type": "object",
+        "properties": {
+          "draft": {
+            "const": true
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ets2",
+                  "ats"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "public",
+                  "members"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "originCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedCargoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerTypeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "server": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingLocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "organizerMemberId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "truckersmp",
+                  "haulmp"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "originDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDlcIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "uniqueItems": true
+          },
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 39,
+                "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+                "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "draft"
+        ],
+        "additionalProperties": false,
+        "description": "Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules."
+      },
+      "EventStage2PublishedCreationInput": {
+        "type": "object",
+        "properties": {
+          "draft": {
+            "const": false
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "game": {
+            "type": "string",
+            "enum": [
+              "ets2",
+              "ats"
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "endsAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "public",
+              "members"
+            ]
+          },
+          "originCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationCityId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedCargoId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedMassKg": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prescribedTrailerTypeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meetingLocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meetingAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+          },
+          "organizerMemberId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "truckersmp",
+              "haulmp"
+            ]
+          },
+          "originDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "destinationDepotId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requiredDlcIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "uniqueItems": true
+          },
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 39,
+                "pattern": "^(0|[1-9][0-9]{0,19})(\\.[0-9]{0,17}[1-9])?$",
+                "description": "Nonnegative exact kilometers. Null or omitted means unavailable; zero is a recorded value."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "title",
+          "game",
+          "platform",
+          "server",
+          "organizerMemberId",
+          "meetingAt",
+          "startsAt",
+          "endsAt",
+          "visibility",
+          "originCityId",
+          "destinationCityId",
+          "requiredDlcIds",
+          "prescribedCargoId",
+          "prescribedMassKg",
+          "prescribedTrailerTypeId"
+        ],
+        "additionalProperties": false,
+        "description": "Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility."
+      },
+      "EventStage2CreationInput": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/EventStage2DraftCreationInput"
+          },
+          {
+            "$ref": "#/components/schemas/EventStage2PublishedCreationInput"
+          }
+        ]
+      },
+      "EventStage2EnvelopeCreation": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/EventStage2Draft"
+              },
+              {
+                "$ref": "#/components/schemas/EventStage2Member"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
       }
     },
     "parameters": {

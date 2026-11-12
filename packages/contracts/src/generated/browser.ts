@@ -285,7 +285,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * listAdminEvents
+         * @description Only event managers can filter draft or published events. The default filter is published; cursors are scoped to the filter and authority.
+         */
+        get: operations["listAdminEvents"];
         put?: never;
         /** createEvent */
         post: operations["createEvent"];
@@ -305,7 +309,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * deleteEventDraft
+         * @description Discard an active draft and fence its media.
+         */
+        delete: operations["deleteEventDraft"];
         options?: never;
         head?: never;
         /** updateEvent */
@@ -345,6 +353,118 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/events/{eventId}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listAdminEventMedia
+         * @description Read media metadata for an accessible draft or published event. The ETag belongs to the media collection.
+         */
+        get: operations["listAdminEventMedia"];
+        put?: never;
+        /**
+         * uploadEventMedia
+         * @description Upload one image under the media collection ETag and a key scoped to the actor and event. Retry the same file and request under the same key. Up to ten images may occupy slots in an event.
+         */
+        post: operations["uploadEventMedia"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/events/{eventId}/media/{mediaId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * deleteEventMedia
+         * @description Remove a media item under the media collection ETag. Removal of the cover clears it.
+         */
+        delete: operations["deleteEventMedia"];
+        options?: never;
+        head?: never;
+        /**
+         * updateEventMedia
+         * @description Edit the caption, position or cover under the media collection ETag.
+         */
+        patch: operations["updateEventMedia"];
+        trace?: never;
+    };
+    "/api/v1/admin/events/{eventId}/nonresponders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listEventNonresponders
+         * @description Current leaders may page eligible members with no current participation or decline response.
+         */
+        get: operations["listEventNonresponders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/events/{eventId}/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * publishEventDraft
+         * @description Validate the saved draft as a complete event and publish under the same event ID. Publication is the first notification-eligible change.
+         */
+        post: operations["publishEventDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/events/drafts/{eventId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getEventDraft
+         * @description Read an active draft under its independent draft version.
+         */
+        get: operations["getEventDraft"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * updateEventDraft
+         * @description Save an incomplete draft under the draft ETag.
+         */
+        patch: operations["updateEventDraft"];
         trace?: never;
     };
     "/api/v1/admin/invitations/{invitationId}": {
@@ -1105,6 +1225,46 @@ export interface paths {
         };
         /** listEventDecliners */
         get: operations["listEventDecliners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events/{eventId}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * listEventMedia
+         * @description Return ready images for an accessible published event.
+         */
+        get: operations["listEventMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events/{eventId}/media/{mediaId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getEventMediaContent
+         * @description Members can read ready images on an accessible published event. A current manager may also read ready draft images.
+         */
+        get: operations["getEventMediaContent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2070,6 +2230,26 @@ export interface paths {
         };
         /** getPublicEvent */
         get: operations["getPublicEvent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/events/{eventId}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * getPublicEventCover
+         * @description Return the selected ready cover thumbnail only while the published event is public. Recheck visibility for each request.
+         */
+        get: operations["getPublicEventCover"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3504,6 +3684,353 @@ export interface components {
         EventResponseCounts: {
             declined: number;
             participating: number;
+        };
+        EventStage2AdminList: {
+            items: (components["schemas"]["EventStage2Draft"] | components["schemas"]["EventStage2AdminPublished"])[];
+            nextCursor: string | null;
+        };
+        /** @description Only ready media have readable image metadata. Uploader identity, storage paths, hashes and generations stay private. */
+        EventStage2AdminMediaItem: {
+            /** Format: uuid */
+            id: string;
+            media: components["schemas"]["EventStage2Media"] | null;
+            /** @enum {string} */
+            state: "processing" | "ready" | "rejected";
+        };
+        EventStage2AdminMediaList: {
+            items: components["schemas"]["EventStage2AdminMediaItem"][];
+            version: number;
+        };
+        EventStage2AdminPublished: {
+            definition: components["schemas"]["EventStage2Member"];
+            /** Format: uuid */
+            id: string;
+            /** @constant */
+            lifecycle: "published";
+        };
+        /** @description Leadership-only actual attendance totals across all rows in scope, independent of RSVP and pagination. */
+        EventStage2Attendance: {
+            items: components["schemas"]["EventStage2AttendanceRow"][];
+            nextCursor: string | null;
+            totals: {
+                attended: number;
+                notAttended: number;
+                total: number;
+                unconfirmed: number;
+            };
+        };
+        /** @description The linked trip ID comes from the authorized Trips-owned association; null means no readable canonical trip. */
+        EventStage2AttendanceRow: {
+            /** @enum {string} */
+            attendance: "unconfirmed" | "attended" | "not_attended";
+            member: components["schemas"]["MemberSummary"];
+            note: string | null;
+            response: components["schemas"]["Rsvp"];
+            tripId: string | null;
+        };
+        /** @description Canonical company, depot or DLC label independent of locale. Display the name on the left and code on the right. A depot uses the company name and code with the depot row ID. */
+        EventStage2CanonicalCatalogOption: {
+            code: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        EventStage2CreationInput: components["schemas"]["EventStage2DraftCreationInput"] | components["schemas"]["EventStage2PublishedCreationInput"];
+        /** @description One entry per canonical DLC ID. from_city covers selected cities and depots; keep both provenance values when a derived DLC was also selected manually. */
+        EventStage2Dlc: {
+            code: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            sources: ("from_city" | "manual")[];
+        };
+        EventStage2Draft: {
+            fields: components["schemas"]["EventStage2DraftInput"];
+            /** Format: uuid */
+            id: string;
+            /** @constant */
+            lifecycle: "draft";
+            /** Format: date-time */
+            updatedAt: string;
+            version: number;
+        };
+        /** @description Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules. */
+        EventStage2DraftCreationInput: {
+            description?: string | null;
+            destinationCityId?: string | null;
+            destinationDepotId?: string | null;
+            distanceKm?: string | null;
+            /** @constant */
+            draft: true;
+            endsAt?: string | null;
+            game?: ("ets2" | "ats") | null;
+            meetingAt?: string | null;
+            meetingLocation?: string | null;
+            organizerMemberId?: string | null;
+            originCityId?: string | null;
+            originDepotId?: string | null;
+            platform?: ("truckersmp" | "haulmp") | null;
+            prescribedCargoId?: string | null;
+            prescribedMassKg?: string | null;
+            prescribedTrailerTypeId?: string | null;
+            requiredDlcIds?: string[];
+            route?: string | null;
+            server?: string | null;
+            startsAt?: string | null;
+            title?: string | null;
+            visibility?: ("public" | "members") | null;
+        };
+        EventStage2DraftDeletion: {
+            /** Format: uuid */
+            id: string;
+            /** @constant */
+            lifecycle: "discarded";
+            version: number;
+        };
+        /** @description Editable draft definition. Missing values are allowed. A PATCH replaces these draft fields; clear nullable selections by omitting them or sending null. Values that are supplied must satisfy their declared shape and applicable catalog rules. */
+        EventStage2DraftInput: {
+            description?: string | null;
+            destinationCityId?: string | null;
+            destinationDepotId?: string | null;
+            distanceKm?: string | null;
+            endsAt?: string | null;
+            game?: ("ets2" | "ats") | null;
+            meetingAt?: string | null;
+            meetingLocation?: string | null;
+            organizerMemberId?: string | null;
+            originCityId?: string | null;
+            originDepotId?: string | null;
+            platform?: ("truckersmp" | "haulmp") | null;
+            prescribedCargoId?: string | null;
+            prescribedMassKg?: string | null;
+            prescribedTrailerTypeId?: string | null;
+            requiredDlcIds?: string[];
+            route?: string | null;
+            server?: string | null;
+            startsAt?: string | null;
+            title?: string | null;
+            visibility?: ("public" | "members") | null;
+        };
+        EventStage2EnvelopeAdminList: {
+            data: components["schemas"]["EventStage2AdminList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeAdminMediaList: {
+            data: components["schemas"]["EventStage2AdminMediaList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeAttendance: {
+            data: components["schemas"]["EventStage2Attendance"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeCreation: {
+            data: components["schemas"]["EventStage2Draft"] | components["schemas"]["EventStage2Member"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeDraft: {
+            data: components["schemas"]["EventStage2Draft"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeDraftDeletion: {
+            data: components["schemas"]["EventStage2DraftDeletion"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeMediaList: {
+            data: components["schemas"]["EventStage2MediaList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeMediaUpload: {
+            data: components["schemas"]["EventStage2MediaUpload"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeMember: {
+            data: components["schemas"]["EventStage2Member"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeMemberList: {
+            data: components["schemas"]["EventStage2MemberList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeNonresponders: {
+            data: components["schemas"]["EventStage2Nonresponders"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopePublic: {
+            data: components["schemas"]["EventStage2Public"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopePublicList: {
+            data: components["schemas"]["EventStage2PublicList"];
+            meta: components["schemas"]["Meta"];
+        };
+        EventStage2EnvelopeUpcoming: {
+            data: components["schemas"]["EventStage2Upcoming"] | null;
+            meta: components["schemas"]["Meta"];
+        };
+        /** @description Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility. */
+        EventStage2Input: {
+            description?: string | null;
+            destinationCityId: string | null;
+            destinationDepotId?: string | null;
+            distanceKm?: string | null;
+            endsAt: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: date-time */
+            meetingAt: string;
+            meetingLocation?: string | null;
+            /** Format: uuid */
+            organizerMemberId: string;
+            originCityId: string | null;
+            originDepotId?: string | null;
+            /** @enum {string} */
+            platform: "truckersmp" | "haulmp";
+            prescribedCargoId: string | null;
+            prescribedMassKg: string | null;
+            prescribedTrailerTypeId: string | null;
+            requiredDlcIds: string[];
+            route?: string | null;
+            server: string;
+            /** Format: date-time */
+            startsAt: string;
+            title: string;
+            /** @enum {string} */
+            visibility: "public" | "members";
+        };
+        EventStage2Media: {
+            byteLength: number;
+            caption: string | null;
+            /** @enum {string} */
+            contentType: "image/png" | "image/jpeg";
+            height: number;
+            /** Format: uuid */
+            id: string;
+            isCover: boolean;
+            position: number;
+            width: number;
+        };
+        /** @description Update any supplied fields. Position is zero-based; the server reorders atomically. A true cover flag replaces the current cover, false clears the cover only if this image is the current cover. */
+        EventStage2MediaEditInput: {
+            caption?: string | null;
+            isCover?: boolean;
+            position?: number;
+        };
+        EventStage2MediaList: {
+            items: components["schemas"]["EventStage2Media"][];
+            version: number;
+        };
+        EventStage2MediaUpload: {
+            item: components["schemas"]["EventStage2AdminMediaItem"];
+            version: number;
+        };
+        EventStage2MediaUploadInput: {
+            /**
+             * Format: binary
+             * @description One PNG or JPEG, subject to the existing manual evidence file-byte and decoded-pixel limits.
+             */
+            file: string;
+        };
+        EventStage2Member: {
+            event: components["schemas"]["EventStage2Public"];
+            /** @enum {string} */
+            myAttendance: "unconfirmed" | "attended" | "not_attended";
+            myResponse: components["schemas"]["Rsvp"];
+            organizerMemberId: string | null;
+            prescribedCargo: components["schemas"]["CatalogLabel"] | null;
+            prescribedCargoId: string | null;
+            prescribedMassKg: string | null;
+            prescribedTrailerType: components["schemas"]["CatalogLabel"] | null;
+            prescribedTrailerTypeId: string | null;
+            responseCounts: components["schemas"]["EventResponseCounts"];
+            /** @enum {string} */
+            visibility: "public" | "members";
+        };
+        EventStage2MemberList: {
+            items: components["schemas"]["EventStage2MemberListItem"][];
+            nextCursor: string | null;
+        };
+        /** @description Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons. */
+        EventStage2MemberListItem: {
+            event: components["schemas"]["EventStage2Public"];
+            myResponse: ("unanswered" | "participating" | "declined") | null;
+            organizerMemberId: string | null;
+            responseCounts: components["schemas"]["EventResponseCounts"];
+            /** @enum {string} */
+            visibility: "public" | "members";
+        };
+        EventStage2Nonresponders: {
+            items: components["schemas"]["MemberSummary"][];
+            nextCursor: string | null;
+        };
+        /** @description Published public projection. Organizer is safe display text, with legacy text fallback when there is no member link. Missing structured fields on older revisions remain null. City labels follow the requested locale. */
+        EventStage2Public: {
+            description: string | null;
+            destination: components["schemas"]["CatalogLabel"] | null;
+            destinationDepot: components["schemas"]["EventStage2CanonicalCatalogOption"] | null;
+            distanceKm: string | null;
+            endsAt: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            hasCover: boolean;
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            meetingAt: string;
+            meetingLocation: string | null;
+            organizer: string;
+            origin: components["schemas"]["CatalogLabel"] | null;
+            originDepot: components["schemas"]["EventStage2CanonicalCatalogOption"] | null;
+            platform: ("truckersmp" | "haulmp") | null;
+            requiredDlcs: components["schemas"]["EventStage2Dlc"][];
+            route: string | null;
+            server: string;
+            /** Format: date-time */
+            startsAt: string;
+            /** @enum {string} */
+            status: "scheduled" | "cancelled" | "completed";
+            title: string;
+            version: number;
+        };
+        EventStage2PublicationInput: Record<string, never>;
+        EventStage2PublicList: {
+            items: components["schemas"]["EventStage2Public"][];
+            nextCursor: string | null;
+        };
+        /** @description Complete event definition for publication and published edits. A selected depot must be visible, in the selected city and in the same game; the origin depot supplies the meeting point. Deprecated text remains optional for compatibility. */
+        EventStage2PublishedCreationInput: {
+            description?: string | null;
+            destinationCityId: string | null;
+            destinationDepotId?: string | null;
+            distanceKm?: string | null;
+            /** @constant */
+            draft?: false;
+            endsAt: string | null;
+            /** @enum {string} */
+            game: "ets2" | "ats";
+            /** Format: date-time */
+            meetingAt: string;
+            meetingLocation?: string | null;
+            /** Format: uuid */
+            organizerMemberId: string;
+            originCityId: string | null;
+            originDepotId?: string | null;
+            /** @enum {string} */
+            platform: "truckersmp" | "haulmp";
+            prescribedCargoId: string | null;
+            prescribedMassKg: string | null;
+            prescribedTrailerTypeId: string | null;
+            requiredDlcIds: string[];
+            route?: string | null;
+            server: string;
+            /** Format: date-time */
+            startsAt: string;
+            title: string;
+            /** @enum {string} */
+            visibility: "public" | "members";
+        };
+        EventStage2Upcoming: {
+            event: components["schemas"]["EventStage2Public"];
+            myResponse: ("unanswered" | "participating" | "declined") | null;
         };
         /** @description Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed. */
         Evidence: {
@@ -5273,6 +5800,40 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listAdminEvents: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+                locale?: "en" | "ru";
+                period?: "published" | "drafts";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeAdminList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     createEvent: {
         parameters: {
             query?: never;
@@ -5297,6 +5858,46 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeEventMember"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteEventDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeDraftDeletion"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -5421,6 +6022,328 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeEventMember"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    listAdminEventMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeAdminMediaList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadEventMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["EventStage2MediaUploadInput"];
+            };
+        };
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            202: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeMediaUpload"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteEventMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeAdminMediaList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateEventMedia: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventStage2MediaEditInput"];
+            };
+        };
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeAdminMediaList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listEventNonresponders: {
+        parameters: {
+            query?: {
+                cursor?: components["parameters"]["Cursor"];
+                limit?: components["parameters"]["Limit"];
+            };
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeNonresponders"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishEventDraft: {
+        parameters: {
+            query?: {
+                locale?: "en" | "ru";
+            };
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventStage2PublicationInput"];
+            };
+        };
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeMember"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getEventDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeDraft"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateEventDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+                "If-Match": components["parameters"]["IfMatch"];
+            };
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventStage2DraftInput"];
+            };
+        };
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    /** @description Strong version of the aggregate named by this operation. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeDraft"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            412: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            428: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -6710,6 +7633,73 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeListParticipant"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    listEventMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Staged result; see semantic preconditions. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventStage2EnvelopeMediaList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getEventMediaContent: {
+        parameters: {
+            query: {
+                size: "thumb" | "full";
+            };
+            header?: never;
+            path: {
+                eventId: string;
+                mediaId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized image rendition. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    "X-Content-Type-Options"?: "nosniff";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -8393,6 +9383,36 @@ export interface operations {
                     "application/json": components["schemas"]["EnvelopeEventPublic"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    getPublicEventCover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized image rendition. */
+            200: {
+                headers: {
+                    /** @description Do not store this response. */
+                    "Cache-Control"?: "no-store";
+                    "X-Content-Type-Options"?: "nosniff";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
