@@ -140,7 +140,23 @@ test(
           `Кренбург ${unique}`,
           code,
         ]) {
-          await page.goto(`/account/catalogs?game=ats&tab=cities&q=${encodeURIComponent(term)}`);
+          const [response] = await Promise.all([
+            page.waitForResponse((response) => {
+              const url = new URL(response.url());
+              return (
+                url.pathname === "/api/v1/catalogs/cities" &&
+                url.searchParams.get("search") === term &&
+                url.searchParams.get("locale") === locale
+              );
+            }),
+            page
+              .getByRole("searchbox", { name: catalogTranslations[locale].searchLabel })
+              .fill(term),
+          ]);
+          expect(response.status()).toBe(200);
+          expect((await response.json()).data.items).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code })]),
+          );
           await expect(page.getByText(code, { exact: true }).first()).toBeVisible();
         }
       }
