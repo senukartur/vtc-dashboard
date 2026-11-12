@@ -321,9 +321,11 @@ export function EffectiveFacts({ facts }: { facts: DTO["EffectiveTripFacts"] | n
 export function Revision({
   revision,
   previous,
+  hideReferenceFields = false,
 }: {
   revision: DTO["ManualRevisionRead"];
   previous?: DTO["ManualRevisionRead"];
+  hideReferenceFields?: boolean;
 }) {
   const { t } = useTranslation("trips"),
     fields = revisionFields(revision),
@@ -362,7 +364,7 @@ export function Revision({
       />
       {(!lineage || (revision.number > 1 && !prior)) && <p>{t("comparisonUnavailable")}</p>}
       {Object.entries(fields)
-        .filter(([key]) => !referenceFields.some((name) => name === key))
+        .filter(([key]) => !hideReferenceFields || !referenceFields.some((name) => name === key))
         .map(([k, v]) => (
           <div key={k}>
             <strong>{t(k)}: </strong>

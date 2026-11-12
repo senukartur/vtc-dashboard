@@ -10,7 +10,15 @@ import {
   envelope,
 } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
-import { completeForm, example, id, mockTrips } from "./support/trip-ui.ts";
+import {
+  cargoId,
+  completeForm,
+  evidenceId,
+  example,
+  id,
+  mockTrips,
+  trailerId,
+} from "./support/trip-ui.ts";
 
 const companyId = "54000000-0000-4000-8000-000000000005";
 const otherCompanyId = "54000000-0000-4000-8000-000000000006";
@@ -331,7 +339,7 @@ test(
 );
 
 test(
-  "draft editor deletes with the GET ETag and returns to an empty draft tab",
+  "draft editor advances its displayed ETag on save and then deletes to the empty draft tab",
   browserCase(["@functional"]),
   async ({ page }) => {
     await mockTrips(page);
@@ -346,20 +354,35 @@ test(
         }),
       }),
     );
+    let etag = '"v7"';
     await page.route(`**${draftPath}/${draftId}`, (route) => {
-      const method = route.request().method();
+      const request = route.request();
+      const method = request.method();
       if (method === "GET")
         return deleted
           ? route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } })
-          : route.fulfill({ json: envelope(draft), headers: { ETag: '"v7"' } });
+          : route.fulfill({ json: envelope(draft), headers: { ETag: etag } });
+      if (method === "PUT") {
+        expect(request.headers()["if-match"]).toBe('"v7"');
+        draft.fields = request.postDataJSON().fields;
+        draft.version = 8;
+        etag = '"v8"';
+        return route.fulfill({ json: envelope(draft), headers: { ETag: etag } });
+      }
       expect(method).toBe("DELETE");
-      expect(route.request().headers()["if-match"]).toBe('"v7"');
-      expect(route.request().postData()).toBeNull();
+      expect(request.headers()["if-match"]).toBe('"v8"');
+      expect(request.postData()).toBeNull();
       deleted = true;
-      return route.fulfill({ json: envelope({ id: draftId, version: 8 }) });
+      return route.fulfill({ json: envelope({ id: draftId, version: 9 }) });
     });
     await page.goto(`/account/reports/drafts/${draftId}`);
     await catalogLanguage(page);
+    await page.getByLabel("Comment (optional)", { exact: true }).fill("Fictional saved edit");
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: "Draft saved on the server." }),
+    ).toBeVisible();
+    expect(draft.fields.comment).toBe("Fictional saved edit");
     await page.getByRole("button", { name: "Delete draft", exact: true }).click();
     await page
       .getByRole("dialog")
@@ -371,6 +394,117 @@ test(
     await expect(
       page.getByRole("region", { name: "Saved drafts" }).getByRole("status"),
     ).toContainText("Draft deleted.");
+  },
+);
+
+test(
+  "draft delete conflict requires visibly reloading the latest draft before confirming again",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const sample = example("listMyManualDrafts:editing-only").data.items[0];
+    const pin = (entityId: string) => ({ status: "resolved", entityId });
+    const first = {
+      ...sample,
+      version: 7,
+      fields: {
+        ...sample.fields,
+        origin: pin(entityId),
+        destination: pin(entityId),
+        cargo: pin(cargoId),
+        trailerType: pin(trailerId),
+        cargoMassKg: "1200",
+        actualDistanceM: "1000",
+        evidenceIds: [evidenceId],
+        startedAt: "2025-10-26T00:00:00.000Z",
+        completedAt: "2025-10-26T02:00:00.000Z",
+        comment: "Fictional draft v7",
+      },
+    };
+    const latest = {
+      ...first,
+      version: 8,
+      fields: {
+        ...first.fields,
+        comment: "Fictional draft v8",
+        startedAt: "2025-10-26T00:30:00.000Z",
+      },
+    };
+    const deletes: Array<{ etag: string | undefined; key: string | undefined }> = [];
+    let releaseLatest = () => {};
+    const latestGate = new Promise<void>((resolve) => {
+      releaseLatest = resolve;
+    });
+    let latestStarted = false;
+    await page.route(`**${draftPath}/${draftId}`, async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        if (!deletes.length)
+          return route.fulfill({ json: envelope(first), headers: { ETag: '"v7"' } });
+        if (deletes.length > 1)
+          return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });
+        latestStarted = true;
+        await latestGate;
+        return route.fulfill({ json: envelope(latest), headers: { ETag: '"v8"' } });
+      }
+      expect(request.method()).toBe("DELETE");
+      const headers = request.headers();
+      deletes.push({ etag: headers["if-match"], key: headers["idempotency-key"] });
+      if (deletes.length === 1)
+        return route.fulfill({ status: 409, json: { error: { code: "VERSION_CONFLICT" } } });
+      return route.fulfill({ json: envelope({ id: draftId, version: 9 }) });
+    });
+    await page.goto(`/account/reports/drafts/${draftId}`);
+    await catalogLanguage(page);
+    const comment = page.getByLabel("Comment (optional)", { exact: true });
+    const deleteDraft = page.getByRole("button", { name: "Delete draft", exact: true });
+    const save = page.getByRole("button", { name: "Save draft", exact: true });
+    const submit = page.getByRole("button", { name: "Submit for review", exact: true });
+    const reload = page.getByRole("button", { name: "Reload latest draft", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Delete this draft?", exact: true });
+    await expect(comment).toHaveValue("Fictional draft v7");
+    await comment.fill("Fictional unsaved edit");
+    await expect(submit).toBeEnabled();
+    await deleteDraft.click();
+    await dialog.getByRole("button", { name: "Delete draft", exact: true }).click();
+    try {
+      await expect.poll(() => latestStarted).toBe(true);
+      await expect(dialog).toHaveCount(0);
+      await expect(reload).toBeDisabled();
+      await expect(save).toBeDisabled();
+      await expect(submit).toBeDisabled();
+      await expect(deleteDraft).toBeDisabled();
+      await expect(comment).toHaveValue("Fictional unsaved edit");
+      await deleteDraft.evaluate((button) => {
+        if (button instanceof HTMLButtonElement) button.click();
+      });
+      expect(deletes).toHaveLength(1);
+    } finally {
+      releaseLatest();
+    }
+
+    await expect(reload).toBeEnabled();
+    await expect(deleteDraft).toBeDisabled();
+    await expect(save).toBeDisabled();
+    await expect(submit).toBeDisabled();
+    await expect(comment).toHaveValue("Fictional unsaved edit");
+    await deleteDraft.evaluate((button) => {
+      if (button instanceof HTMLButtonElement) button.click();
+    });
+    await expect(dialog).toHaveCount(0);
+    expect(deletes).toHaveLength(1);
+
+    await reload.click();
+    await expect(comment).toHaveValue("Fictional draft v8");
+    await expect(page.getByLabel("Trip start", { exact: true })).toHaveValue("2025-10-26T00:30");
+    await expect(reload).toHaveCount(0);
+    await deleteDraft.click();
+    await dialog.getByRole("button", { name: "Delete draft", exact: true }).click();
+    await expect(page).toHaveURL(/\/account\/trips[?]tab=drafts$/);
+    expect(deletes.map(({ etag }) => etag)).toEqual(['"v7"', '"v8"']);
+    expect(deletes[0]?.key).toBeTruthy();
+    expect(deletes[1]?.key).toBeTruthy();
+    expect(deletes[1]?.key).not.toBe(deletes[0]?.key);
   },
 );
 
@@ -409,6 +543,52 @@ test(
       await expect(page.getByText(companyId, { exact: true })).toHaveCount(0);
       await capture(page, info, `private-manual-reference-${locale}`);
     }
+  },
+);
+
+test(
+  "private manual revision history keeps stored reference values and their comparison",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const sample = example("getTrip:dated-private-revision");
+    const previous = sample.data.manualRevision;
+    const oldTime = previous.fields.startedAt;
+    const newTime = "2026-10-20T09:15:00.000Z";
+    const current = {
+      ...previous,
+      id: "51000000-0000-4000-8000-000000000015",
+      number: 2,
+      fields: { ...previous.fields, startedAt: newTime },
+    };
+    sample.data.summary.id = id;
+    sample.data.manualRevision = current;
+    await page.route(`**${detailPath}`, (route) =>
+      route.fulfill({ json: sample, headers: { ETag: '"v3"' } }),
+    );
+    await page.route(`**${detailPath}/manual-revisions?*`, (route) =>
+      route.fulfill({ json: envelope({ items: [current, previous], nextCursor: null }) }),
+    );
+    await page.goto(`/account/trips/${id}`);
+    await catalogLanguage(page);
+    const revisionCard = page.locator("section.trip-revision").filter({
+      has: page.getByRole("heading", { name: "Revision 2", exact: true }),
+    });
+    await expect(revisionCard).toBeVisible();
+    await expect(revisionCard.getByText(newTime, { exact: true })).toHaveCount(0);
+    await page.locator("summary").filter({ hasText: "Private report and review history" }).click();
+    const history = page
+      .locator("details")
+      .filter({ has: page.getByRole("button", { name: "Immutable revisions" }) });
+    const oldRevision = history.locator("section.trip-revision").filter({
+      has: page.getByRole("heading", { name: "Revision 1", exact: true }),
+    });
+    const newRevision = history.locator("section.trip-revision").filter({
+      has: page.getByRole("heading", { name: "Revision 2", exact: true }),
+    });
+    await expect(oldRevision.getByText(oldTime, { exact: true })).toBeVisible();
+    await expect(newRevision.locator("del")).toHaveText(oldTime);
+    await expect(newRevision.locator("ins")).toHaveText(newTime);
   },
 );
 

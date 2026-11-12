@@ -85,7 +85,7 @@ export function TripDetailPage({ review = false }: { review?: boolean }) {
               {view.manualRevision && (
                 <Card className="stack">
                   <ReferenceFacts revision={view.manualRevision} />
-                  <Revision revision={view.manualRevision} />
+                  <Revision revision={view.manualRevision} hideReferenceFields />
                   {summary.owner.id === session.self?.member.id &&
                     summary.decision !== "accepted" &&
                     "reportId" in view.manualRevision && (

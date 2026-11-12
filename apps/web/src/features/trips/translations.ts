@@ -10,6 +10,10 @@ export const tripTranslations = {
     draftDeleted: "Draft deleted.",
     draftDeleteConflict:
       "This draft changed. The latest state has been requested. Review it before deleting again.",
+    draftReloadRequired:
+      "This draft may have changed. Reload the latest version before saving, submitting, or deleting. Reloading replaces your unsaved edits.",
+    reloadLatestDraft: "Reload latest draft",
+    draftAlreadySubmitted: "This draft has been submitted.",
     backToDrafts: "Back to drafts",
     startedAt: "Trip start",
     completedAt: "Trip completion",
@@ -445,6 +449,10 @@ export const tripTranslations = {
     draftDeleted: "Черновик удалён.",
     draftDeleteConflict:
       "Черновик изменился. Запрошены актуальные данные. Проверьте их перед повторным удалением.",
+    draftReloadRequired:
+      "Черновик мог измениться. Загрузите актуальную версию перед сохранением, отправкой или удалением. Несохранённые изменения будут заменены.",
+    reloadLatestDraft: "Загрузить актуальную версию",
+    draftAlreadySubmitted: "Этот черновик уже отправлен.",
     backToDrafts: "К черновикам",
     startedAt: "Начало рейса",
     completedAt: "Завершение рейса",
