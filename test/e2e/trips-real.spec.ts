@@ -204,13 +204,35 @@ test(
       await expect(actions.getByRole("link", { name: event.title, exact: true })).toHaveCount(0);
 
       await resetAccountLimits();
-      const overall = (await workspaceSummary(staff)).reviewQueue;
-      expect(overall?.count).toBe(before.count + 1);
-      expect(overall?.oldestAgeSeconds).not.toBeNull();
-      const total = new Intl.NumberFormat("en").format(overall?.count ?? 0);
       await context.clearCookies();
       await context.addCookies((await staff.storageState()).cookies);
+      const staffSummaryRead = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+      );
       await page.goto("/account/dashboard");
+      const staffSummaryResponse = await staffSummaryRead;
+      expect(staffSummaryResponse.status()).toBe(200);
+      const staffSummary =
+        (await staffSummaryResponse.json()) as Schemas["EnvelopeWorkspaceSummary"];
+      const overall = staffSummary.data.reviewQueue;
+      if (!overall || overall.oldestAgeSeconds === null)
+        throw new Error("SYNTHETIC_REVIEW_AGE_REQUIRED");
+      expect(overall.count).toBe(before.count + 1);
+      await expect(page.locator("html")).toHaveAttribute("lang", "en");
+      const total = new Intl.NumberFormat("en").format(overall.count);
+      const seconds = overall.oldestAgeSeconds;
+      const [divisor, unit] =
+        seconds >= 3600
+          ? ([3600, "hour"] as const)
+          : seconds >= 60
+            ? ([60, "minute"] as const)
+            : ([1, "second"] as const);
+      const age = new Intl.RelativeTimeFormat("en", { numeric: "always" }).format(
+        -Math.floor(seconds / divisor),
+        unit,
+      );
       await expect(
         nav.getByRole("link", { name: `Dispatch (${total} awaiting decision)`, exact: true }),
       ).toBeVisible();
@@ -225,13 +247,14 @@ test(
       expect(queue.get("scope")).toBe("review");
       expect(queue.get("hold")).toBe("true");
       await expect(page).toHaveURL(`${origin}/account/review`);
-      await expect(
-        page.getByText(`Awaiting decision overall (${total})`, { exact: true }),
-      ).toBeVisible();
+      const waiting = page.getByText(`Awaiting decision overall (${total})`, { exact: true });
+      const oldest = page.getByText(`Oldest waiting trip added ${age}`, { exact: true });
+      await expect(waiting).toBeVisible();
+      await expect(oldest).toBeVisible();
       await page.getByRole("button", { name: "Decided", exact: true }).click();
-      await expect(
-        page.getByText(`Awaiting decision overall (${total})`, { exact: true }),
-      ).toBeVisible();
+      await expect(page).toHaveURL(`${origin}/account/review?tab=decided`);
+      await expect(waiting).toBeVisible();
+      await expect(oldest).toBeVisible();
     } finally {
       await staff.dispose();
       await fixture.close();

@@ -84,7 +84,7 @@ const qualificationCard = (page: Page) =>
 const reviewCard = (page: Page) =>
   page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
 const attentionCard = (page: Page) =>
-  page.getByRole("region", { name: /^(Needs attention|Требует внимания)$/ });
+  page.getByRole("region", { name: /^(Needs attention|Дела)$/ });
 const responseGroup = (page: Page) =>
   eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const going = (page: Page) => responseGroup(page).getByRole("button", { name: /^(Going|Поеду)$/ });
@@ -286,6 +286,7 @@ test(
     await expect(actions.getByRole("listitem")).toHaveCount(3);
     await capture(page, info, "workspace-actions-en");
     await switchLanguage(page, "ru");
+    await expect(actions.getByRole("heading", { name: "Дела", exact: true })).toBeVisible();
     await expect(actions.getByRole("link", { name: "Черновики в работе (4)" })).toBeVisible();
     await expect(actions.getByRole("link", { name: "Заявки на рассмотрении (3)" })).toBeVisible();
     await capture(page, info, "workspace-actions-ru");
