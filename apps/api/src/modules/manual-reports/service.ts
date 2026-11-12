@@ -1458,6 +1458,32 @@ export function createManualReports(
     getReport(actor: Actor, id: string) {
       return run(async (tx) => reportDto(tx, await privateReport(tx, actor, id)));
     },
+    // The caller authorizes trips.read_own_private for viewerId in this transaction.
+    workspaceCurrentAuthorRevisionsRelation(tx: TxContext, viewerId: string) {
+      return c(tx)
+        .select({
+          reportTripId: sql<string>`${manualReports.tripId}`
+            .mapWith(manualReports.tripId)
+            .as("report_trip_id"),
+          reportId: sql<string>`${manualReports.id}`.mapWith(manualReports.id).as("report_id"),
+          revisionId: sql<string>`${manualRevisions.id}`
+            .mapWith(manualRevisions.id)
+            .as("revision_id"),
+          reportCreatedAt: sql<string>`${manualReports.createdAt}`
+            .mapWith(manualReports.createdAt)
+            .as("report_created_at"),
+        })
+        .from(manualReports)
+        .innerJoin(
+          manualRevisions,
+          and(
+            eq(manualRevisions.reportId, manualReports.id),
+            eq(manualRevisions.id, manualReports.currentRevisionId),
+          ),
+        )
+        .where(eq(manualReports.ownerId, viewerId))
+        .as("workspace_current_author_revisions");
+    },
     listReports(actor: Actor, page: Page = {}, tripId?: string) {
       return run(async (tx) => {
         await authority(tx, actor);
