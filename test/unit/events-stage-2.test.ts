@@ -42,6 +42,24 @@ test("staged queries include effective filters and validate the new response sha
   await expect(readEventStage2(spec, signal)).rejects.toMatchObject({ kind: "unavailable" });
 });
 
+test("browser transport preserves own RSVP versions for member list and upcoming reads", async () => {
+  const list = stage2Fixture("listEvents", "own-response");
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(list.response))
+    .mockResolvedValueOnce(Response.json(upcoming.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+  const response = { myResponse: "participating", myResponseVersion: 2 };
+  await expect(readEventStage2(eventStage2Reads.memberList({}), signal)).resolves.toMatchObject({
+    data: { data: { items: [response] } },
+  });
+  await expect(readEventStage2(eventStage2Reads.upcoming(), signal)).resolves.toMatchObject({
+    data: { data: response },
+  });
+});
+
 test("draft commands use the staged closed request schema and preserve prepared input", () => {
   expect(eventStage2Commands.create({ draft: true }).body).toEqual({
     encoding: "json",

@@ -3949,10 +3949,12 @@ export interface components {
             items: components["schemas"]["EventStage2MemberListItem"][];
             nextCursor: string | null;
         };
-        /** @description Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons. */
+        /** @description Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons. */
         EventStage2MemberListItem: {
             event: components["schemas"]["EventStage2Public"];
             myResponse: ("unanswered" | "participating" | "declined") | null;
+            /** @description Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null. */
+            myResponseVersion: number | null;
             organizerMemberId: string | null;
             responseCounts: components["schemas"]["EventResponseCounts"];
             /** @enum {string} */
@@ -4031,6 +4033,8 @@ export interface components {
         EventStage2Upcoming: {
             event: components["schemas"]["EventStage2Public"];
             myResponse: ("unanswered" | "participating" | "declined") | null;
+            /** @description Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null. */
+            myResponseVersion: number | null;
         };
         /** @description Stable public states only: internal deleting returns retryable 503 EVIDENCE_TRANSITION on metadata/content access, never ready. Expired metadata/history remains readable; expired content returns 410 EVIDENCE_EXPIRED. No paths or object generations are exposed. */
         Evidence: {
