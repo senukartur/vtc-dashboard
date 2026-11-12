@@ -291,12 +291,14 @@ test(
     await expect(actions.getByRole("link", { name: "Заявки на рассмотрении (3)" })).toBeVisible();
     await capture(page, info, "workspace-actions-ru");
     expect(summaryReads(state)).toBe(3);
+    // Omitted counts are not mentioned: no partial or unavailable note, only the empty state.
     state.summary = { computedAt: overviewNow, unfinishedManualDrafts: { count: 0, items: [] } };
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(
-      actions.getByText("Некоторые действия недоступны.", { exact: true }),
-    ).toBeVisible();
-    await expect(actions.getByText("Нет действий, требующих вашего внимания.")).toHaveCount(0);
+    await expect(actions.getByText("Нет действий, требующих вашего внимания.")).toBeVisible();
+    await expect(actions.getByText(/недоступн/i)).toHaveCount(0);
+    await expect(actions.getByRole("alert")).toHaveCount(0);
+    await expect(actions.getByRole("heading", { level: 3 })).toHaveCount(0);
+    expect(summaryReads(state)).toBe(4);
   },
 );
 

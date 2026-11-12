@@ -45,7 +45,9 @@ test(
     summary = { computedAt, reviewQueue: { count: 0, oldestAgeSeconds: null } };
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(header.getByText("Awaiting decision overall (0)", { exact: true })).toBeVisible();
-    await expect(header.getByText("No trips are waiting.", { exact: true })).toBeVisible();
+    await expect(
+      header.getByText("No other drivers' trips are waiting.", { exact: true }),
+    ).toBeVisible();
     summary = { computedAt };
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(
@@ -54,6 +56,46 @@ test(
     await expect(header.getByText("Awaiting decision overall (0)", { exact: true })).toHaveCount(0);
   },
 );
+
+for (const locale of ["en", "ru"] as const)
+  test(
+    `an own-only awaiting queue counts zero and explains the uncounted own trips (${locale})`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await mockReview(page, { locale, awaiting: "own" });
+      const summary: components["schemas"]["WorkspaceSummary"] = {
+        computedAt: "2026-11-12T08:00:00.000Z",
+        reviewQueue: { count: 0, oldestAgeSeconds: null },
+      };
+      await page.route("**/api/v1/me/workspace-summary", (route) =>
+        route.fulfill({ json: envelope(summary) }),
+      );
+      await page.goto("/account/review");
+      await catalogLanguage(page, locale);
+      const header = page.locator(".review-queue-header");
+      const copy =
+        locale === "en"
+          ? {
+              total: "Awaiting decision overall (0)",
+              none: "No other drivers' trips are waiting.",
+              own: "Your own trips in this list are not counted: another reviewer decides on them.",
+            }
+          : {
+              total: "Всего ждут решения (0)",
+              none: "Нет рейсов других водителей, ожидающих решения.",
+              own: "Ваши рейсы в этом списке не учитываются: решение по ним принимает другой проверяющий.",
+            };
+      // The list shows the own trip while the count, like the menu and the overview, excludes it.
+      await expect(rowOf(page, reviewIds.own)).toContainText(text[locale].you);
+      await expect(table(page).locator("tbody tr")).toHaveCount(1);
+      await expect(header.getByText(copy.total, { exact: true })).toBeVisible();
+      await expect(header.getByText(copy.none, { exact: true })).toBeVisible();
+      await expect(header.getByText(copy.own, { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: text[locale].decided, exact: true }).click();
+      await expect(header.getByText(copy.own, { exact: true })).toHaveCount(0);
+      await expect(header.getByText(copy.total, { exact: true })).toBeVisible();
+    },
+  );
 
 // Controlled synthetic review queue and decision panel (VTC-059); all data is fictional.
 const text = {
@@ -253,7 +295,9 @@ for (const locale of ["en", "ru"] as const)
     async ({ page }, info) => {
       const mock = await open(page, "/account/review", { locale });
       await expect(table(page).locator("tbody tr")).toHaveCount(5);
-      expect(mock.lists.at(-1)?.toString()).toBe("scope=review&hold=true&order=asc&limit=25");
+      expect(mock.lists.at(-1)?.toString()).toBe(
+        `scope=review&hold=true&order=asc&locale=${locale}&limit=25`,
+      );
       await expect(
         table(page).getByRole("columnheader", { name: locale === "en" ? "Revision" : "Редакция" }),
       ).toBeVisible();
@@ -965,14 +1009,16 @@ test(
     await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
     await expect
       .poll(lastList(mock))
-      .toBe("scope=review&hold=true&source=manual&order=asc&limit=25");
+      .toBe("scope=review&hold=true&source=manual&order=asc&locale=en&limit=25");
     await expect(source).toBeFocused();
     await expect(panel(page)).toHaveCount(0);
     await expect(table(page).locator("tbody tr")).toHaveCount(2);
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect
       .poll(lastList(mock))
-      .toBe("scope=review&hold=true&source=manual&order=asc&limit=25&cursor=page-2.manual");
+      .toBe(
+        "scope=review&hold=true&source=manual&order=asc&locale=en&limit=25&cursor=page-2.manual",
+      );
     await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeEnabled();
     if (wide(info)) {
       await page.locator(`#trip-link-${reviewIds.resubmission}`).click();
@@ -984,7 +1030,7 @@ test(
     await source.selectOption("ets2telemetry");
     await expect
       .poll(lastList(mock))
-      .toBe("scope=review&hold=true&source=ets2telemetry&order=asc&limit=25");
+      .toBe("scope=review&hold=true&source=ets2telemetry&order=asc&locale=en&limit=25");
     await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
     await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
     await expect(panel(page)).toHaveCount(0);
@@ -1004,14 +1050,14 @@ test(
     await page.getByRole("button", { name: text.en.decided, exact: true }).click();
     await expect
       .poll(lastList(mock))
-      .toBe("scope=review&hold=false&source=ets2telemetry&order=desc&limit=25");
+      .toBe("scope=review&hold=false&source=ets2telemetry&order=desc&locale=en&limit=25");
     await expect(source).toHaveValue("ets2telemetry");
     await expect(queue(page).getByText("No trips match these filters.")).toBeVisible();
     await page.getByRole("button", { name: "Reset filters", exact: true }).click();
     await expect(page).toHaveURL(/\/account\/review\?tab=decided$/);
     await expect(source).toHaveValue("");
     await expect(page.locator("#review-game")).toBeFocused();
-    await expect.poll(lastList(mock)).toBe("scope=review&hold=false&order=desc&limit=25");
+    await expect.poll(lastList(mock)).toBe("scope=review&hold=false&order=desc&locale=en&limit=25");
     await page.goBack();
     await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
     await expect(source).toHaveValue("ets2telemetry");
@@ -1036,7 +1082,7 @@ test(
     const mock = await open(page, "/account/review?source=bogus");
     const source = page.locator("#review-source");
     await expect(source).toHaveValue("");
-    await expect.poll(lastList(mock)).toBe("scope=review&hold=true&order=asc&limit=25");
+    await expect.poll(lastList(mock)).toBe("scope=review&hold=true&order=asc&locale=en&limit=25");
     // Two filter changes dispatched in one task: each starts from the committed URL.
     await page.evaluate(() => {
       for (const [id, value] of [
@@ -1053,7 +1099,7 @@ test(
     await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
     await expect
       .poll(lastList(mock))
-      .toBe("scope=review&hold=true&game=ats&source=manual&order=asc&limit=25");
+      .toBe("scope=review&hold=true&game=ats&source=manual&order=asc&locale=en&limit=25");
     expect(mock.lists.some((request) => request.get("source") === "bogus")).toBe(false);
     await page.goto("/account/review");
     await page.getByRole("button", { name: text.en.decided, exact: true }).click();
@@ -1149,7 +1195,7 @@ test(
     // The server rejects an expired, rotated or mismatched cursor with 409 VERSION_CONFLICT.
     mock.expire();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
-    const first = "scope=review&hold=true&source=manual&order=asc&limit=25";
+    const first = "scope=review&hold=true&source=manual&order=asc&locale=en&limit=25";
     await expect
       .poll(() => mock.lists.slice(-2).map(String))
       .toEqual([`${first}&cursor=page-2.manual`, first]);

@@ -333,6 +333,15 @@ test(
           ? ["Любой источник", "Телеметрия", "Ручной отчёт"]
           : ["Any source", "Telemetry", "Manual report"],
       );
+      // The filter names a returned trip by what the driver does next; badges keep "Rejected".
+      await expect(
+        page
+          .getByRole("combobox", {
+            name: ru ? "Решение компании" : "Company decision",
+            exact: true,
+          })
+          .locator('option[value="rejected"]'),
+      ).toHaveText(ru ? "Нужно исправить" : "Needs fixes");
       if (ru) {
         const fallbackRow = current.locator("tbody tr").nth(2);
         await expect(fallbackRow.getByText("Показано на английском", { exact: false })).toHaveCount(
