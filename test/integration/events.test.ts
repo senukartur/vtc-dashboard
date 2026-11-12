@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import {
   createUnitOfWork,
+  dedicatedConnection,
   newId,
   runMigrations,
   TransactionCommitOutcomeUnknownError,
@@ -1723,7 +1724,7 @@ test("legacy writers carry compatible route details and staged failures leave no
 
 test("the fenced route-history probe observes the first committed marker after an earlier empty read", async () => {
   const event = await create();
-  const guard = await testConnection();
+  const guard = await dedicatedConnection(guardedSettings());
   try {
     await guard.beginTransaction();
     const [early] = await guard.query<RowDataPacket[]>(
