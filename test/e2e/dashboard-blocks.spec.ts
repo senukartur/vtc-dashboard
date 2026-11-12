@@ -344,6 +344,42 @@ test(
   },
 );
 
+test(
+  "returned trip previews have distinct localized links when reasons repeat or are absent",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    const state = await mockDashboardRoutes(page);
+    const ids = [
+      "10000000-0000-4000-8000-000000000021",
+      "10000000-0000-4000-8000-000000000022",
+      "10000000-0000-4000-8000-000000000023",
+    ];
+    state.summary = {
+      ...state.summary,
+      tripsNeedingFixes: {
+        count: 8,
+        items: ids.map((tripId, index) => ({
+          tripId,
+          latestReturnReason: index < 2 ? "Fictional duplicate return reason" : null,
+        })),
+      },
+    };
+    await page.goto("/account/dashboard");
+    const actions = attentionCard(page);
+    for (const [index, tripId] of ids.entries()) {
+      await expect(
+        actions.getByRole("link", { name: `Open trip (${index + 1} of 3)`, exact: true }),
+      ).toHaveAttribute("href", `/account/trips/${tripId}`);
+    }
+    await switchLanguage(page, "ru");
+    for (const [index, tripId] of ids.entries()) {
+      await expect(
+        actions.getByRole("link", { name: `Открыть рейс (${index + 1} из 3)`, exact: true }),
+      ).toHaveAttribute("href", `/account/trips/${tripId}`);
+    }
+  },
+);
+
 /** Fixed time (timers keep running): the convoy starts in 3 d 4 h 30 min. */
 async function open(
   page: Page,

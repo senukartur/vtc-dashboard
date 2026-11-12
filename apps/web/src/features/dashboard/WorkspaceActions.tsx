@@ -28,7 +28,7 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
       key: "fixes",
       capability: "trips.read_own_private",
       count: fixes?.count,
-      preview: fixes?.items.map(({ tripId, latestReturnReason }, index) => {
+      preview: fixes?.items.map(({ tripId, latestReturnReason }, index, items) => {
         const reasonId = `${id}-reason-${index}`;
         return (
           <li key={tripId}>
@@ -36,7 +36,9 @@ export function WorkspaceActions({ locale, timezone }: { locale: Locale; timezon
               to={`/account/trips/${tripId}`}
               aria-describedby={latestReturnReason ? reasonId : undefined}
             >
-              {t("actions.openTrip")}
+              {items.length === 1
+                ? t("actions.openTrip")
+                : t("actions.openTripPreview", { position: index + 1, total: items.length })}
             </Link>
             {latestReturnReason && (
               <p id={reasonId} className="dashboard-muted dashboard-action-reason">

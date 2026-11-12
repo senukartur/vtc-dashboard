@@ -1,10 +1,85 @@
 import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
+test(
+  "confirmed event creation refreshes attention after the member gains review access",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, true);
+    const manager = ["company.read", "events.respond", "events.manage"];
+    state.capabilities = manager;
+    const event = eventFixture();
+    const title = "Fictional new convoy";
+    let summary: components["schemas"]["WorkspaceSummary"] = {
+      computedAt: "2099-10-25T11:00:00.000Z",
+      unansweredUpcomingEvents: { count: 0, items: [] },
+    };
+    await page.clock.setFixedTime(new Date(summary.computedAt));
+    await page.route("**/api/v1/me/workspace-summary", (route) =>
+      route.fulfill({ json: envelope(summary) }),
+    );
+    await page.goto("/account/events/new");
+    const nav = page.getByRole("navigation", { name: "Main navigation", exact: true });
+    const events = nav.getByRole("link", { name: "Events", exact: true });
+    const review = nav.getByRole("link", { name: "Dispatch (2 awaiting decision)", exact: true });
+    const titleField = page.getByLabel("Event title", { exact: true });
+    await expect(events).toBeVisible();
+    await expect(nav.getByRole("link", { name: /^Dispatch/ })).toHaveCount(0);
+    for (const [label, value] of [
+      ["Event title", title],
+      ["Server", event.server],
+      ["Organizer", event.organizer],
+      ["Route", event.route],
+      ["Meeting location", event.meetingLocation],
+      ["Description", event.description],
+      ["Meeting time (UTC)", event.meetingAt.slice(0, 16)],
+      ["Start time (UTC)", event.startsAt.slice(0, 16)],
+    ] as const)
+      await page.getByLabel(label, { exact: true }).fill(value);
+
+    let release = () => {};
+    state.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/v1/admin/events",
+    );
+    try {
+      await page.getByRole("button", { name: "Create event", exact: true }).click();
+      await expect.poll(() => state.commands.length).toBe(1);
+      state.capabilities = [...manager, "trips.review"];
+      summary = { ...summary, reviewQueue: { count: 2, oldestAgeSeconds: 30 } };
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(review).toBeVisible();
+      await expect(events).toBeVisible();
+      await expect(titleField).toBeDisabled();
+      summary = {
+        ...summary,
+        unansweredUpcomingEvents: {
+          count: 1,
+          items: [{ eventId, title, startsAt: event.startsAt }],
+        },
+      };
+    } finally {
+      release();
+    }
+    expect((await created).status()).toBe(201);
+    await expect(page).toHaveURL(`/account/events/${eventId}`);
+    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(
+      nav.getByRole("link", { name: "Events (1 awaiting your response)", exact: true }),
+    ).toBeVisible();
+    await expect(review).toBeVisible();
+  },
+);
+
 for (const targetPage of [1, 2]) {
   test(
     `report event selection settles decoded options through page ${targetPage}`,

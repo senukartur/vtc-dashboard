@@ -10,11 +10,13 @@ export type WorkspaceSummary = DTO["WorkspaceSummary"];
 
 const summaryKey = ["workspace-summary"] as const;
 
+function workspaceSummarySessionKey(session: ReturnType<typeof useSession>) {
+  return [...summaryKey, session.self?.member.id, session.generation] as const;
+}
+
 function workspaceSummaryKey(session: ReturnType<typeof useSession>) {
   return [
-    ...summaryKey,
-    session.self?.member.id,
-    session.generation,
+    ...workspaceSummarySessionKey(session),
     session.self?.identityEpoch,
     session.self?.capabilities.toSorted().join(","),
   ] as const;
@@ -77,9 +79,9 @@ export async function refreshWorkspaceSummary(
   client: QueryClient,
   session?: ReturnType<typeof useSession>,
 ) {
-  const filters = session
-    ? { queryKey: workspaceSummaryKey(session), exact: true }
-    : { queryKey: summaryKey };
+  // The same member can gain authority while a command is pending. Refresh any snapshot
+  // in that session generation, including one fetched under the new authority.
+  const filters = { queryKey: session ? workspaceSummarySessionKey(session) : summaryKey };
   // An initial read can also predate the commit. Explicit cancellation fences it even when
   // there is no cached data yet. A focus read started after cancellation can be reused.
   await client.cancelQueries(filters);
