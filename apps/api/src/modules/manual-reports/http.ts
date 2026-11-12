@@ -10,7 +10,7 @@ import { type ManualReports, manualError } from "./service.js";
 type S = components["schemas"];
 type Request = FastifyRequest<{
   Params: Record<string, string>;
-  Querystring: { limit?: number; cursor?: string };
+  Querystring: { limit?: number; cursor?: string; state?: "editing" };
 }>;
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const id = {
@@ -82,7 +82,16 @@ export async function registerManualRoutes(
     if (r.method !== "GET") {
       csrf.check(r, current);
       key(r);
-      if (r.routeOptions.url === "/api/v1/evidence") {
+      if (r.method === "DELETE") {
+        if (
+          r.headers["transfer-encoding"] !== undefined ||
+          (r.headers["content-length"] !== undefined && r.headers["content-length"] !== "0")
+        )
+          throw manualError(422);
+        // Fastify uses Content-Type to select a parser even when Content-Length is zero.
+        if (r.headers["content-type"] !== undefined)
+          r.headers = { ...r.headers, "content-type": undefined };
+      } else if (r.routeOptions.url === "/api/v1/evidence") {
         if (
           r.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "multipart/form-data"
         )
@@ -114,13 +123,13 @@ export async function registerManualRoutes(
   });
   const envelope = (r: FastifyRequest, data: unknown) => ({ data, meta: { requestId: r.id } });
   function route(
-    method: "GET" | "POST" | "PUT",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     url: string,
     response: string,
     invoke: (actor: Actor, r: Request) => Promise<unknown>,
     body?: string,
     status = 200,
-    page = false,
+    page: boolean | Record<string, unknown> = false,
   ) {
     const names = [...url.matchAll(/:([A-Za-z]+)/g)].map((m) => m[1] as string);
     app.route({
@@ -133,6 +142,7 @@ export async function registerManualRoutes(
             ? {
                 limit: { type: "integer", minimum: 1, maximum: 100 },
                 cursor: { type: "string", minLength: 1, maxLength: 2048 },
+                ...(page === true ? {} : page),
               }
             : {},
         ),
@@ -146,7 +156,7 @@ export async function registerManualRoutes(
         if (data && typeof data === "object" && "data" in data && "version" in data) {
           reply.header("ETag", `"v${data.version}"`);
           result = data.data;
-        } else if (data && typeof data === "object" && "version" in data)
+        } else if (method !== "DELETE" && data && typeof data === "object" && "version" in data)
           reply.header("ETag", `"v${data.version}"`);
         else if (
           data &&
@@ -168,7 +178,7 @@ export async function registerManualRoutes(
     (a, r) => manual.listDrafts(a, r.query),
     undefined,
     200,
-    true,
+    { state: { type: "string", const: "editing" } },
   );
   route(
     "POST",
@@ -194,6 +204,9 @@ export async function registerManualRoutes(
         r.body as S["ManualDraftInput"],
       ),
     "ManualDraftInput",
+  );
+  route("DELETE", "/api/v1/me/manual-drafts/:draftId", "EnvelopeCommandResult", (a, r) =>
+    manual.deleteDraft(a, r.params.draftId as string, key(r), expected(r)),
   );
   route(
     "POST",
