@@ -179,6 +179,8 @@ test(
       await actions.getByRole("link", { name: /^Continue draft/ }).click();
       await expect(page).toHaveURL(`${origin}/account/reports/drafts/${editing.id}`);
       await expect(page.getByLabel("Comment (optional)")).toHaveValue("Fictional editing draft");
+      // Draft navigation and RSVP are separate phases sharing the synthetic loopback read bucket.
+      await resetAccountLimits();
       await nav.getByRole("link", { name: "Overview", exact: true }).click();
       await actions.getByRole("link", { name: event.title, exact: true }).click();
       await expect(page).toHaveURL(`${origin}/account/events/${event.id}`);
@@ -186,17 +188,22 @@ test(
         .getByRole("group", { name: "Your response", exact: true })
         .getByRole("button", { name: "Participating", exact: true })
         .click();
+      const refreshed = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/v1/me/workspace-summary",
+      );
       await page.getByRole("button", { name: "Save response", exact: true }).click();
       await expect(page.getByText("Response saved.", { exact: true })).toBeVisible();
       const nextEvents =
         eventCount === 1 ? "Events" : `Events (${eventCount - 1} awaiting your response)`;
       await expect(nav.getByRole("link", { name: nextEvents, exact: true })).toBeVisible();
-      expect((await workspaceSummary(page.request)).unansweredUpcomingEvents?.count).toBe(
-        eventCount - 1,
-      );
+      const refreshResponse = await refreshed;
+      expect(refreshResponse.status()).toBe(200);
+      const freshSummary = (await refreshResponse.json()) as Schemas["EnvelopeWorkspaceSummary"];
+      expect(freshSummary.data.unansweredUpcomingEvents?.count).toBe(eventCount - 1);
       await nav.getByRole("link", { name: "Overview", exact: true }).click();
       await expect(actions.getByRole("link", { name: event.title, exact: true })).toHaveCount(0);
 
+      await resetAccountLimits();
       const overall = (await workspaceSummary(staff)).reviewQueue;
       expect(overall?.count).toBe(before.count + 1);
       expect(overall?.oldestAgeSeconds).not.toBeNull();
