@@ -150,14 +150,18 @@ try {
       locale: "en",
       context: null,
     };
+    const originCompanyId = "11700000-0000-4000-8000-000000000002";
     const fields = {
       game: "ets2",
-      origin: unresolved,
+      origin: { status: "resolved", entityId: "11700000-0000-4000-8000-000000000001" },
+      originCompanyId,
       destination: unresolved,
       cargo: unresolved,
       trailerType: unresolved,
       cargoMassKg: "0",
       actualDistanceM: "1",
+      startedAt: "2019-12-31T22:00:00.000Z",
+      completedAt: "2019-12-31T23:00:00.000Z",
       evidenceIds: [image.id],
     };
     smokePhase = "draft";
@@ -165,7 +169,9 @@ try {
     smokePhase = "submit";
     const report = await manual.submitDraft(owner, draft.id, newId(), draft.version, { fields });
     smokePhase = "private_read";
-    assert.equal((await manual.getReport(staff, report.id)).id, report.id);
+    const readback = await manual.getReport(staff, report.id);
+    assert.equal(readback.id, report.id);
+    assert.equal(readback.currentRevision.fields.originCompanyId, originCompanyId);
     smokePhase = "decision_seam";
     await unit.run(async (tx) => {
       await identity.authorizeInTransaction(tx, staff, "trips.review");

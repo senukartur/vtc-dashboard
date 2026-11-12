@@ -63,6 +63,13 @@ type Draft = typeof manualDrafts.$inferSelect;
 type Evidence = typeof manualEvidence.$inferSelect;
 type Report = typeof manualReports.$inferSelect;
 type Revision = typeof manualRevisions.$inferSelect;
+type ReferenceColumns = Pick<
+  Draft,
+  "startedAt" | "completedAt" | "cargoDamagePercent" | "originCompanyId" | "destinationCompanyId"
+>;
+type ReferenceInput = {
+  [K in keyof ReferenceColumns]: NonNullable<ReferenceColumns[K]> | undefined;
+};
 export interface ManualConfig {
   key: string;
   maxFilesPerReport: number;
@@ -99,14 +106,66 @@ export function manualError(status: number, code?: string) {
 const transition = () => manualError(503, "EVIDENCE_TRANSITION");
 const validate = createSchemaValidator();
 const validators = new Map<string, ReturnType<typeof validate.compile>>();
-function input<T>(name: string, value: T): T {
-  let check = validators.get(name);
+const schemaRef = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
+function input<T>(schema: string | readonly [string, string], value: T): T {
+  const key = typeof schema === "string" ? schema : schema.join("|");
+  let check = validators.get(key);
   if (!check) {
-    check = validate.compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
-    validators.set(name, check);
+    check = validate.compile(
+      typeof schema === "string" ? schemaRef(schema) : { anyOf: schema.map(schemaRef) },
+    );
+    validators.set(key, check);
   }
   if (!check(value)) throw manualError(422);
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function splitReferences<T extends S["ManualDraftEditableFields"]>(value: T) {
+  const {
+    startedAt,
+    completedAt,
+    cargoDamagePercent,
+    originCompanyId,
+    destinationCompanyId,
+    ...fields
+  } = value;
+  const references: ReferenceInput = {
+    startedAt,
+    completedAt,
+    cargoDamagePercent,
+    originCompanyId,
+    destinationCompanyId,
+  };
+  return { fields, references };
+}
+
+function referenceFields(row: ReferenceColumns) {
+  const { startedAt, completedAt, cargoDamagePercent, originCompanyId, destinationCompanyId } = row;
+  return {
+    ...(startedAt === null ? {} : { startedAt }),
+    ...(completedAt === null ? {} : { completedAt }),
+    ...(cargoDamagePercent === null ? {} : { cargoDamagePercent }),
+    ...(originCompanyId === null ? {} : { originCompanyId }),
+    ...(destinationCompanyId === null ? {} : { destinationCompanyId }),
+  };
+}
+
+function referenceTime(value: string | undefined) {
+  if (value === undefined) return null;
+  try {
+    return utcIso(utcDateTime(value));
+  } catch {
+    throw manualError(422);
+  }
+}
+
+function extendedRevisionFields(row: Revision): S["ManualReportReadFields"] {
+  const fields = input("ManualReportFields", row.fields) as S["ManualReportFields"];
+  const { startedAt, completedAt, ...references } = referenceFields(row);
+  if (startedAt === undefined && completedAt === undefined) return { ...fields, ...references };
+  if (startedAt === undefined || completedAt === undefined)
+    throw Error("MANUAL_REFERENCE_DATES_INCONSISTENT");
+  return { ...fields, ...references, startedAt, completedAt };
 }
 type Page = { limit?: number; cursor?: string };
 type DraftPage = Page & { state?: "editing" };
@@ -246,7 +305,7 @@ export function createManualReports(
           reportId: row.reportId,
           number: row.number,
           submittedAt: row.submittedAt,
-          fields: input("ManualReportFields", row.fields) as S["ManualReportFields"],
+          fields: extendedRevisionFields(row),
         };
   }
   async function reportDto(
@@ -313,7 +372,10 @@ export function createManualReports(
       id: row.id,
       version: row.version,
       state: row.state,
-      fields: input("ManualDraftFields", row.fields) as S["ManualDraftFields"],
+      fields: {
+        ...(input("ManualDraftFields", row.fields) as S["ManualDraftFields"]),
+        ...referenceFields(row),
+      },
       targetTrip: row.targetTrip as S["ManualTelemetryTarget"] | null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -524,6 +586,48 @@ export function createManualReports(
     }
     return { ...checked, eventId: checked.eventId ?? null, comment: checked.comment ?? null };
   }
+  function finalFields(value: S["ManualSubmissionFields"] | S["ManualDatedSubmissionFields"]) {
+    const { fields: base, references } = splitReferences(value);
+    const fields = normalize(base);
+    // Keep the former normalized command shape when reference fields are absent.
+    const commandFields = { ...value, eventId: fields.eventId, comment: fields.comment };
+    return { fields, references, commandFields };
+  }
+  async function validateReferenceFields(
+    tx: TxContext,
+    fields: S["ManualDraftFields"],
+    references: ReferenceInput,
+    final = false,
+  ): Promise<ReferenceColumns> {
+    const startedAt = referenceTime(references.startedAt),
+      completedAt = referenceTime(references.completedAt);
+    if (final && (!startedAt || !completedAt || startedAt >= completedAt || completedAt > at()))
+      throw manualError(422);
+
+    for (const [selection, companyId] of [
+      [fields.origin, references.originCompanyId],
+      [fields.destination, references.destinationCompanyId],
+    ] as const) {
+      if (companyId === undefined) continue;
+      if (
+        !fields.game ||
+        selection?.status !== "resolved" ||
+        !(await ports.catalogs.hasVisibleDepotInTransaction(tx, {
+          game: fields.game,
+          cityId: selection.entityId,
+          companyId,
+        }))
+      )
+        throw manualError(422);
+    }
+    return {
+      startedAt,
+      completedAt,
+      cargoDamagePercent: references.cargoDamagePercent ?? null,
+      originCompanyId: references.originCompanyId ?? null,
+      destinationCompanyId: references.destinationCompanyId ?? null,
+    };
+  }
   function legacyFields(fields: S["ManualResolvedInput"]): S["ManualInput"] {
     return {
       ...input("ManualResolvedInput", fields),
@@ -581,11 +685,15 @@ export function createManualReports(
     tx: TxContext,
     actor: Actor,
     fields: S["ManualReportFields"],
-    original: S["ManualInput"] | null,
-    target: S["ManualTelemetryTarget"] | null,
-    existing?: Report,
-    expectedTripVersion?: number,
+    options: {
+      original?: S["ManualInput"];
+      target?: S["ManualTelemetryTarget"] | null;
+      existing?: Report | undefined;
+      expectedTripVersion?: number | undefined;
+      references?: ReferenceColumns;
+    },
   ): Promise<Extract<Receipt, { kind: "report" }>> {
+    const { original, target, existing, expectedTripVersion, references } = options;
     await ports.trips.prepareSourceInTransaction(tx, actor.userId, fields.game);
     let tripId: string;
     if (existing) {
@@ -648,6 +756,7 @@ export function createManualReports(
         format: original ? "legacy" : "extended",
         fields: original ?? fields,
         submittedAt: at(),
+        ...references,
       });
     const payload = { format: 2 as const, reportId, revisionId, revision: number, fields };
     const [state] = await ports.trips.statesInTransaction(tx, [tripId]);
@@ -1162,8 +1271,9 @@ export function createManualReports(
     authorize(actor: Actor, write = false) {
       return run((tx) => authority(tx, actor, write));
     },
-    createDraft(actor: Actor, key: string, value: S["ManualDraftInput"]) {
-      value = input("ManualDraftInput", value);
+    createDraft(actor: Actor, key: string, value: S["ManualDraftWriteInput"]) {
+      value = input("ManualDraftWriteInput", value);
+      const { fields, references } = splitReferences(value.fields);
       return command(
         actor,
         key,
@@ -1175,14 +1285,15 @@ export function createManualReports(
             ownerId: actor.userId,
             version: 1,
             state: "editing" as const,
-            fields: value.fields,
+            fields,
             targetTrip: value.targetTrip ?? null,
             submittedReportId: null,
             createdAt: at(),
             updatedAt: at(),
+            ...(await validateReferenceFields(tx, fields, references)),
           };
           await c(tx).insert(manualDrafts).values(row);
-          await draftReferences(tx, actor, row.id, value.fields);
+          await draftReferences(tx, actor, row.id, fields);
           await rememberDraft(tx, row);
           return { kind: "draft", id: row.id, version: 1 };
         },
@@ -1194,9 +1305,10 @@ export function createManualReports(
       id: string,
       key: string,
       expected: number,
-      value: S["ManualDraftInput"],
+      value: S["ManualDraftWriteInput"],
     ) {
-      value = input("ManualDraftInput", value);
+      value = input("ManualDraftWriteInput", value);
+      const { fields, references } = splitReferences(value.fields);
       return command(
         actor,
         key,
@@ -1206,13 +1318,15 @@ export function createManualReports(
           const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
-          await draftReferences(tx, actor, id, value.fields);
+          const columns = await validateReferenceFields(tx, fields, references);
+          await draftReferences(tx, actor, id, fields);
           const next = {
             ...row,
             version: row.version + 1,
-            fields: value.fields,
+            fields,
             targetTrip: value.targetTrip ?? null,
             updatedAt: at(),
+            ...columns,
           };
           await c(tx).update(manualDrafts).set(next).where(eq(manualDrafts.id, id));
           await rememberDraft(tx, next);
@@ -1312,26 +1426,24 @@ export function createManualReports(
       id: string,
       key: string,
       expected: number,
-      value: S["ManualDraftSubmission"],
+      value: S["ManualDraftFinalSubmissionInput"] | S["ManualDraftSubmission"],
     ) {
-      value = input("ManualDraftSubmission", value);
-      const fields = normalize(value.fields);
+      value = input(["ManualDraftFinalSubmissionInput", "ManualDraftSubmission"], value);
+      const { fields, references, commandFields } = finalFields(value.fields);
       return command(
         actor,
         key,
         `draft/${applicationId(id)}/submit`,
-        { expected, fields },
+        { expected, fields: commandFields },
         async (tx) => {
           const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
-          const receipt = await submit(
-            tx,
-            actor,
-            fields,
-            null,
-            row.targetTrip as S["ManualTelemetryTarget"] | null,
-          );
+          const columns = await validateReferenceFields(tx, fields, references, true);
+          const receipt = await submit(tx, actor, fields, {
+            target: row.targetTrip as S["ManualTelemetryTarget"] | null,
+            references: columns,
+          });
           const next = {
             ...row,
             version: row.version + 1,
@@ -1339,6 +1451,7 @@ export function createManualReports(
             fields,
             submittedReportId: receipt.id,
             updatedAt: at(),
+            ...columns,
           };
           await c(tx).update(manualDrafts).set(next).where(eq(manualDrafts.id, id));
           await c(tx).delete(manualDraftEvidence).where(eq(manualDraftEvidence.draftId, id));
@@ -1348,15 +1461,23 @@ export function createManualReports(
         (tx, r) => renderReport(tx, actor, r),
       );
     },
-    submitReport(actor: Actor, key: string, value: S["ManualReportInput"]) {
-      value = input("ManualReportInput", value);
-      const fields = normalize(value.fields);
+    submitReport(
+      actor: Actor,
+      key: string,
+      value: S["ManualReportCreationInput"] | S["ManualReportInput"],
+    ) {
+      value = input(["ManualReportCreationInput", "ManualReportInput"], value);
+      const { fields, references, commandFields } = finalFields(value.fields);
       return command(
         actor,
         key,
         "report/create",
-        { fields, targetTrip: value.targetTrip ?? null },
-        (tx) => submit(tx, actor, fields, null, value.targetTrip ?? null),
+        { fields: commandFields, targetTrip: value.targetTrip ?? null },
+        async (tx) =>
+          submit(tx, actor, fields, {
+            target: value.targetTrip ?? null,
+            references: await validateReferenceFields(tx, fields, references, true),
+          }),
         (tx, r) => renderReport(tx, actor, r),
       );
     },
@@ -1365,15 +1486,15 @@ export function createManualReports(
       id: string,
       key: string,
       expected: number,
-      value: S["ManualReportRevisionInput"],
+      value: S["ManualReportResubmissionInput"] | S["ManualReportRevisionInput"],
     ) {
-      value = input("ManualReportRevisionInput", value);
-      const fields = normalize(value.fields);
+      value = input(["ManualReportResubmissionInput", "ManualReportRevisionInput"], value);
+      const { fields, references, commandFields } = finalFields(value.fields);
       return command(
         actor,
         key,
         `report/${applicationId(id)}/revise`,
-        { expected, ...value, fields },
+        { expected, ...value, fields: commandFields },
         async (tx) => {
           const row = await privateReport(tx, actor, id);
           if (row.ownerId !== actor.userId) throw manualError(404);
@@ -1389,7 +1510,11 @@ export function createManualReports(
             .where(eq(manualReports.id, id))
             .for("update");
           if (!locked || locked.version !== expected) throw manualError(409, "VERSION_CONFLICT");
-          return submit(tx, actor, fields, null, null, locked, value.expectedTripVersion);
+          return submit(tx, actor, fields, {
+            existing: locked,
+            expectedTripVersion: value.expectedTripVersion,
+            references: await validateReferenceFields(tx, fields, references, true),
+          });
         },
         (tx, r) => renderReport(tx, actor, r),
       );
@@ -1420,7 +1545,11 @@ export function createManualReports(
             if (reports.length !== 1) throw manualError(409);
             existing = reports[0];
           }
-          const receipt = await submit(tx, actor, fields, original, null, existing, expected);
+          const receipt = await submit(tx, actor, fields, {
+            original,
+            existing,
+            expectedTripVersion: expected,
+          });
           const row = await privateReport(tx, actor, receipt.id);
           const [trip] = await ports.trips.statesInTransaction(tx, [row.tripId]);
           if (!trip) throw Error("MANUAL_TRIP_MISSING");

@@ -2,6 +2,7 @@ import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts"
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { catalogLanguage, catalogList, entityId, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+import { manualReferenceTimes } from "./support/manual-reference.ts";
 import {
   cargoId,
   completeForm,
@@ -13,7 +14,7 @@ import {
 } from "./support/trip-ui.ts";
 
 test(
-  "controlled report validates undated fields and identical uncertain retries versus changed payload",
+  "controlled report validates dated fields and identical uncertain retries versus changed payload",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockTrips(page);
@@ -51,7 +52,7 @@ test(
       await page.screenshot({ path: info.outputPath(`report-${locale}.png`), fullPage: true });
     }
     await catalogLanguage(page);
-    await expect(page.locator('input[type="date"],input[type="datetime-local"]')).toHaveCount(0);
+    await expect(page.locator('input[type="datetime-local"]')).toHaveCount(2);
     await page.getByRole("button", { name: "Submit for review", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("result is uncertain");
@@ -60,6 +61,7 @@ test(
     expect(keys[0]).toBe(keys[1]);
     // The language round trip changed labels only: the payload still carries canonical IDs.
     expect(bodies[0]?.fields).toMatchObject({
+      ...manualReferenceTimes,
       origin: { status: "resolved", entityId },
       destination: { status: "resolved", entityId },
       cargo: { status: "resolved", entityId: cargoId },
@@ -109,6 +111,7 @@ test(
     await expect.poll(() => body).toBeDefined();
     expect(body).toEqual({
       fields: {
+        ...manualReferenceTimes,
         game: "ets2",
         origin: { status: "resolved", entityId },
         destination: { status: "resolved", entityId },
@@ -316,6 +319,7 @@ test(
       view = example("getTrip:extended-manual-revision");
     const pin = (entityId: string) => ({ status: "resolved", entityId });
     const fields = {
+      ...manualReferenceTimes,
       game: "ets2",
       origin: pin(entityId),
       destination: pin(entityId),

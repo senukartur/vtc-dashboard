@@ -9,6 +9,7 @@ import { pngBytes } from "../fixtures/manual-images.ts";
 import { resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+import { manualReferenceTimes } from "./support/manual-reference.ts";
 import { owningMemberPages, QualificationMemberPicker } from "./support/qualification-members.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
 
@@ -426,7 +427,12 @@ test(
             "image/png",
           );
         const report = await manual.submitReport(author, randomUUID(), {
-            fields: { ...fixture.fields, actualDistanceM, evidenceIds: [image.id] },
+            fields: {
+              ...fixture.fields,
+              ...manualReferenceTimes,
+              actualDistanceM,
+              evidenceIds: [image.id],
+            },
           }),
           review = await decisions.review(fixture.staff, report.tripId);
         const reviewedRevisionId = review.data.trip.manualRevision?.id;

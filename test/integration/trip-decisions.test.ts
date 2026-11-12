@@ -265,6 +265,10 @@ async function credit(id: string) {
       )[0],
   );
 }
+const manualReferenceDates = {
+  startedAt: "2026-09-19T08:00:00.000Z",
+  completedAt: "2026-09-19T09:00:00.000Z",
+};
 async function report(
   who = owner,
   target = manual,
@@ -310,6 +314,7 @@ async function report(
       cargoMassKg: load.cargoMassKg ?? "18000",
       actualDistanceM: "123400",
       evidenceIds: [id],
+      ...manualReferenceDates,
       ...(load.eventId ? { eventId: load.eventId } : {}),
     },
   });
@@ -826,7 +831,7 @@ test("current ETag cannot approve a stale manual revision and revoked authority 
   const fields = r.currentRevision.fields;
   if (!("origin" in fields)) throw Error("SYNTHETIC_MANUAL_V2_REQUIRED");
   const edited = await manual.reviseReport(owner, r.id, newId(), r.version, {
-    fields: { ...fields, actualDistanceM: "124000" },
+    fields: { ...fields, ...manualReferenceDates, actualDistanceM: "124000" },
     expectedTripVersion: (await state(r.tripId))?.version as number,
   });
   const current = await service.review(dispatcher, r.tripId);
@@ -3584,7 +3589,7 @@ test("workspace returns a rejected author revision until resubmission and follow
   const fields = submitted.currentRevision.fields;
   if (!("origin" in fields)) throw new Error("SYNTHETIC_MANUAL_V2_REQUIRED");
   const resubmitted = await manual.reviseReport(author, submitted.id, newId(), submitted.version, {
-    fields: { ...fields, actualDistanceM: "124000" },
+    fields: { ...fields, ...manualReferenceDates, actualDistanceM: "124000" },
     expectedTripVersion: rejected.version,
   });
   expect((await state(submitted.tripId))?.decision).toBe("pending_review");

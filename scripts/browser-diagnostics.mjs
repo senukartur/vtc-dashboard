@@ -18,6 +18,7 @@ export const browserFiles = {
   "test/e2e/trips-real.spec.ts": "trips-real",
   "test/e2e/trips-list.spec.ts": "trips-list",
   "test/e2e/manual-report-layout.spec.ts": "manual-report-layout",
+  "test/e2e/manual-report-reference.spec.ts": "manual-report-reference",
   "test/e2e/account.spec.ts": "account",
   "test/e2e/account-real.spec.ts": "account-real",
   "test/e2e/catalogs.spec.ts": "catalogs",

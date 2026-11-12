@@ -26,9 +26,17 @@
   justify-content: space-between;
   gap: 6px 14px;
 }
-.trip-page .trips-scope > a {
-  color: var(--secondary);
-  font-size: var(--font-small);
+@media (max-width: 760px) {
+  .trip-page .trips-scope .tabs-trigger {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+  .trip-page .trips-scope .tabs-trigger:not(.trips-drafts-tab) {
+    flex-shrink: 1;
+  }
+  .trip-page .trips-scope .trips-drafts-tab {
+    white-space: nowrap;
+  }
 }
 .trip-page .trips-tab-count {
   margin-inline-start: 6px;
@@ -150,7 +158,6 @@
   z-index: 1;
 }
 @media (pointer: coarse) {
-  .trip-page .trips-scope > a,
   .trip-page .trips-row-meta a {
     display: inline-flex;
     align-items: center;

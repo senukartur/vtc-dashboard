@@ -129,7 +129,7 @@ Qualifications remain separate for ETS2 and ATS. The confirmed initial progressi
 - The system calculates promotion progress and signals when the defined requirements are met. The director or deputy confirms promotion; meeting a threshold alone does not automatically change a role or qualification.
 - Director/deputy confirmation applies both to the transition from trainee to driver and to subsequent qualification levels.
 - Each level has a separate promotion-progress period beginning when that level is assigned in the relevant game. For telemetry trips, count accepted trips started after that assignment; trips from earlier levels remain in historical statistics but are not reused for the next promotion.
-- For manual reports without a trip date, use the qualification and rule versions effective at confirmation/acceptance. Attribute their progress to the game-specific qualification level assigned at that confirmation time. This is an explicit source-specific policy and does not establish an actual trip-start timestamp.
+- For manual reports, use the qualification and rule versions effective at staff confirmation. Attribute progress to the game-specific qualification level assigned at that confirmation time. Driver-supplied reference dates remain private report facts.
 - After director/deputy-confirmed completion of the trainee stage in at least one game, the user receives the global Driver role instead of Trainee. The other game's qualification and restrictions remain unchanged; the driver may therefore have Driver III in ETS2 and Trainee qualification in ATS. The director or deputy may also set the global Trainee or Driver role directly; that change leaves every game-specific qualification and its progress period unchanged.
 - When an accepted trip is corrected or its acceptance is revoked, recalculate affected statistics and qualification progress. If the change invalidates the requirements for a previously confirmed promotion, notify the director and retain the assigned qualification until the director decides what to do. Never automatically demote a driver.
 
@@ -202,9 +202,9 @@ Application review is the director's or deputy's responsibility. The required em
 - Every manual report must include at least one screenshot of the trip completion/results screen. Telemetry-confirmed trips do not require a screenshot.
 - While a report awaits a decision, its author may edit it; preserve the changes in its revision history. A review decision must apply to the revision actually reviewed.
 - After acceptance, the author requests a correction from a dispatcher, deputy, or director instead of directly editing the accepted record. Staff changes must retain an audit history and recalculate affected statistics. The prohibition on approving one's own manual report still applies.
-- There is no submission deadline for manual reports in the MVP. The manual form does not collect the trip date; its reporting period is determined by confirmation, as specified below.
+- There is no submission deadline for manual reports in the MVP. Staff confirmation determines the reporting period, qualification, rules and progress attribution for all manual reports.
 
-The required manual-report fields are game, origin city, destination city, cargo, cargo mass, trailer type, actual driven distance, and at least one screenshot. Event association and a comment are optional. Do not request a trip date. Undated manual reports require human review and use qualification/rules and progress attribution at confirmation time as agreed above.
+The current manual form requires game, origin and destination cities, cargo, cargo mass, trailer type, actual driven distance, reference start and completion, and at least one screenshot. The two reference timestamps are at or before server time on submission, and start precedes completion. Event association, comment, cargo damage from 0 to 100 percent, and origin and destination companies are optional. Each selected company must have a visible depot in the corresponding selected city and game. Earlier reports can lack reference dates and remain readable.
 
 ## Screenshot retention
 
@@ -220,7 +220,7 @@ The required manual-report fields are game, origin city, destination city, cargo
 - A manual report supplies actual driven distance, which the reviewer verifies against its screenshot.
 - Corrections and acceptance revocation recalculate affected statistics without counting the canonical trip twice.
 - For telemetry trips, attribute reporting periods to the actual trip completion date/time, including telemetry delivered after the trip finished.
-- For manual reports without a trip date, attribute reporting periods to the report's confirmation/acceptance date/time, rather than an invented trip-completion timestamp.
+- For manual reports, use the staff confirmation time for reporting-period attribution. This also applies to earlier reports without reference dates.
 - Preserve the distinction between trip timestamps and review/acceptance timestamps. A manual report's acceptance date does not establish when the trip actually started or ended.
 - Use one company-wide reporting timezone for daily/monthly statistics, configured by the director before launch.
 - Display event times in the user's timezone with an explicit timezone indication. A user's display timezone must not silently change company reporting-period boundaries.
@@ -243,7 +243,7 @@ The required manual-report fields are game, origin city, destination city, cargo
 8. A manual report without a completion-screen screenshot cannot be submitted. A telemetry-confirmed trip does not require a screenshot.
 9. An author edits a pending report. The revision history retains the previous values, and a reviewer cannot approve an obsolete revision as if it were the current report.
 10. An author requests a correction to an accepted report. An authorized staff member records the correction with its history; affected statistics are recalculated without creating another trip.
-11. A driver submits a manual report without entering a trip date and provides the required evidence. Its age alone does not prevent submission. Once confirmed, it belongs to the reporting period containing its confirmation time, is checked against the qualification/rules at confirmation, and contributes to that game-specific level's progress.
+11. A driver supplies reference start and completion for a manual report and provides the required evidence. Its age alone does not prevent submission. Once confirmed, it belongs to the reporting period containing its confirmation time, is checked against the qualification/rules at confirmation, and contributes to that game-specific level's progress.
 12. A rule or qualification changes after a trip starts but before it finishes or is submitted. The assessment uses the historical versions effective at the start.
 13. A driver meets the configured promotion requirements. The system shows eligibility, but the role/qualification changes only after director/deputy confirmation.
 14. A trainee selects a company-wide event on a report for its prescribed load, and the director confirms actual participation. Ordinary qualification restrictions do not prevent that load; once accepted, the trip also contributes to qualification progress. An RSVP without actual-participation confirmation does not authorize the exception.
@@ -258,13 +258,13 @@ The required manual-report fields are game, origin city, destination city, cargo
 23. A director rejects an application with a reason; the applicant receives the reason by email and may submit another application while the earlier decision remains in history.
 24. A director approves an application and copies its invitation link for manual delivery through Discord. The candidate can use the link to set a password within seven days, without relying on the email having been delivered. A consumed, expired, or replaced invitation cannot be reused.
 25. A member leaves the company. Their existing session and telemetry token no longer grant access, while their profile is marked Former member and historical trips/statistics remain available according to the agreed visibility rules.
-26. A telemetry trip finishes in January and arrives later. Use its actual January completion time for reporting-period attribution. A manual report without a trip date, confirmed in February, belongs to the February reporting period.
+26. A telemetry trip finishes in January and arrives later. Use its actual January completion time for reporting-period attribution. A manual report with January reference dates and February confirmation belongs to the February reporting period.
 27. A pending or rejected report does not increase accepted-trip totals or accepted distance. Accepting it adds one canonical trip; correcting or revoking acceptance updates the affected totals rather than adding another trip.
 28. A manual report records actual distance that differs from planned route length. The reviewer verifies the actual value against the screenshot; company and qualification-distance totals use the actual distance.
 29. A previously accepted manual report receives matching telemetry that would change its reporting period or progress. The system retains one canonical trip and the confirmed result pending staff review; only a reviewed decision applies those changes.
 30. A member leaves an event unanswered or signs up but does not attend. The director can record actual attendance, but the MVP does not impose an automatic penalty.
 31. An event's start time changes. Signed-up participants receive an in-app update, their responses are preserved, response editing follows the revised start, and the one-hour reminder is rescheduled. Cancelling the event notifies them and removes its scheduled reminders.
-32. A manual report includes game, origin/destination cities, cargo, mass, trailer type, actual distance, and a screenshot, while omitting the optional event/comment and any trip date. The form accepts that field set for review.
+32. A manual report includes game, origin and destination cities, cargo, mass, trailer type, actual distance, reference start and completion, and a screenshot. The form accepts it with optional event, comment, damage and company fields omitted.
 33. Two members use different display timezones. Company daily/monthly totals use the same configured reporting timezone; event times are displayed in each user's timezone with an explicit label.
 34. A report screenshot is younger than one year since the latest decision or its report is under review. Retention cleanup must preserve it; expiry of an eligible older screenshot does not erase trip facts or decision history.
 35. A former member returns. The same account and trip history are retained, the director assigns roles/qualifications anew, and old sessions/tokens remain invalid.

@@ -1666,6 +1666,27 @@ export function createCatalogs(
     },
     resolveInTransaction,
     selectionsInTransaction,
+    async hasVisibleDepotInTransaction(
+      tx: TxContext,
+      { game, cityId, companyId }: { game: Game; cityId: string; companyId: string },
+    ) {
+      const [depot] = await c(tx)
+        .select({ id: catalogCompanyCities.id })
+        .from(catalogCompanyCities)
+        .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
+        .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
+        .where(
+          and(
+            eq(catalogCompanyCities.game, game),
+            eq(catalogCompanyCities.cityId, cityId),
+            eq(catalogCompanyCities.companyId, companyId),
+            depotVisible,
+          ),
+        )
+        .limit(1)
+        .for("share");
+      return depot !== undefined;
+    },
     async cargoAdrInTransaction(tx: TxContext, cargoId: string) {
       return (await selectionsInTransaction(tx, [{ kind: "cargo", id: cargoId }])).get(cargoId)
         ?.adrClass;

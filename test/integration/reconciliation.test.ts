@@ -264,7 +264,7 @@ async function image(who = owner) {
   );
   return id;
 }
-function fields(evidenceId: string): S["ManualSubmissionFields"] {
+function fields(evidenceId: string): S["ManualDatedSubmissionFields"] {
   const unresolved = {
     status: "unresolved" as const,
     label: "Fictional unresolved selection",
@@ -281,6 +281,8 @@ function fields(evidenceId: string): S["ManualSubmissionFields"] {
     cargoMassKg: "1000",
     actualDistanceM: "123400",
     evidenceIds: [evidenceId],
+    startedAt: "2026-09-19T08:00:00.000Z",
+    completedAt: "2026-09-19T09:00:00.000Z",
   };
 }
 async function report(who = owner, target = manual) {

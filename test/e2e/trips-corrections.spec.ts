@@ -3,6 +3,7 @@ import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts"
 import { pngBytes } from "../fixtures/manual-images.ts";
 import { catalogLanguage, entityId, envelope, list } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
+import { manualReferenceTimes } from "./support/manual-reference.ts";
 import { cargoId, evidenceId, example, id, mockTrips, trailerId } from "./support/trip-ui.ts";
 
 const targetA = "47000000-0000-4000-8000-000000000001",
@@ -27,7 +28,7 @@ async function draftFixture(
   await mockTrips(page);
   const draft = example("getMyManualDraft:success").data;
   draft.id = id;
-  draft.fields = fields();
+  draft.fields = { ...fields(), ...manualReferenceTimes };
   draft.targetTrip = initial;
   draft.version = 1;
   draft.submittedReportId = null;
@@ -170,7 +171,9 @@ for (const scenario of ["null_to_A", "A_to_B", "A_to_clear", "A_refreshed"] as c
             };
       const submit = page.getByRole("button", { name: "Submit for review", exact: true });
       await expect(submit).toBeDisabled();
-      await expect(page.getByRole("status")).toContainText("Save the draft");
+      await expect(
+        page.getByRole("status").filter({ hasText: /^Save the draft after changing/ }),
+      ).toBeVisible();
       expect(submitted).toHaveLength(0);
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       await expect(submit).toBeEnabled();
