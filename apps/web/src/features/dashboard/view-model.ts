@@ -12,10 +12,11 @@ import type { DTO } from "./transport.js";
 export const RECENT_TRIPS_LIMIT = 5;
 
 /**
- * Latest accepted company trips ordered by effective actual completion.
+ * Latest accepted company trips ordered by effective actual completion, labelled in the
+ * interface language.
  */
-export function recentTripsPath(game?: "ets2" | "ats") {
-  return `/trips?scope=company&limit=${RECENT_TRIPS_LIMIT}&order=completion_desc${game ? `&game=${game}` : ""}`;
+export function recentTripsPath(game?: "ets2" | "ats", locale?: "en" | "ru") {
+  return `/trips?scope=company&limit=${RECENT_TRIPS_LIMIT}&order=completion_desc${game ? `&game=${game}` : ""}${locale ? `&locale=${locale}` : ""}`;
 }
 
 export type BlockState = "ready" | "empty" | "loading" | "error" | "forbidden";
@@ -194,4 +195,38 @@ export function responsePressed(current: ResponseValue, declining: boolean) {
     going: !declining && current === "participating",
     cantGo: declining || current === "declined",
   };
+}
+
+export type ActionKey = "fixes" | "drafts" | "events" | "review" | "applications";
+/** Each "Needs attention" section and the capability that offers it, in display order. */
+const actionSections: readonly { key: ActionKey; capability: string }[] = [
+  { key: "fixes", capability: "trips.read_own_private" },
+  { key: "drafts", capability: "trips.submit_own" },
+  { key: "events", capability: "events.respond" },
+  { key: "review", capability: "trips.review" },
+  { key: "applications", capability: "applications.manage" },
+];
+const actionCount = (summary: DTO["WorkspaceSummary"], key: ActionKey) =>
+  ({
+    fixes: summary.tripsNeedingFixes?.count,
+    drafts: summary.unfinishedManualDrafts?.count,
+    events: summary.unansweredUpcomingEvents?.count,
+    review: summary.reviewQueue?.count,
+    applications: summary.newApplicationsCount,
+  })[key];
+
+/**
+ * Sections of a loaded summary that have work for the viewer. A count the summary omits, because
+ * the viewer has no access or its module is off, is simply not mentioned: it is not a failure.
+ */
+export function visibleActionSections(
+  summary: DTO["WorkspaceSummary"],
+  capabilities: readonly string[],
+): { key: ActionKey; count: number }[] {
+  return actionSections.flatMap(({ key, capability }) => {
+    const count = actionCount(summary, key);
+    return capabilities.includes(capability) && count !== undefined && count > 0
+      ? [{ key, count }]
+      : [];
+  });
 }

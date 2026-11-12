@@ -433,7 +433,6 @@ export async function mockDashboardRoutes(
     holdAnalytics?: boolean;
     leaderboardSize?: number;
     leaderboardNextCursor?: boolean;
-    reviewNextCursor?: boolean;
     /** Public company stats zone (default Europe/Moscow); null: no reporting timezone. */
     reportingTimezone?: string | null;
   } = {},
@@ -620,19 +619,7 @@ export async function mockDashboardRoutes(
       });
     }
     if (path === "/api/v1/trips") {
-      const fixture = makeTripSummaryListFixture();
-      // A full first page of the five-item review queue with more pending behind the cursor.
-      if (options.reviewNextCursor && endpoint === "review") {
-        const [item] = fixture.data.items;
-        const items = [0, 1, 2, 3, 4].map((index) => ({
-          ...item,
-          id: `018f3a2b-4c5d-4e6f-8a9b-0c1d2e3f4a9${index}`,
-        }));
-        return route.fulfill({
-          json: { ...fixture, data: { items, nextCursor: "NONFUNCTIONAL_CURSOR" } },
-        });
-      }
-      return route.fulfill({ json: fixture });
+      return route.fulfill({ json: makeTripSummaryListFixture() });
     }
 
     return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } });

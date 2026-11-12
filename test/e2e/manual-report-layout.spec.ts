@@ -40,7 +40,7 @@ test(
       .click();
     await expect(page.getByRole("heading", { name: "Saved drafts", exact: true })).toBeVisible();
     await expect.poll(() => requests.length).toBe(3);
-    expect(requests.at(-1)?.toString()).toBe("limit=25");
+    expect(requests.at(-1)?.toString()).toBe("locale=en&limit=25");
   },
 );
 
@@ -226,9 +226,9 @@ test(
     const expected = [
       "manual-game",
       "field:Origin city",
-      "originCompanyId",
+      "field:Origin company (optional)",
       "field:Destination city",
-      "destinationCompanyId",
+      "field:Destination company (optional)",
       "field:Cargo",
       "field:Trailer type",
       "cargoMassKg",

@@ -42,6 +42,27 @@ async function fitsViewport(page: Page) {
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 }
+/** Cells whose unclipped content (text included) runs past their edge over a neighbour. */
+async function spilledCells(scope: Locator) {
+  return scope.evaluate((root) =>
+    Array.from(root.querySelectorAll("td, th")).flatMap((cell) => {
+      if (getComputedStyle(cell).overflowX !== "visible") return [];
+      const box = cell.getBoundingClientRect();
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      const spilled: string[] = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        // Screen-reader-only text is clipped to one pixel and never paints over a neighbour.
+        if (!node.textContent?.trim() || node.parentElement?.closest(".visually-hidden")) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const text = range.getBoundingClientRect();
+        if (text.left < box.left - 1 || text.right > box.right + 1)
+          spilled.push(`${cell.className || cell.tagName.toLowerCase()}: ${node.textContent}`);
+      }
+      return spilled;
+    }),
+  );
+}
 async function capture(page: Page, info: TestInfo, name: string) {
   await fitsViewport(page);
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
@@ -110,6 +131,8 @@ for (const locale of ["en", "ru"] as const) {
         ).toBeVisible();
       else await expect(page.getByText(c.rowFallback, { exact: true })).toHaveCount(0);
       await expect(page.getByText("Fictional hidden city", { exact: true })).toHaveCount(0);
+      // Long names and codes wrap inside their own column instead of running under the next one.
+      if (!phone(page)) expect(await spilledCells(page.getByTestId("catalog-table"))).toEqual([]);
       await capture(page, info, `lists-${locale}-cities`);
 
       await tab(page, c.tabCargoes).click();
@@ -121,6 +144,19 @@ for (const locale of ["en", "ru"] as const) {
       // The Steam app ID is a table column; phone rows carry only the name and code.
       if (phone(page)) await expect(rowOf(page, "Fictional pack")).toBeVisible();
       else await expect(rowOf(page, "Fictional pack").getByText("1234")).toBeVisible();
+      // A DLC has only its canonical name; translatable lists keep the Russian column.
+      await expect(rowOf(page, "Fictional pack").getByText(c.rowFallback)).toHaveCount(0);
+      await expect(page.getByRole("button", { name: c.untranslated, exact: true })).toHaveCount(0);
+      if (!phone(page)) {
+        const ruColumn = page
+          .getByTestId("catalog-table")
+          .getByRole("columnheader", { name: c.colNameRu, exact: true });
+        await expect(ruColumn).toHaveCount(0);
+        await tab(page, c.tabTrailers).click();
+        await expect(ruColumn).toHaveCount(1);
+        await tab(page, c.tabDlcs).click();
+        await expect(rowOf(page, "Fictional pack")).toBeVisible();
+      }
       await capture(page, info, `lists-${locale}-dlcs`);
     },
   );
@@ -1177,8 +1213,13 @@ for (const locale of ["en", "ru"] as const) {
       expect(images.find((url) => url.pathname.includes(freight.id))?.search).toBe(
         `?v=${logoRef(3).version}`,
       );
-      if (locale === "ru")
-        await expect(rowOf(page, freight.name).getByText(c.rowFallback)).toBeVisible();
+      // A company has only its canonical name: no Russian column, fallback mark or filter.
+      await expect(rowOf(page, freight.name).getByText(c.rowFallback)).toHaveCount(0);
+      await expect(page.getByRole("button", { name: c.untranslated, exact: true })).toHaveCount(0);
+      if (!phone(page))
+        await expect(
+          page.getByTestId("catalog-table").getByRole("columnheader", { name: c.colNameRu }),
+        ).toHaveCount(0);
       await capture(page, info, `companies-${locale}`);
     },
   );
@@ -1637,6 +1678,31 @@ test(
 );
 
 test(
+  "company and DLC forms and imports ask for the canonical name only",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const c = catalogTranslations.en;
+    await mockCatalogs(page, true, {
+      rows: { ets2: { ...defaultRows("en"), companies: [companyRow(freight, "en", null)] } },
+    });
+    for (const [list, columns] of [
+      ["companies", "game, code, name_en, dlc_code"],
+      ["dlcs", "game, code, name_en, steam_app_id"],
+    ] as const) {
+      await open(page, "en", `?tab=${list}`);
+      await page.getByRole("button", { name: c.importButton, exact: true }).last().click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.locator("code").first()).toHaveText(columns);
+    }
+    await open(page, "en", "?tab=companies");
+    await rowAction(page, freight.name, c.edit);
+    const form = page.getByRole("dialog");
+    await expect(form.getByLabel(c.fieldNameEn, { exact: true })).toBeVisible();
+    await expect(form.getByLabel(c.fieldNameRu, { exact: true })).toHaveCount(0);
+  },
+);
+
+test(
   "members without manage rights see logos and depots but get no logo, depot or import actions",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -1678,10 +1744,7 @@ test(
         `66000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
         `Fictional terminal ${String(index + 1).padStart(2, "0")}`,
         "en",
-        {
-          nameRu: index < 3 ? null : "Вымышленный терминал",
-          logo: index < 5 ? null : logoRef(),
-        },
+        { logo: index < 5 ? null : logoRef() },
       ),
     );
     companies.unshift(
@@ -1705,7 +1768,8 @@ test(
     const latestList = () =>
       requests.findLast((url) => url.pathname === "/api/v1/catalogs/companies")?.searchParams;
     await expect(hidden).toHaveAccessibleDescription("1");
-    await expect(untranslated).toHaveAccessibleDescription("3");
+    // Companies have only their canonical name: the deep link's untranslated filter is dropped.
+    await expect(untranslated).toHaveCount(0);
     await expect(noLogo).toHaveAccessibleDescription("5");
     await expect(hidden).toHaveAttribute("aria-pressed", "true");
     await expect(showHidden).not.toBeChecked();
@@ -1727,16 +1791,16 @@ test(
     await page.getByRole("button", { name: c.next, exact: true }).click();
     await expect(rowOf(page, "Fictional terminal 26")).toBeVisible();
     expect(latestList()?.get("cursor")).toBe("25");
-    await untranslated.click();
+    await noLogo.click();
     await expect(rowOf(page, "Fictional terminal 01")).toBeVisible();
-    await expect(untranslated).toHaveAttribute("aria-pressed", "true");
-    expect(currentSearch().get("untranslated")).toBe("true");
-    expect(latestList()?.get("untranslated")).toBe("true");
+    await expect(noLogo).toHaveAttribute("aria-pressed", "true");
+    expect(latestList()?.get("logo")).toBe("missing");
     expect(latestList()?.has("cursor")).toBe(false);
-    await untranslated.click();
+    await noLogo.click();
     await expect(rowOf(page, "Fictional terminal 01")).toBeVisible();
     await expect(rowOf(page, "Fictional terminal 26")).toHaveCount(0);
     await expect(page.getByRole("button", { name: c.previous, exact: true })).toBeDisabled();
+    expect(requests.some((url) => url.searchParams.has("untranslated"))).toBe(false);
 
     await noLogo.click();
     await expect(noLogo).toHaveAttribute("aria-pressed", "true");
@@ -1774,18 +1838,18 @@ test(
 );
 
 test(
-  "English depot maintenance uses both parent translations and keeps the legacy tab count",
+  "depot maintenance offers no untranslated filter or Russian column and keeps the legacy tab count",
   browserCase(["@functional"]),
   async ({ page }) => {
     const c = catalogTranslations.en;
     const hiddenParent = depotRow("67000000-0000-4000-8000-000000000024", brokenCo, northCity);
     hiddenParent.company.label.hidden = true;
-    await mockCatalogs(page, false, {
+    const { requests } = await mockCatalogs(page, false, {
       maintenanceCounts: true,
       rows: {
         ets2: {
           companies: [
-            catalogItem(freight.id, freight.name, "en", { nameRu: "Вымышленный перевозчик" }),
+            catalogItem(freight.id, freight.name),
             catalogItem(plainCo.id, plainCo.name),
             catalogItem(brokenCo.id, brokenCo.name, "en", { hidden: true }),
           ],
@@ -1804,29 +1868,32 @@ test(
         ],
       },
     });
-    await open(page, "en", "?tab=depots");
-    const untranslated = maintenanceChip(page, c.untranslated);
-    const translatedDepot = rowOf(page, freight.name).filter({ hasText: southCity.name });
+    await open(page, "en", "?tab=depots&untranslated=true");
     const hiddenParentDepot = rowOf(page, brokenCo.name);
+    await expect(page).toHaveURL(/\?tab=depots$/);
     await expect(tab(page, c.tabDepots).getByText("4", { exact: true })).toBeVisible();
     await expect(maintenanceChip(page, c.hiddenOnly)).toHaveAccessibleDescription("0");
-    await expect(untranslated).toHaveAccessibleDescription("2");
-    await expect(translatedDepot).toBeVisible();
-    await expect(hiddenParentDepot).toHaveCount(0);
-
-    await untranslated.click();
-    await expect(untranslated).toHaveAttribute("aria-pressed", "true");
-    await expect(rowOf(page, freight.name).filter({ hasText: northCity.name })).toBeVisible();
+    await expect(maintenanceChip(page, c.untranslated)).toHaveCount(0);
+    await expect(rowOf(page, freight.name).filter({ hasText: southCity.name })).toBeVisible();
     await expect(rowOf(page, plainCo.name).filter({ hasText: southCity.name })).toBeVisible();
-    await expect(translatedDepot).toHaveCount(0);
     await expect(hiddenParentDepot).toHaveCount(0);
+    if (!phone(page))
+      await expect(
+        page.getByTestId("catalog-table").getByRole("columnheader", { name: c.colNameRu }),
+      ).toHaveCount(0);
     await expect(
-      page.getByText(c.pagerTotal.replace("{{count}}", "2"), { exact: true }),
-    ).toBeVisible();
+      page.getByTestId(phone(page) ? "catalog-cards" : "catalog-table").getByText("EN", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    expect(
+      requests
+        .filter((url) => url.pathname === "/api/v1/catalogs/depots")
+        .some((url) => url.searchParams.has("untranslated")),
+    ).toBe(false);
 
     await page.getByRole("checkbox", { name: c.showHidden }).click();
     await expect(hiddenParentDepot).toBeVisible();
-    await expect(untranslated).toHaveAccessibleDescription("2");
   },
 );
 
@@ -1868,19 +1935,8 @@ for (const locale of ["en", "ru"] as const) {
         companyRowId,
         "Fictional company with a long logistics terminal name",
         locale,
-        {
-          nameRu: "Вымышленная компания с длинным названием логистического терминала",
-          code: "fictional_long_terminal",
-          depotCount: 0,
-          updatedAt: catalogInstant,
-        },
+        { code: "fictional_long_terminal", depotCount: 0, updatedAt: catalogInstant },
       );
-      company.display = {
-        ...company.display,
-        label: (locale === "ru" ? company.nameRu : company.nameEn) ?? company.nameEn,
-        renderedLocale: locale,
-        englishFallback: false,
-      };
       await mockCatalogs(page, true, {
         displayTimezone: catalogTimezone,
         depots: {
@@ -1949,6 +2005,8 @@ for (const locale of ["en", "ru"] as const) {
       await expect(noLogo).toHaveAttribute("aria-pressed", "true");
       await expect(time).toBeVisible();
       await capture(page, info, `maintenance-${locale}`);
+      // Long names wrap inside their cell instead of running under the code or source column.
+      if (!phone(page)) expect(await spilledCells(table)).toEqual([]);
       if (page.viewportSize()?.width === 768) {
         const scrollRegion = page.getByRole("region", { name: c.tabCompanies, exact: true });
         await scrollRegion.focus();
@@ -1964,6 +2022,7 @@ for (const locale of ["en", "ru"] as const) {
       const depotTime = rowOf(page, freight.name).locator("time");
       await expect(depotTime).toHaveAttribute("datetime", catalogInstant);
       await expect(depotTime).toHaveText(formatted);
+      if (!phone(page)) expect(await spilledCells(table)).toEqual([]);
       await fitsViewport(page);
     },
   );

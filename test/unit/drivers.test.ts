@@ -198,6 +198,10 @@ describe("driver profile model", () => {
       expect(tripsPath(alphaId, { isSelf: false, game: "ets2" })).toBe(
         `/trips?scope=company&ownerId=${alphaId}&game=ets2&limit=10&order=completion_desc`,
       );
+      // Labels follow the interface language, not the saved account language.
+      expect(tripsPath(alphaId, { isSelf: false, locale: "ru" })).toBe(
+        `/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc&locale=ru`,
+      );
     });
 
     it("names the sources and falls back to unknown", () => {

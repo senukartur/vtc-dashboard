@@ -237,7 +237,7 @@ function ManualEditor({
   const draft = draftEditor?.displayed.data.data;
   const draftEtag = draftEditor?.writable ? draftEditor.displayed.etag : null;
   const draftBlocked = !!draft && !draftEtag;
-  const { t } = useTranslation("trips"),
+  const { t, i18n } = useTranslation("trips"),
     navigate = useNavigate(),
     location = useLocation(),
     session = useSession(),
@@ -268,9 +268,11 @@ function ManualEditor({
     if (focusHeading) heading.current?.focus();
   }, [focusHeading]);
   const game = fields.game ?? "ets2";
+  // Telemetry targets list their routes in the interface language.
+  const listLocale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const [cursor, setCursor] = useState<string | null>(null),
     targets = useTripQuery(
-      `/trips?scope=mine&game=${game}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      `/trips?scope=mine&game=${game}&locale=${listLocale}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       "EnvelopeListTripSummary",
       !report,
     );

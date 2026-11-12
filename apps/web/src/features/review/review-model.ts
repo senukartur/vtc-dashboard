@@ -63,8 +63,11 @@ export function queueParams(search: URLSearchParams): QueueParams {
   };
 }
 
-/** listTrips parameters for one queue page; the selection never reaches the API. */
-export function listQuery(params: QueueParams, cursor: string | null) {
+/**
+ * listTrips parameters for one queue page; the selection never reaches the API. Labels follow the
+ * interface language rather than the saved account language.
+ */
+export function listQuery(params: QueueParams, cursor: string | null, locale?: "en" | "ru") {
   return {
     scope: "review",
     hold: params.tab === "awaiting" ? "true" : "false",
@@ -72,8 +75,33 @@ export function listQuery(params: QueueParams, cursor: string | null) {
     source: params.source,
     decision: params.tab === "decided" ? params.decision : undefined,
     order: params.order,
+    locale,
     limit: pageSize,
     cursor: cursor ?? undefined,
+  };
+}
+
+export type QueueHeader =
+  | { kind: "pending" }
+  | { kind: "unavailable" }
+  | { kind: "ready"; count: number; oldestAgeSeconds: number | null; ownExcluded: boolean };
+
+/**
+ * The queue header. Its count is the workspace summary's: trips the viewer can decide, without the
+ * viewer's own. Own trips still listed on the page are marked and explained as not counted.
+ */
+export function queueHeaderState(
+  summary: { count: number; oldestAgeSeconds: number | null } | undefined,
+  pending: boolean,
+  rows: readonly DTO["TripSummary"][] | undefined,
+  memberId: string | undefined,
+): QueueHeader {
+  if (!summary) return { kind: pending ? "pending" : "unavailable" };
+  return {
+    kind: "ready",
+    count: summary.count,
+    oldestAgeSeconds: summary.oldestAgeSeconds,
+    ownExcluded: !!rows?.some((row) => isOwn(row, memberId)),
   };
 }
 

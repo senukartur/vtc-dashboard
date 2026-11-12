@@ -14,6 +14,7 @@ import {
   CATALOG_LOGO_BULK_MAX_BYTES,
   CATALOG_LOGO_MAX_BYTES,
 } from "../../apps/api/src/modules/catalogs/config.ts";
+import { cursorCodec } from "../../apps/api/src/modules/catalogs/cursor.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   type Actor,
@@ -44,6 +45,7 @@ const origin = "http://127.0.0.1:4173",
   password = "Fictional-company-passphrase-42",
   boundary = "vtc-company-boundary";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
+const catalogSettings = catalogConfig();
 let instant = Date.parse("2026-11-10T12:00:00.000Z");
 const now = () => new Date(instant);
 let control: Connection,
@@ -83,7 +85,7 @@ beforeAll(async () => {
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
-  catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  catalogs = createCatalogs(unit, catalogSettings, { identity }, now);
   await identity.bootstrap({
     email: "company-director@example.invalid",
     name: "Fictional Director",
@@ -338,22 +340,17 @@ test("a depot is listed by default only when the depot, company and city are all
   await catalogs.patch(director, "cities", k.id, newId(), { hidden: false });
   expect(await ids()).toEqual([d.id]);
   const summary = await catalogs.summary(director, "ets2");
-  expect(summary.lists.depots).toEqual({ visible: 1, hidden: 0, untranslated: 1 });
-  expect(summary.lists.companies).toEqual({
-    visible: 1,
-    hidden: 0,
-    untranslated: 1,
-    missingLogo: 1,
-  });
+  // Companies and depots carry no translation, so the summary counts none missing.
+  expect(summary.lists.depots).toEqual({ visible: 1, hidden: 0 });
+  expect(summary.lists.companies).toEqual({ visible: 1, hidden: 0, missingLogo: 1 });
   await catalogs.patchDepot(director, d.id, newId(), { hidden: true });
   expect((await catalogs.summary(director, "ets2")).lists.depots).toEqual({
     visible: 0,
     hidden: 1,
-    untranslated: 0,
   });
   const empty = (await catalogs.summary(director, "ats")).lists;
-  expect(empty.depots).toEqual({ visible: 0, hidden: 0, untranslated: 0 });
-  expect(empty.companies).toEqual({ visible: 0, hidden: 0, untranslated: 0, missingLogo: 0 });
+  expect(empty.depots).toEqual({ visible: 0, hidden: 0 });
+  expect(empty.companies).toEqual({ visible: 0, hidden: 0, missingLogo: 0 });
 });
 
 test("company logo filters combine before paging and follow changes to visible companies", async () => {
@@ -362,7 +359,7 @@ test("company logo filters combine before paging and follow changes to visible c
     withLogo = await company("filter_c"),
     hidden = await company("filter_hidden"),
     ats = await company("filter_a", "ats");
-  await company("filter_d", "ets2", { nameRu: "Пример" });
+  await company("other_d");
   await catalogs.setLogo(director, withLogo.id, newId(), rgbaLogo(2));
   await catalogs.patch(director, "companies", hidden.id, newId(), { hidden: true });
 
@@ -370,14 +367,13 @@ test("company logo filters combine before paging and follow changes to visible c
     game: "ets2",
     locale: "ru",
     logo: "missing",
-    untranslated: true,
     search: "filter_",
     dlc: "base",
     limit: 1,
   } as const;
   const page = await catalogs.list(driver, "companies", query);
   expect(page).toMatchObject({
-    items: [{ id: first.id, logo: null, depotCount: 0, display: { englishFallback: true } }],
+    items: [{ id: first.id, logo: null, depotCount: 0, display: { englishFallback: false } }],
     total: 2,
     nextCursor: expect.any(String),
   });
@@ -403,7 +399,7 @@ test("company logo filters combine before paging and follow changes to visible c
   );
 
   const counts = async () => (await catalogs.summary(driver, "ets2")).lists.companies;
-  expect(await counts()).toEqual({ visible: 4, hidden: 1, untranslated: 3, missingLogo: 3 });
+  expect(await counts()).toEqual({ visible: 4, hidden: 1, missingLogo: 3 });
   instant += 123;
   const logo = await catalogs.setLogo(director, first.id, newId(), rgbaLogo(1));
   expect(logo.updatedAt).toBe(first.updatedAt);
@@ -417,10 +413,10 @@ test("company logo filters combine before paging and follow changes to visible c
   expect(await counts()).toMatchObject({ missingLogo: 3 });
 });
 
-test("depot filters use both parent names, default visibility and the depot's own hidden flag", async () => {
+test("depot filters use default visibility and the depot's own hidden flag", async () => {
   const a = await company("maintenance_a"),
-    b = await company("maintenance_b", "ets2", { nameRu: "Вторая" }),
-    c = await company("maintenance_c", "ets2", { nameRu: "Третья" }),
+    b = await company("maintenance_b"),
+    c = await company("maintenance_c"),
     parentHidden = await company("maintenance_d");
   const cityMissing = await city("missing_label"),
     cityTranslated = await city("translated_label", "ets2", { nameRu: "Пример" }),
@@ -428,7 +424,7 @@ test("depot filters use both parent names, default visibility and the depot's ow
   instant += 123;
   const defaultA = await depot(a.id, cityTranslated.id);
   const defaultB = await depot(b.id, cityMissing.id);
-  await depot(c.id, cityTranslated.id);
+  const defaultC = await depot(c.id, cityTranslated.id);
   const depotHidden = await depot(a.id, cityMissing.id);
   const hiddenByCity = await depot(a.id, cityHidden.id);
   const hiddenByCompany = await depot(parentHidden.id, cityTranslated.id);
@@ -440,22 +436,25 @@ test("depot filters use both parent names, default visibility and the depot's ow
   const atsCity = await city("missing_label", "ats");
   const atsDepot = await depot(ats.id, atsCity.id, "ats");
 
-  const query = { game: "ets2", untranslated: true, search: "maintenance", dlc: "base" } as const;
+  const query = { game: "ets2", search: "maintenance", dlc: "base" } as const;
   const ids = (result: Awaited<ReturnType<Catalogs["listDepots"]>>) =>
     result.items.map((row) => row.id);
   for (const locale of ["en", "ru"] as const) {
-    const scoped = { ...query, locale, limit: 1 };
+    const scoped = { ...query, locale, limit: 2 };
     const first = await catalogs.listDepots(driver, scoped);
-    expect(first.total).toBe(2);
+    expect(first.total).toBe(3);
     expect(first.nextCursor).toEqual(expect.any(String));
     const cursor = first.nextCursor as string;
     const second = await catalogs.listDepots(driver, { ...scoped, cursor });
-    expect(second.total).toBe(2);
+    expect(second.total).toBe(3);
     expect(second.nextCursor).toBeNull();
-    expect([...ids(first), ...ids(second)].sort()).toEqual([defaultA.id, defaultB.id].sort());
-    await expect(
-      catalogs.listDepots(driver, { ...scoped, untranslated: false, cursor }),
-    ).rejects.toMatchObject({ statusCode: 409, publicCode: "VERSION_CONFLICT" });
+    // Company order is the canonical name in both languages.
+    expect([...ids(first), ...ids(second)]).toEqual([defaultA.id, defaultB.id, defaultC.id]);
+    const { dlc: _dlc, ...withoutDlc } = scoped;
+    await expect(catalogs.listDepots(driver, { ...withoutDlc, cursor })).rejects.toMatchObject({
+      statusCode: 409,
+      publicCode: "VERSION_CONFLICT",
+    });
   }
   const hiddenOnly = { ...query, hidden: "only", includeHidden: true } as const;
   expect(ids(await catalogs.listDepots(driver, hiddenOnly))).toEqual([depotHidden.id]);
@@ -468,14 +467,17 @@ test("depot filters use both parent names, default visibility and the depot's ow
   expect(only.total).toBe(1);
   const all = await catalogs.listDepots(driver, { ...query, includeHidden: true });
   expect(ids(all).sort()).toEqual(
-    [defaultA.id, defaultB.id, depotHidden.id, hiddenByCity.id, hiddenByCompany.id].sort(),
+    [
+      defaultA.id,
+      defaultB.id,
+      defaultC.id,
+      depotHidden.id,
+      hiddenByCity.id,
+      hiddenByCompany.id,
+    ].sort(),
   );
   expect(ids(await catalogs.listDepots(driver, { ...query, game: "ats" }))).toEqual([atsDepot.id]);
-  expect((await catalogs.summary(driver, "ets2")).lists.depots).toEqual({
-    visible: 5,
-    hidden: 1,
-    untranslated: 2,
-  });
+  expect((await catalogs.summary(driver, "ets2")).lists.depots).toEqual({ visible: 5, hidden: 1 });
   const companies = await catalogs.list(driver, "companies", { game: "ets2", includeHidden: true });
   expect(companies.items.map((row) => [row.id, row.depotCount])).toEqual([
     [a.id, 3],
@@ -488,19 +490,26 @@ test("depot filters use both parent names, default visibility and the depot's ow
   expect((await catalogs.get(driver, "companies", a.id)).updatedAt).toBe(a.updatedAt);
 });
 
-test("companies are listed per locale with English fallback, stable ties and keyset paging", async () => {
-  await company("c_alpha", "ets2", { nameEn: "Alpha Freight", nameRu: "Яблоко" });
-  await company("c_bravo", "ets2", { nameEn: "Bravo Freight", nameRu: "Арка" });
+test("companies are listed by their canonical name in every locale, with stable ties and keyset paging", async () => {
+  const alpha = await company("c_alpha", "ets2", { nameEn: "Alpha Freight" });
+  await company("c_bravo", "ets2", { nameEn: "Bravo Freight" });
   await company("c_charlie", "ets2", { nameEn: "Charlie Freight" });
   await company("c_other_game", "ats", { nameEn: "Another game" });
+  // A stored Russian name from an older import is ignored everywhere.
+  await control.query("UPDATE catalog_companies SET name_ru=? WHERE id=?", ["Яблоко", alpha.id]);
   const names = async (locale: "en" | "ru") =>
     (await catalogs.list(director, "companies", { game: "ets2", locale })).items.map(
       (item) => item.display.label,
     );
   expect(await names("en")).toEqual(["Alpha Freight", "Bravo Freight", "Charlie Freight"]);
-  expect(await names("ru")).toEqual(["Charlie Freight", "Арка", "Яблоко"]);
+  expect(await names("ru")).toEqual(["Alpha Freight", "Bravo Freight", "Charlie Freight"]);
   const russian = await catalogs.list(director, "companies", { game: "ets2", locale: "ru" });
-  expect(russian.items.map((item) => item.display.englishFallback)).toEqual([true, false, false]);
+  expect(russian.items.map((item) => item.display.englishFallback)).toEqual([false, false, false]);
+  expect(russian.items.map((item) => item.nameRu)).toEqual([null, null, null]);
+  expect(
+    (await catalogs.list(director, "companies", { game: "ets2", locale: "ru", search: "Яблоко" }))
+      .total,
+  ).toBe(0);
   expect(russian.items[0]).toMatchObject({ logo: null, dlcId: null });
   expect(russian.items[0]).not.toHaveProperty("regionId");
   expect(russian.total).toBe(3);
@@ -526,6 +535,78 @@ test("companies are listed per locale with English fallback, stable ties and key
   await expect(
     catalogs.list(director, "companies", { game: "ets2", regionId: newId() }),
   ).rejects.toMatchObject({ statusCode: 422 });
+});
+
+test("cursors issued under the localized order are refused where the canonical name now orders", async () => {
+  const alpha = await company("l_alpha", "ets2", { nameEn: "Alpha Legacy" }),
+    bravo = await company("l_bravo", "ets2", { nameEn: "Bravo Legacy" });
+  await company("l_charlie", "ets2", { nameEn: "Charlie Legacy" });
+  const port = await city("l_port", "ets2", { nameEn: "Legacy Port", nameRu: "Порт" }),
+    bay = await city("l_bay", "ets2", { nameEn: "Legacy Bay" });
+  const alphaDepot = await depot(alpha.id, port.id);
+  await depot(bravo.id, port.id);
+  await depot(alpha.id, bay.id);
+  const codec = cursorCodec(catalogSettings.cursorKey);
+  const session = [driver.userId, driver.sessionId, driver.accessEpoch] as const;
+  const conflict = { statusCode: 409, publicCode: "VERSION_CONFLICT" };
+
+  // A fresh Russian company cursor pages by the canonical name.
+  const query = { game: "ets2", locale: "ru", search: "Legacy", limit: 1 } as const;
+  const first = await catalogs.list(driver, "companies", query);
+  expect(first.items.map((item) => item.id)).toEqual([alpha.id]);
+  const fresh = await catalogs.list(driver, "companies", {
+    ...query,
+    cursor: first.nextCursor as string,
+  });
+  expect(fresh.items.map((item) => item.id)).toEqual([bravo.id]);
+  // The binding of a cursor written before the change, without the canonical-name mark.
+  const listBinding = [...session, "companies", "ets2", "Legacy", false, null, null, "ru"];
+  const after = JSON.stringify(["Alpha Legacy", alpha.id]);
+  await expect(
+    catalogs.list(driver, "companies", { ...query, cursor: codec.write(listBinding, after) }),
+  ).rejects.toMatchObject(conflict);
+  // The same position with the mark is accepted, so the refusal is the missing mark alone.
+  const marked = codec.write([...listBinding, "canonical-name"], after);
+  expect(
+    (await catalogs.list(driver, "companies", { ...query, cursor: marked })).items.map(
+      (item) => item.id,
+    ),
+  ).toEqual([bravo.id]);
+
+  // Companies in a city: ordered by the canonical company name, so old cursors are refused.
+  const inCity = { game: "ets2", cityId: port.id, locale: "ru", limit: 1 } as const;
+  const depotFirst = await catalogs.listDepots(driver, inCity);
+  expect(depotFirst.items.map((row) => row.id)).toEqual([alphaDepot.id]);
+  const byCompany = [...session, "depots", "ets2", null, port.id, null, null, false, "ru"];
+  const depotAfter = JSON.stringify(["Alpha Legacy", alphaDepot.id]);
+  await expect(
+    catalogs.listDepots(driver, { ...inCity, cursor: codec.write(byCompany, depotAfter) }),
+  ).rejects.toMatchObject(conflict);
+  expect(
+    (
+      await catalogs.listDepots(driver, {
+        ...inCity,
+        cursor: codec.write([...byCompany, "canonical-name"], depotAfter),
+      })
+    ).items.map((row) => row.company.id),
+  ).toEqual([bravo.id]);
+
+  // Cities of one company keep their localized order, so their earlier cursors stay valid.
+  const ofCompany = { game: "ets2", companyId: alpha.id, locale: "ru", limit: 1 } as const;
+  const cityFirst = await catalogs.listDepots(driver, ofCompany);
+  const [firstCity] = cityFirst.items;
+  if (!firstCity) throw new Error("MISSING_SYNTHETIC_DEPOT");
+  const byCity = [...session, "depots", "ets2", alpha.id, null, null, null, false, "ru"];
+  const kept = await catalogs.listDepots(driver, {
+    ...ofCompany,
+    cursor: codec.write(byCity, JSON.stringify([firstCity.city.label.label, firstCity.id])),
+  });
+  expect(kept.items.map((row) => row.city.id)).toEqual(
+    (
+      await catalogs.listDepots(driver, { ...ofCompany, cursor: cityFirst.nextCursor as string })
+    ).items.map((row) => row.city.id),
+  );
+  expect(kept.items).toHaveLength(1);
 });
 
 test("companies in a city and cities of a company read in name order with bound cursors", async () => {
@@ -586,6 +667,21 @@ test("companies in a city and cities of a company read in name order with bound 
   expect((await catalogs.listDepots(director, { game: "ets2", search: "Zeta" })).total).toBe(3);
   expect((await catalogs.listDepots(director, { game: "ets2", search: "Eastv" })).total).toBe(1);
   expect((await catalogs.listDepots(director, { game: "ets2", search: "b_co" })).total).toBe(1);
+  // In one city the search picks a company by its name or code, never by the city's own name.
+  const inCity = (search: string) =>
+    catalogs.listDepots(director, { game: "ets2", cityId: north.id, search });
+  expect((await inCity("Northv")).total).toBe(0);
+  expect((await inCity("Alpha")).items.map((item) => item.company.id)).toEqual([b.id]);
+  expect((await inCity("a_co")).items.map((item) => item.company.id)).toEqual([a.id]);
+  // A company's stored Russian name is not searchable.
+  await control.query("UPDATE catalog_companies SET name_ru=? WHERE id=?", ["Альфа", a.id]);
+  expect((await inCity("Альфа")).total).toBe(0);
+  // For one company the search picks a city, never by the company's own name.
+  const ofOne = (search: string) =>
+    catalogs.listDepots(director, { game: "ets2", companyId: a.id, search });
+  expect((await ofOne("Zeta")).total).toBe(0);
+  expect((await ofOne("Восток")).items.map((item) => item.city.id)).toEqual([east.id]);
+  expect((await ofOne("south")).items.map((item) => item.city.id)).toEqual([south.id]);
   expect((await catalogs.listDepots(director, { game: "ets2", search: "%" })).total).toBe(0);
   expect((await catalogs.listDepots(director, { game: "ets2", dlc: "base" })).total).toBe(4);
 
@@ -655,11 +751,19 @@ const depotHeader = "game,company_code,city_code,dlc_code";
 
 test("a company import is a dry run first and then upserts without deleting or clearing", async () => {
   const pack = await dlc("imp_pack");
-  const existing = await company("imp_existing", "ets2", {
-    nameEn: "Before",
-    nameRu: "Прежнее",
-    dlcId: pack.id,
-  });
+  const existing = await company("imp_existing", "ets2", { nameEn: "Before", dlcId: pack.id });
+  // A Russian name stored before companies lost translations stays, but is never read.
+  await control.query("UPDATE catalog_companies SET name_ru=? WHERE id=?", [
+    "Прежнее",
+    existing.id,
+  ]);
+  const storedRu = async (code: string) => {
+    const [rows] = await control.query<RowDataPacket[]>(
+      "SELECT name_ru FROM catalog_companies WHERE CAST(code AS CHAR)=? AND game=?",
+      [code, "ets2"],
+    );
+    return rows[0]?.name_ru;
+  };
   const file = csv(
     companyHeader,
     "ets2,imp_existing,After,,",
@@ -678,20 +782,28 @@ test("a company import is a dry run first and then upserts without deleting or c
     preview.token as string,
   );
   expect(result).toMatchObject({ rows: 3, added: 2, changed: 1 });
-  // An empty cell keeps the stored value: neither the Russian name nor the source was cleared.
+  // An empty cell keeps the stored source; the name_ru column is accepted and ignored.
   expect(await catalogs.get(director, "companies", existing.id)).toMatchObject({
     nameEn: "After",
-    nameRu: "Прежнее",
+    nameRu: null,
     dlcId: pack.id,
   });
+  expect(await storedRu("imp_existing")).toBe("Прежнее");
+  expect(await storedRu("imp_new")).toBeNull();
   expect(await count("catalog_companies")).toBe(3);
   expect(await auditCount("catalog.imported")).toBe(1);
-  // Rows missing from a later file stay.
-  const later = csv(companyHeader, "ets2,imp_new,Brand New,Новая,imp_pack");
+  // Rows missing from a later file stay; a changed Russian name alone changes nothing.
+  const later = csv(companyHeader, "ets2,imp_new,Brand New,Другое,imp_pack");
   const checked = await catalogs.previewImport(director, "companies", later);
   expect(checked).toMatchObject({ added: 0, changed: 0, unchanged: 1 });
   await catalogs.applyImport(director, "companies", later, newId(), checked.token as string);
   expect(await count("catalog_companies")).toBe(3);
+  // The current template has no name_ru column at all.
+  const template = csv("game,code,name_en,dlc_code", "ets2,imp_new,Brand New,imp_pack");
+  expect(await catalogs.previewImport(director, "companies", template)).toMatchObject({
+    errors: 0,
+    unchanged: 1,
+  });
 });
 
 test("a company file reports duplicates, unknown or hidden sources and bad values by line", async () => {
@@ -839,7 +951,7 @@ test("depot timestamps follow its own edits and one instant per import", async (
   const row = await depot(c1.id, k1.id);
   expect(row.updatedAt).toBe(now().toISOString());
   instant += 123;
-  await catalogs.patch(director, "companies", c1.id, newId(), { nameRu: "Пример" });
+  await catalogs.patch(director, "companies", c1.id, newId(), { nameEn: "Renamed Company" });
   const listed = async () =>
     (await catalogs.listDepots(driver, { game: "ets2", includeHidden: true })).items;
   expect((await listed())[0]?.updatedAt).toBe(row.updatedAt);

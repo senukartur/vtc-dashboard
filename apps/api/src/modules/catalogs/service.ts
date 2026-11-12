@@ -34,6 +34,7 @@ import {
   type CatalogList,
   type Game,
   type ImportList,
+  isCanonicalList,
   validateCatalogConfig,
   validCode,
 } from "./config.js";
@@ -76,7 +77,6 @@ const depotVisible = and(
   eq(catalogCompanies.hidden, false),
   eq(catalogCities.hidden, false),
 );
-const depotUntranslated = or(isNull(catalogCompanies.nameRu), isNull(catalogCities.nameRu));
 const companyLogoLink = eq(catalogCompanyLogos.companyId, catalogCompanies.id);
 const companyMissingLogo = isNull(catalogCompanyLogos.companyId);
 const countMatching = (condition: SQL | undefined) =>
@@ -87,6 +87,9 @@ const maintenanceBinding = ({ hidden, untranslated, logo }: ListFilters) =>
   hidden || untranslated || logo
     ? [{ hidden: hidden ?? null, untranslated: untranslated ?? false, logo: logo ?? null }]
     : [];
+// Canonical-name order replaced the localized one for DLCs, companies and company-ordered depots;
+// the mark keeps a cursor issued under the old order from being read under the new one.
+const canonicalOrderBinding = (canonical: boolean) => (canonical ? ["canonical-name"] : []);
 
 function changesFields(row: Record<string, unknown>, fields: Record<string, unknown>) {
   return Object.entries(fields).some(([field, value]) => {
@@ -126,6 +129,10 @@ function label(
     hidden,
     ...(nameNative === null ? {} : { nameNative }),
   };
+}
+/** A DLC or company label: always the canonical name, never a translation or a fallback mark. */
+function canonicalLabel(id: string, name: string, hidden: boolean, locale: Locale) {
+  return { ...label(id, name, null, hidden, locale), englishFallback: false };
 }
 /** A trimmed optional name; empty means no value, so a blank can never become a label. */
 const optionalName = (value: unknown) => {
@@ -172,6 +179,13 @@ export function createCatalogs(
       admin ? "qualifications.manage" : "company.read",
     );
   const parentTable = (kind: keyof typeof parentKinds) => parentKinds[kind];
+  /** The name a list orders and pages by; canonical lists ignore the requested locale. */
+  function displayName(list: CatalogList, locale: Locale) {
+    const t = common(list);
+    return locale === "ru" && !isCanonicalList(list)
+      ? sql`COALESCE(${t.nameRu}, ${t.nameEn})`
+      : sql`${t.nameEn}`;
+  }
   function selectColumns(list: CatalogList, withLogo = false) {
     const t = common(list);
     const logo = withLogo && list === "companies";
@@ -189,7 +203,6 @@ export function createCatalogs(
       steamAppId: list === "dlcs" ? catalogDlcs.steamAppId : sql<number | null>`NULL`,
       adrClass: list === "cargoes" ? catalogCargoes.adrClass : sql<AdrClass | null>`NULL`,
       dlcEn: list === "dlcs" ? sql<string | null>`NULL` : dlcParent.nameEn,
-      dlcRu: list === "dlcs" ? sql<string | null>`NULL` : dlcParent.nameRu,
       dlcHidden: list === "dlcs" ? sql<boolean | null>`NULL` : dlcParent.hidden,
       regionEn: list === "cities" ? regionParent.nameEn : sql<string | null>`NULL`,
       regionRu: list === "cities" ? regionParent.nameRu : sql<string | null>`NULL`,
@@ -213,7 +226,6 @@ export function createCatalogs(
     steamAppId: number | null;
     adrClass: AdrClass | null;
     dlcEn: string | null;
-    dlcRu: string | null;
     dlcHidden: boolean | null;
     regionEn: string | null;
     regionRu: string | null;
@@ -236,10 +248,7 @@ export function createCatalogs(
       query = query.leftJoin(regionParent, eq(catalogCities.regionId, regionParent.id));
     if (list === "companies") query = query.leftJoin(catalogCompanyLogos, companyLogoLink);
     query = query.where(where);
-    if (order) {
-      const display = locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : t.nameEn;
-      query = query.orderBy(asc(display), asc(t.id));
-    }
+    if (order) query = query.orderBy(asc(displayName(list, locale)), asc(t.id));
     if (limit !== undefined) query = query.limit(limit);
     return (await query) as unknown as ListRow[];
   }
@@ -265,17 +274,21 @@ export function createCatalogs(
   ): S["CatalogItem"] {
     const dlc =
       row.dlcId && row.dlcEn !== null
-        ? label(row.dlcId, row.dlcEn, row.dlcRu, row.dlcHidden === true, locale)
+        ? canonicalLabel(row.dlcId, row.dlcEn, row.dlcHidden === true, locale)
         : null;
+    const canonical = isCanonicalList(list);
     return {
       id: row.id,
       game: row.game,
       code: row.code.toString(),
       nameEn: row.nameEn,
-      nameRu: row.nameRu,
+      // A canonical list's stored Russian name stays in the database but is never returned.
+      nameRu: canonical ? null : row.nameRu,
       hidden: row.hidden,
       updatedAt: row.updatedAt,
-      display: label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
+      display: canonical
+        ? canonicalLabel(row.id, row.nameEn, row.hidden, locale)
+        : label(row.id, row.nameEn, row.nameRu, row.hidden, locale, row.nameNative),
       dlcId: list === "dlcs" ? null : row.dlcId,
       dlc: list === "dlcs" ? null : dlc,
       ...(list === "dlcs" ? { steamAppId: row.steamAppId } : {}),
@@ -324,7 +337,7 @@ export function createCatalogs(
   function fieldsOf(list: CatalogList, input: Record<string, unknown>): Record<string, unknown> {
     const nameRu = input.nameRu === "" ? null : input.nameRu;
     return {
-      ...("nameRu" in input ? { nameRu } : {}),
+      ...("nameRu" in input && !isCanonicalList(list) ? { nameRu } : {}),
       ...("nameEn" in input ? { nameEn: input.nameEn } : {}),
       ...("code" in input ? { code: requireCode(input.code as string) } : {}),
       ...(list === "dlcs" && "steamAppId" in input ? { steamAppId: input.steamAppId } : {}),
@@ -357,9 +370,9 @@ export function createCatalogs(
   }
   function assertPatchShape(list: CatalogList, input: S["CatalogItemPatch"]) {
     const allowed: readonly string[] = {
-      dlcs: ["code", "nameEn", "nameRu", "steamAppId", "hidden"],
+      dlcs: ["code", "nameEn", "steamAppId", "hidden"],
       regions: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
-      companies: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
+      companies: ["code", "nameEn", "dlcId", "hidden"],
       cities: ["code", "nameEn", "nameRu", "nameNative", "regionId", "dlcId", "hidden"],
       cargoes: ["code", "nameEn", "nameRu", "adrClass", "dlcId", "hidden"],
       trailers: ["code", "nameEn", "nameRu", "dlcId", "hidden"],
@@ -734,12 +747,10 @@ export function createCatalogs(
     updatedAt: catalogCompanyCities.updatedAt,
     dlcId: catalogCompanyCities.dlcId,
     dlcEn: dlcParent.nameEn,
-    dlcRu: dlcParent.nameRu,
     dlcHidden: dlcParent.hidden,
     companyId: catalogCompanies.id,
     companyCode: catalogCompanies.code,
     companyEn: catalogCompanies.nameEn,
-    companyRu: catalogCompanies.nameRu,
     companyHidden: catalogCompanies.hidden,
     logoSha: catalogCompanyLogos.sha256,
     logoBytes: catalogCompanyLogos.byteLength,
@@ -778,12 +789,12 @@ export function createCatalogs(
       dlcId: row.dlcId,
       dlc:
         row.dlcId && row.dlcEn !== null
-          ? label(row.dlcId, row.dlcEn, row.dlcRu, row.dlcHidden === true, locale)
+          ? canonicalLabel(row.dlcId, row.dlcEn, row.dlcHidden === true, locale)
           : null,
       company: {
         id: row.companyId,
         code: row.companyCode.toString(),
-        label: label(row.companyId, row.companyEn, row.companyRu, row.companyHidden, locale),
+        label: canonicalLabel(row.companyId, row.companyEn, row.companyHidden, locale),
         logo: logoOf(row.logoSha, row.logoBytes),
       },
       city: {
@@ -973,7 +984,10 @@ export function createCatalogs(
             .select({
               visible: countMatching(visible),
               hidden: countMatching(eq(t.hidden, true)),
-              untranslated: countMatching(and(visible, isNull(t.nameRu))),
+              // A canonical list has no translation to miss.
+              ...(isCanonicalList(list)
+                ? {}
+                : { untranslated: countMatching(and(visible, isNull(t.nameRu))) }),
               ...(list === "companies"
                 ? { missingLogo: countMatching(and(visible, companyMissingLogo)) }
                 : {}),
@@ -990,11 +1004,8 @@ export function createCatalogs(
           .select({
             visible: countMatching(eq(catalogCompanyCities.hidden, false)),
             hidden: countMatching(eq(catalogCompanyCities.hidden, true)),
-            untranslated: countMatching(and(depotVisible, depotUntranslated)),
           })
           .from(catalogCompanyCities)
-          .innerJoin(catalogCompanies, eq(catalogCompanyCities.companyId, catalogCompanies.id))
-          .innerJoin(catalogCities, eq(catalogCompanyCities.cityId, catalogCities.id))
           .where(eq(catalogCompanyCities.game, game));
         if (!depots) throw new Error("CATALOG_SUMMARY_COUNT_MISSING");
         lists.depots = depots;
@@ -1022,6 +1033,7 @@ export function createCatalogs(
         if (list === "dlcs" && query.dlc) throw identityError(422);
         if (list !== "cities" && query.regionId) throw identityError(422);
         if (list !== "companies" && query.logo) throw identityError(422);
+        if (isCanonicalList(list) && query.untranslated) throw identityError(422);
         const includeHidden = query.hidden !== "only" && (query.includeHidden ?? false);
         const t = common(list),
           binding = [
@@ -1036,6 +1048,7 @@ export function createCatalogs(
             query.regionId ?? null,
             locale,
             ...maintenanceBinding(query),
+            ...canonicalOrderBinding(isCanonicalList(list)),
           ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1045,8 +1058,8 @@ export function createCatalogs(
             throw identityError(409, "VERSION_CONFLICT");
           }
         }
-        const display =
-          locale === "ru" ? sql`COALESCE(${t.nameRu}, ${t.nameEn})` : sql`${t.nameEn}`;
+        const canonical = isCanonicalList(list);
+        const display = displayName(list, locale);
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const filter = and(
           eq(t.game, query.game),
@@ -1056,7 +1069,7 @@ export function createCatalogs(
           escaped
             ? or(
                 sql`${t.nameEn} LIKE ${`%${escaped}%`}`,
-                sql`${t.nameRu} LIKE ${`%${escaped}%`}`,
+                canonical ? undefined : sql`${t.nameRu} LIKE ${`%${escaped}%`}`,
                 list === "cities"
                   ? sql`${catalogCities.nameNative} LIKE ${`%${escaped}%`}`
                   : undefined,
@@ -1112,7 +1125,9 @@ export function createCatalogs(
               ? codec.write(
                   binding,
                   JSON.stringify([
-                    locale === "ru" && last.nameRu !== null ? last.nameRu : last.nameEn,
+                    locale === "ru" && !canonical && last.nameRu !== null
+                      ? last.nameRu
+                      : last.nameEn,
                     last.id,
                   ]),
                 )
@@ -1316,7 +1331,7 @@ export function createCatalogs(
     },
     async listDepots(
       actor: Actor,
-      query: Omit<ListFilters, "logo"> & {
+      query: Omit<ListFilters, "logo" | "untranslated"> & {
         game: Game;
         companyId?: string;
         cityId?: string;
@@ -1346,6 +1361,8 @@ export function createCatalogs(
           includeHidden,
           locale,
           ...maintenanceBinding(query),
+          // Cities of one company still read by their localized name.
+          ...canonicalOrderBinding(query.companyId === undefined),
         ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1355,14 +1372,34 @@ export function createCatalogs(
             throw identityError(409, "VERSION_CONFLICT");
           }
         }
-        // Cities of one company read by city name; every other view reads by company name.
+        // Cities of one company read by their localized name; every other view reads by the
+        // company's canonical name.
         const byCity = query.companyId !== undefined;
-        const [en, ru] = byCity
-          ? [catalogCities.nameEn, catalogCities.nameRu]
-          : [catalogCompanies.nameEn, catalogCompanies.nameRu];
-        const display = locale === "ru" ? sql`COALESCE(${ru}, ${en})` : sql`${en}`;
+        const display =
+          byCity && locale === "ru"
+            ? sql`COALESCE(${catalogCities.nameRu}, ${catalogCities.nameEn})`
+            : byCity
+              ? sql`${catalogCities.nameEn}`
+              : sql`${catalogCompanies.nameEn}`;
         const escaped = query.search?.replace(/[\\%_]/g, (v) => `\\${v}`);
         const like = `%${escaped}%`;
+        // In one city a search picks a company; for one company it picks a city.
+        const companyMatch = [
+          sql`${catalogCompanies.nameEn} LIKE ${like}`,
+          sql`CONVERT(${catalogCompanies.code} USING utf8mb4) LIKE ${like}`,
+        ];
+        const cityMatch = [
+          sql`${catalogCities.nameEn} LIKE ${like}`,
+          sql`${catalogCities.nameRu} LIKE ${like}`,
+          sql`${catalogCities.nameNative} LIKE ${like}`,
+          sql`CONVERT(${catalogCities.code} USING utf8mb4) LIKE ${like}`,
+        ];
+        const searched =
+          query.cityId !== undefined && !byCity
+            ? companyMatch
+            : byCity && query.cityId === undefined
+              ? cityMatch
+              : [...companyMatch, ...cityMatch];
         const filter = and(
           eq(catalogCompanyCities.game, query.game),
           query.hidden === "only"
@@ -1370,7 +1407,6 @@ export function createCatalogs(
             : includeHidden
               ? undefined
               : depotVisible,
-          query.untranslated ? depotUntranslated : undefined,
           query.companyId
             ? eq(catalogCompanyCities.companyId, applicationId(query.companyId))
             : undefined,
@@ -1379,17 +1415,7 @@ export function createCatalogs(
           query.dlc && query.dlc !== "base"
             ? eq(catalogCompanyCities.dlcId, applicationId(query.dlc))
             : undefined,
-          escaped
-            ? or(
-                sql`${catalogCompanies.nameEn} LIKE ${like}`,
-                sql`${catalogCompanies.nameRu} LIKE ${like}`,
-                sql`CONVERT(${catalogCompanies.code} USING utf8mb4) LIKE ${like}`,
-                sql`${catalogCities.nameEn} LIKE ${like}`,
-                sql`${catalogCities.nameRu} LIKE ${like}`,
-                sql`${catalogCities.nameNative} LIKE ${like}`,
-                sql`CONVERT(${catalogCities.code} USING utf8mb4) LIKE ${like}`,
-              )
-            : undefined,
+          escaped ? or(...searched) : undefined,
         );
         const [total] = await c(tx)
           .select({ count: sql<number | string>`COUNT(*)` })
@@ -1417,9 +1443,7 @@ export function createCatalogs(
             ? locale === "ru" && last.cityRu !== null
               ? last.cityRu
               : last.cityEn
-            : locale === "ru" && last.companyRu !== null
-              ? last.companyRu
-              : last.companyEn
+            : last.companyEn
           : null;
         return {
           items: visible.map((row) => depotDto(row, locale)),
