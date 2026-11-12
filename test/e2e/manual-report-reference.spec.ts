@@ -470,6 +470,9 @@ test(
     try {
       await expect.poll(() => latestStarted).toBe(true);
       await expect(dialog).toHaveCount(0);
+      await expect(
+        page.getByRole("alert").filter({ hasText: "Reload the latest version" }),
+      ).toBeFocused();
       await expect(reload).toBeDisabled();
       await expect(save).toBeDisabled();
       await expect(submit).toBeDisabled();
@@ -498,6 +501,7 @@ test(
     await expect(comment).toHaveValue("Fictional draft v8");
     await expect(page.getByLabel("Trip start", { exact: true })).toHaveValue("2025-10-26T00:30");
     await expect(reload).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "New report", level: 1 })).toBeFocused();
     await deleteDraft.click();
     await dialog.getByRole("button", { name: "Delete draft", exact: true }).click();
     await expect(page).toHaveURL(/\/account\/trips[?]tab=drafts$/);

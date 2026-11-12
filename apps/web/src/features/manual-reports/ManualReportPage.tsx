@@ -131,6 +131,14 @@ function DraftEditorPage({ id, title }: { id: string; title: string }) {
   const [displayed, setDisplayed] = useState<DraftSnapshot | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const [conflict, setConflict] = useState(false);
+  const recoveryAlert = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (!conflict) return;
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === document.body) recoveryAlert.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [conflict]);
   const latestDraft = latest?.data.data;
   if (!displayed && latest && latestDraft?.state === "editing") setDisplayed(latest);
 
@@ -193,7 +201,7 @@ function DraftEditorPage({ id, title }: { id: string; title: string }) {
         focusHeading: editorKey > 0,
         recovery: needsReload && (
           <Card className="stack">
-            <p role="alert" className="field-error">
+            <p ref={recoveryAlert} role="alert" tabIndex={-1} className="field-error">
               {t("draftReloadRequired")}
             </p>
             {query.isFetching && <p role="status">{t("loading")}</p>}
