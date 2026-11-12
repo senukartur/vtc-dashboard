@@ -277,3 +277,6 @@ function EventCatalogFields({
     </div>
   );
 }
+
+export { eventDefinitionSeed } from "./editor/model.js";
+export { Stage2EventEditor, type Stage2EventEditorProps } from "./editor/Stage2Editor.js";
