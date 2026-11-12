@@ -186,6 +186,7 @@ function checkedReceipt<R extends DraftRoute>(
   route: R,
   target: string,
   expected: number,
+  value: unknown,
 ): DraftResult & { route: R } {
   try {
     const result = closed(raw, [
@@ -224,7 +225,7 @@ function checkedReceipt<R extends DraftRoute>(
       )
         throw new Error();
       eventDate(data.updatedAt);
-      normalize(data.fields);
+      if (canonicalJson(normalize(data.fields)) !== canonicalJson(value)) throw new Error();
     }
     return result as DraftResult & { route: R };
   } catch {
@@ -285,9 +286,9 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
         throw new Error("EVENT_WORKFLOW_RECEIPT_INVALID");
       if (!timingSafeEqual(saved.fingerprint, fingerprint))
         throw identityError(409, "IDEMPOTENCY_CONFLICT");
-      return checkedReceipt<R>(saved.result, route, target, expected);
+      return checkedReceipt<R>(saved.result, route, target, expected, value);
     }
-    const result = checkedReceipt<R>(await command(), route, target, expected);
+    const result = checkedReceipt<R>(await command(), route, target, expected, value);
     await c(tx).insert(eventStage2Commands).values({
       actorId: actor.userId,
       route,
@@ -382,19 +383,6 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
           actor,
           value.row.organizerMemberId ?? undefined,
         );
-        const [existing] = await c(tx)
-          .select({ key: eventCommands.key })
-          .from(eventCommands)
-          .where(
-            and(
-              eq(eventCommands.actorId, actor.userId),
-              eq(eventCommands.route, "create"),
-              eq(eventCommands.targetId, key),
-              eq(eventCommands.key, key),
-            ),
-          )
-          .for("share");
-        if (existing) throw identityError(409, "IDEMPOTENCY_CONFLICT");
         const { data } = await once(tx, actor, "draft_create", key, key, 0, value, async () => {
           if (value.row.organizerMemberId && organizer === null) throw identityError(422);
           await ports.validate(tx, value, null);
@@ -448,6 +436,19 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
           value,
           async () => {
             const row = await lock(tx, id, expected);
+            const [existing] = await c(tx)
+              .select({ key: eventCommands.key })
+              .from(eventCommands)
+              .where(
+                and(
+                  eq(eventCommands.actorId, actor.userId),
+                  eq(eventCommands.route, "create"),
+                  eq(eventCommands.targetId, key),
+                  eq(eventCommands.key, key),
+                ),
+              )
+              .for("share");
+            if (existing) throw identityError(409, "IDEMPOTENCY_CONFLICT");
             if (value.row.organizerMemberId && organizer === null) throw identityError(422);
             await ports.validate(tx, value, await readDefinition(tx, row));
             const time = at(),

@@ -2568,7 +2568,13 @@ test("draft HTTP replaces sparse fields and preserves canonical depots through p
         .set({ nameRu: "Fictional renamed origin" })
         .where(eq(catalogCities.id, id("draft_origin"))),
     );
-    await identity.administer(director, organizer.actor.userId, newId(), 1, { kind: "deactivate" });
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(membership)
+        .set({ status: "inactive" })
+        .where(eq(membership.userId, organizer.actor.userId)),
+    );
     const publishedAgain = await write("POST", `${publication}?locale=ru`, {}, '"v4"', publishKey);
     expect(publishedAgain.statusCode).toBe(200);
     expect(publishedAgain.headers.etag).toBe('"v1"');
@@ -2592,6 +2598,39 @@ test("draft HTTP replaces sparse fields and preserves canonical depots through p
   } finally {
     await app.close();
   }
+});
+
+test("a draft retains its existing hidden selection but publication requires current visibility", async () => {
+  const { id } = await seedCatalog(unit, "ets2", { cities: ["draft_hide_city"] });
+  const cityId = id("draft_hide_city");
+  const routes = draftEvents();
+  if (!routes.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const drafts = routes.drafts;
+  const input = stagedInput({ originCityId: cityId });
+  const key = newId();
+  await routes.createPublished(director, key, stagedInput(), "en");
+  await expect(drafts.create(director, key, input)).rejects.toMatchObject({
+    statusCode: 409,
+    publicCode: "IDEMPOTENCY_CONFLICT",
+  });
+  const {
+    data: { id: eventId },
+  } = await drafts.create(director, newId(), input);
+  await unit.run((tx) =>
+    unit.client(tx).update(catalogCities).set({ hidden: true }).where(eq(catalogCities.id, cityId)),
+  );
+  await expect(drafts.create(director, newId(), input)).rejects.toMatchObject({
+    statusCode: 422,
+    publicCode: "CATALOG_SELECTION_HIDDEN",
+  });
+  expect((await drafts.update(director, eventId, newId(), 1, input)).version).toBe(2);
+  await expect(drafts.publish(director, eventId, newId(), 2, "en")).rejects.toMatchObject({
+    statusCode: 422,
+    publicCode: "CATALOG_SELECTION_HIDDEN",
+  });
+  expect((await drafts.get(director, eventId)).data.fields.originCityId).toBe(cityId);
+  expect(await count("events")).toBe(1);
+  expect(await count("outbox_events")).toBe(1);
 });
 
 test("draft receipts recheck authority and fail closed on unsupported, private or mismatched stored data", async () => {
@@ -2619,6 +2658,11 @@ test("draft receipts recheck authority and fail closed on unsupported, private o
     { schemaVersion: 2, route: "draft_create", data: first.data },
     { schemaVersion: 1, route: "draft_update", data: first.data },
     { schemaVersion: 1, route: "draft_create", data: { ...first.data, version: 2 } },
+    {
+      schemaVersion: 1,
+      route: "draft_create",
+      data: { ...first.data, fields: { title: "Fictional mismatched snapshot" } },
+    },
     {
       schemaVersion: 1,
       route: "draft_create",
