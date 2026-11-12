@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -654,8 +654,10 @@ test("thumbnail and cleanup jobs use shared locks on published and draft lifecyc
 });
 
 test("worker passes preserve media attempts during a root outage while local mail completes", async () => {
-  const activeRoot = join(directory, "active");
+  const ancestor = join(directory, "ancestor");
+  const activeRoot = join(ancestor, "active");
   const offlineRoot = join(directory, "offline");
+  await mkdir(ancestor, { mode: 0o700 });
   await mkdir(activeRoot, { mode: 0o700 });
   storage = { ...storage, root: activeRoot };
   useStorage(createPrivateFilesystem(storage));
@@ -669,6 +671,7 @@ test("worker passes preserve media attempts during a root outage while local mai
       .where(eq(durableJobs.kind, Buffer.from("events.media-thumbnail"))),
   );
   if (!thumbnail) throw new Error("EXPECTED_MEDIA_THUMBNAIL");
+  const thumbnailId = thumbnail.id;
   const mail = {
     mode: "local" as const,
     key: randomBytes(32).toString("hex"),
@@ -677,14 +680,26 @@ test("worker passes preserve media attempts during a root outage while local mai
     production: false,
   };
   const messaging = composeIdentity(unit, identity.config, mail);
-  const mailRecipient = await createMember("trainee");
-  const challenge = await messaging.identity.requestChallenge(
-    mailRecipient.actor,
-    newId(),
-    "email_verification",
-  );
-  const deliveryGeneration = challenge.id;
-  if (typeof deliveryGeneration !== "string") throw new Error("EXPECTED_LOCAL_MAIL_CHALLENGE");
+  async function queueLocalMail() {
+    const recipient = await createMember("trainee");
+    const challenge = await messaging.identity.requestChallenge(
+      recipient.actor,
+      newId(),
+      "email_verification",
+    );
+    if (typeof challenge.id !== "string") throw new Error("EXPECTED_LOCAL_MAIL_CHALLENGE");
+    return challenge.id;
+  }
+  async function expectMailDelivered(generation: string) {
+    const [delivery] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ state: mailDeliveries.state, attempts: mailDeliveries.attempts })
+        .from(mailDeliveries)
+        .where(eq(mailDeliveries.generationId, generation)),
+    );
+    expect(delivery).toEqual({ state: "simulated", attempts: 1 });
+  }
   const db = guardedSettings();
   const env = {
     MYSQL_HOST: db.host,
@@ -705,25 +720,32 @@ test("worker passes preserve media attempts during a root outage while local mai
     MANUAL_MAX_PIXELS: String(storage.maxPixels),
     MANUAL_UPLOAD_TIMEOUT_MS: String(storage.timeoutMs),
   };
+  async function expectPausedPass() {
+    expect(await runWorker(env)).toEqual({ code: 1, storageUnavailable: true, result: true });
+    expect(await jobState(thumbnailId)).toMatchObject({ state: "ready", attempts: 0 });
+    expect((await state(accepted.item.id))?.state).toBe("processing");
+  }
+  const missingRootMail = await queueLocalMail();
   await rename(activeRoot, offlineRoot);
   try {
-    for (let pass = 0; pass < 2; pass++) {
-      expect(await runWorker(env)).toEqual({ code: 1, storageUnavailable: true, result: true });
-      expect(await jobState(thumbnail.id)).toMatchObject({ state: "ready", attempts: 0 });
-      expect((await state(accepted.item.id))?.state).toBe("processing");
-    }
-    const [delivery] = await unit.run((tx) =>
-      unit
-        .client(tx)
-        .select({ state: mailDeliveries.state, attempts: mailDeliveries.attempts })
-        .from(mailDeliveries)
-        .where(eq(mailDeliveries.generationId, deliveryGeneration)),
-    );
-    expect(delivery).toEqual({ state: "simulated", attempts: 1 });
+    await expectPausedPass();
+    await expectPausedPass();
+    await expectMailDelivered(missingRootMail);
   } finally {
     await rename(offlineRoot, activeRoot);
   }
+  if ((process.getuid?.() ?? 0) > 0) {
+    const inaccessibleRootMail = await queueLocalMail();
+    await chmod(ancestor, 0o000);
+    try {
+      await expect(lstat(activeRoot)).rejects.toMatchObject({ code: "EACCES" });
+      await expectPausedPass();
+      await expectMailDelivered(inaccessibleRootMail);
+    } finally {
+      await chmod(ancestor, 0o700);
+    }
+  }
   expect(await runWorker(env)).toEqual({ code: 0, storageUnavailable: false, result: true });
-  expect(await jobState(thumbnail.id)).toMatchObject({ state: "completed", attempts: 1 });
+  expect(await jobState(thumbnailId)).toMatchObject({ state: "completed", attempts: 1 });
   expect((await state(accepted.item.id))?.state).toBe("ready");
 }, 30_000);

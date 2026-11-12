@@ -209,9 +209,19 @@ export function createEventMedia(
     discardInTransaction: jobs.discardInTransaction,
     coverIdsInTransaction: store.coverIdsInTransaction,
     async initialize(...additionalRoots: string[]) {
-      for (const root of new Set([...config.separateFrom, ...additionalRoots]))
-        await assertSeparateRoots(config.root, root);
       await blobs.ready?.();
+      try {
+        for (const root of new Set([...config.separateFrom, ...additionalRoots]))
+          await assertSeparateRoots(config.root, root);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error.code === "EACCES" || error.code === "EPERM")
+        )
+          throw new BlobFailure("unavailable");
+        throw error;
+      }
     },
     authorize: (actor: Actor, manage: boolean) => run((tx) => authorize(tx, actor, manage)),
     adminList(actor: Actor, eventId: string) {
