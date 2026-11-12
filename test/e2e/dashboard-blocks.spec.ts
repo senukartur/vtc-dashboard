@@ -1,10 +1,10 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
-  recentTrips,
   makeRecentTripsFixture,
   nextUpcomingEvent,
   overviewNow,
   recentTripItems,
+  recentTrips,
   upcomingEvent,
 } from "./support/dashboard-fixtures.ts";
 import { type DashboardMockState, mockDashboardRoutes } from "./support/dashboard-ui.ts";
@@ -648,7 +648,12 @@ test(
     expect(
       state.requests.some(
         (url) =>
-          url.searchParams.get("scope") === "company" && url.searchParams.get("game") === "ets2",
+          url.pathname === "/api/v1/trips" &&
+          url.searchParams.get("scope") === "company" &&
+          url.searchParams.get("game") === "ets2" &&
+          url.searchParams.get("limit") === "5" &&
+          url.searchParams.get("order") === "completion_desc" &&
+          !url.searchParams.has("decision"),
       ),
     ).toBe(true);
   },

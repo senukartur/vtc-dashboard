@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises";
 import type { Page, TestInfo } from "@playwright/test";
 import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage, entityId, envelope, list } from "./support/catalogs.ts";
@@ -90,7 +89,20 @@ function routeName(tripId: string) {
   return name;
 }
 const reason = "Fictional screenshot does not support the submitted distance";
-const listKeys = new Set(["scope", "game", "decision", "source", "limit", "cursor"]);
+const listKeys = new Set([
+  "scope",
+  "game",
+  "decision",
+  "source",
+  "q",
+  "order",
+  "locale",
+  "from",
+  "toExclusive",
+  "ownerId",
+  "limit",
+  "cursor",
+]);
 
 async function mockList(page: Page, { paged = false } = {}) {
   await mockTrips(page);
@@ -151,6 +163,12 @@ function expectListParams(lists: URLSearchParams[]) {
     expect(q.get("limit")).toBe("25");
   }
 }
+async function openFilters(page: Page) {
+  const toggle = page.getByRole("button", { name: /^(Filters|Фильтры)/ });
+  if ((await toggle.isVisible()) && (await toggle.getAttribute("aria-expanded")) === "false")
+    await toggle.click();
+}
+
 const coarse = (page: Page) => page.evaluate(() => matchMedia("(pointer: coarse)").matches);
 const table = (page: Page, name = "Trip list") => page.getByRole("table", { name, exact: true });
 const rowLink = (page: Page, tripId: string) => page.locator(`#trip-link-${tripId}`);
@@ -178,6 +196,7 @@ async function noOverflow(page: Page) {
     .toBe(true);
 }
 async function capture(page: Page, info: TestInfo, name: string) {
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: true });
 }
 
@@ -188,14 +207,19 @@ test(
     const { lists } = await mockList(page);
     await page.goto("/account/trips");
     await catalogLanguage(page);
-    const phone = info.project.name === "mobile-chromium",
+    const narrow = info.project.name !== "desktop-chromium",
       touch = await coarse(page);
     await expect(page.getByRole("heading", { level: 1, name: "Trips", exact: true })).toBeVisible();
     const header = page
       .getByRole("main")
       .locator("header")
       .filter({ has: page.getByRole("heading", { level: 1 }) });
-    await expect(header.getByRole("link")).toHaveText(["Saved drafts", "New report"]);
+    await expect(header.getByRole("link")).toHaveText(["New report"]);
+    await expect(page.getByRole("link", { name: "Saved drafts" })).toBeVisible();
+    if (narrow) {
+      await expect(page.getByRole("combobox", { name: "Game", exact: true })).toHaveCount(0);
+      await openFilters(page);
+    }
     const tabs = page.getByRole("tablist", { name: "Trip scope", exact: true });
     await expect(tabs.getByRole("tab")).toHaveText(["My trips", "Accepted company trips"]);
     await expect(tabs.getByRole("tab", { name: "My trips" })).toHaveAttribute(
@@ -217,7 +241,7 @@ test(
       await source.boundingBox(),
     ];
     if (!gameBox || !decisionBox || !sourceBox) throw new Error("FILTERS_NOT_RENDERED");
-    if (!phone)
+    if (!narrow)
       for (const box of [decisionBox, sourceBox])
         expect(
           Math.abs(gameBox.y + gameBox.height / 2 - (box.y + box.height / 2)),
@@ -238,11 +262,11 @@ test(
     // table and the whole card on phones, but never other cells, other rows or the page chrome.
     expect(await linkAtCellCentre(page, 0, 0)).toBe(`trip-link-${first}`);
     expect(await linkAtCellCentre(page, 2, 0)).toBe(`trip-link-${third}`);
-    expect(await linkAtCellCentre(page, 0, 1)).toBe(phone ? `trip-link-${first}` : null);
+    expect(await linkAtCellCentre(page, 0, 1)).toBe(narrow ? `trip-link-${first}` : null);
     for (const target of [
       page.getByRole("combobox", { name: "Game", exact: true }),
       page.getByRole("tab", { name: "Accepted company trips", exact: true }),
-      header.getByRole("link", { name: "Saved drafts", exact: true }),
+      page.getByRole("link", { name: "Saved drafts", exact: true }),
     ])
       await target.click({ trial: true, timeout: 2000 });
     const nextPage = page.getByRole("button", { name: "Next page", exact: true });
@@ -251,17 +275,21 @@ test(
       await catalogLanguage(page, locale);
       const ru = locale === "ru";
       const names = ru
-        ? ["Маршрут", "Груз", "Пробег", "Источники", "Решение компании", "Время учёта"]
-        : ["Route", "Cargo", "Driven distance", "Sources", "Company decision", "Reporting time"];
+        ? ["Маршрут", "Груз", "Пробег", "Источники", "Решение компании", "Завершён / подтверждён"]
+        : [
+            "Route",
+            "Cargo",
+            "Driven distance",
+            "Sources",
+            "Company decision",
+            "Completed / confirmed",
+          ];
       const current = table(page, ru ? "Список рейсов" : "Trip list");
       await expect(current).toBeVisible();
       await expect(rowLink(page, first)).toBeVisible();
       await expect(rowLink(page, first)).toContainText(longCyrillicOrigin);
-      await expect(
-        header.getByRole("link").filter({ hasText: /\S/ }),
-        "header keeps only drafts and new report",
-      ).toHaveText(ru ? ["Сохранённые черновики", "Новый отчёт"] : ["Saved drafts", "New report"]);
-      if (phone) {
+      await expect(header.getByRole("link")).toHaveText([ru ? "Новый отчёт" : "New report"]);
+      if (narrow) {
         const headBox = await current.locator("thead").boundingBox();
         expect(headBox?.width ?? 0).toBeLessThanOrEqual(1);
         const row = current.locator("tbody tr").first();
@@ -282,7 +310,12 @@ test(
         if (!routeBox || !cargoBox || !rowBox || !listBox) throw new Error("CARD_NOT_RENDERED");
         expect(routeBox.y + routeBox.height).toBeLessThanOrEqual(cargoBox.y + 1);
         expect(Math.abs(rowBox.width - listBox.width)).toBeLessThanOrEqual(2);
-      } else await expect(current.getByRole("columnheader")).toHaveText(names);
+      } else {
+        await expect(current.getByRole("columnheader")).toHaveText([
+          ...names.slice(0, -1),
+          new RegExp(names.at(-1) ?? ""),
+        ]);
+      }
       const localizedSource = page.getByRole("combobox", {
         name: ru ? "Источник" : "Source",
         exact: true,
@@ -306,7 +339,7 @@ test(
       await capture(page, info, `trips-list-${locale}`);
     }
     await catalogLanguage(page);
-    await header.getByRole("link", { name: "Saved drafts", exact: true }).click();
+    await page.getByRole("link", { name: "Saved drafts", exact: true }).click();
     await expect(page).toHaveURL(/\/account\/reports$/);
     expectListParams(lists);
   },
@@ -319,7 +352,7 @@ test(
     const { lists, details, others } = await mockList(page);
     await page.goto("/account/trips?game=ets2");
     await catalogLanguage(page);
-    await expect(table(page)).toBeVisible();
+    await expect(rowLink(page, second)).toBeVisible();
     const listCount = lists.length;
     await rowLink(page, second).click();
     await expect(page).toHaveURL(new RegExp(`[?&]trip=${second}`));
@@ -350,7 +383,7 @@ test(
       "Cargo",
       "Driven distance",
       "Company decision",
-      "Reporting time",
+      /Completed \/ confirmed/,
     ]);
     await expect(table(page).locator("tbody tr").first().getByRole("cell")).toHaveCount(5);
     const badge = table(page).locator("tbody tr").nth(1).getByText("Pending review");
@@ -457,6 +490,7 @@ test(
     await page.goto("/account/trips?decision=rejected");
     await catalogLanguage(page);
     await expect(table(page)).toBeVisible();
+    await openFilters(page);
     await page.getByRole("combobox", { name: "Game", exact: true }).focus();
     await page.keyboard.press("ArrowDown");
     // The new filter replaces the rows with a loading state; a Tab before they return skips them.
@@ -469,7 +503,20 @@ test(
     await page.keyboard.press("Tab");
     await expect(page.getByRole("combobox", { name: "Source", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
+    await expect(page.getByRole("combobox", { name: "Period", exact: true })).toBeFocused();
+    const sort = page.getByRole("button", { name: "Completed / confirmed" });
+    if (info.project.name !== "desktop-chromium") {
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("combobox", { name: "Completion order" })).toBeFocused();
+    }
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Reset", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(page.getByRole("tabpanel")).toBeFocused();
+    if (info.project.name === "desktop-chromium") {
+      await page.keyboard.press("Tab");
+      await expect(sort).toBeFocused();
+    }
     await page.keyboard.press("Tab");
     await expect(rowLink(page, first)).toBeFocused();
     if (info.project.name === "desktop-chromium") {
@@ -526,7 +573,15 @@ test(
     await expect(page.getByRole("region")).toHaveCount(0);
     await expect
       .poll(() => lists.at(-1)?.toString())
-      .toBe(new URLSearchParams({ scope: "mine", game: "ats", limit: "25" }).toString());
+      .toBe(
+        new URLSearchParams({
+          scope: "mine",
+          game: "ats",
+          order: "completion_desc",
+          locale: "en",
+          limit: "25",
+        }).toString(),
+      );
     expectListParams(lists);
   },
 );
@@ -545,7 +600,7 @@ test(
     const alerts = await countInsertedAlerts(page, ".trips-list-area");
     expire();
     await page.getByRole("button", { name: "Next page", exact: true }).click();
-    const first = "scope=mine&game=ets2&limit=25";
+    const first = "scope=mine&game=ets2&order=completion_desc&locale=en&limit=25";
     await expect.poll(() => lists.slice(-2).map(String)).toEqual([`${first}&cursor=page-2`, first]);
     await expect(page.getByRole("button", { name: "Previous page", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
@@ -570,6 +625,7 @@ test(
     await catalogLanguage(page);
     // The only synthetic company trip is telemetry-only, so the filtered page is empty.
     await expect(page.getByText("No records match this view.", { exact: true })).toBeVisible();
+    await openFilters(page);
     await expect(page.getByRole("combobox", { name: "Source", exact: true })).toHaveValue("manual");
     await expect.poll(() => lists.length).toBeGreaterThan(0);
     // Company scope drops the decision filter but keeps the server-side source filter.
@@ -608,17 +664,22 @@ test(
     await catalogLanguage(page);
     await expect(table(page)).toBeVisible();
     if (desktop) await expect(panel(page, second)).toBeVisible();
+    await openFilters(page);
     const source = page.getByRole("combobox", { name: "Source", exact: true });
     await source.focus();
     await source.selectOption("manual");
     await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
     await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
-    await expect.poll(last).toBe("scope=mine&source=manual&limit=25");
+    await expect
+      .poll(last)
+      .toBe("scope=mine&source=manual&order=completion_desc&locale=en&limit=25");
     // The select stays mounted while the list reloads, so focus is not lost.
     await expect(source).toBeFocused();
     await expect(page.getByRole("region")).toHaveCount(0);
     await page.getByRole("button", { name: "Next page", exact: true }).click();
-    await expect.poll(last).toBe("scope=mine&source=manual&limit=25&cursor=page-2");
+    await expect
+      .poll(last)
+      .toBe("scope=mine&source=manual&order=completion_desc&locale=en&limit=25&cursor=page-2");
     const previous = page.getByRole("button", { name: "Previous page", exact: true });
     await expect(previous).toBeEnabled();
     if (desktop) {
@@ -626,18 +687,22 @@ test(
       await expect(page).toHaveURL(new RegExp(`[?&]trip=${third}`));
     }
     await source.selectOption("ets2telemetry");
-    await expect.poll(last).toBe("scope=mine&source=ets2telemetry&limit=25");
+    await expect
+      .poll(last)
+      .toBe("scope=mine&source=ets2telemetry&order=completion_desc&locale=en&limit=25");
     await expect(previous).toBeDisabled();
     await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
     await expect(page).not.toHaveURL(/[?&](trip|cursor)=/);
     await expect(page.getByRole("region")).toHaveCount(0);
 
     await page.getByRole("tab", { name: "Accepted company trips", exact: true }).click();
-    await expect.poll(last).toBe("scope=company&source=ets2telemetry&limit=25");
+    await expect
+      .poll(last)
+      .toBe("scope=company&source=ets2telemetry&order=completion_desc&locale=en&limit=25");
     await expect(source).toHaveValue("ets2telemetry");
     await expect(rowLink(page, colleague)).toBeVisible();
     await source.selectOption("");
-    await expect.poll(last).toBe("scope=company&limit=25");
+    await expect.poll(last).toBe("scope=company&order=completion_desc&locale=en&limit=25");
     await expect(page).not.toHaveURL(/source=/);
     await page.goBack();
     await expect(page).toHaveURL(/[?&]source=ets2telemetry(&|$)/);
@@ -645,8 +710,9 @@ test(
 
     await page.goto("/account/trips?source=bogus");
     await expect(table(page)).toBeVisible();
+    await openFilters(page);
     await expect(source).toHaveValue("");
-    await expect.poll(last).toBe("scope=mine&limit=25");
+    await expect.poll(last).toBe("scope=mine&order=completion_desc&locale=en&limit=25");
     // Two changes in one task: the second must build on the first, not on stale router params.
     await page.evaluate(() => {
       for (const [id, value] of [
@@ -661,93 +727,235 @@ test(
     });
     await expect(page).toHaveURL(/[?&]game=ats(&|$)/);
     await expect(page).toHaveURL(/[?&]source=manual(&|$)/);
-    await expect.poll(last).toBe("scope=mine&game=ats&source=manual&limit=25");
+    await expect
+      .poll(last)
+      .toBe("scope=mine&game=ats&source=manual&order=completion_desc&locale=en&limit=25");
     expect(lists.some((q) => q.get("source") === "bogus")).toBe(false);
     expectListParams(lists);
   },
 );
 
-const wideFont = ".trips-toolbar, .trips-toolbar * { letter-spacing: 0.06em !important; }";
-/** Toolbar geometry: spare width after children and gaps, and row alignment of the children. */
-function toolbarBudget(page: Page) {
-  return page.evaluate(async () => {
-    await document.fonts.ready;
-    const bar = document.querySelector(".trip-page .trips-toolbar");
-    if (!bar) throw new Error("TOOLBAR_NOT_RENDERED");
-    const box = (element: Element) => element.getBoundingClientRect(),
-      children = Array.from(bar.children),
-      filters = children.filter((child) => child.classList.contains("trips-filter")),
-      selects = Array.from(bar.querySelectorAll("select")),
-      gap = Number.parseFloat(getComputedStyle(bar).columnGap) || 0,
-      width = box(bar).width;
-    const used = (list: Element[]) =>
-      list.reduce((total, element) => total + box(element).width, 0) +
-      gap * Math.max(0, list.length - 1);
-    const spread = (list: Element[]) => {
-      const centres = list.map((element) => box(element).top + box(element).height / 2);
-      return Math.max(...centres) - Math.min(...centres);
-    };
-    const round = (value: number) => Math.round(value * 10) / 10;
-    return {
-      width: round(width),
-      children: children.length,
-      spareAll: round(width - used(children)),
-      spareSelects: round(width - used(filters)),
-      rowSpreadAll: round(spread(children)),
-      rowSpreadSelects: round(spread(filters)),
-      selectHeights: selects.map((select) => round(box(select).height)),
-      selectsInside: selects.every(
-        (select) =>
-          box(select).left >= box(bar).left - 0.5 &&
-          box(select).right <= box(bar).right + 0.5 &&
-          box(select).right <= window.innerWidth,
-      ),
-    };
-  });
-}
 test(
-  "toolbar budget with wide-font spare in RU and EN for own and company trips",
+  "search keeps the latest URL intent, supports both number spellings and preserves sort focus",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const { lists } = await mockList(page);
+    const privateTrip = {
+      ...summary(first),
+      number: 1046,
+      gameMode: "haulmp",
+      event: { id: entityId, title: "Fictional Winter Convoy" },
+    };
+    const status = example("getMyTripStatusSummary:success");
+    status.data.lifetimeTotals = { acceptedTrips: 42, actualDistanceM: "6551250" };
+    await page.route("**/api/v1/me/trip-status-summary", (route) => {
+      expect(new URL(route.request().url()).search).toBe("");
+      return route.fulfill({ json: status });
+    });
+    let releaseOld = () => {};
+    const old = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    await page.route("**/api/v1/trips?*", async (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      const term = params.get("q") ?? "";
+      if (term === "older search") {
+        await old;
+        await route.fulfill({ json: list([summary(second)]) }).catch(() => {});
+        return;
+      }
+      const items = ["", "#1046", "1046"].includes(term) ? [privateTrip] : [];
+      return route.fulfill({ json: envelope({ items, nextCursor: null, total: items.length }) });
+    });
+    await page.goto("/account/trips?game=ets2");
+    await catalogLanguage(page);
+    const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
+    await expect(page.getByText("Lifetime accepted trips · 42 · 6,551.25 km")).toBeVisible();
+    await expect(page.getByText("Found 1", { exact: true })).toBeVisible();
+    await expect(rowLink(page, first)).toContainText("#1046");
+    await expect(page.getByText("HaulMP", { exact: true })).toBeVisible();
+    const event = page.getByRole("link", { name: "Fictional Winter Convoy" });
+    await expect(event).toHaveAttribute("href", `/account/events/${entityId}`);
+    await event.click({ trial: true });
+
+    await search.fill("older search");
+    await expect.poll(() => lists.at(-1)?.get("q")).toBe("older search");
+    await expect(search).toBeFocused();
+    await search.fill("short transient");
+    await search.fill("  #1046  ");
+    await expect(page).toHaveURL(/[?&]q=%231046(&|$)/);
+    await expect(rowLink(page, first)).toBeVisible();
+    await expect(search).toHaveValue("#1046");
+    expect(lists.some((params) => params.get("q") === "short transient")).toBe(false);
+    releaseOld();
+    await expect(rowLink(page, second)).toHaveCount(0);
+    await expect(lists.at(-1)?.get("game")).toBe("ets2");
+
+    await search.fill("1046");
+    await expect(page).toHaveURL(/[?&]q=1046(&|$)/);
+    await expect(rowLink(page, first)).toBeVisible();
+    const sort = page.getByRole("button", { name: "Completed / confirmed", exact: true });
+    await sort.focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/[?&]order=completion_asc(&|$)/);
+    await expect(sort).toBeFocused();
+    await expect(sort.locator("..")).toHaveAttribute("aria-sort", "ascending");
+    await expect.poll(() => lists.at(-1)?.get("order")).toBe("completion_asc");
+
+    await page.goBack();
+    await expect(sort.locator("..")).toHaveAttribute("aria-sort", "descending");
+    await page.goBack();
+    await expect(search).toHaveValue("#1046");
+    await page.goForward();
+    await expect(search).toHaveValue("1046");
+    await page.goForward();
+    await page.reload();
+    await expect(search).toHaveValue("1046");
+    await expect(sort.locator("..")).toHaveAttribute("aria-sort", "ascending");
+    await expect(rowLink(page, first)).toBeVisible();
+    await catalogLanguage(page, "ru");
+    await expect.poll(() => lists.at(-1)?.get("locale")).toBe("ru");
+    expect(lists.at(-1)?.get("q")).toBe("1046");
+    expectListParams(lists);
+  },
+);
+
+test(
+  "period bounds use saved display time and fall back to All time for an unknown zone",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const { lists } = await mockList(page);
+    await page.clock.setFixedTime(new Date("2026-10-30T12:00:00Z"));
+    let displayTimezone = "Mars/Olympus";
+    await page.route("**/api/v1/me", (route) => {
+      const self = accountFixture("en");
+      self.data.preferences.displayTimezone = displayTimezone;
+      return route.fulfill({ json: self });
+    });
+    await page.goto(`/account/trips?scope=company&ownerId=${colleague}&period=thisMonth`);
+    await catalogLanguage(page);
+    await expect(page.getByText("Display timezone unavailable. Showing all time.")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open preferences" })).toHaveAttribute(
+      "href",
+      "/account/preferences",
+    );
+    const period = page.getByRole("combobox", { name: "Period" });
+    await expect(period).toHaveValue("");
+    await expect(rowLink(page, colleague)).toBeVisible();
+    expect(lists.at(-1)?.has("from")).toBe(false);
+    displayTimezone = "Europe/Warsaw";
+    await page.reload();
+    await expect(period).toHaveValue("thisMonth");
+    await expect.poll(() => lists.at(-1)?.get("from")).toBe("2026-09-30T22:00:00.000Z");
+    expect(lists.at(-1)?.get("toExclusive")).toBe("2026-10-31T23:00:00.000Z");
+    expect(lists.at(-1)?.get("ownerId")).toBe(colleague);
+    expect(lists.at(-1)?.has("decision")).toBe(false);
+    await expect(rowLink(page, colleague)).toBeVisible();
+    await page.getByRole("button", { name: "Clear driver filter" }).click();
+    await expect(page).not.toHaveURL(/ownerId=/);
+    await expect(page).toHaveURL(/period=thisMonth/);
+    await expect.poll(() => lists.at(-1)?.has("ownerId")).toBe(false);
+    expectListParams(lists);
+  },
+);
+
+test(
+  "the match count distinguishes a retryable error, zero and unavailable metadata",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const { lists } = await mockList(page);
+    const self = accountFixture("en");
+    self.data.capabilities = self.data.capabilities.filter(
+      (capability) => capability !== "trips.submit_own",
+    );
+    await page.route("**/api/v1/me", (route) => route.fulfill({ json: self }));
+    const status = example("getMyTripStatusSummary:success");
+    status.data.counts.accepted = 0;
+    status.data.lifetimeTotals = { acceptedTrips: 0, actualDistanceM: "0" };
+    await page.route("**/api/v1/me/trip-status-summary", (route) =>
+      route.fulfill({ json: status }),
+    );
+    let state = "error";
+    await page.route("**/api/v1/trips?*", (route) => {
+      if (state === "error")
+        return route.fulfill({ status: 503, json: { error: { code: "UNAVAILABLE" } } });
+      if (state === "missing")
+        return route.fulfill({
+          json: list([{ ...summary(first), reportingBasis: undefined }, summary(third)]),
+        });
+      return route.fulfill({ json: envelope({ items: [], nextCursor: null, total: 0 }) });
+    });
+    await page.goto("/account/trips?q=impossible");
+    await catalogLanguage(page);
+    await expect(page.getByText("Lifetime accepted trips · 0 · 0 km")).toBeVisible();
+    await expect(page.getByRole("link", { name: "New report", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Saved drafts", exact: true })).toHaveCount(0);
+    const retry = page.getByRole("button", { name: "Refresh", exact: true });
+    await expect(retry).toBeVisible();
+    await expect(page.getByText("Count unavailable", { exact: true })).toBeVisible();
+    await expect(page.getByText("Found 0", { exact: true })).toHaveCount(0);
+    state = "empty";
+    await retry.click();
+    await expect(page.getByText("Found 0", { exact: true })).toBeVisible();
+    await expect(page.getByText("No records match this view.")).toBeVisible();
+    expect(lists.at(-1)?.get("q")).toBe("impossible");
+    state = "missing";
+    await page.getByRole("searchbox").fill("");
+    await expect(rowLink(page, first)).toBeVisible();
+    await expect(page.getByText("Count unavailable", { exact: true })).toBeVisible();
+    await expect(page.getByText("Staff confirmation", { exact: true })).toBeVisible();
+    await expect(page.getByText("Reporting time", { exact: true })).toBeVisible();
+    await expect(page.locator(`#trip-time-${first}`)).toContainText("31 Oct 2026, 03:00");
+  },
+);
+
+test(
+  "toolbar fits one row at 1280px and discloses touch filters at 390px and 768px",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     await mockList(page);
-    const project = info.project.name,
-      touch = project === "mobile-chromium";
-    const results: Record<string, unknown>[] = [];
+    const desktop = info.project.name === "desktop-chromium";
+    const touch = await coarse(page);
     for (const scope of ["mine", "company"] as const) {
-      await page.goto(scope === "company" ? "/account/trips?scope=company" : "/account/trips");
-      await catalogLanguage(page);
-      await expect(table(page)).toBeVisible();
+      await page.goto(`/account/trips?scope=${scope}&game=ets2&source=manual`);
       for (const locale of ["en", "ru"] as const) {
         await catalogLanguage(page, locale);
-        await expect(page.locator("#trip-source option").first()).toHaveText(
-          locale === "ru" ? "Любой источник" : "Any source",
-        );
-        for (const wide of [false, true]) {
-          const style = wide ? await page.addStyleTag({ content: wideFont }) : null,
-            budget = await toolbarBudget(page),
-            label = JSON.stringify({ project, scope, locale, wide, ...budget });
-          results.push({ scope, locale, wide, ...budget });
-          expect(budget.children, label).toBe(scope === "mine" ? 4 : 3);
-          for (const height of budget.selectHeights)
-            if (touch) expect(height, label).toBeGreaterThanOrEqual(40);
-            else expect(Math.abs(height - 32), label).toBeLessThanOrEqual(0.5);
-          if (project === "desktop-chromium") {
-            // Selects and the timezone note share one row with at least 4px to spare.
-            expect(budget.rowSpreadAll, label).toBeLessThanOrEqual(4);
-            expect(budget.spareAll, label).toBeGreaterThanOrEqual(4);
-          } else if (project === "tablet-chromium") {
-            expect(budget.rowSpreadSelects, label).toBeLessThanOrEqual(4);
-            expect(budget.spareSelects, label).toBeGreaterThanOrEqual(4);
-          }
-          expect(budget.selectsInside, label).toBe(true);
-          await noOverflow(page);
-          if (touch)
-            await capture(page, info, `trips-toolbar-${scope}-${locale}${wide ? "-wide" : ""}`);
-          await style?.evaluate((node) => node.parentNode?.removeChild(node));
+        const toggle = page.getByRole("button", {
+          name: locale === "ru" ? "Фильтры · 2" : "Filters · 2",
+        });
+        if (!desktop) {
+          await expect(toggle).toBeVisible();
+          const toggleBox = await toggle.boundingBox();
+          expect(toggleBox?.height ?? 0).toBeGreaterThanOrEqual(touch ? 40 : 30);
+          await expect(toggle).toHaveAttribute("aria-expanded", "false");
+          await toggle.click();
+          await expect(toggle).toHaveAttribute("aria-expanded", "true");
+        } else await expect(toggle).toHaveCount(0);
+        await expect(page.locator("#trip-source")).toBeVisible();
+        const budget = await page.locator(".trips-toolbar").evaluate((bar) => {
+          const bounds = bar.getBoundingClientRect();
+          const elements = Array.from(bar.querySelectorAll("input, select, button, .trips-matches"))
+            .map((control) => control.getBoundingClientRect())
+            .filter((box) => box.width > 0 && box.height > 0);
+          const centres = elements.map((box) => box.top + box.height / 2);
+          return {
+            spread: Math.max(...centres) - Math.min(...centres),
+            searchWidth: bar.querySelector("input")?.getBoundingClientRect().width ?? 0,
+            inside: elements.every(
+              (box) => box.left >= bounds.left - 1 && box.right <= bounds.right + 1,
+            ),
+          };
+        });
+        expect(budget.inside).toBe(true);
+        if (desktop) {
+          expect(budget.spread).toBeLessThanOrEqual(4);
+          expect(budget.searchWidth).toBeGreaterThanOrEqual(200);
         }
+        await noOverflow(page);
+        await capture(page, info, `trips-toolbar-${scope}-${locale}`);
+        if (!desktop) await toggle.click();
       }
     }
-    await writeFile(info.outputPath("toolbar-budget.json"), JSON.stringify(results, null, 2));
   },
 );
 

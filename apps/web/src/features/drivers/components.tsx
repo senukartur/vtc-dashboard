@@ -17,9 +17,10 @@ import { Badge, Button, Card, Table } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { progressPercent } from "../dashboard/model.js";
 import type { QueryView } from "../dashboard/view-model.js";
+import { tripListTimestamp } from "../trips/list-model.js";
 import {
   type Assignment,
-  COMPANY_TRIPS_WINDOW,
+  driverTripFilters,
   failureView,
   type Game,
   type GameFilter,
@@ -31,7 +32,6 @@ import {
   nextLevel,
   sourceKeys,
 } from "./model.js";
-import type { AcceptedTrips } from "./queries.js";
 import type { DTO } from "./transport.js";
 
 type Analytics = DTO["Analytics"];
@@ -447,36 +447,30 @@ export function DriverTrips({
   query,
   isSelf,
   game,
-  nickname,
+  member,
+  lifetime,
   locale,
   displayTimezone,
 }: {
-  query: UseQueryResult<AcceptedTrips>;
+  query: UseQueryResult<DTO["ListTripSummary"]>;
   isSelf: boolean;
-  /** Selected game; the company window then holds only that game's trips. */
   game: Game | undefined;
-  nickname: string;
+  member: DTO["MemberSummary"];
+  lifetime: DTO["LifetimeTripTotals"] | undefined;
   locale: Locale;
   displayTimezone: string;
 }) {
-  const { t } = useTranslation("drivers");
+  const { t } = useTranslation(["drivers", "trips"]);
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const data = query.data;
-  const limit = COMPANY_TRIPS_WINDOW;
-  const scope = game ? t("trips.scopeGame", { game: gameName[game] }) : t("trips.scopeAll");
-  // Another member: say what the list covers whenever it is not that member's complete list.
-  const windowNote =
-    data && !isSelf && data.items.length > 0
-      ? data.truncated
-        ? t("trips.truncatedNote", { shown: data.items.length, limit, scope })
-        : data.windowIncomplete
-          ? t("trips.windowNote", { limit, scope })
-          : null
-      : null;
+  const { nickname } = member;
+  const history = driverTripFilters(member.id, { isSelf, game });
 
   let body: ReactNode;
-  if (!data && query.isError) {
+  if (!data && failureView(query.error) === "forbidden") {
+    body = <p className="driver-muted">{t("states.forbidden")}</p>;
+  } else if (!data && query.isError) {
     body = (
       <div className="driver-block-error">
         <p>{t("trips.error")}</p>
@@ -502,15 +496,7 @@ export function DriverTrips({
       </div>
     );
   } else if (data.items.length === 0) {
-    body = (
-      <p className="driver-empty">
-        {isSelf
-          ? t("trips.emptyOwn")
-          : data.windowIncomplete
-            ? t("trips.emptyWindow", { limit, scope })
-            : t("trips.empty")}
-      </p>
-    );
+    body = <p className="driver-empty">{isSelf ? t("trips.emptyOwn") : t("trips.empty")}</p>;
   } else {
     body = (
       <div className="driver-trips-area">
@@ -519,7 +505,7 @@ export function DriverTrips({
           <thead>
             <tr>
               <th scope="col" className="driver-col-time">
-                {t("trips.counted")}
+                {t("trips:completionColumn")}
               </th>
               <th scope="col">{t("trips.route")}</th>
               <th scope="col">{t("trips.cargo")}</th>
@@ -530,45 +516,51 @@ export function DriverTrips({
             </tr>
           </thead>
           <tbody>
-            {data.items.map((trip) => (
-              <tr key={trip.id} className="driver-trip-row">
-                <td className="driver-trip-time">
-                  <CellLabel>{t("trips.counted")}</CellLabel>
-                  <CountedAt value={formatUtc(trip.reportingAt, locale, displayTimezone)} />
-                </td>
-                <td className="driver-trip-route">
-                  <CellLabel>{t("trips.route")}</CellLabel>
-                  <span className="driver-route-line">
-                    <GameChip game={trip.game} />
-                    <Link className="driver-trip-link" to={`/account/trips/${trip.id}`}>
-                      <span>
-                        <CatalogName value={trip.origin} />
-                        {"\u00a0→ "}
-                        <CatalogName value={trip.destination} />
-                      </span>
-                    </Link>
-                  </span>
-                </td>
-                <td className="driver-trip-cargo">
-                  <CellLabel>{t("trips.cargo")}</CellLabel>
-                  <span>
-                    <CatalogName value={trip.cargo} />
-                  </span>
-                </td>
-                <td className="driver-trip-source">
-                  <CellLabel>{t("trips.source")}</CellLabel>
-                  <span>
-                    {sourceKeys(trip.sourceKinds)
-                      .map((key) => t(`trips.${key}`))
-                      .join(" + ")}
-                  </span>
-                </td>
-                <td className="driver-num driver-trip-distance">
-                  <CellLabel>{t("trips.distance")}</CellLabel>
-                  <span>{formatQuantity(trip.actualDistanceM, "km", locale)}</span>
-                </td>
-              </tr>
-            ))}
+            {data.items.map((trip) => {
+              const timestamp = tripListTimestamp(trip);
+              return (
+                <tr key={trip.id} className="driver-trip-row">
+                  <td className="driver-trip-time">
+                    <CellLabel>{t("trips:completionColumn")}</CellLabel>
+                    <CountedAt value={formatUtc(timestamp?.at ?? null, locale, displayTimezone)} />
+                    {timestamp?.label && (
+                      <small className="driver-trip-basis">{t(`trips:${timestamp.label}`)}</small>
+                    )}
+                  </td>
+                  <td className="driver-trip-route">
+                    <CellLabel>{t("trips.route")}</CellLabel>
+                    <span className="driver-route-line">
+                      <GameChip game={trip.game} />
+                      <Link className="driver-trip-link" to={`/account/trips/${trip.id}`}>
+                        <span>
+                          <CatalogName value={trip.origin} />
+                          {"\u00a0→ "}
+                          <CatalogName value={trip.destination} />
+                        </span>
+                      </Link>
+                    </span>
+                  </td>
+                  <td className="driver-trip-cargo">
+                    <CellLabel>{t("trips.cargo")}</CellLabel>
+                    <span>
+                      <CatalogName value={trip.cargo} />
+                    </span>
+                  </td>
+                  <td className="driver-trip-source">
+                    <CellLabel>{t("trips.source")}</CellLabel>
+                    <span>
+                      {sourceKeys(trip.sourceKinds)
+                        .map((key) => t(`trips.${key}`))
+                        .join(" + ")}
+                    </span>
+                  </td>
+                  <td className="driver-num driver-trip-distance">
+                    <CellLabel>{t("trips.distance")}</CellLabel>
+                    <span>{formatQuantity(trip.actualDistanceM, "km", locale)}</span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </Table>
       </div>
@@ -581,16 +573,22 @@ export function DriverTrips({
         <h2 id={headingId} ref={headingRef} tabIndex={-1}>
           {t("trips.title")}
         </h2>
-        <span className="driver-muted">{t("trips.subtitle")}</span>
+        {lifetime && (
+          <span className="driver-muted">
+            {t("trips.lifetime", {
+              trips: formatDecimal(String(lifetime.acceptedTrips), locale),
+              distance: formatQuantity(lifetime.actualDistanceM, "km", locale),
+            })}
+          </span>
+        )}
         <span className="driver-muted driver-timezone">
           {t("trips.timezone", { timezone: displayTimezone })}
         </span>
       </div>
       {body}
-      {windowNote && <p className="driver-muted">{windowNote}</p>}
-      {data && isSelf && data.nextCursor && (
-        <Link to="/account/trips" className="driver-head-link">
-          {t("trips.allMine")}
+      {data && (
+        <Link to={`/account/trips?${history}`} className="driver-head-link">
+          {isSelf ? t("trips.allMine") : t("trips.allDriver", { nickname })}
         </Link>
       )}
       <p className="driver-footnote">{t("trips.privacy")}</p>

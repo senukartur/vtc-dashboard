@@ -202,11 +202,11 @@ test.describe("Compact driver profile", () => {
         page.getByText(/^Progress counts accepted trips and actual distance/),
       ).toBeVisible();
 
-      // Trips: only this member's trips from the company window, with its disclosure.
+      // The accepted history is scoped to this member and retains exact all-game totals.
       const trips = tripsCard(page);
       await expect(trips.getByText("Times: UTC")).toBeVisible();
       await expect(trips.getByRole("columnheader")).toHaveText([
-        "Counted",
+        "Completed / confirmed",
         "Route",
         "Cargo",
         "Source",
@@ -224,9 +224,13 @@ test.describe("Compact driver profile", () => {
       await expect(trips.getByText("Telemetry + Manual report")).toBeVisible();
       await expect(trips.getByRole("cell", { name: "Unavailable" })).toHaveCount(1);
       await expect(trips.getByRole("cell", { name: "Unknown" })).toHaveCount(2);
-      await expect(
-        trips.getByText("Showing this driver's trips among the latest 100 accepted company trips."),
-      ).toBeVisible();
+      await expect(trips.getByText("Lifetime · 253 accepted · 64,585.25 km")).toBeVisible();
+      await expect(trips.getByText("Staff confirmation")).toBeVisible();
+      await expect(trips.getByText("Reporting time", { exact: true })).toBeVisible();
+      await expect(trips.getByRole("link", { name: "All trips by AlphaHauler" })).toHaveAttribute(
+        "href",
+        `/account/trips?scope=company&ownerId=${alphaId}`,
+      );
       await expect(trips.getByText(/^Pending and rejected reports/)).toBeVisible();
 
       // Chart: peak summary; the table view shows exact values with the reporting timezone.
@@ -247,7 +251,7 @@ test.describe("Compact driver profile", () => {
   );
 
   test(
-    "requests exactly the profile, rolling analytics, assigned progress/levels and the company window",
+    "requests exactly the profile, rolling analytics, assigned progress/levels and the owner trip page",
     browserCase(["@functional"]),
     async ({ page }) => {
       const state = await mockDriverRoutes(page);
@@ -262,7 +266,7 @@ test.describe("Compact driver profile", () => {
           `/api/v1/members/${alphaId}/qualification-progress?game=ats`,
           "/api/v1/qualification-levels?game=ets2&limit=25",
           "/api/v1/qualification-levels?game=ats&limit=25",
-          "/api/v1/trips?scope=company&decision=accepted&limit=100",
+          `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc`,
         ].sort(),
       );
       expect(state.requests.some((url) => url.pathname.startsWith("/api/v1/admin"))).toBe(false);
@@ -293,7 +297,7 @@ test.describe("Compact driver profile", () => {
       expect(profileRequests(state).slice(before).sort()).toEqual(
         [
           `/api/v1/members/${alphaId}/analytics?fromDate=2025-12-01&toDateExclusive=2026-12-01&granularity=month&game=ats`,
-          "/api/v1/trips?scope=company&decision=accepted&limit=100&game=ats",
+          `/api/v1/trips?scope=company&ownerId=${alphaId}&game=ats&limit=10&order=completion_desc`,
         ].sort(),
       );
       await expect(qualification(page, "ETS2")).toHaveCount(0);
@@ -303,38 +307,38 @@ test.describe("Compact driver profile", () => {
       await expect(header.getByText("ATS · Highway Driver III", { exact: true })).toBeVisible();
       await expect(ats).toBeFocused();
       await expect(
-        tripsCard(page).getByText(
-          "Showing this driver's trips among the latest 100 accepted ATS company trips.",
-        ),
+        tripsCard(page).getByText("Lifetime · 253 accepted · 64,585.25 km"),
       ).toBeVisible();
+      await tripsCard(page).getByRole("link", { name: "All trips by AlphaHauler" }).click();
+      await expect(page).toHaveURL(`/account/trips?scope=company&ownerId=${alphaId}&game=ats`);
+      await expect(page.getByRole("table", { name: "Trip list" }).getByRole("row")).toHaveCount(3);
+      await expect(page.getByText("Found 2", { exact: true })).toBeVisible();
+      await expect
+        .poll(() => state.requests.filter((url) => url.pathname === "/api/v1/trips").length)
+        .toBe(3);
+      const filtered = state.requests.filter((url) => url.pathname === "/api/v1/trips").at(-1);
+      expect(filtered?.searchParams.get("ownerId")).toBe(alphaId);
+      expect(filtered?.searchParams.has("decision")).toBe(false);
     },
   );
 
   test(
-    "caps another member's list at ten and says so even when the window is complete",
+    "shows the server's ten recent trips without scanning other owners",
     browserCase(["@functional"]),
     async ({ page }) => {
-      await mockDriverRoutes(page, { bulkTrips: true, tripsNextCursor: false });
+      const state = await mockDriverRoutes(page, { bulkTrips: true, tripsNextCursor: false });
       await open(page, alphaId);
       await loaded(page);
-      // Twelve of this member's trips are in the window; ten rows plus the header are shown.
       await expect(tripsCard(page).getByRole("row")).toHaveCount(11);
-      await expect(
-        tripsCard(page).getByText(
-          "Showing the latest 10 of this driver's trips among the latest 100 accepted company trips.",
-        ),
-      ).toBeVisible();
-      await gameGroup(page).getByRole("button", { name: "ATS", exact: true }).click();
-      await expect(tripsCard(page).getByRole("row")).toHaveCount(3);
-      // Complete window and not truncated: the list is this member's full ATS list, no note.
-      await expect(tripsCard(page).getByText(/^Showing/)).toHaveCount(0);
+      await expect(tripsCard(page).getByText(/among the latest/)).toHaveCount(0);
+      expect(profileRequests(state).filter((path) => path.startsWith("/api/v1/trips?"))).toEqual([
+        `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc`,
+      ]);
       await switchLanguage(page, "ru");
-      await gameGroup(page).getByRole("button", { name: "Все игры" }).click();
       await expect(
-        tripsCard(page).getByText(
-          "Показаны последние 10 рейсов водителя среди последних 100 принятых рейсов компании.",
-        ),
+        tripsCard(page).getByRole("link", { name: "Все рейсы AlphaHauler" }),
       ).toBeVisible();
+      await expect(tripsCard(page).getByRole("row")).toHaveCount(11);
     },
   );
 
@@ -350,14 +354,14 @@ test.describe("Compact driver profile", () => {
         page.locator("header.driver-header").getByText("You", { exact: true }),
       ).toBeVisible();
       expect(profileRequests(state)).toContain(
-        "/api/v1/trips?scope=mine&decision=accepted&limit=10",
+        "/api/v1/trips?scope=mine&decision=accepted&limit=10&order=completion_desc",
       );
       expect(profileRequests(state).some((path) => path.includes("scope=company"))).toBe(false);
       await expect(tripsCard(page).getByRole("row")).toHaveCount(3);
       await expect(tripsCard(page).getByText(/among the latest/)).toHaveCount(0);
       await expect(tripsCard(page).getByRole("link", { name: "All my trips" })).toHaveAttribute(
         "href",
-        "/account/trips",
+        "/account/trips?scope=mine&decision=accepted",
       );
       await expect(qualification(page, "ATS").getByText("No qualification assigned")).toBeVisible();
 
@@ -365,7 +369,10 @@ test.describe("Compact driver profile", () => {
       state.tripsNextCursor = false;
       await gameGroup(page).getByRole("button", { name: "ETS2", exact: true }).click();
       await expect(tripsCard(page).getByText("You have no accepted trips yet.")).toBeVisible();
-      await expect(tripsCard(page).getByRole("link", { name: "All my trips" })).toHaveCount(0);
+      await expect(tripsCard(page).getByRole("link", { name: "All my trips" })).toHaveAttribute(
+        "href",
+        "/account/trips?scope=mine&decision=accepted&game=ets2",
+      );
     },
   );
 
@@ -386,11 +393,7 @@ test.describe("Compact driver profile", () => {
         ).toBeVisible();
       await expect(page.locator("header.driver-header .driver-level-chip")).toHaveCount(0);
       await expect(kpis(page).getByRole("definition").first()).toHaveText("139last 12 months");
-      await expect(
-        tripsCard(page).getByText(
-          "No trips by this driver among the latest 100 accepted company trips.",
-        ),
-      ).toBeVisible();
+      await expect(tripsCard(page).getByText("No accepted trips yet.")).toBeVisible();
       const paths = profileRequests(state);
       expect(paths.filter((path) => path.includes("qualification"))).toEqual([]);
       expect(paths).toHaveLength(3);
@@ -691,7 +694,7 @@ test.describe("Compact driver profile", () => {
       ).toHaveAttribute("aria-pressed", "true");
       await expect(kpis(page)).toHaveAccessibleName("Показатели водителя за 12 месяцев");
       await expect(tripsCard(page).getByRole("columnheader")).toHaveText([
-        "Учтён",
+        "Завершён / подтверждён",
         "Маршрут",
         "Груз",
         "Источник",
@@ -909,7 +912,7 @@ for (const locale of ["en", "ru"] as const)
       if (locale === "ru") await switchLanguage(page, "ru");
       const route = tripsCard(page).locator("a.driver-trip-link").first();
       await expect(route).toContainText("· Krönburg");
-      await expect(route.locator("small")).toHaveCount(1);
+      await expect(route.locator(".catalog-native")).toHaveCount(1);
       await expect(route.locator(".catalog-native")).toHaveCSS("display", "inline");
       expect(await noOverflow(page)).toBe(true);
       await capture(page, info, `driver-native-${locale}`);

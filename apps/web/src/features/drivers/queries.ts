@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
-import { type Game, ownTrips, tripsPath } from "./model.js";
+import { type Game, tripsPath } from "./model.js";
 import { type DTO, driversRead } from "./transport.js";
 
 export function useMembersList(
@@ -149,43 +149,17 @@ export function useMemberProgress(memberId: string, game: Game, enabled: boolean
   });
 }
 
-export type AcceptedTrips = {
-  items: DTO["TripSummary"][];
-  nextCursor: string | null;
-  /** Other member only: the scanned company window has older trips that were not checked. */
-  windowIncomplete: boolean;
-  /** Other member only: the window holds more of the member's trips than are shown. */
-  truncated: boolean;
-};
-
-/**
- * Recent accepted trips. Own profile: the exact first page of `scope=mine`. Another member: the
- * latest accepted company trips filtered by owner, because the contract has no owner filter.
- */
+/** First page of the selected driver's authorized accepted trips. */
 export function useMemberAcceptedTrips(
   memberId: string,
   params: { isSelf: boolean; game?: Game | undefined },
 ) {
   const { allowed, key, read } = useProfileRead();
-  const path = tripsPath(params);
+  const path = tripsPath(memberId, params);
   return useQuery({
     ...common,
     queryKey: key("driver-accepted-trips", memberId, path),
     enabled: !!memberId && allowed,
-    queryFn: async ({ signal }): Promise<AcceptedTrips> => {
-      const page = (await read(path, "EnvelopeListTripSummary", signal)).data;
-      if (params.isSelf)
-        return {
-          items: page.items,
-          nextCursor: page.nextCursor,
-          windowIncomplete: false,
-          truncated: false,
-        };
-      return {
-        ...ownTrips(page.items, memberId),
-        nextCursor: null,
-        windowIncomplete: page.nextCursor !== null,
-      };
-    },
+    queryFn: async ({ signal }) => (await read(path, "EnvelopeListTripSummary", signal)).data,
   });
 }

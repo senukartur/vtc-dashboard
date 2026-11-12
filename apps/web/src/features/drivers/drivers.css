@@ -362,6 +362,10 @@
 .driver-profile-page .driver-trips-table td:last-child {
   padding-right: 0;
 }
+.driver-profile-page .driver-trip-basis {
+  display: block;
+  color: var(--muted);
+}
 .driver-profile-page .driver-trip-distance,
 .driver-profile-page .driver-nowrap {
   white-space: nowrap;

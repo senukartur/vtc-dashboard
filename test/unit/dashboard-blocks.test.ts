@@ -45,14 +45,18 @@ const placeholders = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map(
 const shown = ({ nextChangeMs: _, ...rest }: Countdown) => rest;
 
 describe("recent company trips path", () => {
-  it("asks for five accepted company trips and only adds the game", () => {
+  it("asks for five completion-ordered accepted company trips with optional game", () => {
     expect(RECENT_TRIPS_LIMIT).toBe(5);
-    expect(recentTripsPath()).toBe("/trips?scope=company&limit=5");
-    expect(recentTripsPath(undefined)).toBe("/trips?scope=company&limit=5");
-    expect(recentTripsPath("ets2")).toBe("/trips?scope=company&limit=5&game=ets2");
-    expect(recentTripsPath("ats")).toBe("/trips?scope=company&limit=5&game=ats");
+    expect(recentTripsPath()).toBe("/trips?scope=company&limit=5&order=completion_desc");
+    expect(recentTripsPath(undefined)).toBe("/trips?scope=company&limit=5&order=completion_desc");
+    expect(recentTripsPath("ets2")).toBe(
+      "/trips?scope=company&limit=5&order=completion_desc&game=ets2",
+    );
+    expect(recentTripsPath("ats")).toBe(
+      "/trips?scope=company&limit=5&order=completion_desc&game=ats",
+    );
     for (const path of [recentTripsPath(), recentTripsPath("ats")])
-      expect(path).not.toMatch(/decision=|order=|cursor=|hold=/);
+      expect(path).not.toMatch(/decision=|cursor=|hold=/);
   });
 });
 

@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
+import {
+  tripListFilters,
+  tripListTimestamp,
+  tripPeriodBounds,
+  tripSearch,
+} from "../../apps/web/src/features/trips/list-model.ts";
 import { tripTranslations } from "../../apps/web/src/features/trips/translations.ts";
 import {
   attemptFor,
@@ -95,6 +101,90 @@ test("source filter accepts only the contract source kinds and resets paging sta
     "game=ats&source=ets2telemetry",
   );
 });
+test("list filters use canonical owners and completion order, and normalize the search", () => {
+  const id = "49000000-0000-4000-8000-000000000002";
+  expect(
+    tripListFilters(
+      new URLSearchParams({
+        scope: "company",
+        ownerId: id,
+        decision: "rejected",
+        q: " #1046 ",
+        order: "completion_asc",
+        period: "lastMonth",
+      }),
+    ),
+  ).toMatchObject({
+    scope: "company",
+    ownerId: id,
+    decision: undefined,
+    q: "#1046",
+    order: "completion_asc",
+    period: "lastMonth",
+  });
+  expect(
+    tripListFilters(new URLSearchParams("ownerId=bad&order=asc&period=yesterday")),
+  ).toMatchObject({
+    scope: "mine",
+    ownerId: undefined,
+    order: "completion_desc",
+    period: undefined,
+    q: "",
+  });
+  expect(
+    tripListFilters(new URLSearchParams({ scope: "mine", ownerId: id })).ownerId,
+  ).toBeUndefined();
+  expect(tripSearch(" 1046 ")).toBe("1046");
+  expect(tripSearch(` ${"🚛".repeat(129)} `)).toBe("🚛".repeat(128));
+});
+
+test("half-open trip periods use the display calendar and both DST offsets", () => {
+  const now = new Date("2026-10-30T12:00:00Z");
+  expect(tripPeriodBounds("thisMonth", now, "Europe/Warsaw")).toEqual({
+    from: "2026-09-30T22:00:00.000Z",
+    toExclusive: "2026-10-31T23:00:00.000Z",
+  });
+  expect(tripPeriodBounds("last7Days", now, "Europe/Warsaw")).toEqual({
+    from: "2026-10-23T22:00:00.000Z",
+    toExclusive: "2026-10-30T23:00:00.000Z",
+  });
+  expect(
+    tripPeriodBounds("last7Days", new Date("2018-11-10T12:00:00Z"), "America/Sao_Paulo"),
+  ).toEqual({
+    from: "2018-11-04T03:00:00.000Z",
+    toExclusive: "2018-11-11T02:00:00.000Z",
+  });
+  expect(tripPeriodBounds("lastMonth", now, "Unknown/Zone")).toBeUndefined();
+});
+
+test("list dates distinguish completion, staff confirmation and legacy reporting time", () => {
+  const sample = cases.find((f: { id: string }) => f.id === "getTrip:success").response.data;
+  const at = "2026-10-30T12:00:00Z";
+  expect(tripListTimestamp({ ...sample, reportingAt: at, reportingBasis: "unknown" })).toEqual({
+    at,
+    label: "reportingColumn",
+  });
+  expect(tripListTimestamp({ ...sample, reportingAt: at, reportingBasis: undefined })).toEqual({
+    at,
+    label: "reportingColumn",
+  });
+  expect(
+    tripListTimestamp({ ...sample, reportingAt: null, reportingBasis: "actual_completion" }),
+  ).toBeNull();
+  expect(
+    tripListTimestamp({ ...sample, reportingAt: at, reportingBasis: "actual_completion" }),
+  ).toEqual({
+    at,
+    label: null,
+  });
+  expect(
+    tripListTimestamp({ ...sample, reportingAt: at, reportingBasis: "manual_confirmation" }),
+  ).toEqual({
+    at,
+    label: "manual_confirmation",
+  });
+});
+
 test("side-panel selection accepts only canonical UUIDv4 values and never reaches list filters", () => {
   const id = "49000000-0000-4000-8000-000000000002";
   expect(selectedTrip(new URLSearchParams(`trip=${id}`))).toBe(id);
