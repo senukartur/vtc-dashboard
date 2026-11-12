@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
+import { useWorkspaceSummary } from "../../app/workspace-summary.js";
 import type { Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
@@ -27,7 +28,6 @@ import {
   useMyQualificationProgress,
   useRecentCompanyTrips,
   useReportingTimezoneSource,
-  useReviewQueueTrips,
   useUpcomingEvent,
 } from "./queries.js";
 import { untilAnchored } from "./view-model.js";
@@ -106,7 +106,8 @@ function DashboardContent() {
   const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
   const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
   const upcomingEventQuery = useUpcomingEvent({ enabled: anchored });
-  const reviewTripsQuery = useReviewQueueTrips({ enabled: anchored });
+  // The queue card shares the workspace summary with the menu badges and the dispatch header.
+  const workspaceSummary = useWorkspaceSummary();
   // Follows the game filter only: the trips list has no date filter for the period.
   const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
 
@@ -254,12 +255,7 @@ function DashboardContent() {
           <WorkspaceActions locale={locale} timezone={displayTimezone} />
           {!analyticsFailed && (
             <>
-              {canReview && (
-                <ReviewerQueueWidget
-                  query={untilAnchored(reviewTripsQuery, anchored)}
-                  locale={locale}
-                />
-              )}
+              {canReview && <ReviewerQueueWidget summary={workspaceSummary} locale={locale} />}
               <UpcomingEventWidget
                 query={untilAnchored(upcomingEventQuery, anchored)}
                 locale={locale}

@@ -6,7 +6,7 @@ import { listSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogPages } from "../../shared/catalog-selectors/queries.js";
 import { formatDecimal } from "../../shared/formatting.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
-import type { CatalogFilters, MaintenanceMode } from "./model.js";
+import { type CatalogFilters, isTranslatable, type MaintenanceMode } from "./model.js";
 
 function ParentFilter({
   list,
@@ -71,10 +71,13 @@ export function CatalogToolbar({
   const { tab, maintenance } = filters;
   const countId = useId();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  const counts: { hidden: number; untranslated?: number } | undefined = summary?.[tab];
   const chips: { mode: MaintenanceMode; label: string; count: number | undefined }[] = [
-    { mode: "hidden", label: t("hiddenOnly"), count: summary?.[tab].hidden },
-    { mode: "untranslated", label: t("untranslated"), count: summary?.[tab].untranslated },
+    { mode: "hidden", label: t("hiddenOnly"), count: counts?.hidden },
   ];
+  // Canonical lists have no translation, so they offer no untranslated filter.
+  if (isTranslatable(tab))
+    chips.push({ mode: "untranslated", label: t("untranslated"), count: counts?.untranslated });
   if (tab === "companies")
     chips.push({
       mode: "missingLogo",

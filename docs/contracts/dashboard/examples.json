@@ -7763,8 +7763,7 @@
           "lists": {
             "dlcs": {
               "visible": 1,
-              "hidden": 0,
-              "untranslated": 1
+              "hidden": 0
             },
             "regions": {
               "visible": 1,
@@ -7779,13 +7778,11 @@
             "companies": {
               "visible": 1,
               "hidden": 0,
-              "untranslated": 1,
               "missingLogo": 1
             },
             "depots": {
               "visible": 1,
-              "hidden": 0,
-              "untranslated": 1
+              "hidden": 0
             },
             "cargoes": {
               "visible": 1,
@@ -8064,14 +8061,13 @@
       }
     },
     {
-      "id": "listCatalogDepots:hidden-untranslated",
+      "id": "listCatalogDepots:hidden-canonical-company",
       "operationId": "listCatalogDepots",
       "status": 200,
       "query": {
         "game": "ets2",
         "hidden": "only",
         "includeHidden": false,
-        "untranslated": true,
         "locale": "ru"
       },
       "response": {
@@ -8091,7 +8087,7 @@
                   "label": "Synthetic Freight",
                   "requestedLocale": "ru",
                   "renderedLocale": "en",
-                  "englishFallback": true,
+                  "englishFallback": false,
                   "hidden": false
                 },
                 "logo": {

@@ -303,11 +303,13 @@ test(
         nameRu: string | null = null,
       ) => {
         const code = `f1_${variant}_${unique}`;
+        // DLCs and companies have only their canonical name and accept no Russian one.
+        const canonical = list === "dlcs" || list === "companies";
         const response = await write(staff, `/admin/catalogs/${list}`, {
           game,
           code,
           nameEn: `Fictional ${variant} ${unique}`,
-          nameRu,
+          ...(canonical ? {} : { nameRu }),
         });
         expect(response.status()).toBe(201);
         return (await response.json()).data as CatalogSchemas["CatalogItem"];
@@ -317,7 +319,7 @@ test(
       const city = await createItem("cities", "cities", "Вымышленный город");
       const cargo = await createItem("cargoes");
       const trailer = await createItem("trailers");
-      const noLogo = await createItem("companies", "no_logo", "Вымышленная компания");
+      const noLogo = await createItem("companies", "no_logo");
       const hasLogo = await createItem("companies", "has_logo");
       const hidden = await createItem("companies", "hidden");
       const authHeaders = async () => ({
@@ -347,10 +349,11 @@ test(
       const after = (await summary()).lists;
       expect(after.companies).toMatchObject({
         hidden: before.companies.hidden + 1,
-        untranslated: (before.companies.untranslated ?? 0) + 1,
         missingLogo: (before.companies.missingLogo ?? 0) + 1,
       });
-      expect(after.depots.untranslated).toBe((before.depots.untranslated ?? 0) + 1);
+      expect(after.trailers.untranslated).toBe((before.trailers.untranslated ?? 0) + 1);
+      for (const list of ["dlcs", "companies", "depots"] as const)
+        expect(after[list]).not.toHaveProperty("untranslated");
 
       await page.goto("/account/catalogs");
       await catalogLanguage(page);
@@ -412,15 +415,13 @@ test(
       const show = await listResponse("companies", () => page.goto(listUrl("companies")));
       expect(show.items.map((item) => item.id).sort()).toEqual([hasLogo.id, noLogo.id].sort());
       expect(show.total).toBe(2);
+      expect(show.items).toContainEqual(expect.objectContaining({ id: hasLogo.id, depotCount: 1 }));
       await expect(hiddenChip).toHaveAccessibleDescription(countText(after.companies.hidden));
-      await expect(untranslatedChip).toHaveAccessibleDescription(
-        countText(after.companies.untranslated),
-      );
+      await expect(untranslatedChip).toHaveCount(0);
       await expect(noLogoChip).toHaveAccessibleDescription(countText(after.companies.missingLogo));
 
       for (const [label, filter, value, item, depotCount] of [
         [c.hiddenOnly, "hidden", "only", hidden, 0],
-        [c.untranslated, "untranslated", "true", hasLogo, 1],
         [c.missingLogo, "logo", "missing", noLogo, 0],
       ] as const) {
         const actual = await listResponse("companies", () => chip(label).click(), {
@@ -447,27 +448,28 @@ test(
         await expectTime(item.code, actual.items[0]?.updatedAt);
       }
 
-      const depotData = await listResponse(
-        "depots",
-        () => page.goto(listUrl("depots", { untranslated: "true" })),
-        { untranslated: "true" },
-      );
+      const depotData = await listResponse("depots", () => page.goto(listUrl("depots")));
       expect(depotData.items).toMatchObject([{ id: depot.id }]);
-      await expect(untranslatedChip).toHaveAccessibleDescription(
-        countText(after.depots.untranslated),
-      );
+      await expect(untranslatedChip).toHaveCount(0);
       await expect(noLogoChip).toHaveCount(0);
       await expectTime(hasLogo.code, depotData.items[0]?.updatedAt);
 
-      await page.goto(listUrl("companies", { untranslated: "true" }));
+      // A company form has no Russian name; a translatable list still edits one.
+      await page.goto(listUrl("companies"));
       await row(hasLogo.code).getByRole("button", { name: c.edit, exact: true }).click();
+      const companyForm = page.getByRole("dialog");
+      await expect(companyForm.getByLabel(c.fieldNameRu, { exact: true })).toHaveCount(0);
+      await companyForm.getByRole("button", { name: c.cancel, exact: true }).click();
+      await expect(companyForm).toHaveCount(0);
+      await page.goto(listUrl("trailers", { untranslated: "true" }));
+      await row(trailer.code).getByRole("button", { name: c.edit, exact: true }).click();
       const form = page.getByRole("dialog");
-      await form.getByLabel(c.fieldNameRu, { exact: true }).fill("Вымышленный перевозчик");
+      await form.getByLabel(c.fieldNameRu, { exact: true }).fill("Вымышленный прицеп");
       await form.getByRole("button", { name: c.save, exact: true }).click();
       await expect(form).toHaveCount(0);
       await expect(page.getByText(c.empty, { exact: true })).toBeVisible();
       await expect(untranslatedChip).toHaveAccessibleDescription(
-        countText(before.companies.untranslated),
+        countText(before.trailers.untranslated),
       );
     } finally {
       try {

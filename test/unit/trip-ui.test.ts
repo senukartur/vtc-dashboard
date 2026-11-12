@@ -355,3 +355,12 @@ test("manual revision readback keeps paired reference dates and closed fields in
     if (result.success) expect(result.data).toEqual(value);
   }
 });
+
+test("the trips decision filter names a returned trip as needing fixes, badges keep their key", () => {
+  // VTC-114 has one returned status that the driver fixes and resubmits, no final rejection.
+  expect(tripTranslations.ru.decisionFilter_rejected).toBe("Нужно исправить");
+  expect(tripTranslations.en.decisionFilter_rejected).toBe("Needs fixes");
+  // Decision badges and review filters still use the shared key until VTC-136 renames them.
+  expect(tripTranslations.ru.rejected).toBe("Отклонено");
+  expect(tripTranslations.en.rejected).toBe("Rejected");
+});

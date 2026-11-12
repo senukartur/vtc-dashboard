@@ -364,6 +364,16 @@ test("editing filter and count are optional and draft deletion is bodyless, guar
   expect(valid("EnvelopeListManualDraft", fixture("listMyManualDrafts:success").response)).toBe(
     true,
   );
+  // Labels may follow the interface language instead of the saved account language.
+  const locale = list.parameters.find(
+    (parameter: { name?: string }) => parameter.name === "locale",
+  );
+  expect(locale).toMatchObject({
+    in: "query",
+    required: false,
+    schema: { type: "string", enum: ["en", "ru"] },
+  });
+  expect(locale.description).toMatch(/saved locale/);
 
   const remove = spec.paths["/api/v1/me/manual-drafts/{draftId}"].delete;
   expect(remove).toMatchObject({

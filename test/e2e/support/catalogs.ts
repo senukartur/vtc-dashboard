@@ -50,7 +50,8 @@ export function depotRow(
     company: {
       id: company.id,
       code: company.name.toLowerCase().replaceAll(" ", "_"),
-      label: label(company.id, company.name),
+      // A company has only its canonical name, so its label is never an English fallback.
+      label: { ...label(company.id, company.name), englishFallback: false },
       logo: company.logo ?? null,
     },
     city: {
@@ -134,15 +135,14 @@ export const defaultRows = (locale: "ru" | "en"): Record<CatalogListName, S["Cat
 });
 const depotVisible = (row: CatalogDepotRow) =>
   !row.hidden && !row.company.label.hidden && !row.city.label.hidden;
-function depotUntranslated(
-  row: CatalogDepotRow,
-  parents: Partial<Record<CatalogListName, S["CatalogItem"][]>> | undefined,
-) {
-  // Standalone depot fixtures supply English names only. Parent rows can also supply Russian names.
-  const company = parents?.companies?.find((item) => item.id === row.company.id);
-  const city = parents?.cities?.find((item) => item.id === row.city.id);
-  return !company?.nameRu || !city?.nameRu;
-}
+/** DLCs and companies have only their canonical name, like the API. */
+const canonicalLists: readonly CatalogListName[] = ["dlcs", "companies"];
+const isCanonical = (name: CatalogListName) => canonicalLists.includes(name);
+/** A canonical row as the API returns it: no Russian name and no fallback mark. */
+const asServed = (name: CatalogListName, row: S["CatalogItem"]): S["CatalogItem"] =>
+  isCanonical(name)
+    ? { ...row, nameRu: null, display: { ...row.display, englishFallback: false } }
+    : row;
 
 function mockPage(rows: unknown[], query: URLSearchParams, paginate: boolean | undefined) {
   if (!paginate) return catalogList(rows);
@@ -240,7 +240,7 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         return {
           visible: visible.length,
           hidden: items.length - visible.length,
-          ...(options.maintenanceCounts
+          ...(options.maintenanceCounts && !isCanonical(name)
             ? { untranslated: visible.filter((item) => !item.nameRu).length }
             : {}),
           ...(options.maintenanceCounts && name === "companies"
@@ -261,13 +261,6 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
             depots: {
               visible: depots.filter((r) => !r.hidden).length,
               hidden: depots.filter((r) => r.hidden).length,
-              ...(options.maintenanceCounts
-                ? {
-                    untranslated: depots.filter(
-                      (r) => depotVisible(r) && depotUntranslated(r, rows),
-                    ).length,
-                  }
-                : {}),
             },
           },
         }),
@@ -310,17 +303,23 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         city = url.searchParams.get("cityId"),
         includeHidden = url.searchParams.get("includeHidden") === "true",
         hiddenOnly = url.searchParams.get("hidden") === "only",
-        untranslated = url.searchParams.get("untranslated") === "true",
         search = url.searchParams.get("search")?.toLowerCase();
+      if (url.searchParams.has("untranslated"))
+        return route.fulfill({ status: 422, json: { error: { code: "PRIVATE_SENTINEL" } } });
+      // In one city a search picks a company; for one company it picks a city.
+      const matches = (part: { code: string; label: { label: string } }) =>
+        !!search && (part.label.label.toLowerCase().includes(search) || part.code.includes(search));
       const visible = (options.depots?.[game] ?? []).filter(
         (r) =>
           (hiddenOnly ? r.hidden : includeHidden || depotVisible(r)) &&
-          (!untranslated || depotUntranslated(r, options.rows?.[game])) &&
           (!company || r.company.id === company) &&
           (!city || r.city.id === city) &&
           (!search ||
-            r.company.label.label.toLowerCase().includes(search) ||
-            r.city.label.label.toLowerCase().includes(search)),
+            (city && !company
+              ? matches(r.company)
+              : company && !city
+                ? matches(r.city)
+                : matches(r.company) || matches(r.city))),
       );
       return json(mockPage(visible, url.searchParams, options.paginate));
     }
@@ -342,14 +341,16 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         if (!found)
           return route.fulfill({ status: 404, json: { error: { code: "PRIVATE_SENTINEL" } } });
         return json(
-          envelope({
-            ...found,
-            display: {
-              ...found.display,
-              requestedLocale: locale,
-              englishFallback: locale === "ru",
-            },
-          }),
+          envelope(
+            asServed(name, {
+              ...found,
+              display: {
+                ...found.display,
+                requestedLocale: locale,
+                englishFallback: locale === "ru",
+              },
+            }),
+          ),
         );
       }
       const search = url.searchParams.get("search")?.toLowerCase(),
@@ -357,6 +358,8 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
         hiddenOnly = url.searchParams.get("hidden") === "only",
         untranslated = url.searchParams.get("untranslated") === "true",
         missingLogo = name === "companies" && url.searchParams.get("logo") === "missing";
+      if (untranslated && isCanonical(name))
+        return route.fulfill({ status: 422, json: { error: { code: "PRIVATE_SENTINEL" } } });
       const visible = rows.filter(
         (r) =>
           (hiddenOnly ? r.hidden : includeHidden || !r.hidden) &&
@@ -367,7 +370,13 @@ export async function mockCatalogs(page: Page, staff = true, options: CatalogMoc
             r.display.label.toLowerCase().includes(search) ||
             r.nameNative?.toLowerCase().includes(search)),
       );
-      return json(mockPage(visible, url.searchParams, options.paginate));
+      return json(
+        mockPage(
+          visible.map((row) => asServed(name, row)),
+          url.searchParams,
+          options.paginate,
+        ),
+      );
     }
     return route.fulfill({ status: 503, json: { error: { code: "PRIVATE_SENTINEL" } } });
   });

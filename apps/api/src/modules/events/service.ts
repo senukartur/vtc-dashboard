@@ -39,6 +39,19 @@ import { type Actor, type Identity, identityError } from "../identity/service.js
 import type { ConfirmedEventContext } from "../qualification-rules/contracts.js";
 import { canonicalJson, decimal } from "../sources/contracts/canonical.js";
 import { type Page, pagination } from "./pagination.js";
+import {
+  blankLegacyText,
+  createPublishedRoutes,
+  definitionFields,
+  type EventLocale,
+  legacyRouteDetails,
+  legacyTextFields,
+  publishedRouteInput,
+  type RouteCatalogs,
+  type RouteDetails,
+  routeChanged,
+  eventText as text,
+} from "./published-route.js";
 
 type S = components["schemas"];
 type Event = Omit<typeof events.$inferSelect, "notificationMaterialPending">;
@@ -65,7 +78,11 @@ const publicRevisionFields = {
 type PublicRevision = Pick<Revision, keyof typeof publicRevisionFields>;
 type ListOptions = Page & { period?: "upcoming" | "past" };
 type OwnResponse = Pick<S["Rsvp"], "response" | "version">;
-type NotificationMaterial = Pick<Revision, "status" | "startsAt" | "route" | "meetingLocation">;
+type NotificationMaterial = Pick<
+  Revision,
+  "status" | "startsAt" | "route" | "meetingLocation" | "originCityId" | "destinationCityId"
+>;
+type DepotIds = Pick<RouteDetails, "originDepotId" | "destinationDepotId">;
 type MaterialState = NonNullable<Event["notificationMaterial"]>;
 function materialState(raw: unknown, version: number): MaterialState | null {
   if (raw === null) return null;
@@ -101,6 +118,8 @@ function advanceMaterial(
   state: MaterialState,
   prior: NotificationMaterial,
   next: NotificationMaterial & { version: number },
+  priorDepots: DepotIds | null,
+  nextDepots: DepotIds | null,
 ) {
   if (next.version !== state.throughVersion + 1 || prior.status !== "scheduled")
     throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
@@ -111,7 +130,7 @@ function advanceMaterial(
     startVersion:
       statusChanged || prior.startsAt !== next.startsAt ? next.version : state.startVersion,
     routeVersion:
-      statusChanged || prior.route !== next.route || prior.meetingLocation !== next.meetingLocation
+      statusChanged || routeChanged(prior, next, priorDepots, nextDepots)
         ? next.version
         : state.routeVersion,
     statusVersion: statusChanged ? next.version : state.statusVersion,
@@ -137,9 +156,21 @@ type Route = typeof eventCommands.$inferSelect.route;
 type Receipt = typeof eventCommands.$inferSelect.result & {
   responseRevisionId?: string | null;
   attendanceRevisionId?: string | null;
+  responseCounts?: S["EventResponseCounts"];
 };
+type DefinitionCommand =
+  | { legacy: S["EventInput"] }
+  | { published: ReturnType<typeof publishedRouteInput> };
+type MemberProjection<T> = (
+  tx: TxContext,
+  revision: Revision,
+  actor: Actor,
+  receipt: Receipt,
+) => Promise<T>;
+
 export interface EventsConfig {
   cursorKey: string;
+  routeEnabled?: boolean;
 }
 export function validateEventsConfig(config: EventsConfig) {
   if (!/^[0-9a-f]{64}$/.test(config.cursorKey)) throw new Error("INVALID_EVENTS_CONFIG");
@@ -153,7 +184,8 @@ interface Ports {
     | "eventEligibleMembersInTransaction"
     | "memberSummariesInTransaction"
   >;
-  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction">;
+  catalogs?: Pick<Catalogs, "selectionsInTransaction" | "labelsInTransaction"> &
+    Partial<Pick<RouteCatalogs, "eventRouteCatalogInTransaction">>;
   outbox?: Pick<ReturnType<typeof createOutbox>, "append">;
   tripChanged?: (tx: TxContext, eventId: string, generation: number) => Promise<void>;
   attendanceTripIds?: (
@@ -172,6 +204,16 @@ export function createEvents(
   now = () => new Date(),
 ) {
   validateEventsConfig(config);
+  const catalogs = ports.catalogs;
+  const routeCatalogs = catalogs?.eventRouteCatalogInTransaction
+    ? {
+        labelsInTransaction: catalogs.labelsInTransaction,
+        eventRouteCatalogInTransaction: catalogs.eventRouteCatalogInTransaction,
+      }
+    : null;
+  if (config.routeEnabled && !routeCatalogs) throw new Error("EVENT_ROUTE_CATALOGS_REQUIRED");
+  const publishedRoutes =
+    config.routeEnabled && routeCatalogs ? createPublishedRoutes(unit, routeCatalogs) : null;
   const c = (tx: TxContext) => unit.client(tx),
     run = <T>(command: (tx: TxContext) => Promise<T>) =>
       retryTransaction(unit, command).catch((error) => {
@@ -203,7 +245,8 @@ export function createEvents(
     actor: Actor,
     capability = "company.read",
     targets: string[] = [],
-  ) => ports.identity.eventContextInTransaction(tx, actor, targets, capability);
+    organizerId?: string,
+  ) => ports.identity.eventContextInTransaction(tx, actor, targets, capability, organizerId);
   function date(value: string) {
     try {
       const normalized = utcIso(utcDateTime(value));
@@ -213,36 +256,19 @@ export function createEvents(
       throw identityError(422);
     }
   }
-  function text(value: unknown, max: number): asserts value is string {
-    if (typeof value !== "string" || !value.trim() || value.length > max) throw identityError(422);
-  }
-  function input(raw: S["EventInput"]) {
+  function legacyInput(raw: S["EventInput"]) {
     try {
-      closed(raw, [
-        "title",
-        "description",
-        "game",
-        "server",
-        "organizer",
-        "meetingLocation",
-        "route",
-        "meetingAt",
-        "startsAt",
-        "endsAt",
-        "visibility",
-        "originCityId",
-        "destinationCityId",
-        "prescribedCargoId",
-        "prescribedMassKg",
-        "prescribedTrailerTypeId",
-      ]);
+      closed(raw, [...definitionFields, ...legacyTextFields, "organizer"]);
     } catch {
       throw identityError(422);
     }
-    for (const k of ["title", "server", "organizer"] as const) text(raw[k], 256);
-    text(raw.description, 8000);
-    text(raw.meetingLocation, 2048);
-    text(raw.route, 2048);
+    text(raw.organizer, 256);
+    for (const field of legacyTextFields) text(raw[field], field === "description" ? 8000 : 2048);
+    return input(raw);
+  }
+  function input<T extends Pick<S["EventInput"], (typeof definitionFields)[number]>>(raw: T) {
+    text(raw.title, 256);
+    text(raw.server, 256);
     if (!["ets2", "ats"].includes(raw.game) || !["public", "members"].includes(raw.visibility))
       throw identityError(422);
     const meetingAt = date(raw.meetingAt),
@@ -378,6 +404,10 @@ export function createEvents(
         .limit(25)
         .for("share");
       if (!rows.length) throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
+      const details = await publishedRoutes?.detailsInTransaction(tx, [
+        ...(prior ? [prior.id] : []),
+        ...rows.map((row) => row.id),
+      ]);
       for (const row of rows) {
         if (
           row.version !== (state?.throughVersion ?? 0) + 1 ||
@@ -390,7 +420,13 @@ export function createEvents(
           throw new Error("EVENT_NOTIFICATION_MATERIAL_HISTORY_INVALID");
         state =
           state && prior
-            ? advanceMaterial(state, prior, row)
+            ? advanceMaterial(
+                state,
+                prior,
+                row,
+                details?.get(prior.id) ?? null,
+                details?.get(row.id) ?? null,
+              )
             : {
                 schemaVersion: 1,
                 throughVersion: 1,
@@ -454,16 +490,22 @@ export function createEvents(
     knownLabels?: Map<string, S["CatalogLabel"]>,
   ): Promise<S["EventPublic"]> {
     const labels = knownLabels ?? (await routeLabels(tx, [r]));
+    return legacyPublicDto(r, labels);
+  }
+  function legacyPublicDto(
+    r: PublicRevision,
+    labels: Map<string, S["CatalogLabel"]>,
+  ): S["EventPublic"] {
     return {
       id: r.eventId,
       version: r.version,
       title: r.title,
-      description: r.description,
+      description: r.description || blankLegacyText,
       game: r.game,
       server: r.server,
       organizer: r.organizer,
-      meetingLocation: r.meetingLocation,
-      route: r.route,
+      meetingLocation: r.meetingLocation || blankLegacyText,
+      route: r.route || blankLegacyText,
       meetingAt: r.meetingAt,
       startsAt: r.startsAt,
       endsAt: r.endsAt,
@@ -520,12 +562,7 @@ export function createEvents(
       throw new Error("EVENT_ATTENDANCE_REVISION_MISSING");
     return r;
   }
-  async function memberFacts(
-    tx: TxContext,
-    r: Revision,
-    actor: Actor,
-    receipt?: Receipt,
-  ): Promise<Omit<S["EventMember"], "event">> {
+  async function ownEventState(tx: TxContext, r: Revision, actor: Actor, receipt?: Receipt) {
     let ownResponse: ResponseRevision | null, ownAttendance: AttendanceRevision | null;
     if (receipt) {
       const [rr] = receipt.responseRevisionId
@@ -549,7 +586,7 @@ export function createEvents(
     return {
       visibility: r.visibility,
       myResponse: responseDto(ownResponse),
-      myAttendance: ownAttendance?.status ?? "unconfirmed",
+      myAttendance: ownAttendance?.status ?? ("unconfirmed" as const),
       prescribedCargoId: r.prescribedCargoId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
       prescribedTrailerTypeId: r.prescribedTrailerId,
@@ -561,7 +598,7 @@ export function createEvents(
     actor: Actor,
     receipt?: Receipt,
   ): Promise<S["EventMember"]> {
-    const facts = await memberFacts(tx, r, actor, receipt);
+    const facts = await ownEventState(tx, r, actor, receipt);
     return { event: await publicDto(tx, r), ...facts };
   }
 
@@ -775,6 +812,44 @@ export function createEvents(
     return { total, attended, notAttended, unconfirmed: total - attended - notAttended };
   }
 
+  async function readResponseCounts(
+    tx: TxContext,
+    eventId: string,
+  ): Promise<S["EventResponseCounts"]> {
+    return (await responseCountsByEvent(tx, [eventId])).get(eventId) as S["EventResponseCounts"];
+  }
+  async function publishedDto(
+    tx: TxContext,
+    r: Revision,
+    locale: EventLocale,
+    actor: Actor | null,
+    receipt?: Receipt,
+  ): Promise<S["EventStage2Public"] | S["EventStage2Member"]> {
+    if (!publishedRoutes || !routeCatalogs) throw identityError(422);
+    const details = await publishedRoutes.get(tx, r.id);
+    const refs: { kind: "city" | "cargo" | "trailer"; id: string }[] = [];
+    if (r.originCityId) refs.push({ kind: "city", id: r.originCityId });
+    if (r.destinationCityId) refs.push({ kind: "city", id: r.destinationCityId });
+    if (actor && r.prescribedCargoId) refs.push({ kind: "cargo", id: r.prescribedCargoId });
+    if (actor && r.prescribedTrailerId) refs.push({ kind: "trailer", id: r.prescribedTrailerId });
+    const labels = await routeCatalogs.labelsInTransaction(tx, refs, locale);
+    const event: S["EventStage2Public"] = {
+      ...legacyPublicDto(r, labels),
+      ...(await publishedRoutes.publicFields(tx, r, details)),
+      description: r.description || null,
+      meetingLocation: r.meetingLocation || null,
+      route: r.route || null,
+    };
+    if (!actor) return event;
+    return {
+      event,
+      ...(await ownEventState(tx, r, actor, receipt)),
+      organizerMemberId: details?.organizerMemberId ?? null,
+      prescribedCargo: labels.get(r.prescribedCargoId ?? "") ?? null,
+      prescribedTrailerType: labels.get(r.prescribedTrailerId ?? "") ?? null,
+      responseCounts: receipt?.responseCounts ?? (await readResponseCounts(tx, r.eventId)),
+    };
+  }
   function fingerprint(actor: Actor, route: Route, target: string, key: string, value: unknown) {
     return createHmac("sha256", Buffer.from(config.cursorKey, "hex"))
       .update("events/command/v1\0")
@@ -789,6 +864,7 @@ export function createEvents(
     key: string,
     value: unknown,
     command: () => Promise<Receipt>,
+    captureCounts = false,
   ) {
     applicationId(key);
     const hash = fingerprint(actor, route, target, key, value);
@@ -818,6 +894,9 @@ export function createEvents(
               (await response(tx, rawResult.eventId, actor.userId))?.revision.id ?? null,
             attendanceRevisionId:
               (await attendance(tx, rawResult.eventId, actor.userId))?.id ?? null,
+            ...(captureCounts
+              ? { responseCounts: await readResponseCounts(tx, rawResult.eventId) }
+              : {}),
           }
         : rawResult;
     await c(tx).insert(eventCommands).values({
@@ -913,15 +992,13 @@ export function createEvents(
     e: Event,
     value: S["EventInput"],
     category: "created" | "updated" | "cancelled",
+    previous: Revision | null,
+    details: RouteDetails | null,
+    priorDetails: RouteDetails | null,
     reason: string | null = null,
   ) {
     const id = newId();
-    if (category !== "cancelled")
-      await validateReferences(
-        tx,
-        value,
-        category === "created" ? null : await revision(tx, e.currentRevisionId as string),
-      );
+    if (category !== "cancelled") await validateReferences(tx, value, previous);
     const version = category === "created" ? 1 : e.version + 1,
       sequence = category === "created" ? 1 : e.changeSequence + 1;
     let notificationMaterial =
@@ -934,11 +1011,13 @@ export function createEvents(
             statusVersion: 1,
           }
         : materialState(e.notificationMaterial, e.version);
-    if (category !== "created" && notificationMaterial?.throughVersion === e.version)
+    if (previous && notificationMaterial?.throughVersion === e.version)
       notificationMaterial = advanceMaterial(
         notificationMaterial,
-        await revision(tx, e.currentRevisionId as string),
+        previous,
         { ...value, version, status: category === "cancelled" ? "cancelled" : "scheduled" },
+        priorDetails,
+        details,
       );
     await c(tx)
       .insert(eventRevisions)
@@ -969,6 +1048,7 @@ export function createEvents(
         prescribedTrailerId: value.prescribedTrailerTypeId,
         privateReason: reason,
       });
+    if (details) await publishedRoutes?.insert(tx, id, value.game, details);
     const next = {
       ...e,
       version,
@@ -1006,7 +1086,7 @@ export function createEvents(
     );
     return { eventId: e.id, revisionId: id, version };
   }
-  async function revisionInput(_tx: TxContext, r: Revision): Promise<S["EventInput"]> {
+  function revisionInput(r: Revision): S["EventInput"] {
     return {
       title: r.title,
       description: r.description,
@@ -1029,6 +1109,219 @@ export function createEvents(
   const checkVersion = (actual: number, expected: number) => {
     if (actual !== expected) throw identityError(412, "VERSION_CONFLICT");
   };
+  function stagedProjection(locale: EventLocale): MemberProjection<S["EventStage2Member"]> {
+    if (!publishedRoutes) throw identityError(422);
+    return async (tx, r, actor, receipt) => {
+      const data = await publishedDto(tx, r, locale, actor, receipt);
+      if (!("event" in data)) throw new Error("EVENT_MEMBER_PROJECTION_MISSING");
+      return data;
+    };
+  }
+  async function writeDefinition(
+    tx: TxContext,
+    actor: Actor,
+    e: Event,
+    command: DefinitionCommand,
+    organizer: string | null,
+    prior: Revision | null,
+  ) {
+    const category = prior ? "updated" : "created";
+    const priorDetails = prior ? ((await publishedRoutes?.get(tx, prior.id)) ?? null) : null;
+    if ("legacy" in command) {
+      const value = { ...command.legacy };
+      if (prior && publishedRoutes) {
+        for (const field of legacyTextFields)
+          if (prior[field] === "" && value[field] === blankLegacyText) value[field] = "";
+      }
+      const details = publishedRoutes ? legacyRouteDetails(value, prior, priorDetails) : null;
+      return writeRevision(tx, actor, e, value, category, prior, details, priorDetails);
+    }
+    if (!publishedRoutes || organizer === null) throw identityError(422);
+    text(organizer, 256);
+    const {
+      platform,
+      organizerMemberId,
+      originDepotId,
+      destinationDepotId,
+      distanceKm,
+      requiredDlcIds,
+      ...input
+    } = command.published;
+    const details = {
+      platform,
+      organizerMemberId,
+      originDepotId,
+      destinationDepotId,
+      distanceKm,
+      requiredDlcIds,
+    };
+    await publishedRoutes.validate(tx, input, details, priorDetails);
+    const value = {
+      ...input,
+      organizer,
+      description:
+        input.description === undefined ? (prior?.description ?? "") : (input.description ?? ""),
+      meetingLocation:
+        input.meetingLocation === undefined
+          ? (prior?.meetingLocation ?? "")
+          : (input.meetingLocation ?? ""),
+      route: input.route === undefined ? (prior?.route ?? "") : (input.route ?? ""),
+    };
+    return writeRevision(tx, actor, e, value, category, prior, details, priorDetails);
+  }
+  function definitionFingerprint(command: DefinitionCommand) {
+    return "legacy" in command ? command.legacy : ["published_route", command.published];
+  }
+  function createDefinition<T>(
+    actor: Actor,
+    key: string,
+    command: DefinitionCommand,
+    project: MemberProjection<T>,
+  ) {
+    const input = "legacy" in command ? command.legacy : command.published;
+    return run(async (tx) => {
+      const { organizer } = await authorize(
+        tx,
+        actor,
+        "events.manage",
+        [],
+        "published" in command ? command.published.organizerMemberId : undefined,
+      );
+      // The command key is the stable target for a create before the event ID exists.
+      const target = applicationId(key);
+      const result = await once(
+        tx,
+        actor,
+        "create",
+        target,
+        key,
+        definitionFingerprint(command),
+        async () => {
+          const e: Event = {
+            id: newId(),
+            version: 1,
+            changeSequence: 1,
+            tripAssessmentPending: false,
+            notificationPending: true,
+            notificationMaterial: null,
+            tripAssessmentGeneration: 0,
+            attendanceVersion: 1,
+            currentRevisionId: null,
+            game: input.game,
+            visibility: input.visibility,
+            status: "scheduled",
+            startsAt: input.startsAt,
+            createdAt: at(),
+          };
+          await c(tx).insert(events).values(e);
+          return writeDefinition(tx, actor, e, command, organizer, null);
+        },
+        "published" in command,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function updateDefinition<T>(
+    actor: Actor,
+    id: string,
+    key: string,
+    expected: number,
+    command: DefinitionCommand,
+    project: MemberProjection<T>,
+  ) {
+    return run(async (tx) => {
+      const { organizer } = await authorize(
+        tx,
+        actor,
+        "events.manage",
+        [],
+        "published" in command ? command.published.organizerMemberId : undefined,
+      );
+      const e = await lock(tx, id);
+      const result = await once(
+        tx,
+        actor,
+        "update",
+        id,
+        key,
+        [expected, definitionFingerprint(command)],
+        async () => {
+          checkVersion(e.version, expected);
+          if (e.status === "cancelled") throw identityError(409);
+          const prior = await revision(tx, e.currentRevisionId as string);
+          return writeDefinition(tx, actor, e, command, organizer, prior);
+        },
+        "published" in command,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function cancelDefinition<T>(
+    actor: Actor,
+    id: string,
+    key: string,
+    expected: number,
+    reason: string,
+    project: MemberProjection<T>,
+  ) {
+    text(reason, 2048);
+    return run(async (tx) => {
+      await authorize(tx, actor, "events.manage");
+      const e = await lock(tx, id);
+      const result = await once(
+        tx,
+        actor,
+        "cancel",
+        id,
+        key,
+        [expected, reason],
+        async () => {
+          checkVersion(e.version, expected);
+          if (e.status === "cancelled") throw identityError(409);
+          const prior = await revision(tx, e.currentRevisionId as string);
+          const priorDetails = (await publishedRoutes?.get(tx, prior.id)) ?? null;
+          const value = revisionInput(prior);
+          const details = publishedRoutes
+            ? (priorDetails ?? legacyRouteDetails(value, prior, null))
+            : null;
+          return writeRevision(
+            tx,
+            actor,
+            e,
+            value,
+            "cancelled",
+            prior,
+            details,
+            priorDetails,
+            reason,
+          );
+        },
+        publishedRoutes !== null,
+      );
+      return {
+        data: await project(tx, await revision(tx, result.revisionId), actor, result),
+        version: result.version,
+      };
+    });
+  }
+  function readDefinition<T>(
+    actor: Actor | null,
+    id: string,
+    project: (tx: TxContext, r: Revision) => Promise<T>,
+  ) {
+    return run(async (tx) => {
+      if (actor) await authorize(tx, actor);
+      const e = await lock(tx, id, !actor);
+      const r = await revision(tx, e.currentRevisionId as string);
+      return { data: await project(tx, r), version: e.version };
+    });
+  }
   async function association(
     tx: TxContext,
     input: {
@@ -1115,80 +1408,63 @@ export function createEvents(
       run(async (tx) => {
         await authorize(tx, actor, manage ? "events.manage" : "company.read");
       }),
+    publishedRoutesEnabled: publishedRoutes !== null,
     async create(actor: Actor, key: string, raw: S["EventInput"]) {
-      const value = input(raw);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage"); // Stable create target is its idempotency key, serialized by the company lock.
-        const target = applicationId(key);
-        const result = await once(tx, actor, "create", target, key, value, async () => {
-          const e: Event = {
-            id: newId(),
-            version: 1,
-            changeSequence: 1,
-            tripAssessmentPending: false,
-            notificationPending: true,
-            notificationMaterial: null,
-            tripAssessmentGeneration: 0,
-            attendanceVersion: 1,
-            currentRevisionId: null,
-            game: value.game,
-            visibility: value.visibility,
-            status: "scheduled",
-            startsAt: value.startsAt,
-            createdAt: at(),
-          };
-          await c(tx).insert(events).values(e);
-          return writeRevision(tx, actor, e, value, "created");
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return createDefinition(actor, key, { legacy: legacyInput(raw) }, memberDto);
+    },
+    async createPublished(
+      actor: Actor,
+      key: string,
+      raw: S["EventStage2Input"],
+      locale: EventLocale,
+    ) {
+      return createDefinition(
+        actor,
+        key,
+        { published: input(publishedRouteInput(raw)) },
+        stagedProjection(locale),
+      );
     },
     async update(actor: Actor, id: string, key: string, expected: number, raw: S["EventInput"]) {
-      const value = input(raw);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id);
-        const result = await once(tx, actor, "update", id, key, [expected, value], async () => {
-          checkVersion(e.version, expected);
-          if (e.status === "cancelled") throw identityError(409);
-          return writeRevision(tx, actor, e, value, "updated");
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return updateDefinition(actor, id, key, expected, { legacy: legacyInput(raw) }, memberDto);
+    },
+    async updatePublished(
+      actor: Actor,
+      id: string,
+      key: string,
+      expected: number,
+      raw: S["EventStage2Input"],
+      locale: EventLocale,
+    ) {
+      return updateDefinition(
+        actor,
+        id,
+        key,
+        expected,
+        { published: input(publishedRouteInput(raw)) },
+        stagedProjection(locale),
+      );
     },
     async cancel(actor: Actor, id: string, key: string, expected: number, reason: string) {
-      text(reason, 2048);
-      return run(async (tx) => {
-        await authorize(tx, actor, "events.manage");
-        const e = await lock(tx, id);
-        const result = await once(tx, actor, "cancel", id, key, [expected, reason], async () => {
-          checkVersion(e.version, expected);
-          if (e.status === "cancelled") throw identityError(409);
-          const r = await revision(tx, e.currentRevisionId as string);
-          return writeRevision(tx, actor, e, await revisionInput(tx, r), "cancelled", reason);
-        });
-        return {
-          data: await memberDto(tx, await revision(tx, result.revisionId), actor, result),
-          version: result.version,
-        };
-      });
+      return cancelDefinition(actor, id, key, expected, reason, memberDto);
+    },
+    async cancelPublished(
+      actor: Actor,
+      id: string,
+      key: string,
+      expected: number,
+      reason: string,
+      locale: EventLocale,
+    ) {
+      return cancelDefinition(actor, id, key, expected, reason, stagedProjection(locale));
     },
     async get(actor: Actor | null, id: string) {
-      return run(async (tx) => {
-        if (actor) await authorize(tx, actor);
-        const e = await lock(tx, id, !actor),
-          r = await revision(tx, e.currentRevisionId as string);
-        return {
-          data: actor ? await memberDto(tx, r, actor) : await publicDto(tx, r),
-          version: e.version,
-        };
-      });
+      return readDefinition<S["EventMember"] | S["EventPublic"]>(actor, id, (tx, r) =>
+        actor ? memberDto(tx, r, actor) : publicDto(tx, r),
+      );
+    },
+    async getPublished(actor: Actor | null, id: string, locale: EventLocale) {
+      return readDefinition(actor, id, (tx, r) => publishedDto(tx, r, locale, actor));
     },
     async list(actor: Actor | null, options: ListOptions = {}) {
       return run(async (tx) => {
@@ -1240,7 +1516,7 @@ export function createEvents(
         const r = await revision(tx, e.currentRevisionId as string);
         const [projection] = await stage2PublicDtos(tx, [r]);
         if (!projection) throw new Error("EVENT_REVISION_MISSING");
-        const facts = await memberFacts(tx, r, actor);
+        const facts = await ownEventState(tx, r, actor);
         const counts = await responseCountsByEvent(tx, [id]);
         return {
           data: {
@@ -1670,12 +1946,17 @@ export function createEvents(
               )
               .for("share")
           : [];
+      const details =
+        prior && r.status !== "cancelled" && prior.startsAt === r.startsAt
+          ? await publishedRoutes?.detailsInTransaction(tx, [prior.id, r.id])
+          : undefined;
       const changed =
         r.status === "cancelled"
           ? "event.cancelled"
           : prior && prior.startsAt !== r.startsAt
             ? "event.start_changed"
-            : prior && (prior.route !== r.route || prior.meetingLocation !== r.meetingLocation)
+            : prior &&
+                routeChanged(prior, r, details?.get(prior.id) ?? null, details?.get(r.id) ?? null)
               ? "event.route_changed"
               : null;
       const current =

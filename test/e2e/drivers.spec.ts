@@ -266,7 +266,7 @@ test.describe("Compact driver profile", () => {
           `/api/v1/members/${alphaId}/qualification-progress?game=ats`,
           "/api/v1/qualification-levels?game=ets2&limit=25",
           "/api/v1/qualification-levels?game=ats&limit=25",
-          `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc`,
+          `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc&locale=en`,
         ].sort(),
       );
       expect(state.requests.some((url) => url.pathname.startsWith("/api/v1/admin"))).toBe(false);
@@ -297,7 +297,7 @@ test.describe("Compact driver profile", () => {
       expect(profileRequests(state).slice(before).sort()).toEqual(
         [
           `/api/v1/members/${alphaId}/analytics?fromDate=2025-12-01&toDateExclusive=2026-12-01&granularity=month&game=ats`,
-          `/api/v1/trips?scope=company&ownerId=${alphaId}&game=ats&limit=10&order=completion_desc`,
+          `/api/v1/trips?scope=company&ownerId=${alphaId}&game=ats&limit=10&order=completion_desc&locale=en`,
         ].sort(),
       );
       await expect(qualification(page, "ETS2")).toHaveCount(0);
@@ -332,7 +332,7 @@ test.describe("Compact driver profile", () => {
       await expect(tripsCard(page).getByRole("row")).toHaveCount(11);
       await expect(tripsCard(page).getByText(/among the latest/)).toHaveCount(0);
       expect(profileRequests(state).filter((path) => path.startsWith("/api/v1/trips?"))).toEqual([
-        `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc`,
+        `/api/v1/trips?scope=company&ownerId=${alphaId}&limit=10&order=completion_desc&locale=en`,
       ]);
       await switchLanguage(page, "ru");
       await expect(
@@ -354,7 +354,7 @@ test.describe("Compact driver profile", () => {
         page.locator("header.driver-header").getByText("You", { exact: true }),
       ).toBeVisible();
       expect(profileRequests(state)).toContain(
-        "/api/v1/trips?scope=mine&decision=accepted&limit=10&order=completion_desc",
+        "/api/v1/trips?scope=mine&decision=accepted&limit=10&order=completion_desc&locale=en",
       );
       expect(profileRequests(state).some((path) => path.includes("scope=company"))).toBe(false);
       await expect(tripsCard(page).getByRole("row")).toHaveCount(3);

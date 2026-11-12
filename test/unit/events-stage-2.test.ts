@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { afterEach, expect, test, vi } from "vitest";
+import { readConfig } from "../../apps/api/src/platform/config/env.ts";
 import {
   eventStage2ImageQueryPolicy,
   visibleEventStage2Image,
@@ -264,4 +266,64 @@ test("staged JSON and image streams hold their read slots until their bodies fin
     await Promise.allSettled([cover.writer.abort(), detail.writer.abort()]);
     await Promise.allSettled(reads);
   }
+});
+test("published route clients explicitly opt into detail and cancellation with a default locale", () => {
+  expect(eventStage2Reads.publicDetail(stage2EventId).path).toBe(
+    `/public/events/${stage2EventId}?locale=en`,
+  );
+  expect(eventStage2Reads.memberDetail(stage2EventId, "ru").path).toBe(
+    `/events/${stage2EventId}?locale=ru`,
+  );
+  expect(
+    eventStage2Commands.cancel(stage2EventId, { reason: "Fictional cancellation" }, '"v1"').path,
+  ).toBe(`/admin/events/${stage2EventId}/cancellation?locale=en`);
+});
+
+test("published route activation requires Events and Catalogs and keeps baseline grants intact", async () => {
+  const base = {
+    MYSQL_HOST: "127.0.0.1",
+    MYSQL_PORT: "3307",
+    MYSQL_USER: "fixture_user",
+    MYSQL_DATABASE: "fixture_database",
+    MYSQL_PASSWORD: "NONFUNCTIONAL_EXAMPLE_ONLY",
+    IDENTITY_ENABLED: "true",
+    IDENTITY_SECRET: "a".repeat(64),
+    IDENTITY_ORIGIN: "http://127.0.0.1:4173",
+    EVENTS_ENABLED: "true",
+    EVENTS_CURSOR_KEY: "b".repeat(64),
+    CATALOGS_ENABLED: "true",
+    CATALOGS_CURSOR_KEY: "c".repeat(64),
+  };
+  expect(readConfig(base).events).toEqual({ cursorKey: base.EVENTS_CURSOR_KEY });
+  expect(readConfig({ ...base, EVENTS_ROUTE_ENABLED: "false" }).events).toEqual(
+    readConfig(base).events,
+  );
+  const enabled = { ...base, EVENTS_ROUTE_ENABLED: "true" };
+  expect(readConfig(enabled).events).toEqual({
+    cursorKey: base.EVENTS_CURSOR_KEY,
+    routeEnabled: true,
+  });
+  for (const fields of [
+    { CATALOGS_ENABLED: "false" },
+    { EVENTS_ENABLED: "false" },
+    { EVENTS_ROUTE_ENABLED: "yes" },
+  ])
+    expect(() => readConfig({ ...enabled, ...fields })).toThrow("EVENTS_ROUTE_ENABLED");
+  type Grants = { runtime: Record<string, string[]>; jobs: Record<string, string[]> };
+  const activation = new URL("../../deploy/development/", import.meta.url);
+  const baseline = JSON.parse(
+    await readFile(new URL("activation-grants.json", activation), "utf8"),
+  ) as Grants;
+  const stage = JSON.parse(await readFile(new URL("stage-features.json", activation), "utf8")) as {
+    flags: string[];
+    grants: Grants;
+  };
+  expect(stage.flags).toContain("EVENTS_ROUTE_ENABLED");
+  for (const table of ["event_revision_details", "event_revision_dlcs"]) {
+    expect(baseline.runtime[table]).toBeUndefined();
+    expect(baseline.jobs[table]).toBeUndefined();
+    expect(stage.grants.runtime[table]).toEqual(["SELECT", "INSERT"]);
+  }
+  expect(stage.grants.jobs.event_revision_details).toEqual(["SELECT"]);
+  expect(stage.grants.jobs.event_revision_dlcs).toBeUndefined();
 });

@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogTitle } from "../../shared/ui/dialog.js";
 import { Button, Input, Label } from "../../shared/ui/primitives.js";
 import { Failure } from "./Feedback.js";
 import { LogoSection } from "./LogoUpload.js";
-import { tabLabels } from "./model.js";
+import { isTranslatable, tabLabels } from "./model.js";
 import { useCatalogCommand } from "./useCatalogCommand.js";
 
 export function ParentSelect({
@@ -86,6 +86,8 @@ export function CatalogForm({
   const { t } = useTranslation("catalogs");
   const id = useId();
   const { list, game, item } = target;
+  // DLCs and companies use only their canonical name and never ask for a Russian one.
+  const translated = isTranslatable(list);
   const [code, setCode] = useState(item?.code ?? ""),
     [nameEn, setNameEn] = useState(item?.nameEn ?? ""),
     [nameRu, setNameRu] = useState(item?.nameRu ?? ""),
@@ -109,7 +111,7 @@ export function CatalogForm({
     const body: Record<string, unknown> = {
       code,
       nameEn,
-      nameRu: nameRu === "" ? null : nameRu,
+      ...(translated ? { nameRu: nameRu === "" ? null : nameRu } : {}),
       ...(list === "dlcs" ? { steamAppId: steamNumber } : { dlcId }),
       ...(list === "cities" ? { nameNative: nameNative.trim() || null, regionId } : {}),
       ...(list === "cargoes" ? { adrClass: adrClass === "" ? null : adrClass } : {}),
@@ -159,15 +161,17 @@ export function CatalogForm({
             onChange={(e) => setNameEn(e.target.value)}
           />
         </div>
-        <div className="catalog-field">
-          <Label htmlFor={`${id}-ru`}>{t("fieldNameRu")}</Label>
-          <Input
-            id={`${id}-ru`}
-            maxLength={256}
-            value={nameRu}
-            onChange={(e) => setNameRu(e.target.value)}
-          />
-        </div>
+        {translated && (
+          <div className="catalog-field">
+            <Label htmlFor={`${id}-ru`}>{t("fieldNameRu")}</Label>
+            <Input
+              id={`${id}-ru`}
+              maxLength={256}
+              value={nameRu}
+              onChange={(e) => setNameRu(e.target.value)}
+            />
+          </div>
+        )}
         {list === "cities" && (
           <div className="catalog-field">
             <Label htmlFor={`${id}-native`}>{t("fieldNameNative")}</Label>

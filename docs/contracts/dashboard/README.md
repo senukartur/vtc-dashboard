@@ -55,9 +55,9 @@ The [manual report contract](manual-reports.md#stage-1-drafts-and-reference-fiel
 
 ### Catalog filters and counters (VTC-118)
 
-The catalog and depot lists can filter `hidden=only` and `untranslated=true`. The companies list also accepts `logo=missing`. `hidden=only` selects by the row's own hidden flag and takes precedence over `includeHidden`. Default depot visibility still requires the depot, company and city to be visible. A row is untranslated when its Russian name is missing. A depot is untranslated when either linked name lacks Russian. Apply filters before paging and bind them into the cursor.
+The catalog and depot lists can filter `hidden=only`; regions, cities, cargo and trailers can also filter `untranslated=true`. DLCs and companies use only their canonical name, so they return `nameRu: null`, accept no `nameRu`, answer `untranslated` with 422 and never mark a fallback; depots do not offer `untranslated`. The companies list also accepts `logo=missing`. `hidden=only` selects by the row's own hidden flag and takes precedence over `includeHidden`. Default depot visibility still requires the depot, company and city to be visible. A row is untranslated when its Russian name is missing. Apply filters before paging and bind them into the cursor.
 
-Keep the existing visible and hidden summary counters. Each list can add `untranslated`, and companies can add `missingLogo`, matching the corresponding default-visible filtered population for the selected game. A company row can include `depotCount` for its linked depots in the same game. Each of the six catalog row kinds and depots can include UTC `updatedAt` for the row's own last update.
+Keep the existing visible and hidden summary counters. Each translatable list can add `untranslated`, and companies can add `missingLogo`, matching the corresponding default-visible filtered population for the selected game. A company row can include `depotCount` for its linked depots in the same game. Each of the six catalog row kinds and depots can include UTC `updatedAt` for the row's own last update.
 
 ### Qualification publication (VTC-094)
 
