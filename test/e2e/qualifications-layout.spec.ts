@@ -355,7 +355,7 @@ for (const locale of ["en", "ru"] as const)
   );
 
 test(
-  "L5 retained review is a decision callout without actions; unset requirements have no bar",
+  "L5 retained review is a decision callout without actions; disabled minimums have no bar",
   browserCase(["@functional"]),
   async ({ page }, info) => {
     const state = await mockQualifications(page);
@@ -372,9 +372,9 @@ test(
     state.unset = true;
     await page.reload();
     const current = currentCard(page);
-    await expect(current.getByText("2 / Unset", { exact: true })).toBeVisible();
+    await expect(current.getByText("2 / No minimum", { exact: true })).toBeVisible();
     await expect(current.locator(".qualification-bar")).toHaveCount(0);
-    await expect(current.getByText("Ready for confirmation", { exact: true })).toHaveCount(0);
+    await expect(current.getByText("Ready for confirmation", { exact: true })).toBeVisible();
   },
 );
 

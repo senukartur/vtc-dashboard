@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useSession } from "../../app/Session.js";
 import { itemSchema } from "../../shared/catalog-selectors/contracts.js";
 import { useCatalogQuery } from "../../shared/catalog-selectors/queries.js";
-import { formatUtc } from "../../shared/formatting.js";
+import { formatQuantity, formatUtc } from "../../shared/formatting.js";
 import { Button } from "../../shared/ui/primitives.js";
 import { Confirm, Failure, PageNav, State } from "../trips/components.js";
 import { type useQualificationCommand, useQualificationQuery } from "./queries.js";
@@ -69,6 +69,25 @@ export function Fact({ label, children }: { label: string; children: ReactNode }
       <dt>{label}</dt>
       <dd>{children}</dd>
     </div>
+  );
+}
+export function Thresholds({
+  requiredTrips,
+  requiredDistanceM,
+}: Pick<DTO["QualificationRuleVersion"], "requiredTrips" | "requiredDistanceM">) {
+  const { t, i18n } = useTranslation("qualifications");
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
+  return (
+    <p>
+      {t("thresholds")}:{" "}
+      {t("thresholdValue", {
+        trips: requiredTrips ?? t("noMinimum"),
+        distance:
+          requiredDistanceM === null
+            ? t("noMinimum")
+            : formatQuantity(requiredDistanceM, "km", locale),
+      })}
+    </p>
   );
 }
 export function RulesView({ rules, game }: { rules: DTO["Rule"][]; game: Game }) {
@@ -262,10 +281,7 @@ export function RuleHistory({
                 {t("effective")}: <Time value={r.effectiveAt} />
               </p>
               <RulesView rules={r.rules} game={r.game} />
-              <p>
-                {t("thresholds")}: {r.requiredTrips ?? t("unset")} /{" "}
-                {r.requiredDistanceM ?? t("unset")} m
-              </p>
+              <Thresholds requiredTrips={r.requiredTrips} requiredDistanceM={r.requiredDistanceM} />
             </article>
           ))}
           <PageNav
