@@ -35,7 +35,7 @@ export function stage2EventProjection(query: Query, scope: string | null) {
   return undefined;
 }
 
-/** A pre-write read is active but has no rows to match until its first response. */
+/** An active first read has no rows to match until it receives a response. */
 export function isColdStage2EventProjection(query: Query, scope: string | null) {
   return (
     query.state.data === undefined &&
@@ -74,24 +74,34 @@ export function eventLifecycleChanged(before: Lifecycle | null, after: Lifecycle
   );
 }
 
-export function refreshStage2ListsAtLifecycleChange(
+export async function refreshStage2ListsAtLifecycleChange(
   client: QueryClient,
   scope: string,
   before: Lifecycle | null,
   after: Lifecycle | null,
 ) {
-  return client.invalidateQueries({
-    type: "active",
-    predicate: (query) => {
-      const projection = stage2EventProjection(query, scope);
-      return (
-        projection?.kind === "list" &&
-        projection.rows.some(
-          ({ event }) =>
-            (event.id === before?.id && before.id !== after?.id) ||
-            (event.id === after?.id && eventLifecycleChanged(event, after)),
-        )
-      );
-    },
-  });
+  const cold = new Set<Query>();
+  const targets = new Set(
+    client.getQueryCache().findAll({
+      type: "active",
+      predicate: (query) => {
+        if (projectionKind(query, scope) !== "list") return false;
+        if (isColdStage2EventProjection(query, scope)) {
+          cold.add(query);
+          return true;
+        }
+        const projection = stage2EventProjection(query, scope);
+        return (
+          projection?.rows.some(
+            ({ event }) =>
+              (event.id === before?.id && before.id !== after?.id) ||
+              (event.id === after?.id && eventLifecycleChanged(event, after)),
+          ) === true
+        );
+      },
+    }),
+  );
+  // Invalidating a first read alone can reuse the request that preceded the change.
+  if (cold.size) await client.cancelQueries({ predicate: (query) => cold.has(query) });
+  await client.invalidateQueries({ type: "active", predicate: (query) => targets.has(query) });
 }

@@ -44,10 +44,10 @@ export function UpcomingEventChip() {
   }, [cutoff, refetch, started]);
   useEffect(() => {
     if (!scope || event === undefined) return;
-    const before = observed.current?.scope === scope ? observed.current.event : null;
+    const previous = observed.current;
     observed.current = { scope, event };
-    if (eventLifecycleChanged(before, event)) {
-      void refreshStage2ListsAtLifecycleChange(client, scope, before, event);
+    if (previous?.scope === scope && eventLifecycleChanged(previous.event, event)) {
+      void refreshStage2ListsAtLifecycleChange(client, scope, previous.event, event);
     }
   }, [client, event, scope]);
   if (!canRead) return null;

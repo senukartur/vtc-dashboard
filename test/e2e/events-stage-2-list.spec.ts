@@ -177,6 +177,65 @@ test(
 );
 
 test(
+  "nearest cancellation replaces the first list read already in flight",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.clock.install({ time: new Date("2099-10-25T12:00:00.000Z") });
+    const mock = await mockEventsStage2(page, "member");
+    const initial = projection();
+    const row = initial.data.items[0];
+    if (!row) throw new Error("Missing Stage 2 event fixture");
+    let listReads = 0;
+    let releaseOld = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldSettled = false;
+    await page.route(memberList, async (route) => {
+      if (++listReads !== 1)
+        return route.fulfill({ json: { ...initial, data: { ...initial.data, items: [] } } });
+      await oldGate;
+      await route.fulfill({ json: initial }).catch(() => undefined);
+      oldSettled = true;
+    });
+
+    try {
+      await page.goto("/account/dashboard");
+      const header = page.locator(".event-nearest");
+      await expect(header.getByRole("link")).toHaveAttribute(
+        "href",
+        `/account/events/${row.event.id}`,
+      );
+      const firstRead = page.waitForRequest((request) => memberList.test(request.url()));
+      await page
+        .getByRole("navigation", { name: "Main navigation" })
+        .getByRole("link", { name: "Events", exact: true })
+        .click();
+      const oldRequest = await firstRead;
+      await expect.poll(() => listReads).toBe(1);
+
+      mock.upcoming = false;
+      await page.clock.fastForward(31_000);
+      const main = page.getByRole("main");
+      await expect(header).toContainText("No upcoming event");
+      await expect(main.getByText("No events in this period.")).toBeVisible();
+      await expect.poll(() => oldRequest.failure()).not.toBeNull();
+      expect(listReads).toBe(2);
+      expect(mock.requests.filter(({ route }) => route === "GET /me/upcoming-event")).toHaveLength(
+        2,
+      );
+
+      releaseOld();
+      await expect.poll(() => oldSettled).toBe(true);
+      await expect(main.getByRole("link", { name: row.event.title })).toHaveCount(0);
+      await expect(main.getByText("No events in this period.")).toBeVisible();
+    } finally {
+      releaseOld();
+    }
+  },
+);
+
+test(
   "a member cannot request drafts by bookmarking the tab",
   browserCase(["@functional"]),
   async ({ page }) => {
