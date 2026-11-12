@@ -1545,12 +1545,14 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     ).not.toHaveProperty("platform");
 
     await control.query("UPDATE catalog_companies SET hidden=1 WHERE id=?", [companyId]);
+    const description = "Fictional updated convoy description";
     const zero = await write(
       "PATCH",
       updatePath,
       {
         ...value,
         distanceKm: "0",
+        description,
         route: "Fictional legacy route",
         meetingLocation: "Fictional meeting text",
       },
@@ -1558,24 +1560,20 @@ test("opted-in published route HTTP serves localized canonical selections and pr
       '"v1"',
     );
     expect(zero.statusCode, zero.body).toBe(200);
-    expect(zero.json().data.event.distanceKm).toBe("0");
-    const removed = await write(
-      "PATCH",
-      updatePath,
-      {
-        ...value,
-        originDepotId: null,
-        distanceKm: null,
-        meetingLocation: null,
-        visibility: "members",
-      },
-      newId(),
-      '"v2"',
-    );
+    expect(zero.json().data.event).toMatchObject({ distanceKm: "0", description });
+    const withoutOriginDepot = {
+      ...value,
+      originDepotId: null,
+      distanceKm: null,
+      meetingLocation: null,
+      visibility: "members",
+    };
+    const removed = await write("PATCH", updatePath, withoutOriginDepot, newId(), '"v2"');
     expect(removed.statusCode, removed.body).toBe(200);
     expect(removed.json().data.event).toMatchObject({
       originDepot: null,
       distanceKm: null,
+      description,
       route: "Fictional legacy route",
       meetingLocation: null,
     });
@@ -1583,6 +1581,27 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     expect(hidden.statusCode).toBe(422);
     expect(hidden.json().error.code).toBe("CATALOG_SELECTION_HIDDEN");
     expect((await app.inject({ url: `${publicPath}?locale=en` })).statusCode).toBe(404);
+
+    const clearKey = newId();
+    const cleared = await write(
+      "PATCH",
+      updatePath,
+      { ...withoutOriginDepot, description: null },
+      clearKey,
+      '"v3"',
+    );
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    expect(cleared.headers.etag).toBe('"v4"');
+    expect(cleared.json().data.event.description).toBeNull();
+    const conflictingOmission = await write(
+      "PATCH",
+      updatePath,
+      withoutOriginDepot,
+      clearKey,
+      '"v3"',
+    );
+    expect(conflictingOmission.statusCode).toBe(409);
+    expect(conflictingOmission.json().error.code).toBe("IDEMPOTENCY_CONFLICT");
 
     await routes.respond(driver, eventId, newId(), 1, {
       response: "declined",
@@ -1599,21 +1618,21 @@ test("opted-in published route HTTP serves localized canonical selections and pr
     expect(replay.headers.etag).toBe('"v1"');
     expect(replay.json().data).toEqual(member);
     expect((await write("POST", createPath, input(), createKey)).statusCode).toBe(409);
+    await control.query("DELETE FROM identity_limits");
     const reason = { reason: "Fictional private cancellation" };
     const cancelPath = `${updatePath}/cancellation`;
     const cancelKey = newId();
-    const cancelled = await write("POST", `${cancelPath}?locale=ru`, reason, cancelKey, '"v3"');
+    const cancelled = await write("POST", `${cancelPath}?locale=ru`, reason, cancelKey, '"v4"');
     expect(cancelled.statusCode, cancelled.body).toBe(200);
-    expect(cancelled.headers.etag).toBe('"v4"');
+    expect(cancelled.headers.etag).toBe('"v5"');
     expect(cancelled.json().data.event).toMatchObject({
       status: "cancelled",
       destinationDepot: member.event.destinationDepot,
     });
     expect(cancelled.body).not.toContain(reason.reason);
-    const legacyCancelReplay = await write("POST", cancelPath, reason, cancelKey, '"v3"');
-    expect(legacyCancelReplay.headers.etag).toBe('"v4"');
+    const legacyCancelReplay = await write("POST", cancelPath, reason, cancelKey, '"v4"');
+    expect(legacyCancelReplay.headers.etag).toBe('"v5"');
     expect(legacyCancelReplay.json().data.event).not.toHaveProperty("platform");
-    await control.query("DELETE FROM identity_limits");
     const headSelf = await app.inject({
       method: "HEAD",
       url: "/api/v1/me",

@@ -922,7 +922,8 @@ export function createEvents(
     const value = {
       ...input,
       organizer,
-      description: input.description ?? "",
+      description:
+        input.description === undefined ? (prior?.description ?? "") : (input.description ?? ""),
       meetingLocation:
         input.meetingLocation === undefined
           ? (prior?.meetingLocation ?? "")
