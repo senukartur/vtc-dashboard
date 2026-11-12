@@ -33,10 +33,12 @@ import { registerTripDecisionRoutes } from "./modules/trip-decisions/http.js";
 import type { TripDecisions } from "./modules/trip-decisions/service.js";
 import { registerTripRoutes } from "./modules/trips/http.js";
 import type { Trips } from "./modules/trips/service.js";
+import { registerWorkspaceSummaryRoutes } from "./modules/workspace-summary/http.js";
 import { assetCache, keepsCacheControl } from "./platform/http/cache.js";
 import { ingressTrust } from "./platform/http/ingress.js";
 import { installSchemaCompilers } from "./platform/http/schemas.js";
 import type { Administration } from "./use-cases/administration.js";
+import type { createWorkspaceSummary } from "./use-cases/workspace-summary.js";
 
 const errorCodes: Readonly<Record<number, string>> = {
   400: "BAD_REQUEST",
@@ -58,6 +60,7 @@ const errorCodes: Readonly<Record<number, string>> = {
 
 export interface AppOptions {
   identity?: Identity;
+  workspaceSummary?: ReturnType<typeof createWorkspaceSummary>;
   administration?: Administration;
   messaging?: Messaging;
   admissions?: Admissions;
@@ -196,6 +199,8 @@ export async function createApp(options: AppOptions) {
   );
   if (options.closeDatabase) app.addHook("onClose", options.closeDatabase);
   if (options.identity) await registerIdentityRoutes(app, options.identity);
+  if (options.identity && options.workspaceSummary)
+    await registerWorkspaceSummaryRoutes(app, options.identity, options.workspaceSummary);
   if (options.identity && options.administration)
     await registerAdministrationRoutes(app, options.identity, options.administration);
   if (options.identity && options.messaging)

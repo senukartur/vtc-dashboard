@@ -8,15 +8,17 @@ import {
   type TxContext,
   type UnitOfWork,
 } from "@vtc/db";
-import { manualEvidence, manualReports, manualRevisions } from "@vtc/db/manual-reports-schema";
+import { applications } from "@vtc/db/admissions-schema";
+import { manualEvidence } from "@vtc/db/manual-reports-schema";
 import { durableJobs } from "@vtc/db/platform-schema";
 import { reconciliationCandidates, reconciliationSearches } from "@vtc/db/reconciliation-schema";
 import { tripDecisions, tripEventAssociations } from "@vtc/db/trip-decisions-schema";
 import { catalogCargoes } from "@vtc/db/catalogs-schema";
-import { and, eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
+import { eq, tripContributions, tripFacts, trips } from "@vtc/db/trips-schema";
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { expect, test, afterAll as vAfter, beforeAll as vBefore } from "vitest";
 import { createApp } from "../../apps/api/src/app.ts";
+import type { AdmissionsConfig } from "../../apps/api/src/modules/admissions/security.ts";
 import { createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
 import { csrfProtection } from "../../apps/api/src/modules/identity/http.ts";
@@ -87,7 +89,10 @@ const now = () => new Date(instant),
   origin = "http://127.0.0.1:4173",
   password = "Fictional-decision-passphrase-42";
 const ids = new Map<string, string>();
-async function member(roles: ("driver" | "dispatcher" | "deputy_director")[] = ["driver"]) {
+async function member(
+  roles: ("driver" | "dispatcher" | "deputy_director")[] = ["driver"],
+  name = "Fictional Decision Member",
+) {
   const userId = newId(),
     email = `${userId}@example.invalid`,
     credential = await identity.prepareCredential(password);
@@ -95,7 +100,7 @@ async function member(roles: ("driver" | "dispatcher" | "deputy_director")[] = [
     await identity.insertWithCredential(tx, {
       userId,
       email,
-      name: "Fictional Decision Member",
+      name,
       ...credential,
       roles,
     });
@@ -1774,12 +1779,12 @@ test("ambiguous COMMIT is returned once and durable receipt replay resolves comm
   expect(replayed.data.outcome).toBe("accepted");
   expect(await credit(r.tripId)).toEqual(before);
 });
-function composedModules() {
+function composedModules(admissions?: AdmissionsConfig) {
   return composeIdentity(
     unit,
     { secret: key(), origin, production: false },
     undefined,
-    undefined,
+    admissions,
     false,
     { cursorKey: key() },
     { cursorKey: key() },
@@ -3531,20 +3536,7 @@ test("editing a cargo ADR class leaves the stored snapshot and decision unchange
 function returnedTripFixture() {
   return createTripDecisionWorkspace(unit, {
     rejectedGroupMembers: createTripWorkspace(unit).rejectedGroupMembers,
-    resubmittableRevisions: (tx, viewerId) =>
-      unit
-        .client(tx)
-        .select({ reportTripId: manualReports.tripId, revisionId: manualRevisions.id })
-        .from(manualReports)
-        .innerJoin(
-          manualRevisions,
-          and(
-            eq(manualRevisions.id, manualReports.currentRevisionId),
-            eq(manualRevisions.reportId, manualReports.id),
-          ),
-        )
-        .where(eq(manualReports.ownerId, viewerId))
-        .as("fixture_workspace_revisions"),
+    resubmittableRevisions: manual.workspaceCurrentAuthorRevisionsRelation,
   });
 }
 
@@ -3737,4 +3729,216 @@ test("workspace uses the latest root sequence before filtering and counts before
     });
     await unit.client(tx).delete(tripDecisions).where(eq(tripDecisions.id, id));
   });
+});
+
+test("production workspace HTTP composes real sources with current role, ownership and availability", async () => {
+  const composed = composedModules({ key: randomBytes(32).toString("base64url"), origin });
+  const { identity: auth, admissions, events, manualReports, tripDecisions } = composed;
+  if (!admissions || !events || !manualReports || !tripDecisions)
+    throw new Error("SYNTHETIC_COMPOSITION_MISSING");
+  const driver = await member(["driver"], "Fictional Workspace Delta");
+  const signIn = async (email: string) => {
+    const login = await auth.login(email, password);
+    const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
+    return { cookie };
+  };
+  const driverHeaders = await signIn(`${driver.userId}@example.invalid`);
+  const dispatcherHeaders = await signIn(`${dispatcher.userId}@example.invalid`);
+  const deputyHeaders = await signIn(`${deputy.userId}@example.invalid`);
+  const directorHeaders = await signIn("decisions-director@example.invalid");
+  const author = await auth.authenticate(new Headers(driverHeaders));
+  const reviewer = await auth.authenticate(new Headers(dispatcherHeaders));
+  const admin = await auth.authenticate(new Headers(directorHeaders));
+  const app = await createApp({ ...composed, checkReadiness: async () => true });
+  const url = "/api/v1/me/workspace-summary";
+  const read = async (headers: { cookie: string }) => {
+    const response = await app.inject({ url, headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    return response.json().data as S["WorkspaceSummary"];
+  };
+  try {
+    const anonymous = await app.inject({ url });
+    expect(anonymous.statusCode).toBe(401);
+    expect(anonymous.headers["cache-control"]).toBe("no-store");
+    const driverBefore = await read(driverHeaders);
+    const dispatcherBefore = await read(dispatcherHeaders);
+    const deputyBefore = await read(deputyHeaders);
+
+    const draft = await manualReports.createDraft(author, newId(), { fields: { game: "ets2" } });
+    const returned = await report(author, manualReports);
+    const pending = await report(author, manualReports, { cargo: "fixture_gas" });
+    const review = await tripDecisions.review(reviewer, returned.tripId);
+    const latestReturnReason = "Fictional workspace feedback";
+    await tripDecisions.decide(reviewer, returned.tripId, newId(), review.version, {
+      decision: "reject",
+      reviewedRevisionId: returned.currentRevision.id,
+      factRevisionId: review.data.factRevisionId,
+      proposalId: null,
+      reason: latestReturnReason,
+    });
+    expect((await state(pending.tripId))?.reviewHold).toBe(true);
+
+    const now = Date.now();
+    const startsAt = new Date(now + 60_000).toISOString();
+    const event = (
+      await events.create(admin, newId(), {
+        title: "Fictional workspace convoy",
+        description: "Fictional workspace event description",
+        game: "ets2",
+        server: "Fictional server",
+        organizer: "Fictional company",
+        route: "Fictional route",
+        meetingLocation: "Fictional meeting place",
+        meetingAt: new Date(now).toISOString(),
+        startsAt,
+        endsAt: null,
+        visibility: "members",
+        originCityId: null,
+        destinationCityId: null,
+        prescribedCargoId: null,
+        prescribedMassKg: null,
+        prescribedTrailerTypeId: null,
+      })
+    ).data.event;
+
+    const apply = async (nickname: string) => {
+      const email = `${newId()}@example.invalid`;
+      await admissions.submit(`pre:${newId()}`, newId(), {
+        nickname,
+        email,
+        games: ["ets2"],
+        steamProfileUrl: "https://steamcommunity.com/id/fictional-driver",
+      });
+      return email;
+    };
+    const invitationEmail = await apply("Fictional Workspace Delta Applicant");
+    const [invitation] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ id: applications.id, version: applications.version })
+        .from(applications)
+        .where(eq(applications.openEmail, invitationEmail)),
+    );
+    if (!invitation) throw new Error("SYNTHETIC_APPLICATION_REQUIRED");
+    await admissions.decide(admin, invitation.id, newId(), invitation.version, {
+      decision: "approve",
+    });
+    await apply("Fictional Workspace Pending Applicant");
+
+    const oldest = "2000-01-01T00:00:00.000Z";
+    const trip = {
+      game: "ets2" as const,
+      version: 1,
+      outcome: "delivered" as const,
+      recording: "complete" as const,
+      assessmentPending: false,
+      reviewReasons: [],
+    };
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .insert(trips)
+        .values([
+          {
+            ...trip,
+            id: newId(),
+            ownerId: reviewer.userId,
+            decision: "pending_review",
+            reviewHold: true,
+            createdAt: oldest,
+          },
+          {
+            ...trip,
+            id: newId(),
+            ownerId: author.userId,
+            decision: "accepted",
+            reviewHold: false,
+            createdAt: new Date(now).toISOString(),
+            reportingAt: new Date(now).toISOString(),
+          },
+        ]),
+    );
+
+    expect(await read(driverHeaders)).toEqual({
+      computedAt: expect.any(String),
+      tripsNeedingFixes: { count: 1, items: [{ tripId: returned.tripId, latestReturnReason }] },
+      unfinishedManualDrafts: {
+        count: 1,
+        items: [{ draftId: draft.id, updatedAt: draft.updatedAt }],
+      },
+      unansweredUpcomingEvents: {
+        count: (driverBefore.unansweredUpcomingEvents?.count ?? 0) + 1,
+        items: expect.arrayContaining([{ eventId: event.id, title: event.title, startsAt }]),
+      },
+    });
+
+    const dispatcherSummary = await read(dispatcherHeaders);
+    const omittedAge = Math.floor(
+      (Date.parse(dispatcherSummary.computedAt) - Date.parse(oldest)) / 1000,
+    );
+    expect(dispatcherSummary).toEqual({
+      computedAt: expect.any(String),
+      tripsNeedingFixes: { count: 0, items: [] },
+      reviewQueue: {
+        count: (dispatcherBefore.reviewQueue?.count ?? 0) + 1,
+        oldestAgeSeconds: expect.any(Number),
+      },
+    });
+    expect(dispatcherSummary.reviewQueue?.oldestAgeSeconds).toBeLessThan(omittedAge);
+    const deputySummary = await read(deputyHeaders);
+    expect(deputySummary).toEqual({
+      computedAt: expect.any(String),
+      tripsNeedingFixes: { count: 0, items: [] },
+      reviewQueue: {
+        count: (deputyBefore.reviewQueue?.count ?? 0) + 2,
+        oldestAgeSeconds: Math.floor(
+          (Date.parse(deputySummary.computedAt) - Date.parse(oldest)) / 1000,
+        ),
+      },
+      newApplicationsCount: (deputyBefore.newApplicationsCount ?? 0) + 1,
+    });
+    const directorSummary = await read(directorHeaders);
+    expect(Object.keys(directorSummary).sort()).toEqual([
+      "computedAt",
+      "newApplicationsCount",
+      "reviewQueue",
+      "tripsNeedingFixes",
+      "unansweredUpcomingEvents",
+      "unfinishedManualDrafts",
+    ]);
+    expect(directorSummary.newApplicationsCount).toBe(deputySummary.newApplicationsCount);
+
+    const members = await app.inject({
+      url: "/api/v1/admin/members?search=Workspace%20Delta",
+      headers: directorHeaders,
+    });
+    expect(members.statusCode).toBe(200);
+    expect(members.json().data.statusCounts).toEqual({
+      inCompany: 1,
+      left: 0,
+      droveLast30Days: 1,
+      invited: 1,
+    });
+
+    const identityOnly = await createApp({
+      ...composeIdentity(unit, auth.config),
+      checkReadiness: async () => true,
+    });
+    try {
+      const response = await identityOnly.inject({ url, headers: driverHeaders });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json().data).toEqual({ computedAt: expect.any(String) });
+    } finally {
+      await identityOnly.close();
+    }
+
+    await auth.logout(author, new Headers(driverHeaders));
+    const revoked = await app.inject({ url, headers: driverHeaders });
+    expect(revoked.statusCode).toBe(401);
+    expect(revoked.headers["cache-control"]).toBe("no-store");
+  } finally {
+    await app.close();
+  }
 });

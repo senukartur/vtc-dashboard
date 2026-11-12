@@ -5,6 +5,7 @@ import { type AnalyticsConfig, createAnalytics } from "../modules/analytics/inde
 import type { CatalogConfig } from "../modules/catalogs/config.js";
 import { createCatalogs } from "../modules/catalogs/service.js";
 import { createEvents, type EventsConfig } from "../modules/events/service.js";
+import { createEventWorkspace } from "../modules/events/workspace.js";
 import {
   createExternalIdentities,
   steamProjection,
@@ -45,10 +46,14 @@ import {
   type TripDecisions,
   type TripDecisionsConfig,
 } from "../modules/trip-decisions/service.js";
+import { createTripDecisionWorkspace } from "../modules/trip-decisions/workspace.js";
+import { createTripActivity } from "../modules/trips/activity.js";
 import { createTrips, type TripsConfig } from "../modules/trips/service.js";
+import { createTripWorkspace } from "../modules/trips/workspace.js";
 import { createQueue } from "../platform/jobs/queue.js";
 import { admissionsEvents, createOutbox, identityAccessEvents } from "../platform/outbox/events.js";
 import { createAdministration } from "./administration.js";
+import { createWorkspaceSummary } from "./workspace-summary.js";
 
 export function composeIdentity(
   unit: UnitOfWork,
@@ -291,8 +296,25 @@ export function composeIdentity(
   const externalIdentities = externalEnabled ? createExternalIdentities(unit, identity) : undefined;
   const analytics =
     analyticsConfig && trips ? createAnalytics(unit, identity, analyticsConfig) : undefined;
+  const tripWorkspace = trips ? createTripWorkspace(unit) : undefined;
+  const tripActivity = trips ? createTripActivity(unit) : undefined;
+  const acceptanceWorkspace =
+    tripDecisions && tripWorkspace && manualReports
+      ? createTripDecisionWorkspace(unit, {
+          rejectedGroupMembers: tripWorkspace.rejectedGroupMembers,
+          resubmittableRevisions: manualReports.workspaceCurrentAuthorRevisionsRelation,
+        })
+      : undefined;
+  const workspaceSummary = createWorkspaceSummary(identity, {
+    ...(tripWorkspace ? { trips: tripWorkspace } : {}),
+    ...(acceptanceWorkspace ? { acceptance: acceptanceWorkspace } : {}),
+    ...(manualReports ? { manualReports } : {}),
+    ...(events ? { events: createEventWorkspace(unit) } : {}),
+    ...(admissions ? { admissions } : {}),
+  });
   return {
     identity,
+    workspaceSummary,
     ...(notifications ? { notifications } : {}),
     administration: createAdministration(
       unit,
@@ -306,6 +328,10 @@ export function composeIdentity(
         mail: !!mail,
       },
       !!tripsConfig,
+      {
+        ...(tripActivity ? { tripActivity } : {}),
+        ...(admissions ? { admissions } : {}),
+      },
     ),
     ...(analytics ? { analytics } : {}),
     ...(manualReports ? { manualReports } : {}),
