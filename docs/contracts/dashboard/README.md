@@ -44,7 +44,7 @@ Keep the existing visible and hidden summary counters. Each list can add `untran
 
 ### Qualification publication (VTC-094)
 
-`publishQualificationRules` stages `QualificationRulePublicationInput` with an optional nonempty `reason`. The live `RulesInput` still requires `reason` until activation. Both threshold keys remain required and nullable. A null threshold means no minimum for that measure. Preview remains a separate optional action. Publication authority, effective-time guards, and immutable history still apply. Reads exclude the private audit reason.
+`publishQualificationRules` accepts `QualificationRulePublicationInput` with an optional nonempty `reason`. Both threshold keys remain required and nullable. A null threshold means no minimum for that measure. Preview remains a separate optional action. Publication authority, effective-time guards, and immutable history still apply. Reads exclude the private audit reason.
 
 ## Transport and security
 
@@ -156,7 +156,7 @@ Company logos are PNG only, at most 32 KiB and 128x32 pixels, checked on the ser
 
 VTC-028 implements its existing routes behind explicit opt-in [configuration](../../development/qualifications.md). `QualificationRuleVersion.effectiveAt` is the historical selection instant, separate from `publishedAt`; omitted publication input `effectiveAt` means immediate server time, and supplied past/duplicate/backward effective instants fail. Historical-resolution assignments require explicit supported `assignedAt`/exclusive `endedAt`; other assignment purposes reject them. Unknown history/rules never fall back to the current level.
 
-Progress reads the authoritative canonical contribution register synchronously and returns `projectionPending:false`; `projectionVersion` is the current assignment contribution revision. Command ETags represent the level or member/game command version. Both configured non-null thresholds and explicit Director/Deputy confirmation are necessary. Own/admin progress includes private `reviewRequired` and stable `reviewReasonCodes`; other-member DTOs omit both. Signed bounded keyset pages bind session/epoch/scope/game/member or level. VTC-029 mounts the trip-scoped assignment-review route when its explicit opt-in [configuration](../../development/trip-decisions.md#activation-migration-and-rollback) is enabled; default-off configuration and separate hosted activation remain unchanged.
+Progress reads the authoritative canonical contribution register synchronously and returns `projectionPending:false`; `projectionVersion` is the current assignment contribution revision. Command ETags represent the level or member/game command version. Promotion requires an effective published rule, a next level, meeting every non-null threshold, and explicit Director/Deputy confirmation. A published rule with both thresholds null has no minimum. Own/admin progress includes private `reviewRequired` and stable `reviewReasonCodes`; other-member DTOs omit both. Signed bounded keyset pages bind session/epoch/scope/game/member or level. VTC-029 mounts the trip-scoped assignment-review route when its explicit opt-in [configuration](../../development/trip-decisions.md#activation-migration-and-rollback) is enabled; default-off configuration and separate hosted activation remain unchanged.
 
 ## Qualification workspace integration
 

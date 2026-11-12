@@ -16,6 +16,7 @@ export const listOfKind: Record<Kind, CatalogList> = {
   company: "companies",
 };
 export const uuid = z.uuidv4();
+export const catalogUpdatedAt = z.iso.datetime({ precision: 3 });
 const text = z.string().min(1);
 const game = z.enum(["ets2", "ats"]);
 const locale = z.enum(["en", "ru"]);
@@ -48,6 +49,8 @@ export const itemSchema = z.strictObject({
   region: labelSchema.nullable().optional(),
   adrClass: z.enum(adrClasses).nullable().optional(),
   logo: logoSchema.nullable().optional(),
+  depotCount: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).exactOptional(),
+  updatedAt: catalogUpdatedAt.exactOptional(),
 }) as unknown as z.ZodType<CatalogItem>;
 export const envelope = <T extends z.ZodType>(
   data: T,

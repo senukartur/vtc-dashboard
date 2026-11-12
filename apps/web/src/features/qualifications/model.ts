@@ -58,7 +58,7 @@ export type ThresholdSummary =
   | { kind: "terminal" }
   | { kind: "value"; trips: number | null; distanceM: string | null };
 
-/** Promotion threshold of a level; Driver I is terminal. Null parts stay unset, never zero. */
+/** Promotion threshold of a level; Driver I is terminal. Null parts on configured levels have no minimum. */
 export function thresholdSummary(level: Level): ThresholdSummary {
   if (level.code === "driver_i") return { kind: "terminal" };
   return { kind: "value", trips: level.requiredTrips, distanceM: level.requiredDistanceM };

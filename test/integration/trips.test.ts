@@ -3,7 +3,9 @@ import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db
 import { catalogCities } from "@vtc/db/catalogs-schema";
 import { membership, roles } from "@vtc/db/identity-schema";
 import {
+  and,
   eq,
+  inArray,
   sourceMessages,
   sourcePayloads,
   sourceTrips,
@@ -30,12 +32,14 @@ import {
 import { canonicalJson } from "../../apps/api/src/modules/sources/contracts/canonical.ts";
 import type { NormalizedTripEvidence } from "../../apps/api/src/modules/sources/contracts/evidence.ts";
 import type { Telemetry } from "../../apps/api/src/modules/sources/contracts/telemetry.ts";
+import { createTripActivity } from "../../apps/api/src/modules/trips/activity.ts";
 import {
   createTrips,
   type SourceContext,
   type Trips,
   tripListQuery,
 } from "../../apps/api/src/modules/trips/service.ts";
+import { createTripWorkspace } from "../../apps/api/src/modules/trips/workspace.ts";
 import { createQueue, retryTransaction } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
@@ -2019,4 +2023,115 @@ test("private normalized telemetry facts retain supported actual timing, zero, p
   expect(read.effectiveFacts?.actualDistanceM).toBeNull();
   expect(read.effectiveFacts?.wholeTripDistanceSupported).toBe(false);
   expect(read.summary.recording).toBe("partial");
+});
+
+test("accepted reporting activity correlates owners and includes both UTC endpoints", async () => {
+  const from = "2026-09-20T12:00:00.123Z",
+    through = "2026-10-20T12:00:00.123Z";
+  const activity = createTripActivity(unit);
+  const lower = tripRow(newId(), owner.userId, { decision: "accepted" });
+  const upper = tripRow(newId(), other.userId, { decision: "accepted" });
+  const undated = tripRow(newId(), staff.userId, { decision: "accepted" });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(trips).values([
+      { ...lower, reportingAt: from },
+      { ...upper, reportingAt: through },
+      undated,
+      {
+        ...tripRow(newId(), staff.userId, { decision: "accepted" }),
+        reportingAt: "2026-09-20T12:00:00.122Z",
+      },
+      {
+        ...tripRow(newId(), staff.userId, { decision: "accepted" }),
+        reportingAt: "2026-10-20T12:00:00.124Z",
+      },
+      {
+        ...tripRow(newId(), staff.userId, { decision: "pending_review" }),
+        reportingAt: from,
+      },
+    ]);
+    await db.insert(trips).values({
+      ...tripRow(newId(), staff.userId, { decision: "accepted" }, undated.id),
+      reportingAt: through,
+    });
+
+    const matchingOwners = await db
+      .select({ id: membership.userId })
+      .from(membership)
+      .where(activity.hasAcceptedReportingActivity(tx, membership.userId, from, through));
+    expect(matchingOwners.map(({ id }) => id).sort()).toEqual([owner.userId, other.userId].sort());
+
+    // An outer query over the Trips table must still correlate with the outer owner.
+    const matchingTrips = await db
+      .select({ id: trips.id })
+      .from(trips)
+      .where(
+        and(
+          inArray(trips.id, [lower.id, upper.id, undated.id]),
+          activity.hasAcceptedReportingActivity(tx, trips.ownerId, from, through),
+        ),
+      );
+    expect(matchingTrips.map(({ id }) => id).sort()).toEqual([lower.id, upper.id].sort());
+  });
+});
+
+test("workspace review aggregates match held canonical trips apart from the viewer's own", async () => {
+  const workspace = createTripWorkspace(unit);
+  expect(
+    await unit.run((tx) => workspace.workspaceReviewQueueInTransaction(tx, staff.userId)),
+  ).toEqual({ count: 0, oldestCreatedAt: null });
+
+  const released = tripRow(newId(), owner.userId, { decision: "rejected" });
+  const alias = tripRow(newId(), owner.userId, { hold: true }, released.id);
+  const own = tripRow(newId(), staff.userId, { hold: true });
+  const oldest = {
+    ...tripRow(newId(), owner.userId, { decision: "accepted", hold: true }),
+    createdAt: "2026-10-20T12:00:04.123Z",
+  };
+  const newer = tripRow(newId(), other.userId, { decision: "pending_review", hold: true });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(trips).values([released, own, oldest, newer]);
+    await db.insert(trips).values(alias);
+  });
+  const { items } = await service.list(staff, { scope: "review", hold: true, order: "asc" });
+  expect(items.map(({ id }) => id)).toEqual([own.id, oldest.id, newer.id]);
+  expect(
+    await unit.run((tx) => workspace.workspaceReviewQueueInTransaction(tx, staff.userId)),
+  ).toEqual({ count: 2, oldestCreatedAt: oldest.createdAt });
+});
+
+test("workspace rejected groups expose only the viewer's rejected roots and their direct members", async () => {
+  const workspace = createTripWorkspace(unit);
+  const root = tripRow(newId(), owner.userId, { decision: "rejected" });
+  const direct = tripRow(newId(), owner.userId, { decision: "unassessed" }, root.id);
+  const accepted = tripRow(newId(), owner.userId, { decision: "accepted" });
+  const otherRoot = tripRow(newId(), other.userId, { decision: "rejected" });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db.insert(trips).values([root, accepted, otherRoot]);
+    await db.insert(trips).values([
+      direct,
+      tripRow(newId(), owner.userId, { decision: "rejected" }, accepted.id),
+      tripRow(newId(), other.userId, {}, otherRoot.id),
+      // A mislinked member must not expose a foreign owner's ID.
+      tripRow(newId(), other.userId, {}, root.id),
+      tripRow(newId(), owner.userId, { game: "ats" }, root.id),
+    ]);
+    const group = workspace.rejectedGroupMembers(tx, owner.userId);
+    const rows = await db
+      .select({
+        canonicalTripId: group.canonicalTripId,
+        groupMemberTripId: group.groupMemberTripId,
+      })
+      .from(group)
+      .orderBy(group.groupMemberTripId);
+    expect(rows).toEqual(
+      [root.id, direct.id].sort().map((groupMemberTripId) => ({
+        canonicalTripId: root.id,
+        groupMemberTripId,
+      })),
+    );
+  });
 });

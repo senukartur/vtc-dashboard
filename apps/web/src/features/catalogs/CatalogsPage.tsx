@@ -24,6 +24,7 @@ import { LogoBulkDialog } from "./LogoUpload.js";
 import {
   addLabels,
   type CatalogFilters,
+  catalogListParams,
   catalogTabs,
   filterParams,
   parseFilters,
@@ -62,30 +63,34 @@ function CatalogWorkspace() {
     [params, setParams] = useSearchParams();
   const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const filters = parseFilters(params);
+  const timezone = session.self?.preferences.displayTimezone ?? "UTC";
+  useEffect(() => {
+    const canonical = filterParams(parseFilters(params));
+    const next = new URLSearchParams(params);
+    for (const key of ["hidden", "untranslated", "logo"]) {
+      const expected = canonical.get(key);
+      const actual = params.getAll(key);
+      if (expected === null) next.delete(key);
+      else if (actual.length !== 1 || actual[0] !== expected) next.set(key, expected);
+    }
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [params, setParams]);
   const staff = !!session.self?.capabilities.includes("qualifications.manage");
   const queryClient = useQueryClient();
   const refresh = useCallback(
     () => void queryClient.invalidateQueries({ queryKey: ["catalogs"] }),
     [queryClient],
   );
-  const filterKey = [
-    filters.game,
-    filters.tab,
-    filters.q,
-    filters.dlc,
-    filters.region,
-    filters.company,
-    filters.city,
-    filters.hidden,
-    locale,
-  ].join("/");
+  const args = catalogListParams(filters, locale);
+  const listPath = `/catalogs/${filters.tab}?${catalogParams(args)}`;
   // Cursors belong to one filter set; a changed filter set restarts at the first page.
   const [paging, setPaging] = useState<{ key: string; cursors: string[] }>({
-    key: filterKey,
+    key: listPath,
     cursors: [],
   });
-  const cursors = paging.key === filterKey ? paging.cursors : [];
-  const setCursors = (next: string[]) => setPaging({ key: filterKey, cursors: next });
+  if (paging.key !== listPath) setPaging({ key: listPath, cursors: [] });
+  const cursors = paging.key === listPath ? paging.cursors : [];
+  const setCursors = (next: string[]) => setPaging({ key: listPath, cursors: next });
   const [form, setForm] = useState<FormTarget | null>(null);
   const [depotForm, setDepotForm] = useState<DepotTarget | null>(null);
   const [importing, setImporting] = useState(false);
@@ -113,37 +118,9 @@ function CatalogWorkspace() {
     `/catalogs/summary?game=${filters.game}`,
     summarySchema,
   );
-  const list = useCatalogQuery(
-    ["list", filterKey, cursor],
-    `/catalogs/${plain ?? "cities"}?${catalogParams({
-      game: filters.game,
-      search: filters.q || undefined,
-      includeHidden: filters.hidden ? "true" : undefined,
-      dlc: plain !== "dlcs" ? filters.dlc || undefined : undefined,
-      regionId: plain === "cities" ? filters.region || undefined : undefined,
-      locale,
-      limit: 25,
-      cursor,
-    })}`,
-    listSchema,
-    !depots,
-  );
-  const depotList = useCatalogQuery(
-    ["depots", filterKey, cursor],
-    `/catalogs/depots?${catalogParams({
-      game: filters.game,
-      search: filters.q || undefined,
-      includeHidden: filters.hidden ? "true" : undefined,
-      dlc: filters.dlc || undefined,
-      companyId: filters.company || undefined,
-      cityId: filters.city || undefined,
-      locale,
-      limit: 25,
-      cursor,
-    })}`,
-    depotListSchema,
-    depots,
-  );
+  const listUrl = `/catalogs/${filters.tab}?${catalogParams({ ...args, cursor })}`;
+  const list = useCatalogQuery(["list", listUrl], listUrl, listSchema, !depots);
+  const depotList = useCatalogQuery(["depots", listUrl], listUrl, depotListSchema, depots);
   const hide = useCatalogCommand();
   const toggleHidden = useCallback(
     async (item: CatalogItem) => {
@@ -179,11 +156,12 @@ function CatalogWorkspace() {
   const openEdit = (item: CatalogItem) =>
     plain && setForm({ list: plain, game: filters.game, item });
   const filtered = !!(
-    filters.q ||
-    filters.dlc ||
-    filters.region ||
-    filters.company ||
-    filters.city
+    args.search ||
+    args.dlc ||
+    args.regionId ||
+    args.companyId ||
+    args.cityId ||
+    filters.maintenance
   );
   const tabLabel = t(tabLabels[filters.tab]);
   return (
@@ -231,7 +209,12 @@ function CatalogWorkspace() {
         ))}
       </div>
       <Card className="catalog-card">
-        <CatalogToolbar filters={filters} tab={filters.tab} onChange={update} />
+        <CatalogToolbar
+          filters={filters}
+          summary={counts}
+          summaryPending={summary.isPending}
+          onChange={update}
+        />
         {activeQuery.isPending && <p role="status">{t("loading")}</p>}
         {activeQuery.isError && (
           <div role="alert">
@@ -242,12 +225,14 @@ function CatalogWorkspace() {
           </div>
         )}
         {page && page.items.length === 0 && !activeQuery.isPending && (
-          <p className="catalog-muted">{t(filtered || filters.hidden ? "empty" : "emptyList")}</p>
+          <p className="catalog-muted">{t(filtered ? "empty" : "emptyList")}</p>
         )}
         {depots && depotList.data && depotList.data.data.data.items.length > 0 && (
           <>
             <DepotTable
               depots={depotList.data.data.data.items}
+              locale={locale}
+              timezone={timezone}
               staff={staff}
               busy={hide.pending}
               onEdit={(depot) => setDepotForm({ game: filters.game, depot })}
@@ -255,6 +240,8 @@ function CatalogWorkspace() {
             />
             <DepotCards
               depots={depotList.data.data.data.items}
+              locale={locale}
+              timezone={timezone}
               staff={staff}
               busy={hide.pending}
               onEdit={(depot) => setDepotForm({ game: filters.game, depot })}
@@ -267,6 +254,8 @@ function CatalogWorkspace() {
             <CatalogTable
               list={plain}
               items={list.data.data.data.items}
+              locale={locale}
+              timezone={timezone}
               staff={staff}
               busy={hide.pending}
               onEdit={openEdit}
@@ -275,6 +264,8 @@ function CatalogWorkspace() {
             <CatalogCards
               list={plain}
               items={list.data.data.data.items}
+              locale={locale}
+              timezone={timezone}
               staff={staff}
               busy={hide.pending}
               onEdit={openEdit}
