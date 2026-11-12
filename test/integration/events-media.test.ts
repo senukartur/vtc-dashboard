@@ -226,7 +226,7 @@ beforeAll(async () => {
 }, SCHEMA_SETUP_TIMEOUT_MS);
 beforeEach(async () => {
   clock = Date.now() - 3_600_000;
-  await control.query("DELETE FROM effect_receipts");
+  await control.query("DELETE FROM job_effect_receipts");
   await control.query("DELETE FROM durable_jobs");
   await control.query("DELETE FROM event_media_generations");
   await control.query("DELETE FROM event_media");
