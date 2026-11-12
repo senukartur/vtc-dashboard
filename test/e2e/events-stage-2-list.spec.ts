@@ -17,7 +17,11 @@ const memberList = /\/api\/v1\/events(?:\?|$)/;
 const draftList = /\/api\/v1\/admin\/events\?/;
 const discardPath = `/api/v1/admin/events/${stage2DraftId}`;
 
-async function mockDraftsEnabled(page: Page, access: "member" | "manager" = "manager") {
+async function mockDraftRollout(
+  page: Page,
+  access: "member" | "manager" = "manager",
+  draftsEnabled = () => true,
+) {
   const events = await mockEventsStage2(page, access);
   await page.route("**/api/v1/me", (route) => {
     if (route.request().method() !== "GET") return route.fallback();
@@ -26,7 +30,11 @@ async function mockDraftsEnabled(page: Page, access: "member" | "manager" = "man
     self.data.preferences.displayTimezone = "Europe/Warsaw";
     return route.fulfill({
       json: self,
-      headers: { ETag: '"v1"', "X-VTC-Events-Stage2": "1", "X-VTC-Events-Drafts": "1" },
+      headers: {
+        ETag: '"v1"',
+        "X-VTC-Events-Stage2": "1",
+        ...(draftsEnabled() ? { "X-VTC-Events-Drafts": "1" } : {}),
+      },
     });
   });
   return events;
@@ -270,7 +278,7 @@ for (const access of ["member", "manager"] as const) {
       : "a manager without the draft rollout opens Upcoming from a draft bookmark",
     browserCase(["@functional"]),
     async ({ page }) => {
-      if (access === "member") await mockDraftsEnabled(page, access);
+      if (access === "member") await mockDraftRollout(page, access);
       else await mockEventsStage2(page, access);
       const reads = recordReads(page);
       await page.goto("/account/events?period=drafts&cursor=fictional-draft-cursor");
@@ -298,6 +306,84 @@ for (const access of ["member", "manager"] as const) {
 }
 
 test(
+  "draft rollout loss aborts the held list read and re-enabling loads fresh drafts",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    let draftsEnabled = true;
+    await mockDraftRollout(page, "manager", () => draftsEnabled);
+    const stale = stage2Fixture("listAdminEvents", "drafts")
+      .response as DTO["EventStage2EnvelopeAdminList"];
+    const fresh = structuredClone(stale);
+    const row = fresh.data.items[0];
+    if (row?.lifecycle !== "draft") throw new Error("Missing draft fixture");
+    const staleTitle = row.fields.title;
+    row.fields.title = "Fictional refreshed draft";
+    if (!staleTitle) throw new Error("Missing stale draft title");
+
+    let draftReads = 0;
+    let releaseOld = () => {};
+    const oldGate = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldSettled = false;
+    await page.route(draftList, async (route) => {
+      if (++draftReads !== 1) return route.fulfill({ json: fresh });
+      await oldGate;
+      await route.fulfill({ json: stale }).catch(() => undefined);
+      oldSettled = true;
+    });
+
+    const main = page.getByRole("main");
+    const drafts = main.getByRole("button", { name: "Drafts", exact: true });
+    async function refreshSession(enabled: boolean) {
+      draftsEnabled = enabled;
+      const result = page.waitForResponse(
+        (response) =>
+          response.ok() &&
+          new URL(response.url()).pathname === "/api/v1/me" &&
+          response.headers()["x-vtc-events-drafts"] === (enabled ? "1" : undefined),
+      );
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await result;
+    }
+
+    try {
+      const first = page.waitForRequest((request) => draftList.test(request.url()));
+      await page.goto("/account/events?period=drafts");
+      const oldRequest = await first;
+      await expect(drafts).toHaveAttribute("aria-pressed", "true");
+      await expect.poll(() => draftReads).toBe(1);
+      expect(oldRequest.failure()).toBeNull();
+
+      await refreshSession(false);
+      await expect(drafts).toHaveCount(0);
+      await expect.poll(() => oldRequest.failure()).not.toBeNull();
+      await expect(main.getByRole("button", { name: "Upcoming", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(
+        main.getByRole("link", { name: "Fictional northern convoy", exact: true }),
+      ).toBeVisible();
+      releaseOld();
+      await expect.poll(() => oldSettled).toBe(true);
+      await refreshSession(false);
+      expect(draftReads).toBe(1);
+
+      await refreshSession(true);
+      await expect(drafts).toHaveAttribute("aria-pressed", "true");
+      await expect(
+        main.getByRole("heading", { name: row.fields.title, exact: true }),
+      ).toBeVisible();
+      await expect(main.getByRole("heading", { name: staleTitle, exact: true })).toHaveCount(0);
+      expect(draftReads).toBe(2);
+    } finally {
+      releaseOld();
+    }
+  },
+);
+
+test(
   "a rejected cursor can be reset from the keyboard",
   browserCase(["@functional"]),
   async ({ page }) => {
@@ -322,7 +408,7 @@ test(
   "a manager confirms discarding an incomplete draft and retries the exact attempt",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    await mockDraftsEnabled(page);
+    await mockDraftRollout(page);
     const reads = recordReads(page);
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
@@ -385,7 +471,7 @@ test(
   "a stale draft discard refreshes authority and requires a new confirmation",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const mock = await mockDraftsEnabled(page);
+    const mock = await mockDraftRollout(page);
     const drafts = stage2Fixture("listAdminEvents", "drafts")
       .response as DTO["EventStage2EnvelopeAdminList"];
     const entry = drafts.data.items[0];
