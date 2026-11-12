@@ -38,3 +38,8 @@ VTC-115 appends `0026_yielding_deathbird.sql` after `0025`. It adds `trips.numbe
 
 
 VTC-117 appends `0027_sudden_talkback.sql` after `0026`. It adds nullable start and completion times, cargo damage percentage, and origin and destination company IDs to `manual_drafts` and `manual_revisions`. Existing rows retain their JSON, links, and null reference fields. Drain writers and apply before starting code that uses the new columns. Application rollback keeps the columns. If interrupted between the two ALTER statements, follow the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook).
+
+
+VTC-132 Step 1 appends `0028_faulty_caretaker.sql` after `0027`. It adds Events-owned metadata, drafts, immutable revision details, relational manual DLC selections, command receipts, media and generation tracking. The `event_revisions.category` enum appends `published` after the three existing values and preserves their ordinals. The migration writes no event data. Legacy rows are published by definition and need no metadata backfill. Drafts reserve a metadata ID and keep it when their published event row is inserted. Current application rollback keeps the new tables and enum value. Activating Stage 2 writers later requires its own compatibility and rollback review.
+
+Drain schema writers, take a consistent verified backup and use the dedicated migrator. The new tables, enum change, foreign keys and indexes are distinct DDL statements with implicit commits. If execution is interrupted, use the [partial-DDL runbook](../../../docs/development/persistence.md#partial-ddl-recovery-runbook) to inspect the ledger and schema against the exact migration. Recover from the known consistent baseline under operator control before retrying.
