@@ -59,11 +59,12 @@ export function EventQuickResponse({
   async function decline(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled) return;
+    const form = event.currentTarget;
     setSaved(false);
     const body = responseInput("declined", reason);
     setInvalid(!body);
     if (body?.response === "declined" && (await command.run(body))) {
-      declineButton.current?.focus();
+      if (form.contains(document.activeElement)) declineButton.current?.focus();
       setDeclining(false);
       setReason("");
       setSaved(true);

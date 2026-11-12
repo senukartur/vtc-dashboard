@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -7,20 +8,27 @@ import { EventQuickResponse } from "./EventQuickResponse.js";
 import { EventResponseSummary } from "./EventResponseSummary.js";
 import { useEventListLocale, useUpcomingEventCard } from "./event-list-queries.js";
 import {
+  eventLifecycleChanged,
+  refreshStage2ListsAtLifecycleChange,
+} from "./event-projection-cache.js";
+import {
   type ResponseProjection,
   useEventResponseScope,
   useEventResponseView,
 } from "./event-quick-response.js";
+import type { DTO } from "./model.js";
 import { eventTime } from "./model.js";
 import { eventStage2SessionScope } from "./stage-2-queries.js";
 
 export function UpcomingEventChip() {
   const { t } = useTranslation("events");
   const session = useSession();
+  const client = useQueryClient();
   const query = useUpcomingEventCard();
   const chip = useRef<HTMLDivElement>(null);
   const refreshed = useRef<string | null>(null);
-  const event = query.data?.event;
+  const observed = useRef<{ scope: string; event: DTO["EventStage2Public"] | null } | null>(null);
+  const event = query.data === null ? null : query.data?.event;
   const canRead = session.self?.capabilities.includes("company.read") === true;
   const canRespond = session.self?.capabilities.includes("events.respond");
   const scope = eventStage2SessionScope(session);
@@ -34,6 +42,14 @@ export function UpcomingEventChip() {
     refreshed.current = cutoff;
     void refetch({ cancelRefetch: false });
   }, [cutoff, refetch, started]);
+  useEffect(() => {
+    if (!scope || event === undefined) return;
+    const before = observed.current?.scope === scope ? observed.current.event : null;
+    observed.current = { scope, event };
+    if (eventLifecycleChanged(before, event)) {
+      void refreshStage2ListsAtLifecycleChange(client, scope, before, event);
+    }
+  }, [client, event, scope]);
   if (!canRead) return null;
 
   return (

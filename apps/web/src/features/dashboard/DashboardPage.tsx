@@ -5,6 +5,7 @@ import type { Locale } from "../../shared/formatting.js";
 import { Button, Card, Select } from "../../shared/ui/primitives.js";
 import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { useUpcomingEventCard } from "../events/event-list-queries.js";
+import { isEventStage2Enabled } from "../events/event-stage-2-mode.js";
 import { RecentTripsWidget, UpcomingEventWidget } from "./blocks.js";
 import {
   ActualDistanceChart,
@@ -29,7 +30,9 @@ import {
   useRecentCompanyTrips,
   useReportingTimezoneSource,
   useReviewQueueTrips,
+  useUpcomingEvent,
 } from "./queries.js";
+import { Stage2UpcomingEventWidget } from "./Stage2UpcomingEventWidget.js";
 import { untilAnchored } from "./view-model.js";
 import { WorkspaceActions } from "./WorkspaceActions.js";
 import "./dashboard.css";
@@ -105,7 +108,9 @@ function DashboardContent() {
   // keeps its own enabled observer of the nearest event.
   const ets2ProgressQuery = useMyQualificationProgress("ets2", { enabled: anchored });
   const atsProgressQuery = useMyQualificationProgress("ats", { enabled: anchored });
-  const upcomingEventQuery = useUpcomingEventCard(anchored);
+  const stage2 = isEventStage2Enabled(session);
+  const upcomingEventQuery = useUpcomingEvent({ enabled: anchored && !stage2 });
+  const stage2UpcomingQuery = useUpcomingEventCard(anchored && stage2);
   const reviewTripsQuery = useReviewQueueTrips({ enabled: anchored });
   // Follows the game filter only: the trips list has no date filter for the period.
   const recentTripsQuery = useRecentCompanyTrips(effectiveGame, { enabled: anchored });
@@ -260,13 +265,22 @@ function DashboardContent() {
                   locale={locale}
                 />
               )}
-              <UpcomingEventWidget
-                query={untilAnchored(upcomingEventQuery, anchored)}
-                locale={locale}
-                displayTimezone={displayTimezone}
-                canRespond={capabilities.includes("events.respond")}
-                started={upcomingEventQuery.started}
-              />
+              {stage2 ? (
+                <Stage2UpcomingEventWidget
+                  query={untilAnchored(stage2UpcomingQuery, anchored)}
+                  locale={locale}
+                  displayTimezone={displayTimezone}
+                  canRespond={capabilities.includes("events.respond")}
+                  started={stage2UpcomingQuery.started}
+                />
+              ) : (
+                <UpcomingEventWidget
+                  query={untilAnchored(upcomingEventQuery, anchored)}
+                  locale={locale}
+                  displayTimezone={displayTimezone}
+                  canRespond={capabilities.includes("events.respond")}
+                />
+              )}
             </>
           )}
         </div>

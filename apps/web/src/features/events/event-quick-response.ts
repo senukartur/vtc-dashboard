@@ -1,20 +1,16 @@
-import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import { type Query, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { useSession } from "../../app/Session.js";
+import { type CacheRead, stage2EventProjection } from "./event-projection-cache.js";
 import type { DTO } from "./model.js";
 import { useEventCommand } from "./queries.js";
-import { eventStage2SessionScope, isEventStage2QueryKey } from "./stage-2-queries.js";
+import { eventStage2SessionScope } from "./stage-2-queries.js";
 import { eventPhase, type ResponseValue } from "./view-model.js";
 
 export type ResponseProjection = Pick<DTO["EventStage2Upcoming"], "event" | "myResponse">;
-type QueryKey = readonly unknown[];
 type QuickResponse = "participating" | "declined";
 type Intent = { version: number; response: QuickResponse; countBefore: number | undefined };
-type CacheRead<T> = { data: T; etag: string | null };
 type Counts = DTO["EventResponseCounts"];
-
-const memberList = "EventStage2EnvelopeMemberList";
-const upcoming = "EventStage2EnvelopeUpcoming";
 
 export function useEventResponseScope() {
   return eventStage2SessionScope(useSession());
@@ -28,10 +24,6 @@ function responseVersion(projection: ResponseProjection) {
 
 const responseKey = (scope: string | null, eventId: string) =>
   ["event-quick-response", scope, eventId] as const;
-
-function belongsTo(key: QueryKey, scope: string | null) {
-  return isEventStage2QueryKey(key) && key[1] === scope && key.at(-3) === "company.read";
-}
 
 export function responseDelta(previous: ResponseValue | null, next: ResponseValue | null) {
   if (previous === null || next === null) return { participating: 0, declined: 0 };
@@ -85,71 +77,70 @@ export function useEventQuickCommand(projection: ResponseProjection) {
   const held = useRef<{ input: DTO["RsvpInput"]; version: number } | null>(null);
   const input = useRef<DTO["RsvpInput"] | null>(null);
 
-  const command = useEventCommand((failure) => {
-    if (failure.kind === "conflict") {
-      held.current = null;
-      void client.invalidateQueries({
-        predicate: ({ queryKey }) =>
-          belongsTo(queryKey, scope) && [memberList, upcoming].includes(String(queryKey.at(-1))),
-      });
-    } else if (!["uncertain", "unavailable", "limited"].includes(failure.kind)) {
-      held.current = null;
-    }
-  });
+  const command = useEventCommand(
+    (failure) => {
+      if (!["uncertain", "unavailable", "limited"].includes(failure.kind)) held.current = null;
+    },
+    { quickResponse: true },
+  );
 
   async function applyResponse(confirmed: DTO["Rsvp"]) {
-    // Ignore an old read finishing after the committed response. Leave unrelated or
-    // not-yet-loaded pages alone; the ordinary success path patches rows without a list reload.
-    await client.cancelQueries({
-      predicate: ({ queryKey, state }) => {
-        if (!belongsTo(queryKey, scope)) return false;
-        if (queryKey.at(-1) === memberList) {
-          const read = state.data as CacheRead<DTO["EventStage2EnvelopeMemberList"]> | undefined;
-          return read?.data.data.items.some((row) => row.event.id === event.id) ?? false;
-        }
-        if (queryKey.at(-1) === upcoming) {
-          const read = state.data as CacheRead<DTO["EventStage2EnvelopeUpcoming"]> | undefined;
-          return read?.data.data?.event.id === event.id;
-        }
-        return false;
-      },
-    });
+    function older(row: ResponseProjection) {
+      const currentVersion = responseVersion(row);
+      return (
+        row.event.id === event.id && currentVersion !== null && currentVersion < confirmed.version
+      );
+    }
+
+    function eligible(query: Query) {
+      if (query.state.status !== "success") return undefined;
+      const projection = stage2EventProjection(query, scope);
+      return projection?.rows.some(older) ? projection : undefined;
+    }
+
     function patch<T extends ResponseProjection>(current: T) {
-      const currentVersion = responseVersion(current);
-      if (
-        current.event.id !== event.id ||
-        currentVersion === null ||
-        currentVersion >= confirmed.version
-      )
-        return current;
       return { ...current, myResponse: confirmed.response, myResponseVersion: confirmed.version };
     }
 
-    client.setQueriesData<CacheRead<DTO["EventStage2EnvelopeMemberList"]>>(
-      { predicate: ({ queryKey }) => belongsTo(queryKey, scope) && queryKey.at(-1) === memberList },
-      (read) => {
-        if (!read) return read;
-        const items = read.data.data.items.map((row) => {
-          const next = patch(row);
-          if (next === row) return row;
-          return {
-            ...next,
-            responseCounts: addResponseDelta(
-              row.responseCounts,
-              responseDelta(row.myResponse, next.myResponse),
-            ),
-          };
-        });
-        return { ...read, data: { ...read.data, data: { ...read.data.data, items } } };
-      },
-    );
-    client.setQueriesData<CacheRead<DTO["EventStage2EnvelopeUpcoming"]>>(
-      { predicate: ({ queryKey }) => belongsTo(queryKey, scope) && queryKey.at(-1) === upcoming },
-      (read) => {
-        if (!read?.data.data) return read;
-        return { ...read, data: { ...read.data, data: patch(read.data.data) } };
-      },
-    );
+    // Cancel only matching stale reads that could overwrite the committed response.
+    const predicate = (query: Query) => eligible(query) !== undefined;
+    await client.cancelQueries({ predicate });
+    for (const query of client.getQueryCache().findAll({ predicate })) {
+      const projection = eligible(query);
+      if (!projection) continue;
+      const {
+        queryKey,
+        state: { dataUpdatedAt, isInvalidated },
+      } = query;
+      const { read } = projection;
+      if (projection.kind === "list") {
+        const items = projection.rows.map((row) =>
+          older(row)
+            ? {
+                ...patch(row),
+                responseCounts: addResponseDelta(
+                  row.responseCounts,
+                  responseDelta(row.myResponse, confirmed.response),
+                ),
+              }
+            : row,
+        );
+        client.setQueryData(
+          queryKey,
+          { ...read, data: { ...read.data, data: { ...read.data.data, items } } },
+          { updatedAt: dataUpdatedAt },
+        );
+      } else {
+        client.setQueryData(
+          queryKey,
+          { ...read, data: { ...read.data, data: patch(projection.rows[0]) } },
+          { updatedAt: dataUpdatedAt },
+        );
+      }
+      // Changing the response is independent of any pending definition or lifecycle refresh.
+      if (isInvalidated)
+        void client.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+    }
   }
 
   const mutation = useMutation({
@@ -170,7 +161,7 @@ export function useEventQuickCommand(projection: ResponseProjection) {
       );
       if (!result) return false;
       held.current = null;
-      await applyResponse(result.data.data);
+      if (!result.replay) await applyResponse(result.data.data);
       return true;
     },
   });

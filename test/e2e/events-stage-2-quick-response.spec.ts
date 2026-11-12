@@ -1,6 +1,9 @@
+import type { Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
+import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { stage2EventId, stage2Fixture, stage2LegacyEventId } from "../fixtures/events-stage-2.ts";
 import { mockDashboardRoutes } from "./support/dashboard-ui.ts";
+import { eventFixture } from "./support/events.ts";
 import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
@@ -14,13 +17,22 @@ function upcomingProjection() {
     .response as DTO["EventStage2EnvelopeUpcoming"];
 }
 
+async function mockStage2Dashboard(page: Page) {
+  const dashboard = await mockDashboardRoutes(page);
+  // Use the existing account response with the VTC-124 transport opt-in.
+  await page.route("**/api/v1/me", (route) =>
+    route.fulfill({ json: accountFixture("en"), headers: { "X-VTC-Events-Stage2": "1" } }),
+  );
+  return dashboard;
+}
+
 test(
   "header and overview share each localized nearest-event read at cutoff and on notification poll",
   browserCase(["@functional"]),
   async ({ page }) => {
     // Cross the cutoff without advancing to the next notification poll.
     await page.clock.install({ time: new Date("2099-10-25T12:59:50.000Z") });
-    await mockDashboardRoutes(page);
+    await mockStage2Dashboard(page);
     let reads = 0;
     const initial = upcomingProjection();
     const initialEvent = initial.data;
@@ -81,21 +93,31 @@ test(
     const row = list.data.items[0];
     if (!nearest.data || !row) throw new Error("Missing Stage 2 projections");
     test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
-    const versionedNearest = {
-      ...nearest,
-      data: { ...nearest.data, myResponse: "unanswered", myResponseVersion: 7 },
-    };
-    const versionedList = {
-      ...list,
-      data: { ...list.data, items: [{ ...row, myResponse: "unanswered", myResponseVersion: 7 }] },
-    };
+    let response: DTO["Rsvp"]["response"] = "unanswered";
+    let version = 7;
+    let responseCounts = { participating: 1, declined: 0 };
     await mockEventsStage2(page, "member");
     let listReads = 0;
     await page.route(listPath, (route) => {
       listReads++;
-      return route.fulfill({ json: versionedList });
+      return route.fulfill({
+        json: {
+          ...list,
+          data: {
+            ...list.data,
+            items: [{ ...row, myResponse: response, myResponseVersion: version, responseCounts }],
+          },
+        },
+      });
     });
-    await page.route(upcomingPath, (route) => route.fulfill({ json: versionedNearest }));
+    await page.route(upcomingPath, (route) =>
+      route.fulfill({
+        json: {
+          ...nearest,
+          data: { ...nearest.data, myResponse: response, myResponseVersion: version },
+        },
+      }),
+    );
     const attempts: {
       key: string | undefined;
       precondition: string | undefined;
@@ -105,6 +127,10 @@ test(
     let releaseFailure: () => void = () => {};
     const failureGate = new Promise<void>((resolve) => {
       releaseFailure = resolve;
+    });
+    let releaseDecline: () => void = () => {};
+    const declineGate = new Promise<void>((resolve) => {
+      releaseDecline = resolve;
     });
     await page.route(`**${responsePath}`, async (route) => {
       const request = route.request();
@@ -120,12 +146,30 @@ test(
         await failureGate;
         return route.abort("failed");
       }
+      if (attempts.length === 2) {
+        // The retry recovers the old receipt. A newer committed reset already exists.
+        version = 9;
+        return route.fulfill({
+          headers: { ETag: '"v8"' },
+          json: {
+            data: { response: "participating", version: 8, declineReason: null },
+            meta: nearest.meta,
+          },
+        });
+      }
+      if (attempts.length === 3) {
+        response = "participating";
+        version = 10;
+        responseCounts = { participating: 2, declined: 0 };
+        return route.fulfill({ status: 412 });
+      }
+      await declineGate;
       return route.fulfill({
-        headers: { ETag: `"v${6 + attempts.length}"` },
+        headers: { ETag: '"v11"' },
         json: {
           data: {
             response: body.response,
-            version: 6 + attempts.length,
+            version: 11,
             declineReason: body.response === "declined" ? body.reason : null,
           },
           meta: nearest.meta,
@@ -151,7 +195,9 @@ test(
     await expect(card).toContainText("Participating: 1");
     await headerGoing.click();
     await expect(header.getByText("Response saved.")).toBeVisible();
-    await expect(card).toContainText("Participating: 2");
+    await expect(card).toContainText("Participating: 1");
+    await expect(card).toContainText("Your response: No answer");
+    expect(listReads).toBe(2);
     expect(attempts).toEqual([
       { key: expect.any(String), precondition: '"v7"', body: { response: "participating" } },
       attempts[0],
@@ -162,18 +208,123 @@ test(
     await expect(card.getByText("Enter a reason to decline.")).toBeVisible();
     expect(attempts).toHaveLength(2);
     const privateReason = "Fictional night shift";
-    await card.getByRole("textbox", { name: "Private decline reason" }).fill(privateReason);
-    await card.getByRole("button", { name: "Save response" }).click();
+    const reasonField = card.getByRole("textbox", { name: "Private decline reason" });
+    await reasonField.fill(privateReason);
+    const save = card.getByRole("button", { name: "Save response" });
+    await save.click();
+    await expect(card.getByRole("alert")).toContainText("The event changed.");
+    await expect(card).toContainText("Participating: 2");
+    await expect(reasonField).toHaveValue(privateReason);
+    expect(attempts[2]).toEqual({
+      key: expect.any(String),
+      precondition: '"v9"',
+      body: { response: "declined", reason: privateReason },
+    });
+    await save.click();
+    const period = page.getByRole("button", { name: "Upcoming", exact: true });
+    await period.focus();
+    releaseDecline();
     await expect(card.getByText("Response saved.")).toBeVisible();
+    await expect(period).toBeFocused();
     await expect(card).toContainText("Participating: 1");
     await expect(card).toContainText("Can't attend: 1");
     await expect(card.getByText(privateReason)).toHaveCount(0);
-    expect(attempts[2]).toEqual({
+    expect(attempts[3]).toEqual({
       key: expect.any(String),
-      precondition: '"v8"',
+      precondition: '"v10"',
       body: { response: "declined", reason: privateReason },
     });
+    expect(attempts[3]?.key).not.toBe(attempts[2]?.key);
     expect(ownReads).toEqual([]);
-    expect(listReads).toBe(1);
+    expect(listReads).toBe(3);
+  },
+);
+
+test(
+  "a detail response refreshes the header and seeds the overview's next precondition",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const nearest = upcomingProjection();
+    if (!nearest.data) throw new Error("Missing Stage 2 projection");
+    test.skip(!("myResponseVersion" in nearest.data), "Requires the VTC-126 generated contract");
+    const event = { ...eventFixture(), id: stage2EventId };
+    const dashboard = await mockStage2Dashboard(page);
+    dashboard.response = { response: "unanswered", declineReason: null, version: 7 };
+    dashboard.counts = { participating: 4, declined: 0 };
+    let nearestReads = 0;
+    let ownReads = 0;
+    page.on("request", (request) => {
+      if (request.method() === "GET" && new URL(request.url()).pathname === responsePath)
+        ownReads++;
+    });
+    await page.route(upcomingPath, (route) => {
+      nearestReads++;
+      return route.fulfill({
+        json: {
+          ...nearest,
+          data: {
+            ...nearest.data,
+            myResponse: dashboard.response.response,
+            myResponseVersion: dashboard.response.version,
+          },
+        },
+      });
+    });
+    await page.route(`**/api/v1/events/${stage2EventId}`, (route) =>
+      route.fulfill({
+        json: {
+          data: {
+            event,
+            visibility: "members",
+            myResponse: dashboard.response,
+            myAttendance: "unconfirmed",
+            prescribedCargoId: null,
+            prescribedTrailerTypeId: null,
+            prescribedMassKg: null,
+          },
+          meta: nearest.meta,
+        },
+        headers: { ETag: '"v1"' },
+      }),
+    );
+
+    await page.goto(`/account/events/${stage2EventId}`);
+    const headerGoing = page.locator(".event-nearest").getByRole("button", { name: "Going" });
+    const main = page.getByRole("main");
+    await expect(headerGoing).toHaveAttribute("aria-pressed", "false");
+    await main.getByRole("button", { name: "Participating", exact: true }).click();
+    await main.getByRole("button", { name: "Save response" }).click();
+    await expect(main.getByText("Response saved.")).toBeVisible();
+    await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
+    expect(nearestReads).toBe(2);
+
+    const detailOwnReads = ownReads;
+    await page
+      .getByRole("navigation", { name: "Main navigation" })
+      .getByRole("link", { name: "Overview", exact: true })
+      .click();
+    const overview = page.getByRole("region", { name: "Upcoming Event" });
+    await expect(overview).toContainText("Going: 5");
+    await expect(overview.getByRole("button", { name: "Going" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await overview.getByRole("button", { name: "Can't go" }).click();
+    await overview
+      .getByRole("textbox", { name: "Private decline reason" })
+      .fill("Fictional overnight work");
+    dashboard.hold("rsvp");
+    dashboard.rsvpOutcomes.push({ status: 503 });
+    const save = overview.getByRole("button", { name: "Save response" });
+    await save.click();
+    await expect(overview).toContainText("Going: 4");
+    await expect(headerGoing).toHaveAttribute("aria-disabled", "true");
+    dashboard.release("rsvp");
+    await expect(overview.getByRole("alert")).toBeVisible();
+    await expect(overview).toContainText("Going: 5");
+    await expect(headerGoing).toHaveAttribute("aria-pressed", "true");
+    expect(dashboard.commands.map(({ headers }) => headers["if-match"])).toEqual(['"v7"', '"v8"']);
+    expect(nearestReads).toBe(2);
+    expect(ownReads).toBe(detailOwnReads);
   },
 );

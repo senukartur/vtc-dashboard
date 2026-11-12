@@ -120,6 +120,63 @@ for (const locale of ["en", "ru"] as const) {
 }
 
 test(
+  "nearest cutoff and cancellation refresh the affected open list page",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.clock.install({ time: new Date("2099-10-25T12:59:50.000Z") });
+    await mockEventsStage2(page, "member");
+    const initialList = projection();
+    const row = initialList.data.items[0];
+    const initialNearest = stage2Fixture("getUpcomingEvent", "own-response")
+      .response as DTO["EventStage2EnvelopeUpcoming"];
+    if (!row || !initialNearest.data) throw new Error("Missing Stage 2 projections");
+    const next = {
+      ...row.event,
+      id: stage2LegacyEventId,
+      title: "Fictional afternoon convoy",
+      meetingAt: "2099-10-25T14:00:00.000Z",
+      startsAt: "2099-10-25T15:00:00.000Z",
+      hasCover: false,
+    };
+    let list = initialList;
+    let nearest = initialNearest;
+    let reads = 0;
+    await page.route(memberList, (route) => {
+      reads++;
+      return route.fulfill({ json: list });
+    });
+    await page.route(/\/api\/v1\/me\/upcoming-event\?/, (route) =>
+      route.fulfill({ json: nearest }),
+    );
+
+    await page.goto("/account/events");
+    const main = page.getByRole("main");
+    const header = page.locator(".event-nearest");
+    await expect(main.getByRole("link", { name: row.event.title })).toBeVisible();
+    await expect(header.getByRole("link")).toHaveAttribute(
+      "href",
+      `/account/events/${row.event.id}`,
+    );
+    expect(reads).toBe(1);
+
+    list = { ...initialList, data: { ...initialList.data, items: [{ ...row, event: next }] } };
+    nearest = { ...initialNearest, data: { ...initialNearest.data, event: next } };
+    await page.clock.fastForward(11_000);
+    await expect(header.getByRole("link")).toHaveAttribute("href", `/account/events/${next.id}`);
+    await expect(main.getByRole("link", { name: next.title })).toBeVisible();
+    await expect(main.getByRole("link", { name: row.event.title })).toHaveCount(0);
+    expect(reads).toBe(2);
+
+    list = { ...initialList, data: { ...initialList.data, items: [] } };
+    nearest = { ...initialNearest, data: null };
+    await page.clock.fastForward(31_000);
+    await expect(header).toContainText("No upcoming event");
+    await expect(main.getByText("No events in this period.")).toBeVisible();
+    expect(reads).toBe(3);
+  },
+);
+
+test(
   "a member cannot request drafts by bookmarking the tab",
   browserCase(["@functional"]),
   async ({ page }) => {
