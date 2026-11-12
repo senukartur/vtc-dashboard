@@ -384,6 +384,19 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
           value.row.organizerMemberId ?? undefined,
         );
         const { data } = await once(tx, actor, "draft_create", key, key, 0, value, async () => {
+          const [existing] = await c(tx)
+            .select({ key: eventCommands.key })
+            .from(eventCommands)
+            .where(
+              and(
+                eq(eventCommands.actorId, actor.userId),
+                eq(eventCommands.route, "create"),
+                eq(eventCommands.targetId, key),
+                eq(eventCommands.key, key),
+              ),
+            )
+            .for("share");
+          if (existing) throw identityError(409, "IDEMPOTENCY_CONFLICT");
           if (value.row.organizerMemberId && organizer === null) throw identityError(422);
           await ports.validate(tx, value, null);
           const id = newId(),
@@ -436,19 +449,6 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
           value,
           async () => {
             const row = await lock(tx, id, expected);
-            const [existing] = await c(tx)
-              .select({ key: eventCommands.key })
-              .from(eventCommands)
-              .where(
-                and(
-                  eq(eventCommands.actorId, actor.userId),
-                  eq(eventCommands.route, "create"),
-                  eq(eventCommands.targetId, key),
-                  eq(eventCommands.key, key),
-                ),
-              )
-              .for("share");
-            if (existing) throw identityError(409, "IDEMPOTENCY_CONFLICT");
             if (value.row.organizerMemberId && organizer === null) throw identityError(422);
             await ports.validate(tx, value, await readDefinition(tx, row));
             const time = at(),
@@ -501,14 +501,17 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
         return { data, version: data.version };
       });
     },
-    publish(actor: Actor, id: string, key: string, expected: number, locale: EventLocale) {
-      return ports.run(async (tx) => {
-        // Discover the organizer before the sorted Identity locks. Recheck after locking the draft.
-        const [candidate] = await c(tx)
+    async publish(actor: Actor, id: string, key: string, expected: number, locale: EventLocale) {
+      // Discover the organizer before the sorted Identity locks, without opening the
+      // write transaction's repeatable-read snapshot. Recheck under the draft lock.
+      const [candidate] = await ports.run((tx) =>
+        c(tx)
           .select({ organizerId: eventDrafts.organizerMemberId })
           .from(eventDrafts)
           .where(eq(eventDrafts.eventId, id))
-          .limit(1);
+          .limit(1),
+      );
+      return ports.run(async (tx) => {
         const { organizer } = await ports.authorize(tx, actor, candidate?.organizerId ?? undefined);
         const { data } = await once(tx, actor, "publish", id, key, expected, locale, async () => {
           const row = await lock(tx, id, expected);

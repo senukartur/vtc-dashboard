@@ -2603,7 +2603,21 @@ test("draft HTTP replaces sparse fields and preserves canonical depots through p
 test("a draft retains its existing hidden selection but publication requires current visibility", async () => {
   const { id } = await seedCatalog(unit, "ets2", { cities: ["draft_hide_city"] });
   const cityId = id("draft_hide_city");
-  const routes = draftEvents();
+  const atAuthority = deferred<void>(),
+    release = deferred<void>();
+  let pause = false;
+  const routes = draftEvents({
+    identity: {
+      ...identity,
+      async eventContextInTransaction(...args) {
+        if (pause) {
+          atAuthority.resolve();
+          await release.promise;
+        }
+        return identity.eventContextInTransaction(...args);
+      },
+    },
+  });
   if (!routes.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
   const drafts = routes.drafts;
   const input = stagedInput({ originCityId: cityId });
@@ -2616,9 +2630,26 @@ test("a draft retains its existing hidden selection but publication requires cur
   const {
     data: { id: eventId },
   } = await drafts.create(director, newId(), input);
-  await unit.run((tx) =>
-    unit.client(tx).update(catalogCities).set({ hidden: true }).where(eq(catalogCities.id, cityId)),
-  );
+  pause = true;
+  const publication = drafts.publish(director, eventId, newId(), 1, "en");
+  void publication.catch(() => undefined);
+  try {
+    await Promise.race([atAuthority.promise, publication]);
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(catalogCities)
+        .set({ hidden: true })
+        .where(eq(catalogCities.id, cityId)),
+    );
+  } finally {
+    pause = false;
+    release.resolve();
+  }
+  await expect(publication).rejects.toMatchObject({
+    statusCode: 422,
+    publicCode: "CATALOG_SELECTION_HIDDEN",
+  });
   await expect(drafts.create(director, newId(), input)).rejects.toMatchObject({
     statusCode: 422,
     publicCode: "CATALOG_SELECTION_HIDDEN",
