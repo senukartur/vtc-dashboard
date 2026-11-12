@@ -19,6 +19,8 @@
     "trip_fact_trailers": ["SELECT", "INSERT"],
     "trip_history": ["SELECT", "INSERT"],
     "catalog_cities": ["SELECT"],
+    "catalog_companies": ["SELECT"],
+    "catalog_company_cities": ["SELECT"],
     "catalog_cargoes": ["SELECT"],
     "catalog_trailers": ["SELECT"],
     "manual_blob_generations": ["SELECT", "INSERT", "UPDATE(lease_until,updated_at)"]

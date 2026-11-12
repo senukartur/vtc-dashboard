@@ -687,6 +687,15 @@ def core():
         # revoked. This does not change activation-grants.json or hosted control state.
         sql("CREATE TABLE vtc.synthetic_manual_guard (id INT PRIMARY KEY, run_id CHAR(32) NOT NULL) ENGINE=InnoDB;")
         sql(f"INSERT INTO vtc.synthetic_manual_guard VALUES (1,'{manual_proof_run}');")
+        sql("""
+            INSERT INTO vtc.catalog_cities (id,game,code,name_en)
+            VALUES ('11700000-0000-4000-8000-000000000001','ets2','manual_rehearsal_city','Synthetic Manual City');
+            INSERT INTO vtc.catalog_companies (id,game,code,name_en)
+            VALUES ('11700000-0000-4000-8000-000000000002','ets2','manual_rehearsal_company','Synthetic Manual Company');
+            INSERT INTO vtc.catalog_company_cities (id,game,city_id,company_id)
+            VALUES ('11700000-0000-4000-8000-000000000003','ets2',
+                    '11700000-0000-4000-8000-000000000001','11700000-0000-4000-8000-000000000002');
+        """)
         for role in ['runtime', 'jobs']:
             sql(f"GRANT SELECT ON vtc.synthetic_manual_guard TO 'vtc_{role}'@'%';")
         manual_grants = json.loads((base / 'manual-grants.prepared.json').read_text())
