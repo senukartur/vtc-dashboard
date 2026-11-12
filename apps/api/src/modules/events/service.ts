@@ -548,7 +548,9 @@ export function createEvents(
       throw new Error("EVENT_RESPONSE_REVISION_MISSING");
     return { row, revision: r };
   }
-  const responseDto = (r: ResponseRevision | null): S["Rsvp"] => ({
+  const responseDto = (
+    r: Pick<ResponseRevision, "version" | "status" | "reason"> | null,
+  ): S["Rsvp"] => ({
     version: r?.version ?? 1,
     response: r?.status ?? "unanswered",
     declineReason: r?.reason ?? null,
@@ -590,10 +592,21 @@ export function createEvents(
       ownResponse = (await response(tx, r.eventId, actor.userId))?.revision ?? null;
       ownAttendance = await attendance(tx, r.eventId, actor.userId);
     }
+    return eventMemberFacts(r, ownResponse, ownAttendance?.status);
+  }
+
+  function eventMemberFacts(
+    r: Pick<
+      Revision,
+      "visibility" | "prescribedCargoId" | "prescribedMassKg" | "prescribedTrailerId"
+    >,
+    ownResponse: Parameters<typeof responseDto>[0],
+    attendanceStatus: AttendanceRevision["status"] | undefined,
+  ) {
     return {
       visibility: r.visibility,
       myResponse: responseDto(ownResponse),
-      myAttendance: ownAttendance?.status ?? ("unconfirmed" as const),
+      myAttendance: attendanceStatus ?? ("unconfirmed" as const),
       prescribedCargoId: r.prescribedCargoId,
       prescribedMassKg: r.prescribedMassKg === null ? null : decimal(r.prescribedMassKg),
       prescribedTrailerTypeId: r.prescribedTrailerId,
@@ -743,6 +756,111 @@ export function createEvents(
       return { event, organizerMemberId: route.organizerMemberId, visibility: r.visibility };
     });
     return { items, labels };
+  }
+
+  async function adminPublishedPage(
+    tx: TxContext,
+    actor: Actor,
+    locale: EventLocale,
+    options: Page,
+  ): Promise<S["EventStage2AdminList"]> {
+    if (!routeCatalogs || !publishedRoutes) throw identityError(422);
+    const p = page(actor, ["admin", "published", locale], options);
+    const rows = await c(tx)
+      .select({ id: events.id, revisionId: events.currentRevisionId, startsAt: events.startsAt })
+      .from(events)
+      .where(
+        p.after
+          ? or(
+              gt(events.startsAt, p.after.time as string),
+              and(eq(events.startsAt, p.after.time as string), gt(events.id, p.after.id)),
+            )
+          : undefined,
+      )
+      .orderBy(asc(events.startsAt), asc(events.id))
+      .limit(p.limit + 1);
+    const { items, nextCursor } = p.finish(rows, (row) => ({ id: row.id, time: row.startsAt }));
+    if (!items.length) return { items: [], nextCursor };
+    const ids = items.map((row) => row.id);
+    const revisions = await c(tx)
+      .select({
+        ...publicRevisionFields,
+        prescribedCargoId: eventRevisions.prescribedCargoId,
+        prescribedMassKg: eventRevisions.prescribedMassKg,
+        prescribedTrailerId: eventRevisions.prescribedTrailerId,
+      })
+      .from(eventRevisions)
+      .where(
+        inArray(
+          eventRevisions.id,
+          items.map((row) => applicationId(row.revisionId as string)),
+        ),
+      );
+    const revisionById = new Map(revisions.map((row) => [row.id, row]));
+    const responses = await c(tx)
+      .select({
+        eventId: eventResponses.eventId,
+        version: eventResponseRevisions.version,
+        status: eventResponseRevisions.status,
+        reason: eventResponseRevisions.reason,
+      })
+      .from(eventResponses)
+      .innerJoin(
+        eventResponseRevisions,
+        and(
+          eq(eventResponseRevisions.id, eventResponses.currentRevisionId),
+          eq(eventResponseRevisions.eventId, eventResponses.eventId),
+          eq(eventResponseRevisions.memberId, eventResponses.memberId),
+        ),
+      )
+      .where(and(inArray(eventResponses.eventId, ids), eq(eventResponses.memberId, actor.userId)));
+    const attendances = await c(tx)
+      .select({ eventId: eventAttendances.eventId, status: eventAttendanceRevisions.status })
+      .from(eventAttendances)
+      .innerJoin(
+        eventAttendanceRevisions,
+        and(
+          eq(eventAttendanceRevisions.id, eventAttendances.currentRevisionId),
+          eq(eventAttendanceRevisions.eventId, eventAttendances.eventId),
+          eq(eventAttendanceRevisions.memberId, eventAttendances.memberId),
+        ),
+      )
+      .where(
+        and(inArray(eventAttendances.eventId, ids), eq(eventAttendances.memberId, actor.userId)),
+      );
+    const ownResponse = new Map(responses.map((row) => [row.eventId, row]));
+    const ownAttendance = new Map(attendances.map((row) => [row.eventId, row.status]));
+    const privateRefs = revisions.flatMap((row) => [
+      ...(row.prescribedCargoId ? [{ kind: "cargo" as const, id: row.prescribedCargoId }] : []),
+      ...(row.prescribedTrailerId
+        ? [{ kind: "trailer" as const, id: row.prescribedTrailerId }]
+        : []),
+    ]);
+    const privateLabels = await routeCatalogs.labelsInTransaction(tx, privateRefs, locale);
+    const { items: projections } = await publishedEventDtos(tx, revisions, locale);
+    const byEvent = new Map(projections.map((row) => [row.event.id, row]));
+    const counts = await responseCountsByEvent(tx, ids);
+    return {
+      nextCursor,
+      items: items.map(({ id, revisionId }) => {
+        const row = revisionById.get(revisionId as string);
+        const projection = byEvent.get(id);
+        const responseCounts = counts.get(id);
+        if (!row || !projection || !responseCounts || row.eventId !== id)
+          throw new Error("EVENT_ADMIN_PROJECTION_MISSING");
+        return {
+          id,
+          lifecycle: "published",
+          definition: {
+            ...projection,
+            ...eventMemberFacts(row, ownResponse.get(id) ?? null, ownAttendance.get(id)),
+            prescribedCargo: privateLabels.get(row.prescribedCargoId ?? "") ?? null,
+            prescribedTrailerType: privateLabels.get(row.prescribedTrailerId ?? "") ?? null,
+            responseCounts,
+          },
+        };
+      }),
+    };
   }
 
   function quickResponse(own: OwnResponse | undefined) {
@@ -1539,6 +1657,19 @@ export function createEvents(
         await authorize(tx, actor);
         const r = await nearestRevision(tx);
         return r ? publicDto(tx, r) : null;
+      });
+    },
+    async listAdmin(
+      actor: Actor,
+      options: Page & { period?: "published" | "drafts"; locale?: EventLocale } = {},
+    ): Promise<S["EventStage2AdminList"]> {
+      if (options.period === "drafts") {
+        if (!drafts) throw identityError(404);
+        return drafts.list(actor, options);
+      }
+      return run(async (tx) => {
+        await authorize(tx, actor, "events.manage");
+        return adminPublishedPage(tx, actor, options.locale ?? "en", options);
       });
     },
     async listStage2(

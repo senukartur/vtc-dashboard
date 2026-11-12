@@ -147,6 +147,9 @@ For the agreed initial restriction types, the prescribed-load exception covers o
 
 ## Event responses, reminders, and privacy
 
+- The director and deputies can save incomplete event drafts, return to edit them, and discard or publish them. Publication validates the full definition and retains the event ID and attached gallery.
+- Drafts are visible only to event managers and have no RSVP, attendance, event-trip eligibility or notifications. These workflows become available after publication according to the event's visibility and timing.
+
 - Members may change their participation response until the event starts. A decline requires a reason.
 - After the event starts, the director records actual attendance separately from the member's prior response. The previously agreed director confirmation is used for event-trip participation.
 - Send an in-app reminder one hour before the event starts to members whose response is Participating. Notifications are delivered while the website is open; Web Push remains deferred.

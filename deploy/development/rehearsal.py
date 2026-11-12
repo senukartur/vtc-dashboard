@@ -775,6 +775,46 @@ def core():
                          f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
                          'node', 'operations/manual-grants-smoke.mjs', phase], revision=revision)
                 print(f'Manual restricted grants phase: {phase} PASS', flush=True)
+            # Reuse the guarded synthetic director and database. Both modes get the existing
+            # Events route/catalog supplement, but only the enabled runtime gets the draft delta.
+            route_values = {'EVENTS_ROUTE_ENABLED': 'true'}
+            draft_values = {**route_values, ops.activation.EVENTS_DRAFTS_FLAG: 'true'}
+            route_matrix = ops.activation.matrix(ops, route_values)
+            draft_matrix = ops.activation.matrix(ops, draft_values)
+            draft_tables = json.loads((base / ops.activation.STAGE_PROFILE).read_text())['eventsDraftsGrants']
+            assert draft_matrix['jobs'] == route_matrix['jobs']
+            assert {key: value for key, value in draft_matrix['runtime'].items()
+                    if key not in route_matrix['runtime']} == draft_tables
+            previous_route_tables = {
+                'runtime': ['event_revision_details', 'event_revision_dlcs', 'catalog_cities',
+                            'catalog_companies', 'catalog_company_cities', 'catalog_dlcs'],
+                'jobs': ['event_revision_details'],
+            }
+            draft_applied = []
+            try:
+                for phase, service in [('route-only', 'manual-runtime'), ('drafts', 'manual-runtime'),
+                                       ('jobs', 'manual-worker')]:
+                    if phase != 'jobs':
+                        tables_by_role = ({'runtime': draft_tables} if phase == 'drafts' else
+                                          {role: {table: route_matrix[role][table] for table in tables}
+                                           for role, tables in previous_route_tables.items()})
+                        for role, tables in tables_by_role.items():
+                            for table, permissions in tables.items():
+                                assert re.fullmatch('[a-z_]+', table)
+                                extra = [p for p in permissions if p not in manual_grants[role].get(table, [])]
+                                if not extra:
+                                    continue
+                                grants = ','.join(map(ops.activation.quoted_columns, extra))
+                                sql(f"GRANT {grants} ON vtc.{table} TO 'vtc_{role}'@'%';")
+                                draft_applied.append((role, table, grants))
+                    print(f'Events restricted draft grants phase: {phase} STARTED', flush=True)
+                    compose(['run', '--rm', '--no-deps', '-e', 'MANUAL_SYNTHETIC_ACK=synthetic-only',
+                             '-e', f'MANUAL_REHEARSAL_RUN={manual_proof_run}', service,
+                             'node', 'operations/events-drafts-grants-smoke.mjs', phase], revision=revision)
+                    print(f'Events restricted draft grants phase: {phase} PASS', flush=True)
+            finally:
+                for role, table, grants in reversed(draft_applied):
+                    sql(f"REVOKE {grants} ON vtc.{table} FROM 'vtc_{role}'@'%';")
         finally:
             for role, tables in manual_grants.items():
                 for table, permissions in tables.items():

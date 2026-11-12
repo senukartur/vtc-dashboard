@@ -349,6 +349,20 @@ test("published route activation requires Events and Catalogs and keeps baseline
     { EVENTS_ROUTE_ENABLED: "yes" },
   ])
     expect(() => readConfig({ ...enabled, ...fields })).toThrow("EVENTS_ROUTE_ENABLED");
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "false" }).events).toEqual(
+    readConfig(enabled).events,
+  );
+  expect(readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "true" }).events).toEqual({
+    cursorKey: base.EVENTS_CURSOR_KEY,
+    routeEnabled: true,
+    draftsEnabled: true,
+  });
+  expect(() => readConfig({ ...base, EVENTS_DRAFTS_ENABLED: "true" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
+  expect(() => readConfig({ ...enabled, EVENTS_DRAFTS_ENABLED: "1" })).toThrow(
+    "EVENTS_DRAFTS_ENABLED",
+  );
   type Grants = { runtime: Record<string, string[]>; jobs: Record<string, string[]> };
   const activation = new URL("../../deploy/development/", import.meta.url);
   const baseline = JSON.parse(
@@ -357,8 +371,22 @@ test("published route activation requires Events and Catalogs and keeps baseline
   const stage = JSON.parse(await readFile(new URL("stage-features.json", activation), "utf8")) as {
     flags: string[];
     grants: Grants;
+    eventsDraftsGrants: Record<string, string[]>;
   };
   expect(stage.flags).toContain("EVENTS_ROUTE_ENABLED");
+  expect(stage.flags).not.toContain("EVENTS_DRAFTS_ENABLED");
+  expect(Object.keys(stage.eventsDraftsGrants).sort()).toEqual([
+    "event_draft_dlcs",
+    "event_drafts",
+    "event_metadata",
+    "event_workflow_commands",
+  ]);
+  for (const table of Object.keys(stage.eventsDraftsGrants)) {
+    expect(baseline.runtime[table]).toBeUndefined();
+    expect(baseline.jobs[table]).toBeUndefined();
+    expect(stage.grants.runtime[table]).toBeUndefined();
+    expect(stage.grants.jobs[table]).toBeUndefined();
+  }
   for (const table of ["event_revision_details", "event_revision_dlcs"]) {
     expect(baseline.runtime[table]).toBeUndefined();
     expect(baseline.jobs[table]).toBeUndefined();

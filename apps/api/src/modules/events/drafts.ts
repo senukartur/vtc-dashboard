@@ -43,72 +43,58 @@ type Publication = Extract<DraftResult, { route: "publish" }>;
 type PublicationCandidate = Omit<Publication, "data"> & { data: S["EventStage2Member"] };
 type ReceiptCandidate = Exclude<DraftResult, Publication> | PublicationCandidate;
 
-const validator = createSchemaValidator();
-const schema = <T>(name: string) =>
-  validator.compile<T>({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
-const draftInput = schema<DraftFields>("EventStage2DraftInput");
-const draftDto = schema<S["EventStage2Draft"]>("EventStage2Draft");
-const deletionDto = schema<S["EventStage2DraftDeletion"]>("EventStage2DraftDeletion");
-const publicationInput = schema<S["EventStage2Input"]>("EventStage2Input");
-const publicationDto = schema<S["EventStage2Member"]>("EventStage2Member");
-
-function fields(raw: DraftFields) {
-  if (!draftInput(raw)) throw identityError(422);
-  const {
-    requiredDlcIds = [],
-    title = null,
-    server = null,
-    description = null,
-    game = null,
-    platform = null,
-    organizerMemberId = null,
-    meetingLocation = null,
-    route = null,
-    meetingAt = null,
-    startsAt = null,
-    endsAt = null,
-    visibility = null,
-    originCityId = null,
-    destinationCityId = null,
-    originDepotId = null,
-    destinationDepotId = null,
-    distanceKm = null,
-    prescribedCargoId = null,
-    prescribedTrailerTypeId = null,
-    prescribedMassKg = null,
-  } = raw;
+function createDraftSchemas() {
+  const validator = createSchemaValidator();
+  const schema = <T>(name: string) =>
+    validator.compile<T>({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
   return {
-    requiredDlcIds: [...requiredDlcIds].sort(),
-    row: {
-      title,
-      server,
-      description,
-      game,
-      platform,
-      organizerMemberId,
-      meetingLocation,
-      route,
-      meetingAt,
-      startsAt,
-      endsAt,
-      visibility,
-      originCityId,
-      destinationCityId,
-      originDepotId,
-      destinationDepotId,
-      distanceKm,
-      prescribedCargoId,
-      prescribedTrailerTypeId,
-      prescribedMassKg,
-    },
+    input: schema<DraftFields>("EventStage2DraftInput"),
+    draft: schema<S["EventStage2Draft"]>("EventStage2Draft"),
+    deletion: schema<S["EventStage2DraftDeletion"]>("EventStage2DraftDeletion"),
+    publicationInput: schema<S["EventStage2Input"]>("EventStage2Input"),
+    publication: schema<S["EventStage2Member"]>("EventStage2Member"),
   };
 }
+let draftSchemas: ReturnType<typeof createDraftSchemas> | undefined;
+const schemas = () => (draftSchemas ??= createDraftSchemas());
 
-type DraftDefinition = ReturnType<typeof fields>;
+type DraftColumns = Required<Omit<DraftFields, "requiredDlcIds">>;
+const draftDefaults = {
+  title: null,
+  server: null,
+  description: null,
+  game: null,
+  platform: null,
+  organizerMemberId: null,
+  meetingLocation: null,
+  route: null,
+  meetingAt: null,
+  startsAt: null,
+  endsAt: null,
+  visibility: null,
+  originCityId: null,
+  destinationCityId: null,
+  originDepotId: null,
+  destinationDepotId: null,
+  distanceKm: null,
+  prescribedCargoId: null,
+  prescribedTrailerTypeId: null,
+  prescribedMassKg: null,
+} satisfies DraftColumns;
+const draftFields = Object.keys(draftDefaults) as (keyof DraftColumns)[];
+type DraftDefinition = { row: DraftColumns; requiredDlcIds: string[] };
+
+function fields(raw: DraftFields): DraftColumns {
+  return Object.fromEntries(
+    draftFields.map((field) => [field, raw[field] ?? null]),
+  ) as DraftColumns;
+}
 
 function normalize(raw: DraftFields) {
-  const draft = fields(raw);
-  const { row, requiredDlcIds } = draft;
+  if (!schemas().input(raw)) throw identityError(422);
+  const row = fields(raw);
+  const requiredDlcIds = [...(raw.requiredDlcIds ?? [])].sort();
+  const draft = { row, requiredDlcIds };
   for (const [value, max] of [
     [row.title, 256],
     [row.server, 256],
@@ -148,59 +134,14 @@ function normalize(raw: DraftFields) {
   return draft;
 }
 
-function definition(row: DraftRow, requiredDlcIds: string[]) {
-  return fields({
-    ...draftFields(row),
-    prescribedMassKg: row.prescribedMassKg === null ? null : decimal(row.prescribedMassKg),
-    distanceKm: row.distanceKm === null ? null : decimal(row.distanceKm),
-    requiredDlcIds,
-  });
-}
-
-function draftFields(row: DraftDefinition["row"]) {
-  const {
-    title,
-    server,
-    description,
-    game,
-    platform,
-    organizerMemberId,
-    meetingLocation,
-    route,
-    meetingAt,
-    startsAt,
-    endsAt,
-    visibility,
-    originCityId,
-    destinationCityId,
-    originDepotId,
-    destinationDepotId,
-    distanceKm,
-    prescribedCargoId,
-    prescribedTrailerTypeId,
-    prescribedMassKg,
-  } = row;
+function definition(row: DraftRow, requiredDlcIds: string[]): DraftDefinition {
   return {
-    title,
-    server,
-    description,
-    game,
-    platform,
-    organizerMemberId,
-    meetingLocation,
-    route,
-    meetingAt,
-    startsAt,
-    endsAt,
-    visibility,
-    originCityId,
-    destinationCityId,
-    originDepotId,
-    destinationDepotId,
-    distanceKm,
-    prescribedCargoId,
-    prescribedTrailerTypeId,
-    prescribedMassKg,
+    row: fields({
+      ...row,
+      prescribedMassKg: row.prescribedMassKg === null ? null : decimal(row.prescribedMassKg),
+      distanceKm: row.distanceKm === null ? null : decimal(row.distanceKm),
+    }),
+    requiredDlcIds,
   };
 }
 
@@ -258,7 +199,7 @@ function checkedReceipt<R extends DraftRoute>(
     if (route === "publish") {
       applicationId(result.revisionId as string);
       if (
-        !publicationDto(data) ||
+        !schemas().publication(data) ||
         data.event.id !== target ||
         data.event.version !== 1 ||
         data.event.status !== "scheduled" ||
@@ -273,11 +214,11 @@ function checkedReceipt<R extends DraftRoute>(
       )
         throw new Error();
     } else if (route === "draft_delete") {
-      if (!deletionDto(data) || data.id !== target || data.version !== expected + 1)
+      if (!schemas().deletion(data) || data.id !== target || data.version !== expected + 1)
         throw new Error();
     } else {
       if (
-        !draftDto(data) ||
+        !schemas().draft(data) ||
         data.version !== expected + 1 ||
         (route !== "draft_create" && data.id !== target)
       )
@@ -574,7 +515,7 @@ export function createEventDrafts(unit: UnitOfWork, key: string, now: () => Date
             throw identityError(409, "VERSION_CONFLICT");
           const value = await readDefinition(tx, row);
           const input = { ...value.row, requiredDlcIds: value.requiredDlcIds };
-          if (!publicationInput(input) || organizer === null) throw identityError(422);
+          if (!schemas().publicationInput(input) || organizer === null) throw identityError(422);
           const result = await ports.publish(tx, actor, id, input, organizer, locale);
           // The reserved identity already owns the gallery. Only attach the published pointer.
           await c(tx)

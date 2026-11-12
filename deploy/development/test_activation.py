@@ -311,7 +311,8 @@ class ActivationTests(unittest.TestCase):
 
     def test_stage_profile_matches_the_reviewed_key_allowlist(self):
         profile = self.stage_profile()
-        self.assertEqual(set(profile['flags']), set(activation.STAGE_FLAGS))
+        self.assertEqual(set(profile['flags']) | {activation.EVENTS_DRAFTS_FLAG}, activation.STAGE_FLAGS)
+        self.assertNotIn(activation.EVENTS_DRAFTS_FLAG, profile['flags'])
         self.assertEqual(set(profile['settings']), set(activation.STAGE_SETTINGS))
         self.assertEqual(set(profile['generatedKeys']), set(activation.STAGE_KEYS))
         self.assertEqual(set(profile['grants']), {'runtime', 'jobs'})
@@ -333,6 +334,28 @@ class ActivationTests(unittest.TestCase):
         (self.base / activation.STAGE_PROFILE).unlink()
         with self.assertRaisesRegex(RuntimeError, '^STAGE_PROFILE_REQUIRED$'):
             activation.grant_sql(ops, values={'TRIPS_ENABLED': 'true'})
+
+    def test_draft_grants_are_opt_in_and_record_only_permissions_applied(self):
+        profile = self.stage_profile()
+        route = {'EVENTS_ROUTE_ENABLED': 'true'}
+        drafts = {**route, activation.EVENTS_DRAFTS_FLAG: 'true'}
+        old = activation.privilege_rows(activation.matrix(ops, route))
+        new = activation.privilege_rows(activation.matrix(ops, drafts))
+        delta = activation.privilege_rows({'runtime': profile['eventsDraftsGrants']})
+        self.assertEqual(new - old, delta)
+        self.assertTrue(delta)
+        self.assertFalse(any(row[0] != "'vtc_runtime'@'%'" for row in delta))
+        with self.assertRaisesRegex(RuntimeError, '^EVENTS_DRAFTS_PROFILE_REQUIRED$'):
+            activation.matrix(ops, {activation.EVENTS_DRAFTS_FLAG: 'true'})
+        with patch.object(activation, 'privileges', side_effect=[[], list(old)]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, route)
+        self.assertFalse(activation.installed_stage_rows(ops) & delta)
+        with self.assertRaisesRegex(RuntimeError, '^UNEXPECTED_EFFECTIVE_PRIVILEGES$'):
+            activation.check_privileges(ops, new, values=route)
+        with patch.object(activation, 'privileges', side_effect=[list(old), list(new)]), patch.object(ops, 'compose'):
+            activation.grants(ops, self.revision, drafts)
+        self.assertTrue(delta <= activation.installed_stage_rows(ops))
+        activation.check_privileges(ops, new, complete=True, values=route)
 
     def test_column_grants_read_back_per_column_and_rollback_keeps_module_grants(self):
         self.stage_profile()

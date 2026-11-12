@@ -233,6 +233,22 @@ export async function registerEventRoutes(
     },
     async (r) => envelope(r, await events.responseCounts(await actor(r), r.params.eventId)),
   );
+  if (stage2) {
+    app.get<{ Querystring: Page & LocaleQuery & { period?: "published" | "drafts" } }>(
+      "/api/v1/admin/events",
+      {
+        schema: {
+          querystring: object({
+            ...page,
+            locale,
+            period: { type: "string", enum: ["published", "drafts"] },
+          }),
+          response: { 200: ref("EventStage2EnvelopeAdminList") },
+        },
+      },
+      async (r) => envelope(r, await events.listAdmin(await actor(r), r.query)),
+    );
+  }
   app.post<{ Body: CreationInput; Querystring: LocaleQuery }>(
     "/api/v1/admin/events",
     {

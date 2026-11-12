@@ -25,9 +25,9 @@ import {
   type Identity,
 } from "../../apps/api/src/modules/identity/service.ts";
 import { matchEventPrescribedLoad } from "../../apps/api/src/modules/qualification-rules/index.ts";
+import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
-import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
@@ -153,6 +153,9 @@ beforeEach(async () => {
     "event_response_revisions",
     "event_revision_dlcs",
     "event_revision_details",
+    "event_workflow_commands",
+    "event_draft_dlcs",
+    "event_media",
     "event_drafts",
     "event_metadata",
     "event_revisions",
@@ -1511,6 +1514,7 @@ import {
   eventAttendanceRevisions,
   eventAttendances,
   eventDrafts,
+  eventMedia,
   eventMetadata,
   eventResponseRevisions,
   eventRevisions,
@@ -2221,4 +2225,472 @@ test("a newly inactive organizer blocks selection while a committed command stil
     statusCode: 422,
   });
   await expect(routes.createPublished(director, key, value, "en")).resolves.toEqual(created);
+});
+const adminEventsPath = "/api/v1/admin/events";
+
+function draftEvents(ports: Partial<Parameters<typeof createEvents>[2]> = {}) {
+  return createEvents(
+    unit,
+    { ...config, routeEnabled: true, draftsEnabled: true },
+    { identity, catalogs: createCatalogs(unit, catalogConfig(), { identity }, now), ...ports },
+    now,
+  );
+}
+
+test("draft HTTP replaces sparse fields and preserves canonical depots through publication and replay", async () => {
+  await control.query("DELETE FROM identity_limits");
+  const { id } = await seedCatalog(unit, "ets2", {
+    dlcs: ["draft_manual_a", "draft_manual_b"],
+    cities: [
+      {
+        code: "draft_origin",
+        nameEn: "Fictional Draft Origin",
+        nameRu: "Fictional RU Draft Origin",
+      },
+      "draft_destination",
+    ],
+    cargoes: ["draft_load"],
+    trailers: ["draft_trailer"],
+  });
+  const { id: ats } = await seedCatalog(unit, "ats", {
+    dlcs: ["draft_ats_dlc"],
+    cities: ["draft_ats_city"],
+  });
+  const companyId = newId(),
+    originDepotId = newId(),
+    destinationDepotId = newId();
+  await unit.run(async (tx) => {
+    const c = unit.client(tx);
+    await c.insert(catalogCompanies).values({
+      id: companyId,
+      game: "ets2",
+      code: Buffer.from("draft_company"),
+      nameEn: "Fictional Draft Freight",
+    });
+    await c.insert(catalogCompanyCities).values([
+      { id: originDepotId, game: "ets2", cityId: id("draft_origin"), companyId },
+      { id: destinationDepotId, game: "ets2", cityId: id("draft_destination"), companyId },
+    ]);
+  });
+  const organizer = await member(["driver"]);
+  const routes = draftEvents();
+  const app = await createApp({ identity, events: routes, checkReadiness: async () => true });
+  try {
+    const csrf = (
+      await app.inject({
+        url: "/api/v1/auth/csrf",
+        headers: { cookie: directorCookie },
+      })
+    ).json().data.token;
+    const get = (url: string, cookie = directorCookie) => app.inject({ url, headers: { cookie } });
+    const write = (
+      method: "POST" | "PATCH" | "DELETE",
+      url: string,
+      payload?: object,
+      match?: string,
+      key = newId(),
+      cookie = directorCookie,
+    ) =>
+      app.inject({
+        method,
+        url,
+        ...(payload === undefined ? {} : { payload }),
+        headers: {
+          cookie,
+          origin,
+          "x-csrf-token": csrf,
+          "idempotency-key": key,
+          ...(match ? { "if-match": match } : {}),
+        },
+      });
+    const self = await get("/api/v1/me");
+    expect(self.statusCode).toBe(200);
+    expect(self.headers["x-vtc-events-stage2"]).toBe("1");
+    expect(self.headers["x-vtc-events-drafts"]).toBe("1");
+    expect((await get("/api/v1/me", "")).headers["x-vtc-events-drafts"]).toBeUndefined();
+    expect((await get(adminEventsPath, traineeCookie)).statusCode).toBe(403);
+    expect(
+      (await write("POST", adminEventsPath, { draft: true }, undefined, newId(), traineeCookie))
+        .statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: adminEventsPath,
+          payload: { draft: true },
+          headers: { cookie: directorCookie, "idempotency-key": newId() },
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const sparse = { title: "Fictional draft" };
+    const createKey = newId();
+    const created = await write(
+      "POST",
+      adminEventsPath,
+      { draft: true, ...sparse },
+      undefined,
+      createKey,
+    );
+    expect(created.statusCode).toBe(201);
+    expect(created.headers.etag).toBe('"v1"');
+    const snapshot = created.json();
+    const eventId = snapshot.data.id;
+    expect(snapshot.data).toEqual({
+      id: eventId,
+      version: 1,
+      lifecycle: "draft",
+      updatedAt: now().toISOString(),
+      fields: sparse,
+    });
+    const draft = `${adminEventsPath}/drafts/${eventId}`;
+    const publication = `${adminEventsPath}/${eventId}/publication`;
+    expect((await get(draft, traineeCookie)).statusCode).toBe(403);
+    expect((await get(draft)).json().data).toEqual(snapshot.data);
+    expect(
+      (await write("POST", adminEventsPath, stagedInput(), undefined, createKey)).statusCode,
+    ).toBe(409);
+    expect((await write("POST", publication, {}, '"v1"')).statusCode).toBe(422);
+    expect(await count("events")).toBe(0);
+    expect(await count("outbox_events")).toBe(0);
+    expect((await get(`/api/v1/events/${eventId}`)).statusCode).toBe(404);
+    expect((await get(`/api/v1/public/events/${eventId}?locale=en`, "")).statusCode).toBe(404);
+    expect((await get(`/api/v1/events/${eventId}/my-response`)).statusCode).toBe(404);
+    expect((await get(`${adminEventsPath}/${eventId}/attendance`)).statusCode).toBe(404);
+    expect((await get("/api/v1/me/upcoming-event")).json().data).toBeNull();
+    await expect(
+      unit.run((tx) =>
+        routes.associateInTransaction(tx, trainee, {
+          eventId,
+          memberId: trainee.userId,
+          game: "ets2",
+        }),
+      ),
+    ).rejects.toMatchObject({ statusCode: 404 });
+
+    for (const invalid of [
+      { title: "   " },
+      { game: null, originCityId: id("draft_origin") },
+      { game: "ets2", originDepotId },
+      { game: "ets2", originCityId: id("draft_origin"), originDepotId: destinationDepotId },
+      { game: "ets2", destinationCityId: ats("draft_ats_city") },
+      { game: "ets2", requiredDlcIds: [ats("draft_ats_dlc")] },
+      { game: "ets2", requiredDlcIds: [id("draft_manual_a"), id("draft_manual_a")] },
+      { organizerMemberId: newId() },
+      { meetingAt: "2026-10-22T14:00:00.000Z", endsAt: "2026-10-22T13:00:00.000Z" },
+      { distanceKm: "0.0000000000000000001" },
+      { prescribedMassKg: "100000000000000000000" },
+      { unexpected: "Fictional unknown key" },
+    ])
+      expect((await write("PATCH", draft, invalid, '"v1"')).statusCode).toBe(422);
+    expect((await write("PATCH", draft, {})).statusCode).toBe(428);
+    expect((await write("PATCH", draft, {}, 'W/"v1"')).statusCode).toBe(422);
+    instant += 60_000;
+    const fields = stagedInput({
+      description: "Fictional retained description",
+      organizerMemberId: organizer.actor.userId,
+      visibility: "public",
+      originCityId: id("draft_origin"),
+      destinationCityId: id("draft_destination"),
+      originDepotId,
+      destinationDepotId,
+      distanceKm: "0",
+      prescribedCargoId: id("draft_load"),
+      prescribedTrailerTypeId: id("draft_trailer"),
+      prescribedMassKg: "0",
+      requiredDlcIds: [id("draft_manual_b"), id("draft_manual_a")],
+    });
+    const firstPatchKey = newId();
+    const firstPatch = await write("PATCH", draft, fields, '"v1"', firstPatchKey);
+    expect(firstPatch.statusCode).toBe(200);
+    expect(firstPatch.headers.etag).toBe('"v2"');
+    expect(firstPatch.json().data.fields).toMatchObject({
+      originDepotId,
+      destinationDepotId,
+      distanceKm: "0",
+      prescribedMassKg: "0",
+      requiredDlcIds: [...fields.requiredDlcIds].sort(),
+    });
+    expect((await get(draft)).json().data).toEqual(firstPatch.json().data);
+    expect((await write("PATCH", draft, { title: "Fictional stale" }, '"v1"')).statusCode).toBe(
+      412,
+    );
+    expect(
+      (
+        await write(
+          "PATCH",
+          draft,
+          { ...fields, title: "Fictional key collision" },
+          '"v1"',
+          firstPatchKey,
+        )
+      ).statusCode,
+    ).toBe(409);
+
+    const atsPatch = await write(
+      "PATCH",
+      draft,
+      { game: "ats", title: null, requiredDlcIds: [ats("draft_ats_dlc")] },
+      '"v2"',
+    );
+    expect(atsPatch.statusCode).toBe(200);
+    expect(atsPatch.json().data.fields).toEqual({
+      game: "ats",
+      requiredDlcIds: [ats("draft_ats_dlc")],
+    });
+    expect((await write("PATCH", draft, fields, '"v3"')).statusCode).toBe(200);
+    const historicalPatch = await write(
+      "PATCH",
+      draft,
+      { ...fields, requiredDlcIds: [...fields.requiredDlcIds].reverse() },
+      '"v1"',
+      firstPatchKey,
+    );
+    expect(historicalPatch.statusCode).toBe(200);
+    expect(historicalPatch.headers.etag).toBe('"v2"');
+    expect(historicalPatch.json().data).toEqual(firstPatch.json().data);
+    const createdAgain = await write(
+      "POST",
+      adminEventsPath,
+      { ...sparse, draft: true, game: null },
+      undefined,
+      createKey,
+    );
+    expect(createdAgain.statusCode).toBe(201);
+    expect(createdAgain.json().data).toEqual(snapshot.data);
+    expect(createdAgain.json().meta.requestId).not.toBe(snapshot.meta.requestId);
+    expect(await count("event_revisions")).toBe(0);
+
+    const other = (await write("POST", adminEventsPath, { draft: true })).json().data.id;
+    const draftPage = (await get(`${adminEventsPath}?period=drafts&limit=1&locale=ru`)).json().data;
+    const next = (
+      await get(`${adminEventsPath}?period=drafts&limit=1&locale=ru&cursor=${draftPage.nextCursor}`)
+    ).json().data;
+    expect(new Set([draftPage.items[0].id, next.items[0].id])).toEqual(new Set([eventId, other]));
+    expect(next.nextCursor).toBeNull();
+    expect(
+      (await get(`${adminEventsPath}?period=published&locale=ru&cursor=${draftPage.nextCursor}`))
+        .statusCode,
+    ).toBe(409);
+    expect(
+      (await get(`${adminEventsPath}?period=drafts&locale=en&cursor=${draftPage.nextCursor}`))
+        .statusCode,
+    ).toBe(409);
+
+    const mediaId = newId();
+    await unit.run(async (tx) => {
+      const c = unit.client(tx);
+      await c.update(eventMetadata).set({ mediaVersion: 3 }).where(eq(eventMetadata.id, eventId));
+      await c.insert(eventMedia).values({
+        id: mediaId,
+        eventId,
+        uploaderId: director.userId,
+        uploadKey: newId(),
+        generation: newId(),
+        state: "processing",
+        originalName: "fictional.png",
+        contentType: "image/png",
+        createdAt: now().toISOString(),
+        updatedAt: now().toISOString(),
+        nextCheckAt: now().toISOString(),
+      });
+    });
+    const publishKey = newId();
+    expect((await write("POST", publication, {}, '"v3"')).statusCode).toBe(412);
+    const published = await write("POST", `${publication}?locale=ru`, {}, '"v4"', publishKey);
+    expect(published.statusCode).toBe(200);
+    expect(published.headers.etag).toBe('"v1"');
+    const publicSnapshot = published.json();
+    expect(publicSnapshot.data).toMatchObject({
+      event: {
+        id: eventId,
+        version: 1,
+        originDepot: { id: originDepotId },
+        destinationDepot: { id: destinationDepotId },
+        distanceKm: "0",
+      },
+      organizerMemberId: organizer.actor.userId,
+      prescribedMassKg: "0",
+      responseCounts: { participating: 0, declined: 0 },
+    });
+    const [metadata] = await unit.run((tx) =>
+      unit.client(tx).select().from(eventMetadata).where(eq(eventMetadata.id, eventId)),
+    );
+    expect(metadata).toMatchObject({ publishedEventId: eventId, mediaVersion: 3 });
+    const [gallery] = await unit.run((tx) =>
+      unit.client(tx).select().from(eventMedia).where(eq(eventMedia.id, mediaId)),
+    );
+    expect(gallery).toMatchObject({ eventId, state: "processing" });
+    expect((await routes.history(director, eventId)).definitions).toEqual([
+      expect.objectContaining({ category: "published", version: 1, sequence: 1 }),
+    ]);
+    expect(await count("outbox_events")).toBe(1);
+    const [changes] = await control.query<RowDataPacket[]>(
+      "SELECT data FROM outbox_events WHERE type='event.changed'",
+    );
+    expect(changes[0]?.data).toMatchObject({ eventId, category: "created", changeSequence: 1 });
+    expect((await get(draft)).statusCode).toBe(404);
+    expect((await write("PATCH", draft, {}, '"v4"')).statusCode).toBe(409);
+    expect(
+      (await write("DELETE", `${adminEventsPath}/${eventId}`, undefined, '"v4"')).statusCode,
+    ).toBe(409);
+    expect(
+      (await get(`${adminEventsPath}?period=drafts`))
+        .json()
+        .data.items.map((row: { id: string }) => row.id),
+    ).toEqual([other]);
+
+    await routes.respond(director, eventId, newId(), 1, {
+      response: "declined",
+      reason: "Fictional own reason",
+    });
+    await routes.respond(trainee, eventId, newId(), 1, {
+      response: "declined",
+      reason: "Fictional other reason",
+    });
+    const admin = (await get(`${adminEventsPath}?locale=ru`)).json().data;
+    expect(admin.items).toEqual([
+      expect.objectContaining({
+        id: eventId,
+        lifecycle: "published",
+        definition: expect.objectContaining({
+          myResponse: { response: "declined", version: 2, declineReason: "Fictional own reason" },
+          responseCounts: { participating: 0, declined: 2 },
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(admin)).not.toContain("Fictional other reason");
+    await unit.run((tx) =>
+      unit
+        .client(tx)
+        .update(catalogCities)
+        .set({ nameRu: "Fictional renamed origin" })
+        .where(eq(catalogCities.id, id("draft_origin"))),
+    );
+    await identity.administer(director, organizer.actor.userId, newId(), 1, { kind: "deactivate" });
+    const publishedAgain = await write("POST", `${publication}?locale=ru`, {}, '"v4"', publishKey);
+    expect(publishedAgain.statusCode).toBe(200);
+    expect(publishedAgain.headers.etag).toBe('"v1"');
+    expect(publishedAgain.json().data).toEqual(publicSnapshot.data);
+    expect(publishedAgain.json().meta.requestId).not.toBe(publicSnapshot.meta.requestId);
+    expect((await write("POST", publication, {}, '"v4"', publishKey)).statusCode).toBe(409);
+
+    const discardKey = newId(),
+      discard = `${adminEventsPath}/${other}`;
+    const withBody = await write("DELETE", discard, { invalid: true }, '"v1"', discardKey);
+    expect(withBody.statusCode).toBe(422);
+    const discarded = await write("DELETE", discard, undefined, '"v1"', discardKey);
+    expect(discarded.statusCode).toBe(200);
+    expect(discarded.headers.etag).toBe('"v2"');
+    expect(discarded.json().data).toEqual({ id: other, version: 2, lifecycle: "discarded" });
+    expect((await write("DELETE", discard, undefined, '"v1"', discardKey)).json().data).toEqual(
+      discarded.json().data,
+    );
+    expect((await get(`${adminEventsPath}/drafts/${other}`)).statusCode).toBe(404);
+    expect((await get(`${adminEventsPath}?period=drafts`)).json().data.items).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+
+test("draft receipts recheck authority and fail closed on unsupported, private or mismatched stored data", async () => {
+  const routes = draftEvents();
+  if (!routes.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const drafts = routes.drafts;
+  const staff = await member(["deputy_director"]);
+  const key = newId();
+  const body = { title: "Fictional receipt" };
+  const saved = await drafts.create(staff.actor, key, body);
+  const eventId = saved.data.id;
+  const updateKey = newId();
+  await drafts.update(staff.actor, eventId, updateKey, 1, {});
+  await identity.administer(director, staff.actor.userId, newId(), 1, {
+    kind: "roles",
+    roles: ["dispatcher"],
+  });
+  await expect(drafts.create(staff.actor, key, body)).rejects.toMatchObject({ statusCode: 401 });
+  await expect(drafts.update(staff.actor, eventId, updateKey, 1, {})).rejects.toMatchObject({
+    statusCode: 401,
+  });
+  const first = await drafts.create(director, key, body);
+  expect(first.data.id).not.toBe(eventId);
+  for (const corrupted of [
+    { schemaVersion: 2, route: "draft_create", data: first.data },
+    { schemaVersion: 1, route: "draft_update", data: first.data },
+    { schemaVersion: 1, route: "draft_create", data: { ...first.data, version: 2 } },
+    {
+      schemaVersion: 1,
+      route: "draft_create",
+      data: { ...first.data, private: "Fictional unsafe receipt" },
+    },
+  ]) {
+    await control.execute(
+      "UPDATE event_workflow_commands SET result=? WHERE actor_id=? AND route='draft_create' AND `key`=?",
+      [JSON.stringify(corrupted), Buffer.from(director.userId), Buffer.from(key)],
+    );
+    await expect(drafts.create(director, key, body)).rejects.toThrow(
+      "EVENT_WORKFLOW_RECEIPT_INVALID",
+    );
+  }
+});
+
+test("draft publication rolls back its writes on failure and serializes concurrent edits and exact retries", async () => {
+  const effects = createOutbox(unit);
+  const fail = draftEvents({
+    outbox: {
+      async append(tx, event) {
+        await effects.append(tx, event);
+        throw new Error("FICTIONAL_DRAFT_PUBLICATION_ROLLBACK");
+      },
+    },
+  });
+  if (!fail.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const created = await fail.drafts.create(director, newId(), stagedInput());
+  const id = created.data.id;
+  const key = newId();
+  const auditBefore = await count("audit_entries");
+  await expect(fail.drafts.publish(director, id, key, 1, "en")).rejects.toThrow(
+    "FICTIONAL_DRAFT_PUBLICATION_ROLLBACK",
+  );
+  for (const table of [
+    "events",
+    "event_revisions",
+    "event_revision_details",
+    "event_revision_dlcs",
+    "outbox_events",
+  ])
+    expect(await count(table)).toBe(0);
+  expect(await count("audit_entries")).toBe(auditBefore);
+  expect((await fail.drafts.get(director, id)).data).toEqual(created.data);
+
+  const entered = deferred<void>(),
+    release = deferred<void>();
+  const racing = draftEvents({
+    outbox: {
+      async append(tx, event) {
+        entered.resolve();
+        await release.promise;
+        await effects.append(tx, event);
+      },
+    },
+  });
+  if (!racing.drafts) throw new Error("DRAFT_FIXTURE_REQUIRED");
+  const drafts = racing.drafts;
+  const publish = drafts.publish(director, id, key, 1, "en");
+  await Promise.race([entered.promise, publish]);
+  const edit = drafts.update(deputy, id, newId(), 1, { title: "Fictional concurrent edit" });
+  const replay = drafts.publish(director, id, key, 1, "en");
+  const settled = Promise.allSettled([publish, edit, replay]);
+  release.resolve();
+  const [published, patched, repeated] = await settled;
+  expect(published).toMatchObject({
+    status: "fulfilled",
+    value: { data: { event: { id, version: 1 } } },
+  });
+  expect(repeated).toEqual(published);
+  expect(patched).toMatchObject({ status: "rejected", reason: { statusCode: 409 } });
+  expect(await count("events")).toBe(1);
+  expect(await count("event_revisions")).toBe(1);
+  expect(await count("outbox_events")).toBe(1);
 });
