@@ -14,6 +14,7 @@ import {
   CATALOG_LOGO_BULK_MAX_BYTES,
   CATALOG_LOGO_MAX_BYTES,
 } from "../../apps/api/src/modules/catalogs/config.ts";
+import { cursorCodec } from "../../apps/api/src/modules/catalogs/cursor.ts";
 import { type Catalogs, createCatalogs } from "../../apps/api/src/modules/catalogs/service.ts";
 import {
   type Actor,
@@ -44,6 +45,7 @@ const origin = "http://127.0.0.1:4173",
   password = "Fictional-company-passphrase-42",
   boundary = "vtc-company-boundary";
 const identityConfig = { secret: randomBytes(32).toString("hex"), origin, production: false };
+const catalogSettings = catalogConfig();
 let instant = Date.parse("2026-11-10T12:00:00.000Z");
 const now = () => new Date(instant);
 let control: Connection,
@@ -83,7 +85,7 @@ beforeAll(async () => {
   await reset(control);
   await runMigrations(guardedSettings());
   identity = createIdentity(unit, identityConfig, { accessEvents: identityAccessEvents(unit) });
-  catalogs = createCatalogs(unit, catalogConfig(), { identity }, now);
+  catalogs = createCatalogs(unit, catalogSettings, { identity }, now);
   await identity.bootstrap({
     email: "company-director@example.invalid",
     name: "Fictional Director",
@@ -533,6 +535,78 @@ test("companies are listed by their canonical name in every locale, with stable 
   await expect(
     catalogs.list(director, "companies", { game: "ets2", regionId: newId() }),
   ).rejects.toMatchObject({ statusCode: 422 });
+});
+
+test("cursors issued under the localized order are refused where the canonical name now orders", async () => {
+  const alpha = await company("l_alpha", "ets2", { nameEn: "Alpha Legacy" }),
+    bravo = await company("l_bravo", "ets2", { nameEn: "Bravo Legacy" });
+  await company("l_charlie", "ets2", { nameEn: "Charlie Legacy" });
+  const port = await city("l_port", "ets2", { nameEn: "Legacy Port", nameRu: "Порт" }),
+    bay = await city("l_bay", "ets2", { nameEn: "Legacy Bay" });
+  const alphaDepot = await depot(alpha.id, port.id);
+  await depot(bravo.id, port.id);
+  await depot(alpha.id, bay.id);
+  const codec = cursorCodec(catalogSettings.cursorKey);
+  const session = [driver.userId, driver.sessionId, driver.accessEpoch] as const;
+  const conflict = { statusCode: 409, publicCode: "VERSION_CONFLICT" };
+
+  // A fresh Russian company cursor pages by the canonical name.
+  const query = { game: "ets2", locale: "ru", search: "Legacy", limit: 1 } as const;
+  const first = await catalogs.list(driver, "companies", query);
+  expect(first.items.map((item) => item.id)).toEqual([alpha.id]);
+  const fresh = await catalogs.list(driver, "companies", {
+    ...query,
+    cursor: first.nextCursor as string,
+  });
+  expect(fresh.items.map((item) => item.id)).toEqual([bravo.id]);
+  // The binding of a cursor written before the change, without the canonical-name mark.
+  const listBinding = [...session, "companies", "ets2", "Legacy", false, null, null, "ru"];
+  const after = JSON.stringify(["Alpha Legacy", alpha.id]);
+  await expect(
+    catalogs.list(driver, "companies", { ...query, cursor: codec.write(listBinding, after) }),
+  ).rejects.toMatchObject(conflict);
+  // The same position with the mark is accepted, so the refusal is the missing mark alone.
+  const marked = codec.write([...listBinding, "canonical-name"], after);
+  expect(
+    (await catalogs.list(driver, "companies", { ...query, cursor: marked })).items.map(
+      (item) => item.id,
+    ),
+  ).toEqual([bravo.id]);
+
+  // Companies in a city: ordered by the canonical company name, so old cursors are refused.
+  const inCity = { game: "ets2", cityId: port.id, locale: "ru", limit: 1 } as const;
+  const depotFirst = await catalogs.listDepots(driver, inCity);
+  expect(depotFirst.items.map((row) => row.id)).toEqual([alphaDepot.id]);
+  const byCompany = [...session, "depots", "ets2", null, port.id, null, null, false, "ru"];
+  const depotAfter = JSON.stringify(["Alpha Legacy", alphaDepot.id]);
+  await expect(
+    catalogs.listDepots(driver, { ...inCity, cursor: codec.write(byCompany, depotAfter) }),
+  ).rejects.toMatchObject(conflict);
+  expect(
+    (
+      await catalogs.listDepots(driver, {
+        ...inCity,
+        cursor: codec.write([...byCompany, "canonical-name"], depotAfter),
+      })
+    ).items.map((row) => row.company.id),
+  ).toEqual([bravo.id]);
+
+  // Cities of one company keep their localized order, so their earlier cursors stay valid.
+  const ofCompany = { game: "ets2", companyId: alpha.id, locale: "ru", limit: 1 } as const;
+  const cityFirst = await catalogs.listDepots(driver, ofCompany);
+  const [firstCity] = cityFirst.items;
+  if (!firstCity) throw new Error("MISSING_SYNTHETIC_DEPOT");
+  const byCity = [...session, "depots", "ets2", alpha.id, null, null, null, false, "ru"];
+  const kept = await catalogs.listDepots(driver, {
+    ...ofCompany,
+    cursor: codec.write(byCity, JSON.stringify([firstCity.city.label.label, firstCity.id])),
+  });
+  expect(kept.items.map((row) => row.city.id)).toEqual(
+    (
+      await catalogs.listDepots(driver, { ...ofCompany, cursor: cityFirst.nextCursor as string })
+    ).items.map((row) => row.city.id),
+  );
+  expect(kept.items).toHaveLength(1);
 });
 
 test("companies in a city and cities of a company read in name order with bound cursors", async () => {

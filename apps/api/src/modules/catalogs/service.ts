@@ -87,6 +87,9 @@ const maintenanceBinding = ({ hidden, untranslated, logo }: ListFilters) =>
   hidden || untranslated || logo
     ? [{ hidden: hidden ?? null, untranslated: untranslated ?? false, logo: logo ?? null }]
     : [];
+// Canonical-name order replaced the localized one for DLCs, companies and company-ordered depots;
+// the mark keeps a cursor issued under the old order from being read under the new one.
+const canonicalOrderBinding = (canonical: boolean) => (canonical ? ["canonical-name"] : []);
 
 function changesFields(row: Record<string, unknown>, fields: Record<string, unknown>) {
   return Object.entries(fields).some(([field, value]) => {
@@ -1045,6 +1048,7 @@ export function createCatalogs(
             query.regionId ?? null,
             locale,
             ...maintenanceBinding(query),
+            ...canonicalOrderBinding(isCanonicalList(list)),
           ];
         let after: [string, string] | null = null;
         if (query.cursor) {
@@ -1357,6 +1361,8 @@ export function createCatalogs(
           includeHidden,
           locale,
           ...maintenanceBinding(query),
+          // Cities of one company still read by their localized name.
+          ...canonicalOrderBinding(query.companyId === undefined),
         ];
         let after: [string, string] | null = null;
         if (query.cursor) {
