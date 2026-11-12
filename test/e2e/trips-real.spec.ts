@@ -1247,6 +1247,7 @@ test(
           ownerId: fixture.userId,
           limit: "10",
           order: "completion_desc",
+          locale: "en",
         });
         expectOnlyAcceptedCompanyTrip(recent.data, completed.tripId, fixture.userId);
         const history = visitor.getByRole("region", { name: "Accepted trips", exact: true });
