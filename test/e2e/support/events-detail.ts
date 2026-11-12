@@ -120,7 +120,19 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
     height: 320,
     byteLength: images[index]?.length ?? 0,
   }));
-  const state = { missingMedia: false, mediaFailure: false, requests: [] as URL[], member };
+  const state = {
+    missingMedia: false,
+    mediaFailure: false,
+    staleCancellation: false,
+    cancellations: [] as {
+      body: unknown;
+      etag: string | undefined;
+      key: string | undefined;
+      locale: string | null;
+    }[],
+    requests: [] as URL[],
+    member,
+  };
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.pathname.startsWith("/api/v1/")) state.requests.push(url);
@@ -129,17 +141,33 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname.slice("/api/v1".length);
-    const envelope = (data: unknown) =>
+    const envelope = (data: unknown, version = 1) =>
       route.fulfill({
         json: { data, meta: { requestId: "synthetic-event-detail" } },
-        headers: { ETag: '"v1"' },
+        headers: { ETag: `"v${version}"` },
       });
     if (role && path === "/me") {
       const self = accountFixture(locale);
       self.data.member.roles = [role];
       self.data.preferences.displayTimezone = "Europe/Warsaw";
       if (manager) self.data.capabilities.push("events.manage");
-      return route.fulfill({ json: self });
+      return route.fulfill({ json: self, headers: { "X-VTC-Events-Stage2": "1" } });
+    }
+    if (manager && request.method() === "POST" && path === `/admin${eventPath}/cancellation`) {
+      const headers = request.headers();
+      state.cancellations.push({
+        body: request.postDataJSON(),
+        etag: headers["if-match"],
+        key: headers["idempotency-key"],
+        locale: url.searchParams.get("locale"),
+      });
+      event.version++;
+      if (state.staleCancellation) {
+        state.staleCancellation = false;
+        return route.fulfill({ status: 412 });
+      }
+      event.status = "cancelled";
+      return envelope(member, event.version);
     }
     if (request.method() !== "GET") return route.fallback();
     if (role && path === "/me/upcoming-event") {
@@ -184,7 +212,7 @@ export async function mockStructuredDetail(page: Page, locale: Locale, role?: Ro
         nextCursor: null,
       });
     if (path === `/public${eventPath}`) return envelope(event);
-    if (role && path === eventPath) return envelope(member);
+    if (role && path === eventPath) return envelope(member, event.version);
     if (role && path === `${eventPath}/media`)
       return state.missingMedia || state.mediaFailure
         ? route.fulfill({ status: state.missingMedia ? 404 : 503 })

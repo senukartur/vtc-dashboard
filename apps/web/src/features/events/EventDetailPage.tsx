@@ -88,6 +88,7 @@ function refreshPublicDetail(client: QueryClient, id: string) {
 export function EventDetailPage({ publicView = false }: { publicView?: boolean }) {
   const { eventId = "" } = useParams();
   const session = useSession();
+  const stage2Enabled = "eventsStage2Enabled" in session && session.eventsStage2Enabled === true;
   return publicView ? (
     <PublicDetail key={eventId} id={eventId} />
   ) : (
@@ -98,8 +99,10 @@ export function EventDetailPage({ publicView = false }: { publicView?: boolean }
         session.self?.member.id,
         session.self?.identityEpoch,
         session.self?.capabilities,
+        stage2Enabled,
       ])}
       id={eventId}
+      stage2Enabled={stage2Enabled}
     />
   );
 }
@@ -202,14 +205,14 @@ function EventDetails({
   );
 }
 
-function MemberDetail({ id }: { id: string }) {
+function MemberDetail({ id, stage2Enabled: staged }: { id: string; stage2Enabled: boolean }) {
   const session = useSession();
   const capabilities = session.self?.capabilities ?? [];
   const allowed = capabilities.includes("company.read");
   const manager = capabilities.includes("events.manage");
   const respond = capabilities.includes("events.respond");
   const locale = useDetailLocale();
-  const { query, snapshot: current } = useMemberDetailRead(id, locale, allowed);
+  const { query, snapshot: current } = useMemberDetailRead(id, locale, allowed, staged);
   const cancel = useEventStage2Command<"EventStage2EnvelopeMember">();
   const client = useQueryClient();
   const { t } = useTranslation("events");
@@ -220,7 +223,6 @@ function MemberDetail({ id }: { id: string }) {
   }, [current, query.isPending]);
   const snapshot = current ?? (query.isPending ? previousLocale.current : undefined);
   const member = snapshot?.member;
-  const staged = snapshot?.staged === true;
   const event = member?.event;
   const etag = event && snapshot?.etag === `"v${event.version}"` ? snapshot.etag : null;
   const now = useEventClock(event?.startsAt ?? null);

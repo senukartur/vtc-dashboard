@@ -3,13 +3,7 @@ import type { Page, Request, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { stage2Fixture, stage2LegacyEventId, stage2MediaId } from "../fixtures/events-stage-2.ts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
-import {
-  eventFixture,
-  eventId,
-  mockEventDetail,
-  mockEvents,
-  selectPastReportEvent,
-} from "./support/events.ts";
+import { eventFixture, eventId, mockEvents, selectPastReportEvent } from "./support/events.ts";
 import {
   coverCaption,
   detailsPath,
@@ -19,6 +13,7 @@ import {
   nextUnreported,
   unreported,
 } from "./support/events-detail.ts";
+import { mockEventsStage2 } from "./support/events-stage-2.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -124,7 +119,7 @@ for (const status of [412, 503, 429]) {
     `attendance page two keeps reviewable drafts and safe authority after ${status}`,
     browserCase(["@functional"]),
     async ({ page }, info) => {
-      const state = await mockEventDetail(page, true);
+      const state = await mockEvents(page, true);
       state.attendancePages = true;
       state.event.startsAt = "2020-10-25T13:00:00.000Z";
       state.event.meetingAt = "2020-10-25T12:00:00.000Z";
@@ -173,7 +168,7 @@ test(
   "attendance lost receipt retries the original decision after refreshed collection authority",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page, true);
+    const state = await mockEvents(page, true);
     state.attendancePages = true;
     state.event.startsAt = "2020-10-25T13:00:00.000Z";
     state.event.meetingAt = "2020-10-25T12:00:00.000Z";
@@ -202,7 +197,7 @@ test(
   "changing own RSVP from participants page two resets to the current first page",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     state.response = { response: "participating", declineReason: null, version: 2 };
     state.participantPages = true;
     await page.goto(`/account/events/${eventId}`);
@@ -236,7 +231,7 @@ test(
   "changing own RSVP from decliners page two resets to the current first page",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     state.response = { response: "declined", declineReason: "Fictional old reason", version: 2 };
     state.declinerPages = true;
     await page.goto(`/account/events/${eventId}`);
@@ -355,7 +350,7 @@ test(
   "nearest event keeps one request across locale changes and preserves accessible unanswered header",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     await page.goto(`/account/events/${eventId}`);
     await expect(page.locator(".event-nearest a")).toHaveAttribute(
       "href",
@@ -375,7 +370,7 @@ test(
   "event loading and unknown command results preserve exact retry identity and historical load",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    const state = await mockEventDetail(page, true);
+    const state = await mockEvents(page, true);
     let release = () => {};
     state.readGate = new Promise<void>((resolve) => {
       release = resolve;
@@ -456,7 +451,7 @@ for (const locale of ["en", "ru"] as const) {
     `events ${locale} public and member views fit viewport and keep private reads scoped`,
     browserCase(["@layout"]),
     async ({ page }, info) => {
-      const state = await mockEventDetail(page, false, locale);
+      const state = await mockEvents(page, false, locale);
       if (locale === "ru") {
         state.event.title = "Фиктивный конвой компании с длинным названием маршрута "
           .repeat(3)
@@ -543,7 +538,7 @@ test(
   "RSVP prevents duplicates, retains decline input on stale and clears private state on session loss",
   browserCase(["@functional", "@smoke-events"]),
   async ({ page }, info) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     await page.goto(`/account/events/${eventId}`);
     await page
       .getByRole("group", { name: "Your response", exact: true })
@@ -591,7 +586,7 @@ test(
   "organizer stale edit preserves draft, cancellation dialog restores focus, attendance records intentional rows",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    const state = await mockEventDetail(page, true);
+    const state = await mockEvents(page, true);
     await page.goto(`/account/events/${eventId}`);
     const edit = page.getByRole("button", { name: "Edit event", exact: true });
     await edit.click();
@@ -689,7 +684,7 @@ test(
   "public list empty error recovery cursor reset cancelled and inaccessible states are honest",
   browserCase(["@functional"]),
   async ({ page }, info) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     state.listStatus = 503;
     await page.goto("/events?period=past&cursor=obsolete");
     await catalogLanguage(page);
@@ -913,17 +908,18 @@ for (const role of ["director", "deputy_director"] as const) {
 }
 
 test(
-  "leadership cancellation retains its reason across stale definition authority",
+  "Stage 2 leadership cancellation retains its reason across stale definition authority",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page, true);
-    await page.goto(`/account/events/${eventId}`);
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    const state = await mockStructuredDetail(page, "en", "director");
+    await page.goto(detailsPath);
     await page.getByRole("button", { name: "Cancel event", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const reason = dialog.getByLabel("Private reason");
     const confirm = dialog.getByRole("button", { name: "Confirm cancellation" });
     await reason.fill("Fictional snow closure");
-    state.failNext = 412;
+    state.staleCancellation = true;
     await confirm.click();
     await expect(dialog.getByRole("alert")).toContainText("changed");
     await expect(reason).toHaveValue("Fictional snow closure");
@@ -933,12 +929,12 @@ test(
     await expect(page.getByRole("region", { name: "Your response" })).toContainText(
       "Your response before the start",
     );
-    expect(state.commands.map(({ body }) => body)).toEqual([
-      { reason: "Fictional snow closure" },
-      { reason: "Fictional snow closure" },
+    expect(state.cancellations.map(({ body, etag, locale }) => ({ body, etag, locale }))).toEqual([
+      { body: { reason: "Fictional snow closure" }, etag: '"v1"', locale: "en" },
+      { body: { reason: "Fictional snow closure" }, etag: '"v2"', locale: "en" },
     ]);
-    expect(state.preconditions).toEqual(['"v1"', '"v2"']);
-    expect(state.keys[0]).not.toBe(state.keys[1]);
+    expect(state.cancellations[0]?.key).toBeTruthy();
+    expect(state.cancellations[0]?.key).not.toBe(state.cancellations[1]?.key);
   },
 );
 
@@ -946,7 +942,7 @@ test(
   "a member can clear a response immediately without a reason or Save",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page);
+    const state = await mockEvents(page);
     state.response = { version: 3, response: "participating", declineReason: null };
     await page.goto(`/account/events/${eventId}`);
     const section = page.getByRole("region", { name: "Your response" });
@@ -968,12 +964,51 @@ test(
   },
 );
 
+function trackMemberDetailReads(page: Page, path: string) {
+  const locales: (string | null)[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (request.method() === "GET" && url.pathname === `/api/v1${path}`)
+      locales.push(url.searchParams.get("locale"));
+  });
+  return locales;
+}
+
 test(
-  "the default-off API negotiates legacy detail, counts, roster and cancellation",
+  "member detail selects one localized Stage 2 read from the session flag",
   browserCase(["@functional"]),
   async ({ page }) => {
-    const state = await mockEventDetail(page, true);
-    state.stage2Status = 422;
+    await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+    await mockEventsStage2(page, "member");
+    const locales = trackMemberDetailReads(page, eventPath);
+    await page.goto(detailsPath);
+    await expect(page.getByRole("heading", { name: "Fictional northern convoy" })).toBeVisible();
+    await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
+    expect(locales).toEqual(["en"]);
+  },
+);
+
+for (const status of [404, 422, 503] as const) {
+  test(
+    `member detail stays on Stage 2 after HTTP ${status}`,
+    browserCase(["@functional"]),
+    async ({ page }) => {
+      await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
+      const state = await mockEventsStage2(page, "member");
+      state.statusByRequest.set(`GET ${eventPath}`, status);
+      const locales = trackMemberDetailReads(page, eventPath);
+      await page.goto(detailsPath);
+      await expect(page.locator(".events-detail").getByRole("alert")).toBeVisible();
+      expect(locales).toEqual(["en"]);
+    },
+  );
+}
+
+test(
+  "member detail uses legacy reads and cancellation without the Stage 2 session flag",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const state = await mockEvents(page, true);
     state.extraParticipants = [
       {
         member: {
@@ -985,16 +1020,10 @@ test(
       },
     ];
     await page.addInitScript(() => localStorage.setItem("vtc.locale", "en"));
-    const detailPath = `/api/v1/events/${eventId}`;
-    const reads: (string | null)[] = [];
-    page.on("request", (request) => {
-      const url = new URL(request.url());
-      if (request.method() === "GET" && url.pathname === detailPath)
-        reads.push(url.searchParams.get("locale"));
-    });
+    const reads = trackMemberDetailReads(page, `/events/${eventId}`);
     await page.goto(`/account/events/${eventId}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
-    expect(reads).toEqual(["en", null]);
+    expect(reads).toEqual([null]);
     await expect(page.getByRole("region", { name: "Gallery" })).toContainText(
       "No images have been added to this event.",
     );
@@ -1002,7 +1031,13 @@ test(
     await expect(page.locator(".events-counts")).toContainText("Participating: 1");
     await expect(page.getByRole("link", { name: "Fictional legacy participant" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit event" })).toBeEnabled();
+    const roster = page.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === `/api/v1/admin/events/${eventId}/attendance`,
+    );
     await page.getByRole("button", { name: "View responses and attendance" }).click();
+    expect(new URL((await roster).url()).searchParams.has("view")).toBe(false);
     await expect(
       page.getByRole("combobox", { name: "Actual attendance · Fictional Yukon Member" }),
     ).toBeVisible();

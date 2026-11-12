@@ -2,7 +2,7 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
-import { eventFixture, eventId, mockEventDetail, mockEvents } from "./support/events.ts";
+import { eventFixture, eventId, mockEvents } from "./support/events.ts";
 import {
   coverCaption,
   decoyCompanyId,
@@ -118,10 +118,10 @@ async function quiet(page: Page) {
 async function openDetail(
   page: Page,
   locale: "en" | "ru" = "en",
-  setup: (state: Awaited<ReturnType<typeof mockEventDetail>>) => void = () => {},
+  setup: (state: Awaited<ReturnType<typeof mockEvents>>) => void = () => {},
   staff = false,
 ) {
-  const state = await mockEventDetail(page, staff, locale);
+  const state = await mockEvents(page, staff, locale);
   setup(state);
   await page.goto(`/account/events/${eventId}`);
   if (locale !== "en") await catalogLanguage(page, locale);
@@ -470,17 +470,18 @@ test(
 );
 
 test(
-  "L6 embedded counts stay readable when a member list fails",
+  "L6 counts and list failures stay in their section and are never shown as zero",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     const state = await openDetail(page, "en", (s) => {
+      s.countsStatus = 503;
       s.declinersStatus = 503;
     });
     const participants = page.getByRole("region", { name: text.en.participants, exact: true }),
       decliners = participants.getByRole("region", { name: text.en.cantAttend, exact: true }),
       signedUp = participants.getByRole("region", { name: text.en.signedUp, exact: true });
-    await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
-    expect(state.requests).not.toContain(`GET /events/${eventId}/response-counts`);
+    await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
+    await expect(participants.locator(".events-counts")).not.toContainText(/\d/);
     await expect(decliners.getByRole("alert")).toBeVisible();
     await expect(decliners.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
     await expect(workspace(page).getByRole("alert")).toHaveCount(1);
@@ -503,7 +504,21 @@ test(
     await settled;
     await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
     await expect(decliners).toContainText("No one has declined.");
+    const counts = participants.getByRole("button", { name: "Load counts again", exact: true });
+    await counts.focus();
+    settled = read(page, "/response-counts", 503);
+    await page.keyboard.press("Enter");
+    await settled;
+    await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
+    await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
+    state.countsStatus = 200;
+    await counts.focus();
+    settled = read(page, "/response-counts", 200);
+    await page.keyboard.press("Enter");
+    await settled;
+    await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
     await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
+    await expect(counts).toHaveCount(0);
     await quiet(page);
   },
 );
@@ -630,7 +645,7 @@ test(
   "L7 the public detail on a phone in Russian makes no private reads",
   browserCase(["@layout", "@viewport-mobile"]),
   async ({ page }, info) => {
-    const state = await mockEventDetail(page, false, "ru");
+    const state = await mockEvents(page, false, "ru");
     state.event.title = "Фиктивный открытый конвой по длинному северному маршруту";
     state.event.description = "Фиктивный сбор.\nВторая строка.";
     await page.goto(`/events/${eventId}`);
