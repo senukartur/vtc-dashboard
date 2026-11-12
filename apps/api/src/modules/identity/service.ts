@@ -1847,13 +1847,26 @@ export function createIdentity(
       actor: Actor,
       targetIds: string[] = [],
       capability = "company.read",
+      organizerId?: string,
     ) {
       const current = await lockCompany(tx);
-      const locked = await lockMembers(tx, [...targetIds, actor.userId]);
+      const locked = await lockMembers(tx, [
+        ...targetIds,
+        actor.userId,
+        ...(organizerId ? [organizerId] : []),
+      ]);
       await checkActor(tx, actor, current, locked.get(actor.userId));
       requireCapability(actor, capability);
       for (const id of targetIds) if (!locked.has(id)) throw identityError(404);
-      return { companyId: current.id, members: locked };
+      const [organizer] =
+        organizerId && locked.get(organizerId)?.status === "active"
+          ? await client(tx)
+              .select({ nickname: user.name })
+              .from(user)
+              .where(eq(user.id, organizerId))
+              .for("share")
+          : [];
+      return { companyId: current.id, members: locked, organizer: organizer?.nickname ?? null };
     },
     async eventRosterInTransaction(tx: TxContext, after: string | null, limit: number) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 101)

@@ -216,6 +216,24 @@ Watch a jobs tick and memory afterwards. With every module on, a jobs pass needs
 
 `activation rollback` restores the previous configuration, and routes answer 404 again. It keeps the module grants, which the privilege check accepts only because `apply` recorded the exact rights it installed in `state/stage-grants-installed.json`; a host without that record must match the baseline exactly. It does not remove seeded rows, and no operation does: `restore` proves an export in isolated volumes and never switches active data. Removing them is a separate owner-run recovery from the export whose ID `stage-seed` printed.
 
+### Published event route activation
+
+VTC-124 uses the already-published `0028_faulty_caretaker` migration and starts with `EVENTS_ROUTE_ENABLED` off. An ordinary release keeps the current control files and private settings. A separately authorized activation uses the reviewed controls and staged profile. Verify migration `0028` is applied, then use the [staged module activation commands](#stage-product-modules-and-synthetic-data) to install and read back the prepared grants. The profile enables `EVENTS_ROUTE_ENABLED` alongside Events and Catalogs through the shared API and jobs environment. Runtime needs SELECT and INSERT on `event_revision_details` and `event_revision_dlcs`. Jobs needs SELECT on `event_revision_details` for material classification and repair. These additions grant no history UPDATE or DELETE. Keep the stable Events key.
+
+For a local Compose checkout, stop any separate jobs invocation and use `node scripts/setup-local.mjs` if the private `.env` is absent. Set `IDENTITY_ENABLED=true`, `EVENTS_ENABLED=true`, `CATALOGS_ENABLED=true` and `EVENTS_ROUTE_ENABLED=true` in that file. Configure distinct valid `IDENTITY_SECRET`, `EVENTS_CURSOR_KEY` and `CATALOGS_CURSOR_KEY`. From the same checkout run:
+
+```sh
+docker compose stop app
+docker compose up -d --wait db
+docker compose build app
+docker compose run --rm --no-deps app pnpm db:migrate
+docker compose up -d --wait app
+```
+
+For notification verification, keep the existing Notifications prerequisites configured in the same file. Invoke a local worker from the same Compose image and environment with `docker compose run --rm --no-deps app sh -c "pnpm build && pnpm jobs run"`. If using Compose Watch, restart it after recreating the app. An existing local account with the default full schema permissions already covers these tables. Restricted accounts need the reviewed grants listed above.
+
+Drain old workers before enabling the setting and run the same compatible release and setting on the API and jobs runner. Once any enabled writer commits a marked revision, old writers or flag-off processes are outside the supported rollback boundary. They can drop structured values on subsequent writes and interpret new route notifications using legacy text. Old API releases can also fail to serialize newly absent text. After that point, keep compatible API and jobs processes and their grants, or fence writes and jobs while following the reviewed restore or forward recovery procedure. A flag change alone does not undo committed revisions.
+
 ### Stage catalogs
 
 A trip from a real telemetry client stays in review until staff supply the missing facts, and those selections need catalog rows. Rows live in the database and are maintained with the [catalog administration page](../development/catalog-ui.md). The repository carries no game-derived data, and there is no trust record or evidence file to configure.

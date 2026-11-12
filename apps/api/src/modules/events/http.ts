@@ -4,8 +4,13 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { csrfProtection } from "../identity/http.js";
 import { type Actor, type Identity, identityError } from "../identity/service.js";
 import type { Page } from "./pagination.js";
+import type { EventLocale } from "./published-route.js";
 import type { Events } from "./service.js";
+
 type S = components["schemas"];
+type LocaleQuery = { locale?: EventLocale };
+type CreationInput = S["EventInput"] | S["EventStage2PublishedCreationInput"];
+type UpdateInput = S["EventInput"] | S["EventStage2Input"];
 const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const object = (properties: Record<string, unknown>, required: string[] = []) => ({
   type: "object",
@@ -30,6 +35,10 @@ export async function registerEventRoutes(
 ) {
   const actors = new WeakMap<FastifyRequest, Actor>(),
     csrf = csrfProtection(identity.config);
+  const stage2 = events.publishedRoutesEnabled;
+  const localized = object(stage2 ? { locale: { type: "string", enum: ["en", "ru"] } } : {});
+  const wire = (legacy: string, staged: string) =>
+    stage2 ? { oneOf: [ref(legacy), ref(staged)] } : ref(legacy);
   const owned = (p: string) =>
     p.startsWith("/api/v1/events") ||
     p.startsWith("/api/v1/public/events") ||
@@ -93,17 +102,24 @@ export async function registerEventRoutes(
       },
       async (r) => envelope(r, await events.list(publicOnly ? null : await actor(r), r.query)),
     );
-    app.get<{ Params: { eventId: string } }>(
+    app.get<{ Params: { eventId: string }; Querystring: LocaleQuery }>(
       `${prefix}/:eventId`,
       {
         schema: {
           params,
-          querystring: object({}),
-          response: { 200: ref(publicOnly ? "EnvelopeEventPublic" : "EnvelopeEventMember") },
+          querystring: localized,
+          response: {
+            200: publicOnly
+              ? wire("EnvelopeEventPublic", "EventStage2EnvelopePublic")
+              : wire("EnvelopeEventMember", "EventStage2EnvelopeMember"),
+          },
         },
       },
       async (r, reply) => {
-        const result = await events.get(publicOnly ? null : await actor(r), r.params.eventId);
+        const viewer = publicOnly ? null : await actor(r);
+        const result = r.query.locale
+          ? await events.getPublished(viewer, r.params.eventId, r.query.locale)
+          : await events.get(viewer, r.params.eventId);
         reply.header("ETag", `"v${result.version}"`);
         return envelope(r, result.data);
       },
@@ -171,41 +187,79 @@ export async function registerEventRoutes(
     },
     async (r) => envelope(r, await events.responseCounts(await actor(r), r.params.eventId)),
   );
-  app.post<{ Body: S["EventInput"] }>(
+  app.post<{ Body: CreationInput; Querystring: LocaleQuery }>(
     "/api/v1/admin/events",
-    { schema: { body: ref("EventInput"), response: { 201: ref("EnvelopeEventMember") } } },
+    {
+      schema: {
+        body: wire("EventInput", "EventStage2PublishedCreationInput"),
+        ...(stage2 ? { querystring: localized } : {}),
+        response: { 201: wire("EnvelopeEventMember", "EventStage2EnvelopeCreation") },
+      },
+    },
     async (r, reply) => {
-      const result = await events.create(await actor(r), key(r), r.body);
+      const current = await actor(r);
+      let result: Awaited<ReturnType<Events["create"] | Events["createPublished"]>>;
+      if ("platform" in r.body) {
+        const { draft: _draft, ...definition } = r.body;
+        result = await events.createPublished(current, key(r), definition, r.query.locale ?? "en");
+      } else {
+        result = await events.create(current, key(r), r.body);
+      }
       reply.code(201).header("ETag", `"v${result.version}"`);
       return envelope(r, result.data);
     },
   );
-  app.patch<{ Params: { eventId: string }; Body: S["EventInput"] }>(
+  app.patch<{ Params: { eventId: string }; Body: UpdateInput; Querystring: LocaleQuery }>(
     "/api/v1/admin/events/:eventId",
-    { schema: { params, body: ref("EventInput"), response: { 200: ref("EnvelopeEventMember") } } },
+    {
+      schema: {
+        params,
+        body: wire("EventInput", "EventStage2Input"),
+        ...(stage2 ? { querystring: localized } : {}),
+        response: { 200: wire("EnvelopeEventMember", "EventStage2EnvelopeMember") },
+      },
+    },
     async (r, reply) => {
-      const result = await events.update(
-        await actor(r),
-        r.params.eventId,
-        key(r),
-        expected(r),
-        r.body,
-      );
+      const current = await actor(r);
+      const eventId = r.params.eventId;
+      const result =
+        "platform" in r.body
+          ? await events.updatePublished(
+              current,
+              eventId,
+              key(r),
+              expected(r),
+              r.body,
+              r.query.locale ?? "en",
+            )
+          : await events.update(current, eventId, key(r), expected(r), r.body);
       reply.header("ETag", `"v${result.version}"`);
       return envelope(r, result.data);
     },
   );
-  app.post<{ Params: { eventId: string }; Body: S["ReasonInput"] }>(
+  app.post<{ Params: { eventId: string }; Body: S["ReasonInput"]; Querystring: LocaleQuery }>(
     "/api/v1/admin/events/:eventId/cancellation",
-    { schema: { params, body: ref("ReasonInput"), response: { 200: ref("EnvelopeEventMember") } } },
+    {
+      schema: {
+        params,
+        querystring: localized,
+        body: ref("ReasonInput"),
+        response: { 200: wire("EnvelopeEventMember", "EventStage2EnvelopeMember") },
+      },
+    },
     async (r, reply) => {
-      const result = await events.cancel(
-        await actor(r),
-        r.params.eventId,
-        key(r),
-        expected(r),
-        r.body.reason,
-      );
+      const current = await actor(r);
+      const eventId = r.params.eventId;
+      const result = r.query.locale
+        ? await events.cancelPublished(
+            current,
+            eventId,
+            key(r),
+            expected(r),
+            r.body.reason,
+            r.query.locale,
+          )
+        : await events.cancel(current, eventId, key(r), expected(r), r.body.reason);
       reply.header("ETag", `"v${result.version}"`);
       return envelope(r, result.data);
     },
