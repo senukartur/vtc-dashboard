@@ -192,7 +192,7 @@ async function serializedFreshMigrations(
   ) as {
     entries: { when: number; tag: string }[];
   };
-  assert.equal(journal.entries.length, 27);
+  assert.equal(journal.entries.length, 28);
   const expectedHistory = await Promise.all(
     journal.entries.map(async (entry) => ({
       version: String(entry.when),
@@ -203,11 +203,11 @@ async function serializedFreshMigrations(
     })),
   );
   const expectedTables = Object.keys(
-    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0026_snapshot.json"), "utf8"))
+    JSON.parse(await readFile(join(root, "packages/db/migrations/meta/0027_snapshot.json"), "utf8"))
       .tables,
   ).sort();
   assert.equal(expectedTables.length, 94);
-  const gate = await journalAckGate("finalize", 27);
+  const gate = await journalAckGate("finalize", 28);
   const lock = migrationLockName(settings.database);
   const history = async () => {
     const [rows] = await connection.query<RowDataPacket[]>({
@@ -307,7 +307,7 @@ async function serializedFreshMigrations(
         throw new Error("FRESH_MIGRATION_ENDED_BEFORE_FINAL_ACK_GATE");
       }),
     ]);
-    assert.equal(gate.facts.finalizations, 27);
+    assert.equal(gate.facts.finalizations, 28);
     assert.equal(gate.facts.okPackets, 1);
     milestone("final_journal_held");
     const before = await history();
@@ -352,15 +352,15 @@ async function serializedFreshMigrations(
     milestone("ack_released");
     const result = await Promise.all([first, second]);
     assert.deepEqual(result, [
-      { state: "fulfilled", applied: 27 },
+      { state: "fulfilled", applied: 28 },
       { state: "fulfilled", applied: 0 },
     ]);
     assert.equal(gate.facts.explicitReleases, 1);
     assert.equal(gate.facts.automaticRelease, false);
     assert.equal(gate.facts.waiterResponses, 1);
     assert.equal(gate.facts.waiterResponseBeforeRelease, false);
-    assert.equal(gate.facts.inserts, 27);
-    assert.equal(gate.facts.finalizations, 27);
+    assert.equal(gate.facts.inserts, 28);
+    assert.equal(gate.facts.finalizations, 28);
     assert.deepEqual(
       await history(),
       before,
@@ -1370,7 +1370,7 @@ test("real MySQL persistence foundations", { timeout: foundationsTimeout }, asyn
           "Синтетический / Synthetic 🚚",
         ]);
         extended = await extendedFixtureFolder();
-        assert.equal(await runMigrations(settings, { folder: extended }), 27);
+        assert.equal(await runMigrations(settings, { folder: extended }), 28);
         assert.equal(await runMigrations(settings, { folder: extended }), 0);
         const [parents] = await connection.query<RowDataPacket[]>(
           "SELECT label FROM synthetic_parent WHERE id = 1",

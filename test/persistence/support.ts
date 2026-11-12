@@ -11,7 +11,7 @@ import {
 import type { Connection, RowDataPacket } from "mysql2/promise";
 import { guardedAllocation } from "../support/environment.ts";
 
-// Fresh full-schema preparation now covers 95 tables including the ledger and 27 migrations.
+// Fresh full-schema preparation now covers 95 tables including the ledger and 28 migrations.
 // The outer fixture allowance is separate from ordinary cases and every native/runtime bound.
 export const SCHEMA_SETUP_TIMEOUT_MS = 90000;
 export const EXTENDED_TEST_TIMEOUT_MS = 60000;
@@ -267,7 +267,8 @@ async function publishedPrefixFolder(
     | 23
     | 24
     | 25
-    | 26,
+    | 26
+    | 27,
 ): Promise<string> {
   await mkdir(join(root, ".local"), { recursive: true });
   const folder = await mkdtemp(join(root, ".local/identity-audit-prefix-"));
@@ -434,6 +435,10 @@ export async function manualDraftDiscardPriorFolder(): Promise<string> {
 
 export async function tripNumberPriorFolder(): Promise<string> {
   return publishedPrefixFolder(26);
+}
+
+export async function manualReferencePriorFolder(): Promise<string> {
+  return publishedPrefixFolder(27);
 }
 
 export async function simpleCatalogsPriorFolder(): Promise<string> {
