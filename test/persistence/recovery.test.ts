@@ -2178,9 +2178,10 @@ await recoveryTest(
         "SELECT d.title,d.game,d.starts_at,d.distance_km,(e.id IS NOT NULL) published FROM event_drafts d LEFT JOIN events e ON e.id=d.event_id WHERE d.event_id=?",
         [draft],
       );
-      assert.deepEqual(incomplete, [
-        { title: null, game: null, starts_at: null, distance_km: null, published: 0 },
-      ]);
+      assert.deepEqual(
+        incomplete.map((row) => ({ ...row, published: String(row.published) })),
+        [{ title: null, game: null, starts_at: null, distance_km: null, published: "0" }],
+      );
       await assert.rejects(
         connection.execute("UPDATE event_drafts SET distance_km=-1 WHERE event_id=?", [draft]),
         hasCode("ER_CHECK_CONSTRAINT_VIOLATED"),
