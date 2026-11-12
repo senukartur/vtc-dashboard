@@ -2,7 +2,18 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { fixtureId } from "../../apps/web/src/features/account/fixtures.ts";
 import { catalogLanguage } from "./support/catalogs.ts";
-import { eventFixture, eventId, mockEvents } from "./support/events.ts";
+import { eventFixture, eventId, mockEventDetail, mockEvents } from "./support/events.ts";
+import {
+  coverCaption,
+  decoyCompanyId,
+  detailsPath,
+  eventPath,
+  galleryLabel,
+  lastCaption,
+  middleCaption,
+  mockStructuredDetail,
+  organizerLabel,
+} from "./support/events-detail.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 
 type S = components["schemas"];
@@ -107,10 +118,10 @@ async function quiet(page: Page) {
 async function openDetail(
   page: Page,
   locale: "en" | "ru" = "en",
-  setup: (state: Awaited<ReturnType<typeof mockEvents>>) => void = () => {},
+  setup: (state: Awaited<ReturnType<typeof mockEventDetail>>) => void = () => {},
   staff = false,
 ) {
-  const state = await mockEvents(page, staff, locale);
+  const state = await mockEventDetail(page, staff, locale);
   setup(state);
   await page.goto(`/account/events/${eventId}`);
   if (locale !== "en") await catalogLanguage(page, locale);
@@ -459,18 +470,17 @@ test(
 );
 
 test(
-  "L6 counts and list failures stay in their section and are never shown as zero",
+  "L6 embedded counts stay readable when a member list fails",
   browserCase(["@layout"]),
   async ({ page }, info) => {
     const state = await openDetail(page, "en", (s) => {
-      s.countsStatus = 503;
       s.declinersStatus = 503;
     });
     const participants = page.getByRole("region", { name: text.en.participants, exact: true }),
       decliners = participants.getByRole("region", { name: text.en.cantAttend, exact: true }),
       signedUp = participants.getByRole("region", { name: text.en.signedUp, exact: true });
-    await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
-    await expect(participants.locator(".events-counts")).not.toContainText(/\d/);
+    await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
+    expect(state.requests).not.toContain(`GET /events/${eventId}/response-counts`);
     await expect(decliners.getByRole("alert")).toBeVisible();
     await expect(decliners.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
     await expect(workspace(page).getByRole("alert")).toHaveCount(1);
@@ -493,21 +503,7 @@ test(
     await settled;
     await expect(decliners.getByRole("heading", { level: 3 })).toBeFocused();
     await expect(decliners).toContainText("No one has declined.");
-    const counts = participants.getByRole("button", { name: "Load counts again", exact: true });
-    await counts.focus();
-    settled = read(page, "/response-counts", 503);
-    await page.keyboard.press("Enter");
-    await settled;
-    await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
-    await expect(participants.locator(".events-counts")).toHaveText("Counts are unavailable");
-    state.countsStatus = 200;
-    await counts.focus();
-    settled = read(page, "/response-counts", 200);
-    await page.keyboard.press("Enter");
-    await settled;
-    await expect(participants.getByRole("heading", { level: 2 })).toBeFocused();
     await expect(participants.locator(".events-counts")).toContainText("✓ Participating: 0");
-    await expect(counts).toHaveCount(0);
     await quiet(page);
   },
 );
@@ -546,7 +542,7 @@ test(
       .getByRole("group", { name: text.en.response, exact: true })
       .getByRole("button", { name: text.en.participating, exact: true })
       .click();
-    await page.getByRole("button", { name: text.en.save, exact: true }).click();
+    await expect(page.getByRole("button", { name: text.en.save, exact: true })).toHaveCount(0);
     await settled;
     const retry = decliners.getByRole("button", { name: "Try again", exact: true });
     await expect(retry).toBeVisible();
@@ -634,13 +630,15 @@ test(
   "L7 the public detail on a phone in Russian makes no private reads",
   browserCase(["@layout", "@viewport-mobile"]),
   async ({ page }, info) => {
-    const state = await mockEvents(page, false, "ru");
+    const state = await mockEventDetail(page, false, "ru");
     state.event.title = "Фиктивный открытый конвой по длинному северному маршруту";
     state.event.description = "Фиктивный сбор.\nВторая строка.";
     await page.goto(`/events/${eventId}`);
     await catalogLanguage(page, "ru");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.event.title);
-    await expect(workspace(page).locator(".events-facts")).toBeVisible();
+    await expect(
+      workspace(page).getByRole("heading", { name: "Маршрут", exact: true }),
+    ).toBeVisible();
     await expect(page.getByRole("region", { name: text.ru.participants })).toHaveCount(0);
     await expect(page.getByRole("group", { name: text.ru.response })).toHaveCount(0);
     expect(state.requests.filter((r) => privateReads.test(r))).toEqual([]);
@@ -677,3 +675,95 @@ test(
     await capture(page, info, "events-closed-at-start");
   },
 );
+
+for (const locale of ["en", "ru"] as const) {
+  test(
+    `Stage 2 ${locale} event detail shows the structured route, load and gallery`,
+    browserCase(["@layout"]),
+    async ({ page }, info) => {
+      const state = await mockStructuredDetail(page, locale, "driver");
+      await page.goto(detailsPath);
+      await catalogLanguage(page, locale);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(state.member.event.title);
+      const gallery = page.getByRole("region", { name: galleryLabel[locale] });
+      await expect(gallery.locator("figcaption")).toHaveText([
+        coverCaption,
+        middleCaption,
+        lastCaption,
+      ]);
+      await expect(gallery.locator("img")).toHaveCount(3);
+      const route = page.locator(".events-route-stops");
+      await expect(
+        route.getByText(locale === "ru" ? "Синтетическая гавань" : "Fictional Harbour", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(route.getByText("Fictional Plateau Depot")).toBeVisible();
+      await route.scrollIntoViewIfNeeded();
+      await expect(route.locator(".company-logo img")).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await expect(page.getByText("TruckersMP", { exact: true })).toBeVisible();
+      await expect(page.getByText("Fictional Simulation", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "0 км" : "0 km", { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("Fictional Northern Roads")).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "Синтетический груз" : "Fictional Cargo"),
+      ).toBeVisible();
+      await expect(
+        page.getByText(locale === "ru" ? "Синтетический прицеп" : "Fictional Trailer"),
+      ).toBeVisible();
+      const organizer = page.getByRole("region", { name: organizerLabel[locale] });
+      await expect(organizer.getByRole("link")).toHaveAttribute(
+        "href",
+        `/account/drivers/${state.member.organizerMemberId}`,
+      );
+      await expect(page.locator(".events-counts")).toContainText(
+        locale === "en" ? "Participating: 2" : "Участвуют: 2",
+      );
+      await expect(page.locator(".events-counts")).toContainText(
+        locale === "en" ? "Can't attend: 1" : "Не смогут: 1",
+      );
+      expect(state.requests.some((url) => url.pathname.endsWith("/response-counts"))).toBe(false);
+      expect(state.requests.some((url) => url.pathname.includes(decoyCompanyId))).toBe(false);
+      expect(
+        state.requests.some(
+          (url) =>
+            url.pathname.endsWith("/catalogs/depots") &&
+            url.searchParams.get("game") === "ets2" &&
+            url.searchParams.get("includeHidden") === "true" &&
+            url.searchParams.get("cityId") === state.member.event.origin?.entityId &&
+            url.searchParams.get("locale") === locale,
+        ),
+      ).toBe(true);
+      expect(
+        state.requests.some(
+          (url) => url.pathname.endsWith(eventPath) && url.searchParams.get("locale") === locale,
+        ),
+      ).toBe(true);
+      expect(state.requests.some((url) => url.pathname.includes(`/admin${eventPath}`))).toBe(false);
+      const main = await page.locator(".events-main").boundingBox();
+      const rail = await page.locator(".events-side").boundingBox();
+      const response = await page.locator(".events-response").boundingBox();
+      if (!main || !rail || !response) throw new Error("Detail layout did not render");
+      if (info.project.name === "desktop-chromium") {
+        expect(rail.x).toBeGreaterThanOrEqual(main.x + main.width);
+        expect(response.x).toBe(rail.x);
+        expect(rail.y).toBeGreaterThanOrEqual(response.y + response.height);
+      } else {
+        expect(main.y).toBeGreaterThanOrEqual(response.y + response.height);
+        expect(rail.y).toBeGreaterThanOrEqual(main.y + main.height);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({
+        path: info.outputPath(`stage-2-detail-${locale}.png`),
+        fullPage: true,
+        animations: "disabled",
+      });
+    },
+  );
+}

@@ -1,7 +1,17 @@
-import { type ReactNode, type RefObject, useId, useLayoutEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import {
   Dialog,
   DialogClose,
@@ -10,8 +20,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../shared/ui/dialog.js";
-import { SegmentedControl } from "../../shared/ui/segmented-control.js";
 import { Badge, Button, Card, Input, Label } from "../../shared/ui/primitives.js";
+import { SegmentedControl } from "../../shared/ui/segmented-control.js";
+import { AccountFailure } from "../account/transport.js";
 import {
   EventFailureView,
   EventState,
@@ -20,10 +31,28 @@ import {
   useEventStarted,
   useEventTimezone,
 } from "./components.js";
+import {
+  type DetailEvent,
+  type DetailMember,
+  DetailTime,
+  EventLoad,
+  EventOrganizer,
+  EventRoute,
+  EventSchedule,
+  useDetailLocale,
+} from "./EventDetailContent.js";
+import { EventGallery, EventPublicCover } from "./EventDetailGallery.js";
+import { useMemberDetailRead, usePublicDetailRead } from "./EventDetailReads.js";
+import { EventRoster } from "./EventDetailRoster.js";
 import { EventEditor } from "./EventEditor.js";
 import { type DTO, eventTime, responseInput } from "./model.js";
 import { useEventCommand, useEventQuery } from "./queries.js";
-import { EventFailure } from "./transport.js";
+import { useEventStage2Command } from "./stage-2-queries.js";
+import {
+  type EventStage2Command,
+  eventStage2Commands,
+  eventStage2Reads,
+} from "./stage-2-transport.js";
 import {
   countsView,
   type EventPhase,
@@ -33,19 +62,38 @@ import {
   type ResponseValue,
   responseChoiceKey,
   responseTone,
-  showException,
 } from "./view-model.js";
 import "./events.css";
 import "./events-workspace.css";
+import "./events-detail.css";
+
+type RefreshDetail = () => Promise<unknown>;
+
+function stagedReadsAt(...paths: string[]) {
+  const targets = paths.map((path) => path.split("?")[0]);
+  return ({ queryKey }: { queryKey: readonly unknown[] }) =>
+    queryKey[0] === "events-stage-2" && targets.includes(String(queryKey.at(-2)).split("?")[0]);
+}
 
 export function EventDetailPage({ publicView = false }: { publicView?: boolean }) {
   const { eventId = "" } = useParams();
+  const session = useSession();
   return publicView ? (
     <PublicDetail key={eventId} id={eventId} />
   ) : (
-    <MemberDetail key={eventId} id={eventId} />
+    <MemberDetail
+      key={JSON.stringify([
+        eventId,
+        session.generation,
+        session.self?.member.id,
+        session.self?.identityEpoch,
+        session.self?.capabilities,
+      ])}
+      id={eventId}
+    />
   );
 }
+
 function BackLink({ to }: { to: string }) {
   const { t } = useTranslation("events");
   return (
@@ -54,124 +102,151 @@ function BackLink({ to }: { to: string }) {
     </Link>
   );
 }
-/** Public detail reads only the public event: no lists, counts, responses or attendance. */
+
 function PublicDetail({ id }: { id: string }) {
-  const query = useEventQuery(`/public/events/${encodeURIComponent(id)}`, "EnvelopeEventPublic"),
-    event = query.data?.data.data,
-    root = useRef<HTMLDivElement>(null);
+  const locale = useDetailLocale();
+  const { query, event } = usePublicDetailRead(id, locale);
+  const root = useRef<HTMLDivElement>(null);
   return (
     <div className="events-page events-detail stack" ref={root} tabIndex={-1}>
       <BackLink to="/events" />
       <EventState query={query} focusTarget={() => root.current?.focus()} />
       {event && (
-        <Card className="events-header">
-          <EventHeading event={event} />
-          <EventFacts event={event} publicView />
-        </Card>
+        <>
+          <EventHeading event={event} publicView />
+          <div className="events-detail-layout">
+            <div className="events-main stack">
+              {event.hasCover && <EventPublicCover id={event.id} />}
+              <EventDetails event={event} publicView />
+            </div>
+            <div className="events-side stack">
+              <EventOrganizer name={event.organizer} />
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
 }
+
 function EventHeading({
   event,
+  publicView = false,
   visibility,
   actions,
 }: {
-  event: DTO["EventPublic"];
-  visibility?: DTO["EventMember"]["visibility"];
+  event: DetailEvent;
+  publicView?: boolean;
+  visibility?: DetailMember["visibility"];
   actions?: ReactNode;
 }) {
   const { t } = useTranslation("events");
   return (
-    <div className="events-header-top">
-      <div className="events-header-text">
-        <p className="events-header-meta">
-          <span className="events-game">{event.game.toUpperCase()}</span>
-          <Badge className={`events-status events-status-${event.status}`}>{t(event.status)}</Badge>
-        </p>
-        <h1>{event.title}</h1>
-        {visibility && (
-          <p className="muted">
-            {t("visibility")}: {t(visibility)}
+    <Card className="events-header">
+      <div className="events-header-top">
+        <div className="events-header-text">
+          <p className="events-header-meta">
+            <span className="events-game">{event.game.toUpperCase()}</span>
+            <Badge className={`events-status events-status-${event.status}`}>
+              {t(event.status)}
+            </Badge>
+            {visibility && <span>{t(visibility)}</span>}
           </p>
-        )}
-        {visibility === "public" && <p className="muted">{t("publicNoLists")}</p>}
+          <h1>{event.title}</h1>
+          <p className="events-header-time">
+            <DetailTime value={event.startsAt} publicView={publicView} />
+          </p>
+          {visibility === "public" && <p className="muted">{t("publicNoLists")}</p>}
+        </div>
+        {actions}
       </div>
-      {actions}
-    </div>
+    </Card>
   );
 }
-function EventFacts({
+
+function EventDetails({
   event,
   publicView = false,
-  phase,
+  responsesOpen = false,
 }: {
-  event: DTO["EventPublic"];
+  event: DetailEvent;
   publicView?: boolean;
-  phase?: EventPhase;
+  responsesOpen?: boolean;
 }) {
-  const { t, i18n } = useTranslation("events"),
-    timezone = useEventTimezone(publicView),
-    locale = i18n.resolvedLanguage ?? "en";
-  const time = (value: string) => (
-    <time dateTime={value}>{eventTime(value, locale, timezone)}</time>
-  );
+  const { t } = useTranslation("events");
   return (
     <>
-      <dl className="events-facts">
-        <div>
-          <dt>{t("startsAt")}</dt>
-          <dd>
-            {time(event.startsAt)}
-            {phase === "open" && <span className="events-fact-note">{t("responseClosed")}</span>}
-          </dd>
-        </div>
-        <div>
-          <dt>{t("meetingAt")}</dt>
-          <dd>{time(event.meetingAt)}</dd>
-        </div>
-        <div>
-          <dt>{t("meetingLocation")}</dt>
-          <dd>{event.meetingLocation}</dd>
-        </div>
-        <div>
-          <dt>{t("route")}</dt>
-          <dd>{event.route}</dd>
-        </div>
-        <div>
-          <dt>{t("server")}</dt>
-          <dd>{event.server}</dd>
-        </div>
-        <div>
-          <dt>{t("organizer")}</dt>
-          <dd>{event.organizer}</dd>
-        </div>
-        {event.endsAt && (
-          <div>
-            <dt>{t("endsAt")}</dt>
-            <dd>{time(event.endsAt)}</dd>
-          </div>
-        )}
-      </dl>
-      <p className="events-description">{event.description}</p>
+      {event.description && (
+        <Card>
+          <h2>{t("description")}</h2>
+          <p className="events-description">{event.description}</p>
+        </Card>
+      )}
+      <Card>
+        <EventSchedule event={event} publicView={publicView} responsesOpen={responsesOpen} />
+      </Card>
+      <Card>
+        <EventRoute event={event} publicView={publicView} />
+      </Card>
     </>
   );
 }
+
 function MemberDetail({ id }: { id: string }) {
-  const session = useSession(),
-    capabilities = session.self?.capabilities ?? [],
-    allowed = capabilities.includes("company.read"),
-    manager = capabilities.includes("events.manage"),
-    respond = capabilities.includes("events.respond"),
-    query = useEventQuery(`/events/${encodeURIComponent(id)}`, "EnvelopeEventMember", allowed),
-    { t } = useTranslation("events");
-  const member = query.data?.data.data,
-    event = member?.event;
-  const now = useEventClock(event?.startsAt ?? null),
-    phase = event ? eventPhase(event, now) : "open";
-  const [editing, setEditing] = useState(false),
-    [attendance, setAttendance] = useState(false),
-    root = useRef<HTMLDivElement>(null);
+  const session = useSession();
+  const capabilities = session.self?.capabilities ?? [];
+  const allowed = capabilities.includes("company.read");
+  const manager = capabilities.includes("events.manage");
+  const respond = capabilities.includes("events.respond");
+  const locale = useDetailLocale();
+  const { query, snapshot: current } = useMemberDetailRead(id, locale, allowed);
+  const cancel = useEventStage2Command<"EventStage2EnvelopeMember">();
+  const client = useQueryClient();
+  const { t } = useTranslation("events");
+  // Keep open forms mounted while the same session requests translated labels.
+  const previousLocale = useRef<typeof current>(undefined);
+  useEffect(() => {
+    if (!query.isPending) previousLocale.current = current;
+  }, [current, query.isPending]);
+  const snapshot = current ?? (query.isPending ? previousLocale.current : undefined);
+  const member = snapshot?.member;
+  const staged = snapshot?.staged === true;
+  const event = member?.event;
+  const etag = event && snapshot?.etag === `"v${event.version}"` ? snapshot.etag : null;
+  const now = useEventClock(event?.startsAt ?? null);
+  const phase = event ? eventPhase(event, now) : "open";
+  const [attendance, setAttendance] = useState(false);
+  const rosterId = useId();
+  const root = useRef<HTMLDivElement>(null);
+
+  async function refreshResponseDetail() {
+    if (!staged) return;
+    await Promise.all([
+      query.refetch(),
+      manager &&
+        client.invalidateQueries({
+          predicate: stagedReadsAt(
+            eventStage2Reads.attendance(id).path,
+            eventStage2Reads.nonresponders(id).path,
+          ),
+        }),
+    ]);
+  }
+
+  async function cancelDefinition(attempt: Cancellation) {
+    await cancel.run(attempt);
+    void refreshWorkspaceSummary(client, session).catch(() => undefined);
+    await client.invalidateQueries({
+      predicate: ({ queryKey: key }) =>
+        key[0] === "dashboard-upcoming-event" ||
+        (key[0] === "events" &&
+          key[1] === session.self?.member.id &&
+          key[2] === session.generation &&
+          /^\/events(?:\?|$)/.test(String(key.at(-2)))) ||
+        (key[0] === "public-events" && /^\/public\/events(?:\?|$)/.test(String(key.at(-2)))),
+    });
+  }
+
   return (
     <div className="events-page events-detail stack" ref={root} tabIndex={-1}>
       <BackLink to="/account/events" />
@@ -179,136 +254,228 @@ function MemberDetail({ id }: { id: string }) {
         <p>{t("forbidden")}</p>
       ) : (
         <>
-          <EventState query={query} focusTarget={() => root.current?.focus()} />
+          {!member && <EventState query={query} focusTarget={() => root.current?.focus()} />}
           {member && event && (
-            <div className="events-detail-layout">
-              <div className="events-main stack">
-                <Card className="events-header">
-                  <EventHeading
-                    event={event}
-                    visibility={member.visibility}
-                    actions={
-                      manager &&
-                      event.status !== "cancelled" && (
-                        <div className="events-actions">
-                          <Dialog open={editing} onOpenChange={setEditing}>
-                            <DialogTrigger asChild>
-                              <Button variant="outline">{t("edit")}</Button>
-                            </DialogTrigger>
-                            <DialogContent className="event-dialog">
-                              <DialogTitle>{t("edit")}</DialogTitle>
-                              <DialogDescription>{event.title}</DialogDescription>
-                              <EventEditor member={member} etag={query.data?.etag ?? null} />
-                              <DialogClose asChild>
-                                <Button variant="outline">{t("close")}</Button>
-                              </DialogClose>
-                            </DialogContent>
-                          </Dialog>
+            <>
+              <EventHeading
+                event={event}
+                visibility={member.visibility}
+                actions={
+                  manager && (
+                    <div className="events-actions">
+                      {event.status !== "cancelled" && (
+                        <>
+                          {legacyEditable(member) && (
+                            <LegacyEdit
+                              member={member}
+                              etag={etag}
+                              staged={staged}
+                              refreshDetail={query.refetch}
+                            />
+                          )}
                           <CancelEvent
                             id={id}
-                            etag={query.data?.etag ?? null}
+                            etag={etag}
                             title={event.title}
+                            run={cancelDefinition}
+                            pending={cancel.pending}
+                            staged={staged}
                           />
-                        </div>
-                      )
-                    }
+                        </>
+                      )}
+                      <Button
+                        variant="outline"
+                        aria-controls={rosterId}
+                        aria-expanded={attendance}
+                        onClick={() => setAttendance(!attendance)}
+                      >
+                        {t("showAttendance")}
+                      </Button>
+                    </div>
+                  )
+                }
+              />
+              <div
+                className={`events-detail-layout${respond ? " events-detail-with-response" : ""}`}
+              >
+                {respond && (
+                  <ResponseSection
+                    member={member}
+                    phase={phase}
+                    refreshDetail={refreshResponseDetail}
                   />
-                  <EventFacts event={event} phase={phase} />
-                  {hasPrescribedLoad(member) && <PrescribedLoad member={member} />}
+                )}
+                <div className="events-main stack">
+                  <EventGallery id={id} enabled={staged} />
+                  <EventDetails event={event} responsesOpen={phase === "open" && respond} />
+                  {(hasPrescribedLoad(member) ||
+                    member.prescribedCargo ||
+                    member.prescribedTrailerType) && (
+                    <Card>
+                      <EventLoad member={member} legacy={!staged} />
+                    </Card>
+                  )}
                   {capabilities.includes("trips.submit_own") && (
                     <Link className="events-report-link" to="/account/reports/new">
                       {t("viewReport")}
                     </Link>
                   )}
-                </Card>
-                {respond && <ResponseSection member={member} phase={phase} />}
+                </div>
+                <div className="events-side stack">
+                  <Participants
+                    id={id}
+                    counts={member.responseCounts}
+                    version={member.myResponse.version}
+                    selfId={session.self?.member.id}
+                  />
+                  <EventOrganizer name={event.organizer} memberId={member.organizerMemberId} />
+                </div>
+                {manager && (
+                  <EventRoster
+                    id={id}
+                    event={event}
+                    panelId={rosterId}
+                    visible={attendance}
+                    responseVersion={member.myResponse.version}
+                    staged={staged}
+                    refreshDetail={query.refetch}
+                  />
+                )}
               </div>
-              <div className="events-side stack">
-                <Participants
-                  id={id}
-                  version={member.myResponse.version}
-                  selfId={session.self?.member.id}
-                />
-              </div>
-              {manager && (
-                <Card className="events-roster">
-                  <Button
-                    variant="outline"
-                    aria-expanded={attendance}
-                    onClick={() => setAttendance(!attendance)}
-                  >
-                    {t("showAttendance")}
-                  </Button>
-                  {attendance && <Attendance id={id} event={event} />}
-                </Card>
-              )}
-            </div>
+            </>
           )}
         </>
       )}
     </div>
   );
 }
-function PrescribedLoad({ member }: { member: DTO["EventMember"] }) {
-  const { t } = useTranslation("events"),
-    headingId = useId();
+
+function legacyEditable({ event, organizerMemberId }: DetailMember) {
   return (
-    <section className="events-load" aria-labelledby={headingId}>
-      <h2 id={headingId}>{t("load")}</h2>
-      <dl className="events-facts">
-        {member.prescribedMassKg !== null && (
-          <div>
-            <dt>{t("prescribedMassKg")}</dt>
-            <dd className="events-break">{member.prescribedMassKg}</dd>
-          </div>
-        )}
-        {member.prescribedCargoId !== null && (
-          <div>
-            <dt>{t("prescribedCargoId")}</dt>
-            <dd className="events-break">{member.prescribedCargoId}</dd>
-          </div>
-        )}
-        {member.prescribedTrailerTypeId !== null && (
-          <div>
-            <dt>{t("prescribedTrailerTypeId")}</dt>
-            <dd className="events-break">{member.prescribedTrailerTypeId}</dd>
-          </div>
-        )}
-      </dl>
-      {showException(member) && <p className="events-exception">{t("exceptionHelp")}</p>}
-    </section>
+    organizerMemberId === null &&
+    event.platform === null &&
+    event.originDepot === null &&
+    event.destinationDepot === null &&
+    event.distanceKm === null &&
+    !event.requiredDlcs?.length &&
+    !!event.description &&
+    !!event.route &&
+    !!event.meetingLocation
+  );
+}
+
+function LegacyEdit({
+  member,
+  etag,
+  staged,
+  refreshDetail,
+}: {
+  member: DetailMember;
+  etag: string | null;
+  staged: boolean;
+  refreshDetail: RefreshDetail;
+}) {
+  const { t } = useTranslation("events");
+  const session = useSession();
+  const client = useQueryClient();
+  const [open, setOpen] = useState(false);
+  // Let the legacy command's definition invalidation refresh the staged detail after
+  // writes and stale conflicts, without a second read when the editor opens.
+  useQuery({
+    queryKey: [
+      "events",
+      session.self?.member.id,
+      session.generation,
+      session.self?.identityEpoch,
+      session.self?.capabilities.join(","),
+      `/events/${member.event.id}`,
+      "legacy-editor-refresh",
+    ],
+    meta: { private: true },
+    enabled: staged && open,
+    initialData: true,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+    queryFn: async () => {
+      await Promise.all([
+        refreshDetail(),
+        client.invalidateQueries({
+          predicate: stagedReadsAt(eventStage2Reads.publicDetail(member.event.id).path),
+        }),
+      ]);
+      return true;
+    },
+  });
+
+  const { event } = member;
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" disabled={!etag}>
+          {t("edit")}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="event-dialog">
+        <DialogTitle>{t("edit")}</DialogTitle>
+        <DialogDescription>{event.title}</DialogDescription>
+        <EventEditor
+          member={{
+            ...member,
+            event: {
+              ...event,
+              description: event.description ?? "",
+              route: event.route ?? "",
+              meetingLocation: event.meetingLocation ?? "",
+            },
+          }}
+          etag={etag}
+        />
+        <DialogClose asChild>
+          <Button variant="outline">{t("close")}</Button>
+        </DialogClose>
+      </DialogContent>
+    </Dialog>
   );
 }
 /** Own response for members with events.respond: the form while open, a summary afterwards. */
-function ResponseSection({ member, phase }: { member: DTO["EventMember"]; phase: EventPhase }) {
-  const { t } = useTranslation("events"),
-    headingId = useId(),
-    heading = useRef<HTMLHeadingElement>(null);
+function ResponseSection({
+  member,
+  phase,
+  refreshDetail,
+}: {
+  member: DetailMember;
+  phase: EventPhase;
+  refreshDetail: RefreshDetail;
+}) {
+  const { t } = useTranslation("events");
+  const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   return (
     <Card className="events-response" aria-labelledby={headingId}>
       <h2 id={headingId} ref={heading} tabIndex={-1}>
         {t("response")}
       </h2>
       {phase === "open" ? (
-        <OpenResponse event={member.event} heading={heading} />
+        <OpenResponse event={member.event} heading={heading} refreshDetail={refreshDetail} />
       ) : (
         <ClosedResponse member={member} phase={phase} />
       )}
     </Card>
   );
 }
-/** Own response while open. my-response is read only here, so never after the start. */
+/** The response ETag is independent of the definition ETag. */
 function OpenResponse({
   event,
   heading,
+  refreshDetail,
 }: {
-  event: DTO["EventPublic"];
+  event: DetailEvent;
   heading: RefObject<HTMLHeadingElement | null>;
+  refreshDetail: RefreshDetail;
 }) {
-  const query = useEventQuery(`/events/${event.id}/my-response`, "EnvelopeRsvp"),
-    body = useRef<HTMLDivElement>(null);
-  // At the start or a cancellation the form is replaced by the summary. If focus was inside it,
-  // move focus to the section heading instead of losing it to the document body.
+  const query = useEventQuery(`/events/${event.id}/my-response`, "EnvelopeRsvp");
+  const body = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = body.current;
     return () => {
@@ -319,7 +486,12 @@ function OpenResponse({
     <div className="stack events-response-body" ref={body}>
       <EventState query={query} focusTarget={() => heading.current?.focus()} />
       {query.data && (
-        <ResponseForm event={event} response={query.data.data.data} etag={query.data.etag} />
+        <ResponseForm
+          event={event}
+          response={query.data.data.data}
+          etag={query.data.etag}
+          refreshDetail={refreshDetail}
+        />
       )}
     </div>
   );
@@ -328,49 +500,58 @@ function ResponseForm({
   event,
   response: current,
   etag,
+  refreshDetail,
 }: {
-  event: DTO["EventPublic"];
+  event: DetailEvent;
   response: DTO["Rsvp"];
   etag: string | null;
+  refreshDetail: RefreshDetail;
 }) {
-  const { t, i18n } = useTranslation("events"),
-    timezone = useEventTimezone(),
-    id = useId(),
-    command = useEventCommand(),
-    [response, setResponse] = useState(current.response),
-    [reason, setReason] = useState(current.declineReason ?? ""),
-    [invalid, setInvalid] = useState(false),
-    [saved, setSaved] = useState(false);
+  const { t } = useTranslation("events");
+  const locale = useDetailLocale();
+  const timezone = useEventTimezone();
+  const id = useId();
+  const command = useEventCommand((failure) => {
+    if (failure.kind === "conflict") void refreshDetail();
+  });
+  const [declineEditor, setDeclineEditor] = useState(current.response === "declined");
+  const [reason, setReason] = useState(current.declineReason ?? "");
+  const [invalid, setInvalid] = useState(false);
+  const [saved, setSaved] = useState(false);
   const started = useEventStarted(event.startsAt);
-  const closed = event.status !== "scheduled" || started,
-    // Unavailable Save stays focusable (aria-disabled); the submit handler ignores it.
-    blocked = closed || command.pending || command.seconds > 0 || !etag,
-    state = responseTone(current.response);
+  const blocked =
+    event.status !== "scheduled" || started || command.pending || command.seconds > 0 || !etag;
+  const state = responseTone(current.response);
+
+  async function saveResponse(value: ResponseValue) {
+    if (blocked || !etag) return;
+    const input = responseInput(value, reason);
+    setInvalid(!input);
+    setSaved(false);
+    if (!input) return;
+    const result = await command.run(
+      `/events/${event.id}/my-response`,
+      input,
+      "EnvelopeRsvp",
+      etag,
+      "PUT",
+    );
+    if (result) {
+      setSaved(true);
+      await refreshDetail();
+    }
+  }
+
   return (
     <form
       className="stack events-response-form"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (blocked) return;
-        const input = responseInput(response, reason);
-        setInvalid(!input);
-        setSaved(false);
-        if (input && etag) {
-          const result = await command.run(
-            `/events/${event.id}/my-response`,
-            input,
-            "EnvelopeRsvp",
-            etag,
-            "PUT",
-          );
-          if (result) setSaved(true);
-        }
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (declineEditor) void saveResponse("declined");
       }}
     >
       <p className="muted">
-        {t("responseDeadline", {
-          start: eventTime(event.startsAt, i18n.resolvedLanguage ?? "en", timezone),
-        })}
+        {t("responseDeadline", { start: eventTime(event.startsAt, locale, timezone) })}
       </p>
       <p className={`events-state events-tone-${state.tone}`}>
         <span aria-hidden="true">{state.symbol}</span>{" "}
@@ -386,19 +567,20 @@ function ResponseForm({
         aria-label={t("response")}
         size="sm"
         className="events-choice"
-        value={response}
+        value={declineEditor ? "declined" : current.response}
         onValueChange={(value) => {
-          // A pending command keeps its body; changes are ignored until it settles.
-          if (command.pending) return;
-          setResponse(value);
+          if (blocked) return;
+          setDeclineEditor(value === "declined");
           setSaved(false);
+          setInvalid(false);
+          if (value !== "declined" && value !== current.response) void saveResponse(value);
         }}
         options={(["participating", "declined", "unanswered"] as const).map((value) => ({
           value,
           label: t(responseChoiceKey(value)),
         }))}
       />
-      {response === "declined" && (
+      {declineEditor && (
         <div className="field">
           <Label htmlFor={`${id}-reason`}>{t("declineReason")}</Label>
           <textarea
@@ -409,8 +591,8 @@ function ResponseForm({
             aria-describedby={`${id}-hint`}
             value={reason}
             readOnly={command.pending}
-            onChange={(e) => {
-              setReason(e.target.value);
+            onChange={(event) => {
+              setReason(event.target.value);
               setSaved(false);
             }}
           />
@@ -426,16 +608,19 @@ function ResponseForm({
           {t("savedResponse")}
         </p>
       )}
-      <div className="events-form-actions">
-        <Button aria-disabled={blocked || undefined}>
-          {t(command.pending ? "savingResponse" : "respond")}
-        </Button>
-      </div>
+      {command.pending && !declineEditor && <p role="status">{t("savingResponse")}</p>}
+      {declineEditor && (
+        <div className="events-form-actions">
+          <Button aria-disabled={blocked || undefined}>
+            {t(command.pending ? "savingResponse" : "respond")}
+          </Button>
+        </div>
+      )}
     </form>
   );
 }
 /** After the start or a cancellation: the last own response and actual attendance, read-only. */
-function ClosedResponse({ member, phase }: { member: DTO["EventMember"]; phase: EventPhase }) {
+function ClosedResponse({ member, phase }: { member: DetailMember; phase: EventPhase }) {
   const { t } = useTranslation("events"),
     own = member.myResponse,
     tone = responseTone(own.response);
@@ -470,21 +655,29 @@ function ClosedResponse({ member, phase }: { member: DTO["EventMember"]; phase: 
 function Participants({
   id,
   version,
+  counts,
   selfId,
 }: {
   id: string;
   version: number;
+  counts: DetailMember["responseCounts"];
   selfId: string | undefined;
 }) {
-  const { t } = useTranslation("events"),
-    headingId = useId(),
-    heading = useRef<HTMLHeadingElement>(null),
-    counts = useEventQuery(`/events/${id}/response-counts`, "EnvelopeEventResponseCounts"),
-    view = countsView({
-      isPending: counts.isPending,
-      isError: counts.isError,
-      data: counts.data?.data.data,
-    });
+  const { t } = useTranslation("events");
+  const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const legacy = useEventQuery(
+    `/events/${id}/response-counts`,
+    "EnvelopeEventResponseCounts",
+    counts === null,
+  );
+  const view = counts
+    ? { state: "ready" as const, ...counts }
+    : countsView({
+        isPending: legacy.isPending,
+        isError: legacy.isError,
+        data: legacy.data?.data.data,
+      });
   return (
     <Card className="events-participants" aria-labelledby={headingId}>
       <h2 id={headingId} ref={heading} tabIndex={-1}>
@@ -506,18 +699,16 @@ function Participants({
             {t(view.state === "loading" ? "countsLoading" : "countsUnavailable")}
           </p>
           {view.state === "unavailable" && (
-            // Without cached counts the refetch replaces this button; focus then moves to the heading.
             <KeepFocusButton
               variant="outline"
               focusTarget={() => heading.current?.focus()}
-              onClick={() => void counts.refetch()}
+              onClick={() => void legacy.refetch()}
             >
               {t("retryCounts")}
             </KeepFocusButton>
           )}
         </div>
       )}
-      {/* A committed own response re-keys the lists so they restart from the current first page. */}
       <MemberList key={`participants:${version}`} id={id} kind="participants" selfId={selfId} />
       <MemberList key={`decliners:${version}`} id={id} kind="decliners" selfId={selfId} />
       <p className="muted">{t("listPrivacy")}</p>
@@ -602,25 +793,58 @@ function MemberList({
     </section>
   );
 }
-function CancelEvent({ id, etag, title }: { id: string; etag: string | null; title: string }) {
-  const { t } = useTranslation("events"),
-    inputId = useId(),
-    [open, setOpen] = useState(false),
-    [reason, setReason] = useState(""),
-    command = useEventCommand();
+type Cancellation = EventStage2Command<"EventStage2EnvelopeMember">;
+
+function CancelEvent({
+  id,
+  etag,
+  title,
+  run,
+  pending: stagedPending,
+  staged,
+}: {
+  id: string;
+  etag: string | null;
+  title: string;
+  run: (attempt: Cancellation) => Promise<void>;
+  pending: boolean;
+  staged: boolean;
+}) {
+  const { t } = useTranslation("events");
+  const locale = useDetailLocale();
+  const inputId = useId();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [failure, setFailure] = useState<AccountFailure | null>(null);
+  const [waitUntil, setWaitUntil] = useState(0);
+  const [now, setNow] = useState(Date.now);
   const trigger = useRef<HTMLButtonElement>(null);
+  const prepared = useRef<{ reason: string; locale: string; attempt: Cancellation } | null>(null);
+  const legacy = useEventCommand();
+  const pending = staged ? stagedPending : legacy.pending;
+  const seconds = staged ? Math.max(0, Math.ceil((waitUntil - now) / 1000)) : legacy.seconds;
+  useEffect(() => {
+    if (!waitUntil) return;
+    const timer = window.setInterval(() => {
+      const time = Date.now();
+      setNow(time);
+      if (time >= waitUntil) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [waitUntil]);
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" ref={trigger}>
+        <Button variant="outline" ref={trigger} disabled={!etag}>
           {t("cancel")}
         </Button>
       </DialogTrigger>
       <DialogContent
         className="event-dialog"
-        onCloseAutoFocus={(e) => {
+        onCloseAutoFocus={(event) => {
           if (!trigger.current?.isConnected) {
-            e.preventDefault();
+            event.preventDefault();
             document.getElementById("main-content")?.focus();
           }
         }}
@@ -631,18 +855,42 @@ function CancelEvent({ id, etag, title }: { id: string; etag: string | null; tit
         <DialogDescription>{t("cancelHelp")}</DialogDescription>
         <form
           className="stack"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            if (!reason.trim() || !etag) return;
-            if (
-              await command.run(
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const trimmed = reason.trim();
+            if (!trimmed || !etag || pending || seconds > 0) return;
+            if (!staged) {
+              const result = await legacy.run(
                 `/admin/events/${id}/cancellation`,
-                { reason: reason.trim() },
+                { reason: trimmed },
                 "EnvelopeEventMember",
                 etag,
-              )
-            )
+              );
+              if (result) setOpen(false);
+              return;
+            }
+            setFailure(null);
+            try {
+              const previous = prepared.current;
+              const attempt =
+                previous?.reason === trimmed && previous.locale === locale
+                  ? previous.attempt
+                  : eventStage2Commands.cancel(id, { reason: trimmed }, etag, locale);
+              prepared.current = { reason: trimmed, locale, attempt };
+              await run(attempt);
+              prepared.current = null;
               setOpen(false);
+            } catch (error) {
+              const safe =
+                error instanceof AccountFailure ? error : new AccountFailure("uncertain");
+              if (!["uncertain", "unavailable", "limited"].includes(safe.kind))
+                prepared.current = null;
+              setFailure(safe);
+              if (safe.retryAfter) {
+                setWaitUntil(Date.now() + safe.retryAfter * 1000);
+                setNow(Date.now());
+              }
+            }
           }}
         >
           <Label htmlFor={inputId}>{t("reason")}</Label>
@@ -651,11 +899,11 @@ function CancelEvent({ id, etag, title }: { id: string; etag: string | null; tit
             required
             maxLength={2048}
             value={reason}
-            disabled={command.pending}
-            onChange={(e) => setReason(e.target.value)}
+            disabled={pending}
+            onChange={(event) => setReason(event.target.value)}
           />
-          <EventFailureView error={command.failure} seconds={command.seconds} />
-          <Button disabled={command.pending || command.seconds > 0 || !reason.trim() || !etag}>
+          <EventFailureView error={staged ? failure : legacy.failure} seconds={seconds} />
+          <Button disabled={pending || seconds > 0 || !reason.trim() || !etag}>
             {t("confirm")}
           </Button>
         </form>
@@ -664,260 +912,5 @@ function CancelEvent({ id, etag, title }: { id: string; etag: string | null; tit
         </DialogClose>
       </DialogContent>
     </Dialog>
-  );
-}
-function Attendance({ id, event }: { id: string; event: DTO["EventPublic"] }) {
-  type Row = DTO["AttendanceInput"]["members"][number];
-  type Draft = Row & { nickname: string };
-  const started = useEventStarted(event.startsAt);
-  const submission = useRef<{
-    body: DTO["AttendanceInput"];
-    etag: string;
-    signature: string;
-  } | null>(null);
-  const { t } = useTranslation("events"),
-    heading = useRef<HTMLHeadingElement>(null),
-    [cursor, setCursor] = useState<string | null>(null),
-    [changes, setChanges] = useState<Record<string, Draft>>({}),
-    [needsReview, setNeedsReview] = useState(false),
-    [reviewed, setReviewed] = useState<Record<string, string>>({}),
-    [saved, setSaved] = useState(false),
-    command = useEventCommand((failure) => {
-      if (failure instanceof EventFailure && failure.status === 412) recoverCursor(true);
-    }),
-    query = useEventQuery(
-      `/admin/events/${id}/attendance?limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-      "EnvelopeListAttendance",
-    );
-  const data = query.data?.data.data,
-    closed = event.status === "cancelled" || !started,
-    hintId = useId(),
-    etag = query.data?.etag,
-    body = {
-      members: Object.values(changes).map(({ memberId, attendance, note }) => ({
-        memberId,
-        attendance,
-        note,
-      })),
-    },
-    signature = JSON.stringify(body),
-    retrySubmission = submission.current?.signature === signature ? submission.current : null,
-    reviewComplete =
-      !!retrySubmission ||
-      !needsReview ||
-      Object.keys(changes).every((memberId) => reviewed[memberId] === etag),
-    blocked =
-      closed ||
-      command.pending ||
-      command.seconds > 0 ||
-      !Object.keys(changes).length ||
-      !reviewComplete ||
-      (!etag && !retrySubmission);
-  function recoverCursor(rejected = false) {
-    if (rejected) submission.current = null;
-    if (Object.keys(changes).length && !submission.current) {
-      setNeedsReview(true);
-      setReviewed({});
-    }
-    setCursor(null);
-  }
-  return (
-    <form
-      className="stack"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        // The unavailable Record button stays focusable (aria-disabled); ignore it here.
-        if (blocked) return;
-        setSaved(false);
-        if (!closed && Object.keys(changes).length && (retrySubmission || etag) && reviewComplete) {
-          const submitted = retrySubmission ?? { body, etag: etag as string, signature };
-          submission.current = submitted;
-          const result = await command.run(
-            `/admin/events/${id}/attendance`,
-            submitted.body,
-            "EnvelopeCommandResult",
-            submitted.etag,
-            "PUT",
-          );
-          if (result) {
-            setChanges({});
-            submission.current = null;
-            setNeedsReview(false);
-            setReviewed({});
-            setCursor(null);
-            setSaved(true);
-          }
-        }
-      }}
-    >
-      <h2 ref={heading} tabIndex={-1}>
-        {t("attendance")}
-      </h2>
-      <p>{t("attendanceHelp")}</p>
-      {Object.keys(changes).length > 0 && (
-        <section className="stack" aria-label={t("attendanceDrafts")}>
-          <h3>{t("attendanceDrafts")}</h3>
-          {needsReview && <p role="status">{t("reviewAttendance")}</p>}
-          {Object.values(changes).map((draft) => (
-            <div key={draft.memberId}>
-              <p>
-                {draft.nickname}: {t(draft.attendance)}
-                {draft.note ? ` · ${draft.note}` : ""}
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={command.pending}
-                onClick={() => {
-                  setSaved(false);
-                  setChanges((previous) => {
-                    const next = { ...previous };
-                    delete next[draft.memberId];
-                    return next;
-                  });
-                }}
-              >
-                {t("removeDraft")}
-              </Button>
-            </div>
-          ))}
-        </section>
-      )}
-      <EventState
-        query={query}
-        focusTarget={() => heading.current?.focus()}
-        {...(cursor ? { reset: () => recoverCursor() } : {})}
-      />
-      {data?.items.map((row) => (
-        <fieldset className="stack event-attendance-row" key={row.member.id}>
-          <legend>{row.member.nickname}</legend>
-          <p className="events-roster-line">
-            <span>
-              {t("memberResponse")}:{" "}
-              <span className={`events-tone-${row.response.response}`}>
-                <span aria-hidden="true">{responseTone(row.response.response).symbol}</span>{" "}
-                {t(responseChoiceKey(row.response.response))}
-              </span>
-            </span>
-            <span>
-              {t("attendance")}: {t(row.attendance)}
-            </span>
-          </p>
-          {row.response.declineReason && (
-            <p className="events-reason">
-              {t("declineReason")}: {row.response.declineReason}
-            </p>
-          )}
-          {row.note && (
-            <p className="events-reason">
-              {t("note")}: {row.note}
-            </p>
-          )}
-          <Label htmlFor={`attendance-${row.member.id}`}>
-            {t("attendance")} · {row.member.nickname}
-          </Label>
-          <select
-            className="input"
-            id={`attendance-${row.member.id}`}
-            disabled={closed || command.pending}
-            value={changes[row.member.id]?.attendance ?? ""}
-            onChange={(e) => {
-              setSaved(false);
-              const value = e.target.value;
-              setChanges((previous) => {
-                const next = { ...previous };
-                if (!value) delete next[row.member.id];
-                else
-                  next[row.member.id] = {
-                    memberId: row.member.id,
-                    nickname: row.member.nickname,
-                    attendance: value as "attended" | "not_attended",
-                    note: previous[row.member.id]?.note ?? null,
-                  };
-                return next;
-              });
-            }}
-          >
-            <option value="">{t("unchanged")}</option>
-            <option value="attended">{t("attended")}</option>
-            <option value="not_attended">{t("not_attended")}</option>
-          </select>
-          {changes[row.member.id] && (
-            <>
-              <Label htmlFor={`note-${row.member.id}`}>
-                {t("note")} · {row.member.nickname}
-              </Label>
-              <Input
-                id={`note-${row.member.id}`}
-                maxLength={2048}
-                disabled={command.pending}
-                value={changes[row.member.id]?.note ?? ""}
-                onChange={(e) => {
-                  setSaved(false);
-                  setChanges((previous) => ({
-                    ...previous,
-                    [row.member.id]: {
-                      ...(previous[row.member.id] as Draft),
-                      note: e.target.value || null,
-                    },
-                  }));
-                }}
-              />
-            </>
-          )}
-          {needsReview && changes[row.member.id] && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!etag || command.pending || reviewed[row.member.id] === etag}
-              onClick={() => {
-                if (etag) setReviewed((previous) => ({ ...previous, [row.member.id]: etag }));
-              }}
-            >
-              {t(reviewed[row.member.id] === etag ? "draftReviewed" : "keepAttendanceDraft")}
-            </Button>
-          )}
-        </fieldset>
-      ))}
-      <div className="events-pager">
-        {cursor && (
-          <KeepFocusButton
-            type="button"
-            variant="outline"
-            focusTarget={() => heading.current?.focus()}
-            onClick={() => {
-              setCursor(null);
-            }}
-          >
-            {t("first")}
-          </KeepFocusButton>
-        )}
-        {data?.nextCursor && (
-          <KeepFocusButton
-            type="button"
-            variant="outline"
-            focusTarget={() => heading.current?.focus()}
-            onClick={() => setCursor(data.nextCursor)}
-          >
-            {t("next")}
-          </KeepFocusButton>
-        )}
-      </div>
-      <EventFailureView error={command.failure} seconds={command.seconds} />
-      {saved && <p role="status">{t("savedAttendance")}</p>}
-      {!started && event.status !== "cancelled" && (
-        <p className="muted" id={hintId}>
-          {t("attendanceAfterStart")}
-        </p>
-      )}
-      <div className="events-form-actions">
-        <Button
-          aria-disabled={blocked || undefined}
-          aria-describedby={!started && event.status !== "cancelled" ? hintId : undefined}
-        >
-          {t("recordAttendance")}
-        </Button>
-      </div>
-    </form>
   );
 }

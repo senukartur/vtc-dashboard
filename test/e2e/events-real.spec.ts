@@ -299,7 +299,7 @@ test(
         choice = (name: string) => response.getByRole("button", { name, exact: true }),
         save = member.getByRole("button", { name: "Save response", exact: true });
       await choice("Participating").click();
-      await save.click();
+      await expect(save).toHaveCount(0);
       await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
       const other = await s.actor(await s.fixture.newMember());
       await other.goto(`/account/events/${e.id}`);
@@ -345,7 +345,7 @@ test(
         0,
       );
       await choice("No answer").click();
-      await save.click();
+      await expect(save).toHaveCount(0);
       await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
     } finally {
       await s.close();
@@ -373,7 +373,8 @@ test(
         await manager
           .getByRole("button", { name: "View responses and attendance", exact: true })
           .click();
-        const target = manager.locator(`#attendance-${s.fixture.userId}`);
+        const roster = manager.getByRole("form", { name: "Actual attendance", exact: true });
+        const target = roster.locator(`#attendance-${s.fixture.userId}`);
         let pages = 0;
         while (true) {
           await expect(manager.locator(".event-attendance-row").first()).toBeVisible();
@@ -383,7 +384,7 @@ test(
             (r) =>
               r.request().method() === "GET" && new URL(r.url()).pathname.endsWith("/attendance"),
           );
-          await manager.getByRole("button", { name: "Next page", exact: true }).click();
+          await roster.getByRole("button", { name: "Next page", exact: true }).click();
           await read;
         }
         await expect(
@@ -445,7 +446,9 @@ test(
         response.getByRole("button", { name: "Participating", exact: true }),
       ).toHaveAttribute("aria-pressed", "true");
       await response.getByRole("button", { name: "No answer", exact: true }).click();
-      await member.getByRole("button", { name: "Save response", exact: true }).click();
+      await expect(member.getByRole("button", { name: "Save response", exact: true })).toHaveCount(
+        0,
+      );
       await expect(member.getByText("Response saved.", { exact: true })).toBeVisible();
       await manager.getByRole("button", { name: "Cancel event", exact: true }).click();
       await manager

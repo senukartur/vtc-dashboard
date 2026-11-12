@@ -1,7 +1,7 @@
-import { inertNotifications } from "./notifications.ts";
 import { expect, type Page } from "@playwright/test";
 import type { components } from "@vtc/contracts";
 import { accountFixture, fixtureId } from "../../../apps/web/src/features/account/fixtures.ts";
+import { inertNotifications } from "./notifications.ts";
 
 type S = components["schemas"];
 export async function selectPastReportEvent(page: Page, eventId: string) {
@@ -58,7 +58,16 @@ export const eventFixture = (): S["EventPublic"] => ({
   destination: null,
   status: "scheduled",
 });
-export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" = "en") {
+export function mockEventDetail(page: Page, staff = false, locale: "en" | "ru" = "en") {
+  return mockEvents(page, staff, locale, true);
+}
+
+export async function mockEvents(
+  page: Page,
+  staff = false,
+  locale: "en" | "ru" = "en",
+  stage2Detail = false,
+) {
   const state = {
     event: eventFixture(),
     upcoming: undefined as S["EventPublic"] | undefined,
@@ -68,6 +77,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     attendanceVersion: 1,
     ownAttendance: "unconfirmed" as "unconfirmed" | "attended" | "not_attended",
     status: 200,
+    stage2Status: 200,
     listStatus: 200,
     listPages: false,
     empty: false,
@@ -95,11 +105,9 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
     extraDecliners: [] as S["Participant"][],
     declinerPages: false,
     declinerCursors: [] as string[],
-    /** Non-200 statuses injected for the member list and count reads. */
+    /** Non-200 statuses injected for member-list reads. */
     participantsStatus: 200,
     declinersStatus: 200,
-    countsStatus: 200,
-    countsGate: null as Promise<void> | null,
     /** Replaces the session capabilities when set. */
     capabilities: null as string[] | null,
   };
@@ -139,6 +147,34 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
       prescribedMassKg: state.prescribedMassKg,
       prescribedTrailerTypeId: state.prescribedTrailerTypeId,
     });
+    const stage2Event = (): S["EventStage2Public"] => ({
+      ...state.event,
+      version: state.definitionVersion,
+      hasCover: false,
+      originDepot: null,
+      destinationDepot: null,
+      platform: null,
+      distanceKm: null,
+      requiredDlcs: [],
+    });
+    const self = (response: S["Rsvp"]["response"]) =>
+      state.response.response === response ? [{ member: accountFixture().data.member }] : [];
+    const counts = () => ({
+      participating:
+        self("participating").length +
+        state.extraParticipants.length +
+        (state.participantPages ? 25 : 0),
+      declined:
+        self("declined").length + state.extraDecliners.length + (state.declinerPages ? 25 : 0),
+    });
+    const stage2Member = (): S["EventStage2Member"] => ({
+      ...member(),
+      event: stage2Event(),
+      organizerMemberId: null,
+      prescribedCargo: null,
+      prescribedTrailerType: null,
+      responseCounts: counts(),
+    });
     if (method !== "GET") {
       state.keys.push(request.headers()["idempotency-key"] ?? "");
       state.preconditions.push(request.headers()["if-match"] ?? "");
@@ -157,7 +193,7 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
         const status = state.failNext;
         state.failNext = 0;
         if (status === 412) {
-          state.definitionVersion++;
+          state.event.version = ++state.definitionVersion;
           state.response.version++;
           state.attendanceVersion++;
         }
@@ -192,8 +228,12 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
           state.attendanceVersion,
         );
       }
-      if (p.endsWith("/cancellation")) state.event.status = "cancelled";
-      else {
+      if (p.endsWith("/cancellation")) {
+        state.event.status = "cancelled";
+        state.event.version = ++state.definitionVersion;
+        if (stage2Detail && url.searchParams.has("locale"))
+          return reply(stage2Member(), 200, state.definitionVersion);
+      } else {
         const input = body as S["EventInput"];
         state.event = {
           ...state.event,
@@ -248,30 +288,31 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
             status: state.listStatus,
             json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
           });
-    if (p === `/public/events/${eventId}` || p === `/events/${eventId}`)
-      return state.status === 200
-        ? reply(p.startsWith("/public") ? state.event : member(), 200, state.definitionVersion)
-        : route.fulfill({
-            status: state.status,
-            json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
-          });
+    if (p === `/public/events/${eventId}` || p === `/events/${eventId}`) {
+      const staged = stage2Detail && url.searchParams.has("locale");
+      const status = staged && state.stage2Status !== 200 ? state.stage2Status : state.status;
+      if (status !== 200)
+        return route.fulfill({
+          status,
+          json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
+        });
+      const publicView = p.startsWith("/public");
+      return reply(
+        staged
+          ? publicView
+            ? stage2Event()
+            : stage2Member()
+          : publicView
+            ? state.event
+            : member(),
+        200,
+        state.definitionVersion,
+      );
+    }
     if (p.endsWith("/my-response")) return reply(state.response, 200, state.response.version);
     const unavailable = (status: number) =>
       route.fulfill({ status, json: { error: { code: "UNAVAILABLE", message: "Unavailable" } } });
-    const self = (response: S["Rsvp"]["response"]) =>
-      state.response.response === response ? [{ member: accountFixture().data.member }] : [];
-    if (p.endsWith("/response-counts")) {
-      if (state.countsGate) await state.countsGate;
-      if (state.countsStatus !== 200) return unavailable(state.countsStatus);
-      return reply({
-        participating:
-          self("participating").length +
-          state.extraParticipants.length +
-          (state.participantPages ? 25 : 0),
-        declined:
-          self("declined").length + state.extraDecliners.length + (state.declinerPages ? 25 : 0),
-      });
-    }
+    if (p.endsWith("/response-counts")) return reply(counts());
     if (p.endsWith("/decliners")) {
       if (state.declinersStatus !== 200) return unavailable(state.declinersStatus);
       const cursor = url.searchParams.get("cursor") ?? "";
@@ -319,6 +360,8 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
         items: [...state.extraParticipants, ...self("participating")],
         nextCursor: null,
       });
+    const stagedRoster = stage2Detail && state.stage2Status === 200;
+    if (stagedRoster && p.endsWith("/nonresponders")) return reply({ items: [], nextCursor: null });
     if (p.endsWith("/attendance")) {
       const cursor = url.searchParams.get("cursor") ?? "";
       state.attendanceCursors.push(cursor);
@@ -345,7 +388,18 @@ export async function mockEvents(page: Page, staff = false, locale: "en" | "ru" 
       }));
       return reply(
         {
-          items: state.attendancePages && !cursor ? first : [target],
+          items: (state.attendancePages && !cursor ? first : [target]).map((row) =>
+            stagedRoster ? { ...row, tripId: null } : row,
+          ),
+          ...(stagedRoster && {
+            totals: {
+              total: state.attendancePages ? 26 : 1,
+              attended: Number(state.attendance === "attended"),
+              notAttended: Number(state.attendance === "not_attended"),
+              unconfirmed:
+                Number(state.attendance === "unconfirmed") + (state.attendancePages ? 25 : 0),
+            },
+          }),
           nextCursor:
             state.attendancePages && !cursor
               ? `synthetic-attendance-page-2-v${state.attendanceVersion}`
