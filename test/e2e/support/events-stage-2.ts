@@ -28,6 +28,7 @@ const routes: Record<string, Fixture> = {
   [`DELETE /admin/events/${stage2DraftId}`]: ["deleteEventDraft", "discarded", 2],
   [`POST /admin/events/${stage2DraftId}/publication`]: ["publishEventDraft", "retains-identity", 1],
   [`PATCH ${adminEvent}`]: ["updateEvent", "published-definition", 1],
+  [`POST ${adminEvent}/cancellation`]: ["cancelEvent", "cancelled", 2],
   [`GET ${adminEvent}/attendance`]: ["getEventAttendance", "leadership", 1],
   [`GET ${adminEvent}/nonresponders`]: ["listEventNonresponders", "leadership"],
   [`GET ${event}/media`]: ["listEventMedia", "ready"],

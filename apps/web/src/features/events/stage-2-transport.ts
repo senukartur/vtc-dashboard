@@ -2,7 +2,7 @@ import { withReadSlot } from "../../shared/read-scheduler.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import type { DTO } from "./model.js";
-import { eventRead, fail, schema } from "./transport.js";
+import { fail, schema } from "./transport.js";
 
 type Stage2Schema = Extract<keyof DTO, `EventStage2${string}`>;
 export type EventStage2Envelope = Extract<Stage2Schema, `EventStage2Envelope${string}`>;
@@ -105,7 +105,7 @@ export const eventStage2Content = {
   }),
 };
 
-function jsonBody<K extends Stage2Schema>(name: K, body: DTO[K]): CommandBody {
+function jsonBody<K extends Stage2Schema | "ReasonInput">(name: K, body: DTO[K]): CommandBody {
   const parsed = schema(name).safeParse(body);
   if (!parsed.success) throw new AccountFailure("invalid");
   return { encoding: "json", value: JSON.stringify(parsed.data) };
@@ -148,6 +148,16 @@ export const eventStage2Commands = {
       "EventStage2EnvelopeMember",
       200,
       jsonBody("EventStage2Input", input),
+      etag,
+    ),
+
+  cancel: (id: string, input: DTO["ReasonInput"], etag: string, locale?: EventStage2Locale) =>
+    command(
+      localPath(`${admin(id)}/cancellation`, { locale }),
+      "POST",
+      "EventStage2EnvelopeMember",
+      200,
+      jsonBody("ReasonInput", input),
       etag,
     ),
   updateDraft: (id: string, input: DTO["EventStage2DraftInput"], etag: string) =>
@@ -206,37 +216,56 @@ export const eventStage2Commands = {
     ),
 };
 
+async function stage2Read<T>(
+  spec: EventStage2Content,
+  signal: AbortSignal,
+  accept: string,
+  consume: (response: Response) => Promise<T>,
+) {
+  const bounded = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
+  try {
+    return await withReadSlot(bounded, async () => {
+      const response = await fetch(`/api/v1${spec.path}`, {
+        credentials: spec.access === "public" ? "omit" : "same-origin",
+        cache: "no-store",
+        signal: bounded,
+        headers: { Accept: accept },
+      });
+      try {
+        if (response.status !== 200) fail(response);
+        const data = await consume(response);
+        bounded.throwIfAborted();
+        return data;
+      } finally {
+        if (!response.bodyUsed) await response.body?.cancel().catch(() => undefined);
+      }
+    });
+  } catch (error) {
+    if (error instanceof AccountFailure) throw error;
+    throw new AccountFailure("unavailable");
+  }
+}
+
 export function readEventStage2<K extends EventStage2Envelope>(
   spec: EventStage2Read<K>,
   signal: AbortSignal,
 ) {
-  return eventRead(spec.path, spec.schema, signal);
+  return stage2Read(spec, signal, "application/json", async (response) => {
+    const parsed = schema(spec.schema).safeParse(await response.json());
+    if (!parsed.success) throw new AccountFailure("unavailable");
+    return { data: parsed.data, etag: response.headers.get("ETag") };
+  });
 }
 
 function isImage(type: string | null): type is "image/jpeg" | "image/png" {
   return type === "image/jpeg" || type === "image/png";
 }
 
-export async function readEventStage2Content(spec: EventStage2Content, signal: AbortSignal) {
-  const bounded = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
-  try {
-    const response = await withReadSlot(bounded, () =>
-      fetch(`/api/v1${spec.path}`, {
-        credentials: spec.access === "public" ? "omit" : "same-origin",
-        cache: "no-store",
-        signal: bounded,
-        headers: { Accept: "image/png, image/jpeg" },
-      }),
-    );
-    if (response.status !== 200) fail(response);
+export function readEventStage2Content(spec: EventStage2Content, signal: AbortSignal) {
+  return stage2Read(spec, signal, "image/png, image/jpeg", async (response) => {
     if (!isImage(response.headers.get("Content-Type"))) throw new AccountFailure("unavailable");
-    const blob = await response.blob();
-    bounded.throwIfAborted();
-    return blob;
-  } catch (error) {
-    if (error instanceof AccountFailure) throw error;
-    throw new AccountFailure("unavailable");
-  }
+    return response.blob();
+  });
 }
 
 export async function sendEventStage2<K extends EventStage2Envelope>(

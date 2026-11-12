@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { createSchemaValidator } from "../../apps/api/src/platform/http/schemas.ts";
+import { stage2Fixture } from "../fixtures/events-stage-2.ts";
 const valid = (name: string) =>
   createSchemaValidator().compile({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const input = {
@@ -168,4 +169,23 @@ test("Stage 2 canonical labels and gallery shapes close private and locale field
     true,
   );
   expect(valid("EventStage2MediaEditInput")({ position: 10 })).toBe(false);
+});
+
+test("Stage 2 cancellation returns the structured member response without private reasons", () => {
+  const { response } = stage2Fixture("cancelEvent", "cancelled");
+  expect(valid("EventStage2EnvelopeMember")(response)).toBe(true);
+  expect(valid("EnvelopeEventMember")(response)).toBe(false);
+  const staged = response as { data: { event: object } };
+  expect(staged.data.event).toMatchObject({
+    status: "cancelled",
+    route: null,
+    meetingLocation: null,
+    description: null,
+  });
+  expect(
+    valid("EventStage2EnvelopeMember")({
+      ...staged,
+      data: { ...staged.data, event: { ...staged.data.event, reason: "Fictional private reason" } },
+    }),
+  ).toBe(false);
 });

@@ -9284,6 +9284,106 @@
           "requestId": "synthetic-event-stage-2"
         }
       }
+    },
+    {
+      "id": "cancelEvent:stage2-cancelled",
+      "operationId": "cancelEvent",
+      "status": 200,
+      "operationExtension": "x-stage-2-operation",
+      "request": {
+        "reason": "Fictional weather cancellation"
+      },
+      "response": {
+        "data": {
+          "event": {
+            "id": "e1320000-0000-4000-8000-000000000001",
+            "version": 2,
+            "title": "Fictional northern convoy",
+            "description": null,
+            "game": "ets2",
+            "server": "Fictional Simulation",
+            "organizer": "Fictional Coordinator",
+            "route": null,
+            "meetingLocation": null,
+            "meetingAt": "2099-10-25T12:00:00.000Z",
+            "startsAt": "2099-10-25T13:00:00.000Z",
+            "endsAt": null,
+            "status": "cancelled",
+            "origin": {
+              "entityId": "e1320000-0000-4000-8000-000000000005",
+              "label": "Синтетическая гавань",
+              "requestedLocale": "ru",
+              "renderedLocale": "ru",
+              "englishFallback": false,
+              "hidden": false,
+              "nameNative": "Fictional Harbour"
+            },
+            "destination": {
+              "entityId": "e1320000-0000-4000-8000-000000000006",
+              "label": "Синтетическое плато",
+              "requestedLocale": "ru",
+              "renderedLocale": "ru",
+              "englishFallback": false,
+              "hidden": false,
+              "nameNative": "Fictional Plateau"
+            },
+            "platform": "truckersmp",
+            "originDepot": {
+              "id": "e1320000-0000-4000-8000-000000000004",
+              "name": "Fictional Harbour Freight",
+              "code": "synthetic_freight"
+            },
+            "destinationDepot": null,
+            "distanceKm": "0",
+            "requiredDlcs": [
+              {
+                "id": "e1320000-0000-4000-8000-000000000003",
+                "name": "Fictional Northern Roads",
+                "code": "synthetic_north",
+                "sources": [
+                  "from_city",
+                  "manual"
+                ]
+              }
+            ],
+            "hasCover": true
+          },
+          "organizerMemberId": "e1320000-0000-4000-8000-000000000002",
+          "visibility": "public",
+          "myResponse": {
+            "version": 1,
+            "response": "participating",
+            "declineReason": null
+          },
+          "responseCounts": {
+            "participating": 1,
+            "declined": 0
+          },
+          "myAttendance": "unconfirmed",
+          "prescribedCargoId": "e1320000-0000-4000-8000-000000000007",
+          "prescribedCargo": {
+            "entityId": "e1320000-0000-4000-8000-000000000007",
+            "label": "Синтетический груз",
+            "requestedLocale": "ru",
+            "renderedLocale": "ru",
+            "englishFallback": false,
+            "hidden": false
+          },
+          "prescribedMassKg": "8000",
+          "prescribedTrailerTypeId": "e1320000-0000-4000-8000-000000000008",
+          "prescribedTrailerType": {
+            "entityId": "e1320000-0000-4000-8000-000000000008",
+            "label": "Синтетический прицеп",
+            "requestedLocale": "ru",
+            "renderedLocale": "ru",
+            "englishFallback": false,
+            "hidden": false
+          }
+        },
+        "meta": {
+          "requestId": "synthetic-event-stage-2"
+        }
+      }
     }
   ]
 }

@@ -162,7 +162,7 @@ VTC-015 adds the permission-filtered `GET /api/v1/admin/applications/{applicatio
 
 ## Stage 2 Events (VTC-132 Step 1)
 
-The operations below are staged in OpenAPI. Existing methods with new `x-stage-2-operation` projections are the public/member event list and detail, upcoming event, event creation and update, and leadership attendance read. Those extensions preserve the live operation schemas until the owning feature lanes coordinate the wire cutover. See [staged semantics and picker handoff](README.md#stage-2-foundation-vtc-132-step-1).
+The operations below are staged in OpenAPI. Existing methods with new `x-stage-2-operation` projections are the public/member event list and detail, upcoming event, event creation, update and cancellation, and leadership attendance read. Those extensions preserve the live operation schemas until the owning feature lanes coordinate the wire cutover. See [staged semantics and picker handoff](README.md#stage-2-foundation-vtc-132-step-1).
 
 | Method and route | Operation ID | Capability | Feature owner |
 | --- | --- | --- | --- |

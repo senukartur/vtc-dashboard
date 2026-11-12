@@ -484,6 +484,116 @@ export const eventMediaGenerations = mysqlTable(
   ],
 );
 
+type EventDraftFields = Partial<
+  Pick<
+    typeof eventDrafts.$inferSelect,
+    | "title"
+    | "description"
+    | "game"
+    | "platform"
+    | "server"
+    | "organizerMemberId"
+    | "meetingLocation"
+    | "route"
+    | "meetingAt"
+    | "startsAt"
+    | "endsAt"
+    | "visibility"
+    | "originCityId"
+    | "destinationCityId"
+    | "originDepotId"
+    | "destinationDepotId"
+    | "distanceKm"
+    | "prescribedCargoId"
+    | "prescribedTrailerTypeId"
+    | "prescribedMassKg"
+  > & { requiredDlcIds: string[] }
+>;
+
+type EventMediaSnapshot = Pick<
+  typeof eventMedia.$inferSelect,
+  "id" | "contentType" | "byteLength" | "caption" | "isCover"
+> & { width: number; height: number; position: number };
+
+type EventMediaGallery = {
+  version: number;
+  items: (
+    | { id: string; state: "ready"; media: EventMediaSnapshot }
+    | { id: string; state: "processing" | "rejected"; media: null }
+  )[];
+};
+
+type LocalizedEventCatalogLabel = {
+  entityId: string;
+  label: string;
+  requestedLocale: "en" | "ru";
+  renderedLocale: "en" | "ru";
+  englishFallback: boolean;
+  hidden: boolean;
+  nameNative?: string;
+};
+
+type CanonicalEventCatalogLabel = { id: string; name: string; code: string };
+
+type EventPublicationSnapshot = {
+  event: Pick<
+    typeof eventRevisions.$inferSelect,
+    "version" | "title" | "game" | "server" | "organizer" | "meetingAt" | "startsAt" | "endsAt"
+  > & {
+    id: string;
+    status: "scheduled";
+    description: string | null;
+    route: string | null;
+    meetingLocation: string | null;
+    platform: NonNullable<typeof eventRevisionDetails.$inferSelect.platform>;
+    origin: LocalizedEventCatalogLabel | null;
+    destination: LocalizedEventCatalogLabel | null;
+    originDepot: CanonicalEventCatalogLabel | null;
+    destinationDepot: CanonicalEventCatalogLabel | null;
+    distanceKm: string | null;
+    requiredDlcs: (CanonicalEventCatalogLabel & { sources: ("from_city" | "manual")[] })[];
+    hasCover: boolean;
+  };
+  organizerMemberId: string;
+  visibility: typeof events.$inferSelect.visibility;
+  myResponse: { version: number; response: "unanswered"; declineReason: null };
+  myAttendance: "unconfirmed";
+  responseCounts: { participating: 0; declined: 0 };
+  prescribedCargoId: string | null;
+  prescribedMassKg: string | null;
+  prescribedTrailerTypeId: string | null;
+  prescribedCargo: LocalizedEventCatalogLabel | null;
+  prescribedTrailerType: LocalizedEventCatalogLabel | null;
+};
+
+// Validate each snapshot against its closed response DTO before storing it or
+// replaying it. The receipt carries no response headers, binary content or diagnostics.
+type EventStage2CommandResult = { schemaVersion: 1 } & (
+  | {
+      route: "draft_create" | "draft_update";
+      data: {
+        id: string;
+        version: number;
+        lifecycle: "draft";
+        updatedAt: string;
+        fields: EventDraftFields;
+      };
+    }
+  | {
+      route: "draft_delete";
+      data: { id: string; version: number; lifecycle: "discarded" };
+    }
+  | {
+      route: "publish";
+      revisionId: string;
+      data: EventPublicationSnapshot;
+    }
+  | {
+      route: "media_edit" | "media_delete";
+      data: EventMediaGallery;
+    }
+);
+
 export const eventStage2Commands = mysqlTable(
   "event_stage2_commands",
   {
@@ -499,9 +609,7 @@ export const eventStage2Commands = mysqlTable(
     targetId: idColumn("target_id").notNull(),
     key: idColumn("key").notNull(),
     fingerprint: opaqueColumn("fingerprint", { length: 32 }).notNull(),
-    result: json("result")
-      .$type<{ eventId: string; version: number; revisionId?: string }>()
-      .notNull(),
+    result: json("result").$type<EventStage2CommandResult>().notNull(),
     recordedAt: utcColumn("recorded_at").notNull(),
   },
   (t) => [

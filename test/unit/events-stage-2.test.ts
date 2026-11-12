@@ -1,5 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import {
+  eventStage2ImageQueryPolicy,
+  visibleEventStage2Image,
+} from "../../apps/web/src/features/events/stage-2-model.ts";
+import {
   eventStage2Commands,
   eventStage2Content,
   eventStage2Reads,
@@ -125,4 +129,104 @@ test("a public cover requests image bytes without credentials and rejects non-im
     `/api/v1/public/events/${stage2EventId}/cover`,
     expect.objectContaining({ credentials: "omit", cache: "no-store" }),
   );
+});
+
+test("cancellation accepts a staged event without legacy text and sends the definition precondition", async () => {
+  const command = eventStage2Commands.cancel(
+    stage2EventId,
+    { reason: "Fictional weather cancellation" },
+    '"v1"',
+    "ru",
+  );
+  const example = stage2Fixture("cancelEvent", "cancelled");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({
+        data: { token: "synthetic-nonfunctional-csrf" },
+        meta: { requestId: "synthetic" },
+      }),
+    )
+    .mockResolvedValueOnce(Response.json(example.response, { headers: { ETag: '"v2"' } }));
+  vi.stubGlobal("fetch", fetch);
+  await expect(sendEventStage2(command, new AbortController().signal)).resolves.toEqual({
+    data: example.response,
+    etag: '"v2"',
+  });
+  const [path, init] = fetch.mock.calls[1] as [string, RequestInit];
+  expect(path).toBe(`/api/v1/admin/events/${stage2EventId}/cancellation?locale=ru`);
+  expect(init.method).toBe("POST");
+  expect(JSON.parse(String(init.body))).toEqual({ reason: "Fictional weather cancellation" });
+  const headers = new Headers(init.headers);
+  expect(headers.get("If-Match")).toBe('"v1"');
+  expect(headers.get("Idempotency-Key")).toBe(command.key);
+});
+
+test("image data is visible only after the mounted enabled observer completes its current read", () => {
+  expect(eventStage2ImageQueryPolicy).toEqual({
+    gcTime: 0,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+  const image = new Blob(["synthetic"], { type: "image/png" });
+  const prior = {
+    data: image,
+    isSuccess: true,
+    fetchStatus: "idle",
+    isFetchedAfterMount: false,
+  } as const;
+  const authorized = { ...prior, isFetchedAfterMount: true };
+  expect(visibleEventStage2Image(prior, true)).toBeUndefined();
+  expect(visibleEventStage2Image(authorized, false)).toBeUndefined();
+  expect(visibleEventStage2Image({ ...authorized, fetchStatus: "fetching" }, true)).toBeUndefined();
+  expect(visibleEventStage2Image({ ...authorized, fetchStatus: "paused" }, true)).toBeUndefined();
+  expect(visibleEventStage2Image({ ...authorized, isSuccess: false }, true)).toBeUndefined();
+  expect(visibleEventStage2Image(authorized, true)).toBe(image);
+});
+
+test("staged JSON and image streams hold their read slots until their bodies finish", async () => {
+  const response = stage2Fixture("getEvent", "structured").response;
+  const stagedResponse = (contentType: string) => {
+    const { readable, writable } = new TransformStream<Uint8Array>();
+    return {
+      response: new Response(readable, { headers: { "Content-Type": contentType } }),
+      writer: writable.getWriter(),
+    };
+  };
+  const detail = stagedResponse("application/json");
+  const cover = stagedResponse("image/png");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(detail.response)
+    .mockResolvedValueOnce(cover.response)
+    .mockResolvedValueOnce(Response.json(response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+  const detailSpec = eventStage2Reads.memberDetail(stage2EventId);
+  const reads = [
+    readEventStage2(detailSpec, signal),
+    readEventStage2Content(eventStage2Content.publicCover(stage2EventId), signal),
+    readEventStage2(detailSpec, signal),
+  ];
+  const completed = Promise.all(reads);
+  void completed.catch(() => undefined);
+  const encoder = new TextEncoder();
+  try {
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(detail.response.bodyUsed).toBe(true);
+    expect(cover.response.bodyUsed).toBe(true);
+    await cover.writer.write(encoder.encode("synthetic"));
+    await cover.writer.close();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await detail.writer.write(encoder.encode(JSON.stringify(response)));
+    await detail.writer.close();
+    await expect(completed).resolves.toMatchObject([
+      { data: response },
+      { type: "image/png" },
+      { data: response },
+    ]);
+  } finally {
+    await Promise.allSettled([cover.writer.abort(), detail.writer.abort()]);
+    await Promise.allSettled(reads);
+  }
 });

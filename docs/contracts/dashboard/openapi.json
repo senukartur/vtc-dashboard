@@ -7528,6 +7528,81 @@
               }
             }
           }
+        },
+        "x-stage-2-operation": {
+          "x-contract-stage": "VTC-132 Step 1",
+          "x-owner-card": "VTC-124 / VTC-126",
+          "parameters": [
+            {
+              "name": "eventId",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              }
+            },
+            {
+              "$ref": "#/components/parameters/IfMatch"
+            },
+            {
+              "$ref": "#/components/parameters/IdempotencyKey"
+            },
+            {
+              "name": "locale",
+              "in": "query",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "en",
+                  "ru"
+                ]
+              }
+            }
+          ],
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReasonInput"
+                }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Staged result; see semantic preconditions.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/EventStage2EnvelopeMember"
+                  }
+                }
+              },
+              "headers": {
+                "ETag": {
+                  "schema": {
+                    "type": "string",
+                    "pattern": "^\"v[1-9][0-9]*\"$"
+                  },
+                  "description": "Strong version of the aggregate named by this operation."
+                },
+                "Cache-Control": {
+                  "schema": {
+                    "const": "no-store"
+                  },
+                  "description": "Do not store this response."
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Error"
+            }
+          },
+          "description": "Cancel a published event under its definition ETag. Return the staged projection, including null optional legacy text when unavailable. The cancellation reason stays private."
         }
       }
     },

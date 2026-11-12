@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useSession } from "../../app/Session.js";
 import { AccountFailure } from "../account/transport.js";
+import { eventStage2ImageQueryPolicy, visibleEventStage2Image } from "./stage-2-model.js";
 import {
   type EventStage2Access,
   type EventStage2Command,
@@ -46,7 +47,7 @@ function useStage2Read<T>(
   name: string,
   read: (signal: AbortSignal) => Promise<T>,
   enabled: boolean,
-  staleTime: number,
+  image = false,
 ) {
   const session = useSession();
   const client = useQueryClient();
@@ -57,8 +58,9 @@ function useStage2Read<T>(
     meta: { private: !publicRead },
     enabled: enabled && allowed,
     retry: false,
-    gcTime: publicRead ? 300000 : 0,
-    staleTime,
+    ...(image
+      ? eventStage2ImageQueryPolicy
+      : { gcTime: publicRead ? 300000 : 0, staleTime: 30000 }),
     queryFn: async ({ signal }) => {
       try {
         return await read(signal);
@@ -68,24 +70,41 @@ function useStage2Read<T>(
       }
     },
   });
-  return { ...query, data: query.isError || !allowed ? undefined : query.data };
+  return { query, allowed };
 }
 
 export function useEventStage2Query<K extends EventStage2Envelope>(
   spec: EventStage2Read<K>,
   enabled = true,
 ) {
-  return useStage2Read(
+  const { query, allowed } = useStage2Read(
     spec,
     spec.schema,
     (signal) => readEventStage2(spec, signal),
     enabled,
-    30000,
   );
+  return { ...query, data: query.isError || !allowed ? undefined : query.data };
 }
 
 export function useEventStage2Image(spec: EventStage2Content, enabled = true) {
-  return useStage2Read(spec, "image", (signal) => readEventStage2Content(spec, signal), enabled, 0);
+  const { query, allowed } = useStage2Read(
+    spec,
+    "image",
+    (signal) => readEventStage2Content(spec, signal),
+    enabled,
+    true,
+  );
+  const canFetch = enabled && allowed;
+  return {
+    data: visibleEventStage2Image(query, canFetch),
+    error: query.error,
+    isError: query.isError,
+    isFetching: query.isFetching,
+    isPending: query.isPending,
+    refetch: async () => {
+      if (canFetch) await query.refetch();
+    },
+  };
 }
 
 export function useEventStage2Command<K extends EventStage2Envelope>() {
