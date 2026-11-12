@@ -1,4 +1,12 @@
+import { createRequire } from "node:module";
+import type { components } from "@vtc/contracts";
 import { describe, expect, it } from "vitest";
+import { createAppQueryClient } from "../../apps/web/src/app/session-cache.ts";
+import {
+  refreshWorkspaceSummary,
+  workspaceSummaryKey,
+} from "../../apps/web/src/app/workspace-summary-cache.ts";
+import { accountFixture } from "../../apps/web/src/features/account/fixtures.ts";
 import { AccountFailure } from "../../apps/web/src/features/account/transport.ts";
 import { dashboardTranslations } from "../../apps/web/src/features/dashboard/translations.ts";
 import { schema } from "../../apps/web/src/features/dashboard/transport.ts";
@@ -43,6 +51,79 @@ function keys(value: object, prefix = ""): string[] {
 const placeholders = (text: string) => [...text.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).sort();
 /** The countdown without its timer hint: what the chip shows. */
 const shown = ({ nextChangeMs: _, ...rest }: Countdown) => rest;
+
+it("refreshes a newer authority in the command's member and generation after commit", async () => {
+  const require = createRequire(new URL("../../apps/web/package.json", import.meta.url));
+  const { QueryObserver } = require("@tanstack/react-query");
+  const client = createAppQueryClient();
+  const self = accountFixture().data;
+  const capturedSession = { self, generation: 4 };
+  const currentSession = {
+    ...capturedSession,
+    self: { ...self, capabilities: [...self.capabilities, "trips.review"] },
+  };
+  const activeKey = workspaceSummaryKey(currentSession);
+  const otherMember = workspaceSummaryKey({
+    ...currentSession,
+    self: {
+      ...currentSession.self,
+      member: { ...self.member, id: "41000000-0000-4000-8000-000000000018" },
+    },
+  });
+  const otherGeneration = workspaceSummaryKey({
+    ...currentSession,
+    generation: currentSession.generation + 1,
+  });
+  const preCommit: components["schemas"]["WorkspaceSummary"] = {
+    computedAt: overviewNow,
+    reviewQueue: { count: 2, oldestAgeSeconds: 30 },
+    unansweredUpcomingEvents: {
+      count: 1,
+      items: [
+        { eventId: upcomingEvent.id, startsAt: upcomingEvent.startsAt, title: upcomingEvent.title },
+      ],
+    },
+  };
+  const committed = { ...preCommit, unansweredUpcomingEvents: { count: 0, items: [] } };
+  let releaseStaleRead = () => {};
+  const staleRead = new Promise<typeof preCommit>((resolve) => {
+    releaseStaleRead = () => resolve(preCommit);
+  });
+  const signals: AbortSignal[] = [];
+  let source = preCommit;
+  client.setQueryData(otherMember, preCommit);
+  client.setQueryData(otherGeneration, preCommit);
+  const observer = new QueryObserver(client, {
+    queryKey: activeKey,
+    staleTime: Infinity,
+    queryFn: ({ signal }: { signal: AbortSignal }) => {
+      signals.push(signal);
+      return signals.length === 1 ? staleRead : Promise.resolve(source);
+    },
+  });
+  const unsubscribe = observer.subscribe(() => {});
+  try {
+    expect(activeKey).not.toEqual(workspaceSummaryKey(capturedSession));
+    expect(client.getQueryState(activeKey)?.fetchStatus).toBe("fetching");
+    expect(signals[0]?.aborted).toBe(false);
+
+    source = committed;
+    await refreshWorkspaceSummary(client, capturedSession);
+    expect(signals).toHaveLength(2);
+    expect(signals[0]?.aborted).toBe(true);
+    // A response that ignores abort still cannot replace the committed snapshot.
+    releaseStaleRead();
+    await staleRead;
+    expect(client.getQueryState(activeKey)).toMatchObject({ data: committed, fetchStatus: "idle" });
+    for (const key of [otherMember, otherGeneration]) {
+      expect(client.getQueryState(key)).toMatchObject({ data: preCommit, isInvalidated: false });
+    }
+  } finally {
+    releaseStaleRead();
+    unsubscribe();
+    client.clear();
+  }
+});
 
 describe("recent company trips path", () => {
   it("asks for five completion-ordered accepted company trips with optional game", () => {
