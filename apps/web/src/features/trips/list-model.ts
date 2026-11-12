@@ -20,7 +20,7 @@ export function tripListFilters(params: URLSearchParams) {
   return {
     ...filters,
     decision: filters.scope === "mine" ? filters.decision : undefined,
-    ownerId: filters.scope === "company" && validId(owner) ? owner : undefined,
+    ownerId: filters.scope === "company" && validId(owner) ? owner.toLowerCase() : undefined,
     q: tripSearch(params.get("q") ?? ""),
     period,
     order,

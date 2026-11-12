@@ -102,12 +102,12 @@ test("source filter accepts only the contract source kinds and resets paging sta
   );
 });
 test("list filters use canonical owners and completion order, and normalize the search", () => {
-  const id = "49000000-0000-4000-8000-000000000002";
+  const id = "49000000-0000-4000-8000-00000000000a";
   expect(
     tripListFilters(
       new URLSearchParams({
         scope: "company",
-        ownerId: id,
+        ownerId: id.toUpperCase(),
         decision: "rejected",
         q: " #1046 ",
         order: "completion_asc",
@@ -133,6 +133,9 @@ test("list filters use canonical owners and completion order, and normalize the 
   });
   expect(
     tripListFilters(new URLSearchParams({ scope: "mine", ownerId: id })).ownerId,
+  ).toBeUndefined();
+  expect(
+    tripListFilters(new URLSearchParams({ scope: "company", ownerId: "not-a-driver" })).ownerId,
   ).toBeUndefined();
   expect(tripSearch(" 1046 ")).toBe("1046");
   expect(tripSearch(` ${"🚛".repeat(129)} `)).toBe("🚛".repeat(128));

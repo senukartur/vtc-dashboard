@@ -51,7 +51,7 @@ export function TripListFilters({
             placeholder={t("searchPlaceholder")}
             value={search}
             onChange={(event) =>
-              onSearch(Array.from(event.target.value).slice(0, SEARCH_LIMIT).join(""))
+              onSearch(Array.from(event.target.value.trimStart()).slice(0, SEARCH_LIMIT).join(""))
             }
           />
         </div>

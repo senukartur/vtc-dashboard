@@ -113,7 +113,7 @@ export function TripTable({
             >
               <span className="trips-column-label">{t("completionColumn")}</span>
               <button type="button" className="trips-sort" onClick={onSort}>
-                {t("completionColumn")}
+                {t("completion")}
                 <span aria-hidden="true">{order === "completion_desc" ? "↓" : "↑"}</span>
               </button>
             </th>

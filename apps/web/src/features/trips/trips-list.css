@@ -149,6 +149,15 @@
   position: relative;
   z-index: 1;
 }
+@media (pointer: coarse) {
+  .trip-page .trips-scope > a,
+  .trip-page .trips-row-meta a {
+    display: inline-flex;
+    align-items: center;
+    min-width: var(--target-min);
+    min-height: var(--target-min);
+  }
+}
 .trip-page .trips-time-basis {
   display: block;
   color: var(--muted);

@@ -12,6 +12,7 @@ const ids = [1, 2, 3, 4].map((n) => `49000000-0000-4000-8000-00000000000${n}`) a
   string,
 ];
 const [first, second, third, colleague] = ids;
+const colleagueOwnerId = "49000000-0000-4000-8000-00000000000a";
 const label = (text: string, englishFallback = false) => ({
   entityId,
   label: text,
@@ -67,7 +68,7 @@ function summary(tripId: string) {
   if (tripId === colleague)
     Object.assign(trip, {
       decision: "accepted",
-      owner: { ...owner, id: colleague, nickname: "Fictional Colleague" },
+      owner: { ...owner, id: colleagueOwnerId, nickname: "Fictional Colleague" },
       origin: label("Fictional Port"),
       destination: label("Fictional Mill"),
       cargo: label("Fictional paper"),
@@ -310,10 +311,10 @@ test(
         expect(routeBox.y + routeBox.height).toBeLessThanOrEqual(cargoBox.y + 1);
         expect(Math.abs(rowBox.width - listBox.width)).toBeLessThanOrEqual(2);
       } else {
-        await expect(current.getByRole("columnheader")).toHaveText([
-          ...names.slice(0, -1),
-          new RegExp(names.at(-1) ?? ""),
-        ]);
+        await expect(current.getByRole("columnheader")).toHaveText(
+          [...names.slice(0, -1), ru ? /Завершение/ : /Completion/],
+          { useInnerText: true },
+        );
       }
       const localizedGame = page.getByRole("combobox", {
         name: ru ? "Игра" : "Game",
@@ -387,7 +388,7 @@ test(
       "Cargo",
       "Driven distance",
       "Company decision",
-      /Completed \/ confirmed/,
+      /Completion/,
     ]);
     await expect(table(page).locator("tbody tr").first().getByRole("cell")).toHaveCount(5);
     const badge = table(page).locator("tbody tr").nth(1).getByText("Pending review");
@@ -508,7 +509,7 @@ test(
     await expect(page.getByRole("combobox", { name: "Source", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("combobox", { name: "Period", exact: true })).toBeFocused();
-    const sort = page.getByRole("button", { name: "Completed / confirmed" });
+    const sort = page.getByRole("button", { name: "Completion" });
     if (info.project.name !== "desktop-chromium") {
       await page.keyboard.press("Tab");
       await expect(page.getByRole("combobox", { name: "Completion order" })).toBeFocused();
@@ -798,7 +799,9 @@ test(
     await search.fill("1046");
     await expect(page).toHaveURL(/[?&]q=1046(&|$)/);
     await expect(rowLink(page, first)).toBeVisible();
-    const sort = page.getByRole("button", { name: "Completed / confirmed", exact: true });
+    const sort = page.getByRole("button", { name: "Completion", exact: true });
+    await expect(sort.locator("..")).toHaveAttribute("aria-sort", "descending");
+    expect(lists.at(-1)?.get("order")).toBe("completion_desc");
     await sort.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/[?&]order=completion_asc(&|$)/);
@@ -820,6 +823,9 @@ test(
     await catalogLanguage(page, "ru");
     await expect.poll(() => lists.at(-1)?.get("locale")).toBe("ru");
     expect(lists.at(-1)?.get("q")).toBe("1046");
+    const limit = `${"🚛".repeat(127)}я`;
+    await page.getByRole("searchbox").fill(` ${limit} `);
+    await expect.poll(() => lists.at(-1)?.get("q")).toBe(limit);
     expectListParams(lists);
   },
 );
@@ -836,7 +842,9 @@ test(
       self.data.preferences.displayTimezone = displayTimezone;
       return route.fulfill({ json: self });
     });
-    await page.goto(`/account/trips?scope=company&ownerId=${colleague}&period=thisMonth`);
+    await page.goto(
+      `/account/trips?scope=company&ownerId=${colleagueOwnerId.toUpperCase()}&period=thisMonth`,
+    );
     await catalogLanguage(page);
     await expect(page.getByText("Display timezone unavailable. Showing all time.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Open preferences" })).toHaveAttribute(
@@ -852,14 +860,60 @@ test(
     await expect(period).toHaveValue("thisMonth");
     await expect.poll(() => lists.at(-1)?.get("from")).toBe("2026-09-30T22:00:00.000Z");
     expect(lists.at(-1)?.get("toExclusive")).toBe("2026-10-31T23:00:00.000Z");
-    expect(lists.at(-1)?.get("ownerId")).toBe(colleague);
+    expect(lists.at(-1)?.get("ownerId")).toBe(colleagueOwnerId);
     expect(lists.at(-1)?.has("decision")).toBe(false);
     await expect(rowLink(page, colleague)).toBeVisible();
     await page.getByRole("button", { name: "Clear driver filter" }).click();
     await expect(page).not.toHaveURL(/ownerId=/);
     await expect(page).toHaveURL(/period=thisMonth/);
     await expect.poll(() => lists.at(-1)?.has("ownerId")).toBe(false);
+
+    const requestCount = lists.length;
+    await page.goto("/account/trips?scope=company&ownerId=not-a-driver");
+    await expect(rowLink(page, colleague)).toBeVisible();
+    expect(lists.length).toBeGreaterThan(requestCount);
+    expect(lists.at(-1)?.has("ownerId")).toBe(false);
+    await expect(page.getByRole("button", { name: "Clear driver filter" })).toHaveCount(0);
     expectListParams(lists);
+  },
+);
+
+test(
+  "phone taps distinguish the event link from the adjacent trip card",
+  browserCase(["@layout", "@viewport-mobile"]),
+  async ({ page }) => {
+    await mockList(page);
+    await page.route(`**/api/v1/events/${entityId}`, (route) =>
+      route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND" } } }),
+    );
+    await page.route("**/api/v1/trips?*", (route) => {
+      const trip = {
+        ...summary(first),
+        event: { id: entityId, title: "Fictional Winter Convoy" },
+      };
+      return route.fulfill({ json: list([trip]) });
+    });
+    await page.goto("/account/trips");
+    await catalogLanguage(page);
+
+    const drafts = page.getByRole("link", { name: "Saved drafts", exact: true });
+    await expect(drafts).toBeVisible();
+    expect((await drafts.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(40);
+    const event = page.getByRole("link", { name: "Fictional Winter Convoy", exact: true });
+    await event.scrollIntoViewIfNeeded();
+    const target = await event.boundingBox();
+    if (!target) throw new Error("EVENT_LINK_NOT_RENDERED");
+    expect(target.height).toBeGreaterThanOrEqual(40);
+    await page.touchscreen.tap(target.x + target.width / 2, target.y + 3);
+    await expect(page).toHaveURL(`/account/events/${entityId}`);
+
+    await page.goBack();
+    const cargo = table(page).getByRole("cell", { name: "Fictional machinery", exact: true });
+    await cargo.scrollIntoViewIfNeeded();
+    const adjacent = await cargo.boundingBox();
+    if (!adjacent) throw new Error("TRIP_CARD_NOT_RENDERED");
+    await page.touchscreen.tap(adjacent.x + adjacent.width / 2, adjacent.y + adjacent.height / 2);
+    await expect(page).toHaveURL(`/account/trips/${first}`);
   },
 );
 
