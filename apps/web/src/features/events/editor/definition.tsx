@@ -5,7 +5,7 @@ import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
 import { useEventStage2Query } from "../stage-2-queries.js";
 import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
-import { type EditorStep, useEditorCommands } from "./commands.js";
+import { type EditorStep, eventEditorAccessLost, useEditorCommands } from "./commands.js";
 import { type DraftFields, eventRevisionTag, type OpenEventDraft } from "./draft.js";
 import { eventDefinitionSeed } from "./model.js";
 import { useEditorText } from "./text.js";
@@ -52,7 +52,14 @@ export function useDefinitionActions(source: EditorDefinition, onPublished?: Pub
   );
   const conflict = writes.failure?.kind === "conflict" && definition.kind !== "new";
   const missingRevision = definition.kind !== "new" && !eventRevisionTag(definition.etag);
-  const locked = writes.pending || !!writes.retry || conflict || refreshing || missingRevision;
+  const accessFailure = [writes.failure, refreshFailure].find(eventEditorAccessLost);
+  const locked =
+    writes.pending ||
+    !!writes.retry ||
+    conflict ||
+    refreshing ||
+    missingRevision ||
+    !!accessFailure;
 
   function draftStep(
     fields: DraftFields,
@@ -163,6 +170,7 @@ export function useDefinitionActions(source: EditorDefinition, onPublished?: Pub
   return {
     definition,
     eventId,
+    accessFailure,
     locked,
     conflict,
     missingRevision,

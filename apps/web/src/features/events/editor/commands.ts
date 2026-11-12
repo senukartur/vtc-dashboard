@@ -3,12 +3,22 @@ import { AccountFailure } from "../../account/transport.js";
 import type { DTO } from "../model.js";
 import { useEventStage2Command } from "../stage-2-queries.js";
 import type { EventStage2Command, EventStage2Envelope } from "../stage-2-transport.js";
+import { EventFailure } from "../transport.js";
 
 type Receipt<K extends EventStage2Envelope> = { data: DTO[K]; etag: string };
 export type EditorStep<K extends EventStage2Envelope> = {
   request: EventStage2Command<K>;
   commit: (receipt: Receipt<K>) => EditorStep<K> | undefined;
 };
+
+export function eventEditorAccessLost(error: unknown) {
+  return (
+    error instanceof AccountFailure &&
+    (error.kind === "unauthorized" ||
+      error.kind === "forbidden" ||
+      (error instanceof EventFailure && error.status === 404))
+  );
+}
 
 export function useEditorCommands<K extends EventStage2Envelope>() {
   const transport = useEventStage2Command<K>();
@@ -39,9 +49,14 @@ export function useEditorCommands<K extends EventStage2Envelope>() {
     } catch (error) {
       const reason = error instanceof AccountFailure ? error : new AccountFailure("uncertain");
       setFailure(reason);
-      if (reason.retryAfter) setWaitUntil(Date.now() + 1000 * reason.retryAfter);
-      if (["uncertain", "unavailable", "limited"].includes(reason.kind) && current)
+      if (
+        ["uncertain", "unavailable", "limited"].includes(reason.kind) &&
+        !eventEditorAccessLost(reason) &&
+        current
+      ) {
         setRetry(current);
+        if (reason.retryAfter) setWaitUntil(Date.now() + 1000 * reason.retryAfter);
+      }
     } finally {
       running.current = false;
       setPending(false);

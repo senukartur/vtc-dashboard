@@ -7,7 +7,7 @@ import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
 import { useEventStage2Query } from "../stage-2-queries.js";
 import { eventStage2Commands, eventStage2Reads } from "../stage-2-transport.js";
-import { useEditorCommands } from "./commands.js";
+import { eventEditorAccessLost, useEditorCommands } from "./commands.js";
 
 export type DraftFields = DTO["EventStage2DraftInput"];
 export type OpenEventDraft = { kind: "draft"; id: string; etag: string; fields: DraftFields };
@@ -22,6 +22,8 @@ const en = {
   conflict: "The saved draft changed. Your edits are still here.",
   refresh: "Check latest draft",
   latest: "Latest saved title",
+  latestDescription: "Latest saved description",
+  noDescription: "No saved description",
   untitled: "Untitled draft",
   keep: "Keep my edits",
   load: "Load saved fields",
@@ -37,6 +39,8 @@ const ru: Record<keyof typeof en, string> = {
   conflict: "Сохранённый черновик изменился. Ваши правки остались в редакторе.",
   refresh: "Проверить последний черновик",
   latest: "Последнее сохранённое название",
+  latestDescription: "Последнее сохранённое описание",
+  noDescription: "Описание отсутствует",
   untitled: "Черновик без названия",
   keep: "Сохранить мои правки",
   load: "Загрузить сохранённые поля",
@@ -85,27 +89,31 @@ function openedDraft(
 
 export function EventDraftRead({
   id,
+  observeAfterOpening = true,
   children,
 }: {
   id: string;
+  observeAfterOpening?: boolean;
   children: (draft: OpenEventDraft, refresh: () => Promise<OpenEventDraft>) => ReactNode;
 }) {
   const { t } = useTranslation("events");
   const text = useDraftText();
-  const query = useEventStage2Query(eventStage2Reads.draft(id));
-  const response = query.data;
   const [opened, setOpened] = useState<OpenEventDraft | null>(null);
+  const query = useEventStage2Query(eventStage2Reads.draft(id), !opened || observeAfterOpening);
+  const response = query.data;
+  const accessLost = eventEditorAccessLost(query.error);
 
   // Initialize the editable form once. Background reads must never replace its unsaved values.
   useEffect(() => {
+    if (accessLost) {
+      setOpened(null);
+      return;
+    }
     const saved = openedDraft(id, response);
     if (saved) setOpened((previous) => previous ?? saved);
-  }, [id, response]);
+  }, [id, response, accessLost]);
 
-  const denied =
-    query.error instanceof AccountFailure &&
-    (query.error.kind === "forbidden" || query.error.kind === "unauthorized");
-  if (denied) return <EventFailureView error={query.error} />;
+  if (accessLost) return <EventFailureView error={query.error} />;
   if (opened)
     return children(opened, async () => {
       const result = await query.refetch();
@@ -204,6 +212,9 @@ function DraftFieldsEditor({
     commands.clearFailure();
   }
 
+  const accessLost = [commands.failure, refreshError].find(eventEditorAccessLost);
+  if (accessLost) return <EventFailureView error={accessLost} />;
+
   return (
     <form
       className="stack"
@@ -253,9 +264,22 @@ function DraftFieldsEditor({
           </p>
           {latest ? (
             <>
-              <p>
-                {text.latest} · {latest.fields.title ?? text.untitled}
-              </p>
+              <dl className="event-facts">
+                {edits.title !== undefined && (
+                  <div>
+                    <dt>{text.latest}</dt>
+                    <dd>{latest.fields.title ?? text.untitled}</dd>
+                  </div>
+                )}
+                {edits.description !== undefined && (
+                  <div>
+                    <dt>{text.latestDescription}</dt>
+                    <dd className="event-description">
+                      {latest.fields.description ?? text.noDescription}
+                    </dd>
+                  </div>
+                )}
+              </dl>
               <div className="event-actions">
                 <Button type="button" variant="outline" onClick={() => acceptLatest(false)}>
                   {text.load}

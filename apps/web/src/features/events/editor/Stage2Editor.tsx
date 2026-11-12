@@ -1,5 +1,6 @@
 import { type FormEvent, useId, useState } from "react";
 import { Button } from "../../../shared/ui/primitives.js";
+import { EventFailureView } from "../components.js";
 import type { DTO } from "../model.js";
 import {
   DepotField,
@@ -54,7 +55,13 @@ export function Stage2EventEditor({ source, ...props }: Stage2EventEditorProps) 
       {(scope) => {
         if (source.kind === "draft") {
           return (
-            <EventDraftRead id={source.id} key={JSON.stringify([scope, source.kind, source.id])}>
+            // Publication invalidates reads before the receipt returns. Stop watching the draft
+            // after opening so its transition to published cannot unmount the editor mid-command.
+            <EventDraftRead
+              id={source.id}
+              observeAfterOpening={false}
+              key={JSON.stringify([scope, source.kind, source.id])}
+            >
               {(draft) => <EventEditorForm source={draft} {...props} />}
             </EventDraftRead>
           );
@@ -183,7 +190,7 @@ function EventEditorForm({
       : attempt === "draft"
         ? validation.draftErrors
         : {};
-  const gallery = useEditorGallery(eventId, ensureDraft);
+  const gallery = useEditorGallery(actions.accessFailure ? null : eventId, ensureDraft);
   const disableForm = actions.locked || gallery.busy;
   const saving = actions.pending || gallery.busy;
 
@@ -263,6 +270,16 @@ function EventEditorForm({
       : member?.organizerMemberId && member.organizerMemberId === form.organizerMemberId
         ? event?.organizer
         : undefined;
+
+  if (actions.accessFailure)
+    return (
+      <div className="stack">
+        <EventFailureView error={actions.accessFailure} />
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          {text.cancel}
+        </Button>
+      </div>
+    );
 
   return (
     <div className="event-stage2-editor">
