@@ -1707,7 +1707,7 @@ export function createCatalogs(
       const depotIds = ids(selection.depots);
       const cities = cityIds.length
         ? await c(tx)
-            .select({ dlcId: catalogCities.dlcId })
+            .select({ id: catalogCities.id, dlcId: catalogCities.dlcId })
             .from(catalogCities)
             .where(and(eq(catalogCities.game, game), inArray(catalogCities.id, cityIds)))
             .for("share")
@@ -1732,20 +1732,31 @@ export function createCatalogs(
             )
             .for("share")
         : [];
-      const derivedDlcIds = new Set(ids([...cities, ...depots].map((row) => row.dlcId)));
-      const dlcIds = ids([...derivedDlcIds, ...selection.manualDlcs]);
-      const dlcs = dlcIds.length
-        ? await c(tx)
-            .select({
-              id: catalogDlcs.id,
-              name: catalogDlcs.nameEn,
-              code: catalogDlcs.code,
-              hidden: catalogDlcs.hidden,
-            })
-            .from(catalogDlcs)
-            .where(and(eq(catalogDlcs.game, game), inArray(catalogDlcs.id, dlcIds)))
-            .for("share")
-        : [];
+      const dlcIds = ids([
+        ...cities.map((row) => row.dlcId),
+        ...depots.map((row) => row.dlcId),
+        ...selection.manualDlcs,
+      ]).sort();
+      const dlcs = new Map<string, { id: string; name: string; code: string; hidden: boolean }>();
+      // A page can combine the manual DLC sets of many definitions.
+      for (let start = 0; start < dlcIds.length; start += 1000) {
+        const rows = await c(tx)
+          .select({
+            id: catalogDlcs.id,
+            name: catalogDlcs.nameEn,
+            code: catalogDlcs.code,
+            hidden: catalogDlcs.hidden,
+          })
+          .from(catalogDlcs)
+          .where(
+            and(
+              eq(catalogDlcs.game, game),
+              inArray(catalogDlcs.id, dlcIds.slice(start, start + 1000)),
+            ),
+          )
+          .for("share");
+        for (const row of rows) dlcs.set(row.id, { ...row, code: row.code.toString() });
+      }
       return {
         depots: new Map(
           depots.map((row) => [
@@ -1753,14 +1764,15 @@ export function createCatalogs(
             {
               id: row.id,
               cityId: row.cityId,
+              dlcId: row.dlcId,
               name: row.name,
               code: row.code.toString(),
               hidden: row.depotHidden || row.companyHidden || row.cityHidden,
             },
           ]),
         ),
-        dlcs: new Map(dlcs.map((row) => [row.id, { ...row, code: row.code.toString() }])),
-        derivedDlcIds,
+        dlcs,
+        cityDlcs: new Map(cities.map((row) => [row.id, row.dlcId])),
       };
     },
     async hasVisibleDepotInTransaction(

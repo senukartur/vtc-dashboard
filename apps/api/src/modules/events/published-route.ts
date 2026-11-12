@@ -1,6 +1,6 @@
 import type { components } from "@vtc/contracts";
 import { applicationId, decimal38_18, type TxContext, type UnitOfWork } from "@vtc/db";
-import { eq, eventRevisionDetails, eventRevisionDlcs, inArray } from "@vtc/db/events-schema";
+import { eventRevisionDetails, eventRevisionDlcs, inArray } from "@vtc/db/events-schema";
 import { closed } from "../../platform/outbox/events.js";
 import type { Catalogs } from "../catalogs/service.js";
 import { identityError } from "../identity/service.js";
@@ -16,6 +16,9 @@ type DetailsRow = typeof eventRevisionDetails.$inferSelect;
 type Depots = Pick<DetailsRow, "originDepotId" | "destinationDepotId">;
 export type RouteDetails = Omit<DetailsRow, "revisionId"> & { requiredDlcIds: string[] };
 type Cities = Pick<S["EventInput"], "originCityId" | "destinationCityId">;
+type EventGame = S["EventInput"]["game"];
+type PublishedRouteRef = Cities & { id: string; game: EventGame };
+type CatalogFacts = Awaited<ReturnType<RouteCatalogs["eventRouteCatalogInTransaction"]>>;
 type RouteFields = Cities & Pick<S["EventInput"], "route" | "meetingLocation">;
 
 export const blankLegacyText = "—";
@@ -126,40 +129,75 @@ export function createPublishedRoutes(unit: UnitOfWork, catalogs: RouteCatalogs)
       .for("share");
     return new Map(rows.map((row) => [row.revisionId, row]));
   }
-  async function get(tx: TxContext, revisionId: string): Promise<RouteDetails | null> {
-    const details = (await detailsInTransaction(tx, [revisionId])).get(revisionId);
-    if (!details) return null;
+  async function routesInTransaction(tx: TxContext, revisionIds: string[]) {
+    const details = await detailsInTransaction(tx, revisionIds);
+    const routes = new Map<string, RouteDetails>();
+    if (!details.size) return routes;
+    for (const { revisionId, ...route } of details.values())
+      routes.set(revisionId, { ...route, requiredDlcIds: [] });
     const rows = await c(tx)
-      .select({ id: eventRevisionDlcs.dlcId })
+      .select({ revisionId: eventRevisionDlcs.revisionId, dlcId: eventRevisionDlcs.dlcId })
       .from(eventRevisionDlcs)
-      .where(eq(eventRevisionDlcs.revisionId, revisionId))
-      .orderBy(eventRevisionDlcs.dlcId)
+      .where(inArray(eventRevisionDlcs.revisionId, [...details.keys()]))
+      .orderBy(eventRevisionDlcs.revisionId, eventRevisionDlcs.dlcId)
       .for("share");
-    const { revisionId: _revisionId, ...route } = details;
-    return { ...route, requiredDlcIds: rows.map((row) => row.id) };
+    for (const { revisionId, dlcId } of rows) routes.get(revisionId)?.requiredDlcIds.push(dlcId);
+    return routes;
   }
-  function catalogFacts(
-    tx: TxContext,
-    value: Cities & Pick<S["EventInput"], "game">,
-    details: RouteDetails | null,
-    deriveDlc: boolean,
-  ) {
-    return catalogs.eventRouteCatalogInTransaction(tx, value.game, {
-      cities: deriveDlc ? [value.originCityId, value.destinationCityId] : [],
-      depots: [details?.originDepotId, details?.destinationDepotId],
-      manualDlcs: details?.requiredDlcIds ?? [],
-    });
+
+  function publicFields(value: Cities, details: RouteDetails | undefined, facts: CatalogFacts) {
+    const { depots, dlcs, cityDlcs } = facts;
+    const originDepot = details?.originDepotId ? depots.get(details.originDepotId) : undefined;
+    const destinationDepot = details?.destinationDepotId
+      ? depots.get(details.destinationDepotId)
+      : undefined;
+    const derived = new Set([
+      value.originCityId ? cityDlcs.get(value.originCityId) : null,
+      value.destinationCityId ? cityDlcs.get(value.destinationCityId) : null,
+      originDepot?.dlcId,
+      destinationDepot?.dlcId,
+    ]);
+    const manual = new Set(details?.requiredDlcIds);
+    const requiredDlcs: S["EventStage2Dlc"][] = [];
+    for (const id of [...new Set([...derived, ...manual])]
+      .filter((id): id is string => id != null)
+      .sort()) {
+      const row = dlcs.get(id);
+      if (!row) continue;
+      const sources: S["EventStage2Dlc"]["sources"] = [];
+      if (derived.has(id)) sources.push("from_city");
+      if (manual.has(id)) sources.push("manual");
+      requiredDlcs.push({ id, name: row.name, code: row.code, sources });
+    }
+    function depotOption(row: typeof originDepot) {
+      return row ? { id: row.id, name: row.name, code: row.code } : null;
+    }
+    return {
+      platform: details?.platform ?? null,
+      originDepot: depotOption(originDepot),
+      destinationDepot: depotOption(destinationDepot),
+      distanceKm: details?.distanceKm == null ? null : decimal(details.distanceKm),
+      requiredDlcs,
+      hasCover: false,
+    };
   }
+
   return {
     detailsInTransaction,
-    get,
+    async get(tx: TxContext, revisionId: string): Promise<RouteDetails | null> {
+      return (await routesInTransaction(tx, [revisionId])).get(revisionId) ?? null;
+    },
     async validate(
       tx: TxContext,
       value: Cities & Pick<S["EventInput"], "game">,
       details: RouteDetails,
       previous: RouteDetails | null,
     ) {
-      const { depots, dlcs } = await catalogFacts(tx, value, details, false);
+      const { depots, dlcs } = await catalogs.eventRouteCatalogInTransaction(tx, value.game, {
+        cities: [],
+        depots: [details.originDepotId, details.destinationDepotId],
+        manualDlcs: details.requiredDlcIds,
+      });
       for (const [id, cityId, priorId] of [
         [details.originDepotId, value.originCityId, previous?.originDepotId],
         [details.destinationDepotId, value.destinationCityId, previous?.destinationDepotId],
@@ -194,32 +232,36 @@ export function createPublishedRoutes(unit: UnitOfWork, catalogs: RouteCatalogs)
             requiredDlcIds.slice(start, start + 1000).map((dlcId) => ({ revisionId, game, dlcId })),
           );
     },
-    async publicFields(
-      tx: TxContext,
-      value: Cities & Pick<S["EventInput"], "game">,
-      details: RouteDetails | null,
-    ) {
-      const { depots, dlcs, derivedDlcIds } = await catalogFacts(tx, value, details, true);
-      const manual = new Set(details?.requiredDlcIds);
-      const requiredDlcs: S["EventStage2Dlc"][] = [];
-      for (const [id, row] of [...dlcs].sort(([a], [b]) => (a < b ? -1 : a === b ? 0 : 1))) {
-        const sources: S["EventStage2Dlc"]["sources"] = [];
-        if (derivedDlcIds.has(id)) sources.push("from_city");
-        if (manual.has(id)) sources.push("manual");
-        requiredDlcs.push({ id, name: row.name, code: row.code, sources });
+    async publicFieldsInTransaction(tx: TxContext, values: readonly PublishedRouteRef[]) {
+      const routes = await routesInTransaction(
+        tx,
+        values.map((value) => value.id),
+      );
+      const fields = new Map<
+        string,
+        {
+          public: ReturnType<typeof publicFields>;
+          organizerMemberId: string | null;
+        }
+      >();
+      for (const game of ["ats", "ets2"] as const) {
+        const group = values.filter((value) => value.game === game);
+        if (!group.length) continue;
+        const details = group.map((value) => routes.get(value.id));
+        const facts = await catalogs.eventRouteCatalogInTransaction(tx, game, {
+          cities: group.flatMap((value) => [value.originCityId, value.destinationCityId]),
+          depots: details.flatMap((route) => [route?.originDepotId, route?.destinationDepotId]),
+          manualDlcs: details.flatMap((route) => route?.requiredDlcIds ?? []),
+        });
+        for (const value of group) {
+          const route = routes.get(value.id);
+          fields.set(value.id, {
+            public: publicFields(value, route, facts),
+            organizerMemberId: route?.organizerMemberId ?? null,
+          });
+        }
       }
-      function depotOption(id: string | null | undefined) {
-        const row = id ? depots.get(id) : undefined;
-        return row ? { id: row.id, name: row.name, code: row.code } : null;
-      }
-      return {
-        platform: details?.platform ?? null,
-        originDepot: depotOption(details?.originDepotId),
-        destinationDepot: depotOption(details?.destinationDepotId),
-        distanceKm: details?.distanceKm == null ? null : decimal(details.distanceKm),
-        requiredDlcs,
-        hasCover: false,
-      };
+      return fields;
     },
   };
 }

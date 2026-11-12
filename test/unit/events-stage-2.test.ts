@@ -44,6 +44,81 @@ test("staged queries include effective filters and validate the new response sha
   await expect(readEventStage2(spec, signal)).rejects.toMatchObject({ kind: "unavailable" });
 });
 
+test("browser transport preserves own RSVP versions for member list and upcoming reads", async () => {
+  const list = stage2Fixture("listEvents", "own-response");
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(list.response))
+    .mockResolvedValueOnce(Response.json(upcoming.response));
+  vi.stubGlobal("fetch", fetch);
+  const signal = new AbortController().signal;
+  const response = { myResponse: "participating", myResponseVersion: 2 };
+  await expect(readEventStage2(eventStage2Reads.memberList({}), signal)).resolves.toMatchObject({
+    data: { data: { items: [response] } },
+  });
+  await expect(readEventStage2(eventStage2Reads.upcoming(), signal)).resolves.toMatchObject({
+    data: { data: response },
+  });
+});
+
+test("browser transport rejects both mismatched status and version pairs", async () => {
+  const list = stage2Fixture("listEvents", "own-response").response as {
+    data: { items: Record<string, unknown>[] };
+  };
+  const upcoming = stage2Fixture("getUpcomingEvent", "own-response").response as {
+    data: Record<string, unknown>;
+  };
+  const signal = new AbortController().signal;
+  const memberList = eventStage2Reads.memberList();
+  const nearest = eventStage2Reads.upcoming();
+  expect(memberList.path).toBe("/events?locale=en");
+  expect(nearest.path).toBe("/me/upcoming-event?locale=en");
+  for (const pair of [
+    { myResponse: null, myResponseVersion: 2 },
+    { myResponse: "unanswered", myResponseVersion: null },
+  ]) {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({
+            ...list,
+            data: { ...list.data, items: [{ ...list.data.items[0], ...pair }] },
+          }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            ...upcoming,
+            data: { ...upcoming.data, ...pair },
+          }),
+        ),
+    );
+    await expect(readEventStage2(memberList, signal)).rejects.toMatchObject({
+      kind: "unavailable",
+    });
+    await expect(readEventStage2(nearest, signal)).rejects.toMatchObject({ kind: "unavailable" });
+  }
+});
+
+test("staged attendance requests the leadership projection and reads its collection ETag", async () => {
+  const example = stage2Fixture("getEventAttendance", "leadership");
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(example.response, { headers: { ETag: '"v2"' } }));
+  vi.stubGlobal("fetch", fetch);
+  const spec = eventStage2Reads.attendance(stage2EventId, { limit: 2, cursor: "fixture&next" });
+  await expect(readEventStage2(spec, new AbortController().signal)).resolves.toEqual({
+    data: example.response,
+    etag: '"v2"',
+  });
+  expect(fetch).toHaveBeenCalledWith(
+    `/api/v1/admin/events/${stage2EventId}/attendance?limit=2&cursor=fixture%26next&view=stage2`,
+    expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+  );
+});
+
 test("draft commands use the staged closed request schema and preserve prepared input", () => {
   expect(eventStage2Commands.create({ draft: true }).body).toEqual({
     encoding: "json",

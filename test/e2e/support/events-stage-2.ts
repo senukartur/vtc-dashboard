@@ -46,7 +46,7 @@ export async function mockEventsStage2(
   access: "public" | "member" | "manager" = "manager",
   locale: "en" | "ru" = "en",
 ) {
-  const shell = await mockEvents(page, access === "manager", locale);
+  const shell = await mockEvents(page, access === "manager", locale, { stage2Rollout: true });
   shell.session = access !== "public";
   const state = {
     publicCover: true,

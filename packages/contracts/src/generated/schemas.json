@@ -11950,6 +11950,19 @@
             }
           ]
         },
+        "myResponseVersion": {
+          "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "responseCounts": {
           "$ref": "#/$defs/EventResponseCounts"
         }
@@ -11959,10 +11972,43 @@
         "organizerMemberId",
         "visibility",
         "myResponse",
+        "myResponseVersion",
         "responseCounts"
       ],
       "additionalProperties": false,
-      "description": "Null own response indicates unavailable; unanswered is a known absence of a response. Counts exclude unanswered and contain no identities or reasons."
+      "description": "Null own response indicates unavailable. Unanswered is a known absence of an answer. Counts exclude unanswered and contain no identities or reasons.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2Member": {
       "type": "object",
@@ -12095,13 +12141,59 @@
               "type": "null"
             }
           ]
+        },
+        "myResponseVersion": {
+          "description": "Current own RSVP version for If-Match. Starts at 1 when an eligible member has no RSVP row. Null exactly when myResponse is null.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "event",
-        "myResponse"
+        "myResponse",
+        "myResponseVersion"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "null"
+            },
+            "myResponseVersion": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "myResponse": {
+              "type": "string"
+            },
+            "myResponseVersion": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "myResponse",
+            "myResponseVersion"
+          ]
+        }
+      ]
     },
     "EventStage2AdminPublished": {
       "type": "object",
