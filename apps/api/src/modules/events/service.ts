@@ -1412,6 +1412,30 @@ export function createEvents(
         startsAt: r.startsAt,
       };
     },
+    /** Uses the same public/member visibility as event details. The game validates the trip reference. */
+    async tripTitlesInTransaction(
+      tx: TxContext,
+      ids: string[],
+      actor: Actor,
+    ): Promise<Map<string, { id: string; title: string; game: Event["game"] }>> {
+      if (ids.length > 100) throw new Error("EVENT_TITLE_BATCH_BOUND_EXCEEDED");
+      if (!ids.length) return new Map();
+      await authorize(tx, actor);
+      const rows = await c(tx)
+        .select({ id: events.id, title: eventRevisions.title, game: events.game })
+        .from(events)
+        .innerJoin(
+          eventRevisions,
+          and(
+            eq(eventRevisions.id, events.currentRevisionId),
+            eq(eventRevisions.eventId, events.id),
+            eq(eventRevisions.game, events.game),
+          ),
+        )
+        .where(inArray(events.id, ids))
+        .for("share");
+      return new Map(rows.map((row) => [row.id, row]));
+    },
     async notificationChangeProjectionsInTransaction(
       tx: TxContext,
       requests: { eventId: string; version: number; category: string }[],

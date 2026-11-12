@@ -661,11 +661,7 @@ export function createTripDecisions(
     const people = await reviewers(tx, decisions);
     return {
       view: "private",
-      summary: await ports.trips.summaryInTransaction(
-        tx,
-        row.id,
-        (await ports.identity.authorizeInTransaction(tx, actor, "company.read")).locale,
-      ),
+      summary: await ports.trips.privateSummaryInTransaction(tx, row.id, actor, projection),
       effectiveFacts: await ports.trips.effectiveFactsInTransaction(tx, row.id),
       manualRevision: projection?.manualRevision ?? null,
       evidence: projection?.evidence ?? [],
@@ -1130,6 +1126,16 @@ export function createTripDecisions(
       await run((tx) =>
         ports.identity.authorizeInTransaction(tx, actor, review ? "trips.review" : "company.read"),
       );
+    },
+    async eventAssociationsInTransaction(tx: TxContext, tripIds: string[]) {
+      if (tripIds.length > 100) throw new Error("TRIP_ASSOCIATION_BATCH_BOUND_EXCEEDED");
+      if (!tripIds.length) return new Map<string, string>();
+      const rows = await c(tx)
+        .select({ tripId: tripEventAssociations.tripId, eventId: tripEventAssociations.eventId })
+        .from(tripEventAssociations)
+        .where(inArray(tripEventAssociations.tripId, tripIds))
+        .for("share");
+      return new Map(rows.map((row) => [row.tripId, row.eventId]));
     },
     async privateProjectionInTransaction(tx: TxContext, id: string, actor: Actor) {
       const row = await ports.trips.groups.resolve(tx, id, "share");

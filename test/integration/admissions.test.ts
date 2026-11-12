@@ -287,6 +287,102 @@ afterAll(async () => {
   await control?.end();
 });
 
+test("application status counts precede status selection and paging, while history keeps its envelope", async () => {
+  const app = await createApp({ identity, admissions, checkReadiness: async () => true });
+  const login = await identity.login("admissions-director@example.invalid", password);
+  const headers = { cookie: login.cookies.map((c) => c.split(";", 1)[0]).join("; ") };
+  const url = "/api/v1/admin/applications";
+  try {
+    const empty = await app.inject({ url: `${url}?status=rejected`, headers });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json().data).toEqual({
+      items: [],
+      nextCursor: null,
+      statusCounts: { submitted: 0, approved: 0, rejected: 0 },
+    });
+
+    const accepted = await submitted();
+    await admissions.decide(director, accepted.id, newId(), 1, { decision: "approve" });
+    const declined = await submitted();
+    await admissions.decide(director, declined.id, newId(), 1, {
+      decision: "reject",
+      reason: "Fictional refusal",
+    });
+    const reapplied = await submitted(admissions, input(declined.email));
+    await submitted();
+    const totals = { submitted: 2, approved: 1, rejected: 1 };
+    const pageUrl = `${url}?status=submitted&limit=1`;
+    const first = await app.inject({ url: pageUrl, headers });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().data.items).toMatchObject([{ status: "submitted" }]);
+    expect(first.json().data.statusCounts).toEqual(totals);
+    const cursor = first.json().data.nextCursor as string;
+    expect(cursor).toBeTruthy();
+
+    const second = await app.inject({
+      url: `${pageUrl}&cursor=${encodeURIComponent(cursor)}`,
+      headers,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().data.items).toMatchObject([{ status: "submitted" }]);
+    expect(second.json().data.items[0].id).not.toBe(first.json().data.items[0].id);
+    expect(second.json().data.nextCursor).toBeNull();
+    expect(second.json().data.statusCounts).toEqual(totals);
+    expect(await unit.run((tx) => admissions.submittedCountInTransaction(tx, director))).toBe(2);
+
+    const history = await app.inject({ url: `${url}/${declined.id}/history`, headers });
+    expect(history.statusCode).toBe(200);
+    expect(Object.keys(history.json().data).sort()).toEqual(["items", "nextCursor"]);
+    expect(
+      history
+        .json()
+        .data.items.map((row: { id: string }) => row.id)
+        .sort(),
+    ).toEqual([declined.id, reapplied.id].sort());
+  } finally {
+    await app.close();
+  }
+});
+
+test("usable invitation counts require the current usable generation and a strictly future expiry", async () => {
+  const current = await approved(admissions, { ...input(), nickname: "Fictional 100%_\\Bay" });
+  await approved(admissions, { ...input(), nickname: "Fictional 100xxBay" });
+  const search = "  100%_\\bAY ";
+  const countAt = (computedAt: string) =>
+    unit.run((tx) =>
+      admissions.usableInvitationCountInTransaction(tx, director, computedAt, search),
+    );
+  const justBeforeExpiry = new Date(Date.parse(current.link.expiresAt) - 1).toISOString();
+  expect(await countAt(justBeforeExpiry)).toBe(1);
+  expect(await countAt(current.link.expiresAt)).toBe(0);
+
+  const replacement = await admissions.reissue(director, current.invitationId, newId(), 1);
+  const now = time().toISOString();
+  expect(await countAt(now)).toBe(1);
+  await unit.run(async (tx) => {
+    // Exercise the pointer guard even when a noncurrent generation looks otherwise eligible.
+    const retiredId = newId();
+    await unit
+      .client(tx)
+      .insert(invitations)
+      .values({
+        id: retiredId,
+        applicationId: current.app.id,
+        createdAt: now,
+        expiresAt: replacement.expiresAt,
+        secretHash: randomBytes(32),
+        ciphertext: "fictional placeholder",
+      });
+    expect(await admissions.usableInvitationCountInTransaction(tx, director, now, search)).toBe(1);
+    await unit.client(tx).delete(invitations).where(eq(invitations.id, retiredId));
+  });
+
+  const link = await admissions.copy(director, replacement.id, 1);
+  const token = new URL(link.link).searchParams.get("token") as string;
+  await admissions.redeem(`pre:${newId()}`, newId(), token, password);
+  expect(await countAt(now)).toBe(0);
+});
+
 test("first email request preserves invitation generation, link and expiry with idempotent enqueue and disabled/failure rollback", async () => {
   const disabled = harness({ mail: false }).admissions,
     fixture = await approved(disabled),
@@ -738,6 +834,14 @@ test("current director/deputy parity; every other role and inactive/stale sessio
     return { userId: id, sessionId, accessEpoch: 1, credentialEpoch: 1, capabilities: [] } as Actor;
   }
   const deputy = await member(["deputy_director"]);
+  const countOperations = (actor: Actor) => [
+    () => unit.run((tx) => admissions.submittedCountInTransaction(tx, actor)),
+    () =>
+      unit.run((tx) =>
+        admissions.usableInvitationCountInTransaction(tx, actor, time().toISOString()),
+      ),
+  ];
+  for (const operation of countOperations(deputy)) expect(await status(operation())).toBe(200);
   expect((await admissions.detail(deputy, f.app.id)).id).toBe(f.app.id);
   expect((await admissions.copy(deputy, f.invitationId, 1)).invitationId).toBe(f.invitationId);
   const pending = await submitted();
@@ -755,7 +859,9 @@ test("current director/deputy parity; every other role and inactive/stale sessio
     | "dispatcher"
   )[][]) {
     const actor = await member(assigned);
+    actor.capabilities = ["applications.manage"];
     const methods = [
+      ...countOperations(actor),
       () => admissions.list(actor),
       () => admissions.list(actor, { historyId: f.app.id }),
       () => admissions.detail(actor, f.app.id),
@@ -775,6 +881,7 @@ test("current director/deputy parity; every other role and inactive/stale sessio
   );
   expect(await status(admissions.list(deputy))).toBe(401);
   const staleOperations = [
+    ...countOperations(deputy),
     () => admissions.list(deputy, { historyId: f.app.id }),
     () => admissions.detail(deputy, f.app.id),
     () => admissions.inspect(deputy, f.invitationId),

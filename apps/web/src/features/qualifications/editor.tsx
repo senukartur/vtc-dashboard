@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type AdrClass, adrClasses } from "../../shared/catalog-selectors/contracts.js";
 import { CatalogSelector } from "../../shared/catalog-selectors/index.js";
-import { Button, Input, Label } from "../../shared/ui/primitives.js";
+import { Button, FieldError, Input, Label } from "../../shared/ui/primitives.js";
 import {
   Confirm,
   DraftEntities,
@@ -10,9 +10,18 @@ import {
   LevelContext,
   Recovery,
   RulesView,
+  Thresholds,
 } from "./components.js";
 import { useQualificationCommand } from "./queries.js";
-import { countInput, type DTO, exactInput, type Game, utcInput } from "./transport.js";
+import {
+  countInput,
+  distanceForEditor,
+  distanceInput,
+  type DTO,
+  exactInput,
+  type Game,
+  utcInput,
+} from "./transport.js";
 
 export function LevelEditor({
   level,
@@ -21,7 +30,8 @@ export function LevelEditor({
   level: DTO["QualificationLevel"];
   current: DTO["QualificationRuleVersion"] | undefined;
 }) {
-  const { t } = useTranslation("qualifications");
+  const { t, i18n } = useTranslation("qualifications");
+  const locale = i18n.resolvedLanguage === "en" ? "en" : "ru";
   const [baseline, setBaseline] = useState({
     version: level.version,
     ruleVersionId: level.ruleVersionId,
@@ -41,7 +51,8 @@ export function LevelEditor({
     [rules, setRules] = useState<DTO["Rule"][]>(current?.rules ?? []),
     [mass, setMass] = useState(current?.rules.find((r) => r.type === "max_mass")?.maxKg ?? ""),
     [count, setCount] = useState(current?.requiredTrips?.toString() ?? ""),
-    [distance, setDistance] = useState(current?.requiredDistanceM ?? ""),
+    [initialDistanceM] = useState(current?.requiredDistanceM ?? null),
+    [distanceDraft, setDistance] = useState<string>(),
     [reason, setReason] = useState(""),
     [schedule, setSchedule] = useState(false),
     [time, setTime] = useState(""),
@@ -57,47 +68,47 @@ export function LevelEditor({
       result: DTO["QualificationPreview"];
     } | null>(null),
     [success, setSuccess] = useState(false);
+  const distance = distanceDraft ?? distanceForEditor(initialDistanceM, locale);
   const max = exactInput(mass),
     requiredTrips = countInput(count),
-    requiredDistanceM = distance.trim() ? exactInput(distance) : null,
+    requiredDistanceM = distanceInput(distance),
     effectiveAt = schedule ? utcInput(time) : undefined;
   const draft = rules.map((r) => (r.type === "max_mass" ? { ...r, maxKg: max ?? mass } : r));
-  const massValid = !rules.some((r) => r.type === "max_mass") || max !== undefined;
-  const valid =
-    massValid &&
-    requiredTrips !== undefined &&
-    requiredDistanceM !== undefined &&
-    (!schedule || !!effectiveAt);
-  const sampleMassValue = sampleMass.trim() ? exactInput(sampleMass) : null;
-  const actualSample = { ...sample, cargoMassKg: sampleMassValue ?? null };
-  const previewInput: DTO["QualificationPreviewInput"] = {
-      game: level.game,
-      rules: draft,
-      sample: actualSample,
-    },
-    fingerprint = JSON.stringify([
-      baseline,
-      level.version,
-      level.ruleVersionId,
-      previewInput,
-      sampleMass,
-      mass,
-      count,
-      distance,
-      reason,
-      schedule,
-      time,
-      name,
-    ]),
-    fresh = preview?.fingerprint === fingerprint;
-  const input: DTO["RulesInput"] = {
+  const nameInvalid = !name.trim();
+  const massInvalid = rules.some((r) => r.type === "max_mass") && max === undefined;
+  const tripsInvalid = requiredTrips === undefined;
+  const distanceInvalid = requiredDistanceM === undefined;
+  const timeInvalid = schedule && !effectiveAt;
+  const publishInvalid = massInvalid || tripsInvalid || distanceInvalid || timeInvalid;
+
+  const input: DTO["QualificationRulePublicationInput"] = {
     rules: draft,
     requiredTrips: requiredTrips ?? null,
     requiredDistanceM: requiredDistanceM ?? null,
-    reason,
-    ...(schedule && effectiveAt ? { effectiveAt } : {}),
+    ...(reason.trim() ? { reason } : {}),
+    ...(effectiveAt ? { effectiveAt } : {}),
   };
-  const guard = JSON.stringify([level.id, level.version, input, fingerprint, fresh]);
+  const guard = JSON.stringify([
+    level.id,
+    level.version,
+    level.ruleVersionId,
+    baseline,
+    input,
+    mass,
+    count,
+    distanceDraft,
+    schedule,
+    time,
+  ]);
+  const sampleMassValue = sampleMass.trim() ? exactInput(sampleMass) : null;
+  const sampleAdrInvalid = sample.adr.status === "known" && sample.adr.adrClass === null;
+  const previewInput: DTO["QualificationPreviewInput"] = {
+    game: level.game,
+    rules: draft,
+    sample: { ...sample, cargoMassKg: sampleMassValue ?? null },
+  };
+  const fingerprint = JSON.stringify([guard, previewInput, sampleMass]);
+  const fresh = preview?.fingerprint === fingerprint;
   const busy = command.pending || previewCommand.pending;
   const stale =
       baseline.version !== level.version || baseline.ruleVersionId !== level.ruleVersionId,
@@ -140,10 +151,10 @@ export function LevelEditor({
             level.ruleVersionId && current ? (
               <>
                 <RulesView rules={current.rules} game={level.game} />
-                <p>
-                  {t("thresholds")}: {current.requiredTrips ?? t("unset")} /{" "}
-                  {current.requiredDistanceM ?? t("unset")} m
-                </p>
+                <Thresholds
+                  requiredTrips={current.requiredTrips}
+                  requiredDistanceM={current.requiredDistanceM}
+                />
               </>
             ) : (
               <p>{t("noRules")}</p>
@@ -166,20 +177,26 @@ export function LevelEditor({
         </div>
       )}
       <fieldset className="stack" disabled={busy}>
-        <Label htmlFor={`level-name-${level.id}`}>{t("name")}</Label>
+        <RequiredLabel id={`level-name-${level.id}`}>{t("name")}</RequiredLabel>
         <Input
           id={`level-name-${level.id}`}
           maxLength={128}
+          required
+          aria-invalid={nameInvalid}
+          aria-describedby={nameInvalid ? `error-level-name-${level.id}` : undefined}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+        <FieldError id={`error-level-name-${level.id}`}>
+          {nameInvalid ? t("nameRequired") : undefined}
+        </FieldError>
         <Confirm
           label={t("saveName")}
           guard={JSON.stringify([level.id, level.version, level.ruleVersionId, baseline, name])}
           disabled={
-            !name.trim() ||
+            nameInvalid ||
             (name === level.name && !renameReplay) ||
-            (stale && !renameReplay) ||
+            ((stale || command.canRecover) && !renameReplay) ||
             command.seconds > 0
           }
           pending={command.pending || command.seconds > 0}
@@ -217,14 +234,19 @@ export function LevelEditor({
               {rule &&
                 (type === "max_mass" ? (
                   <>
-                    <Label htmlFor={`mass-${level.id}`}>{t(type)}</Label>
+                    <RequiredLabel id={`mass-${level.id}`}>{t(type)}</RequiredLabel>
                     <Input
                       id={`mass-${level.id}`}
                       inputMode="decimal"
                       value={mass}
                       onChange={(e) => setMass(e.target.value)}
-                      aria-invalid={!massValid}
+                      required
+                      aria-invalid={massInvalid}
+                      aria-describedby={massInvalid ? `error-mass-${level.id}` : undefined}
                     />
+                    <FieldError id={`error-mass-${level.id}`}>
+                      {massInvalid ? t("massInvalid") : undefined}
+                    </FieldError>
                   </>
                 ) : type === "allowed_adr_categories" ? (
                   <AdrClassAllowlist
@@ -253,17 +275,25 @@ export function LevelEditor({
           inputMode="numeric"
           value={count}
           onChange={(e) => setCount(e.target.value)}
-          aria-invalid={requiredTrips === undefined}
+          aria-invalid={tripsInvalid}
+          aria-describedby={tripsInvalid ? `error-count-${level.id}` : undefined}
         />
+        <FieldError id={`error-count-${level.id}`}>
+          {tripsInvalid ? t("tripsInvalid") : undefined}
+        </FieldError>
         <Label htmlFor={`distance-${level.id}`}>{t("requiredDistance")}</Label>
         <Input
           id={`distance-${level.id}`}
           inputMode="decimal"
           value={distance}
           onChange={(e) => setDistance(e.target.value)}
-          aria-invalid={requiredDistanceM === undefined}
+          aria-invalid={distanceInvalid}
+          aria-describedby={distanceInvalid ? `error-distance-${level.id}` : undefined}
         />
-        <Label htmlFor={`reason-${level.id}`}>{t("reason")}</Label>
+        <FieldError id={`error-distance-${level.id}`}>
+          {distanceInvalid ? t("distanceInvalid") : undefined}
+        </FieldError>
+        <Label htmlFor={`reason-${level.id}`}>{t("publicationReason")}</Label>
         <Input
           id={`reason-${level.id}`}
           maxLength={2048}
@@ -282,118 +312,31 @@ export function LevelEditor({
         </select>
         {schedule && (
           <>
-            <Label htmlFor={`effective-${level.id}`}>{t("effectiveAt")}</Label>
+            <RequiredLabel id={`effective-${level.id}`}>{t("effectiveAt")}</RequiredLabel>
             <Input
               id={`effective-${level.id}`}
               type="datetime-local"
               step="0.001"
+              required
+              aria-invalid={timeInvalid}
+              aria-describedby={timeInvalid ? `error-effective-${level.id}` : undefined}
               value={time}
               onChange={(e) => setTime(e.target.value)}
             />
-            <p>{effectiveAt ?? t("invalid")}</p>
+            <FieldError id={`error-effective-${level.id}`}>
+              {timeInvalid ? t("timeInvalid") : undefined}
+            </FieldError>
+            {effectiveAt && <p>{effectiveAt}</p>}
           </>
         )}
         <p>{t("effectiveHelp")}</p>
-        <fieldset className="stack">
-          <legend>{t("sample")}</legend>
-          <p>{t("sampleHelp")}</p>
-          <Label htmlFor={`sample-mass-${level.id}`}>{t("sampleMass")}</Label>
-          <Input
-            id={`sample-mass-${level.id}`}
-            inputMode="decimal"
-            value={sampleMass}
-            onChange={(e) => setSampleMass(e.target.value)}
-            aria-invalid={sampleMassValue === undefined}
-          />
-          <h5>{t("chain")}</h5>
-          <SampleTrailers game={level.game} sample={sample} onChange={setSample} />
-          <Label htmlFor={`adr-status-${level.id}`}>{t("adrStatus")}</Label>
-          <select
-            className="input"
-            id={`adr-status-${level.id}`}
-            value={sample.adr.status}
-            onChange={(e) =>
-              setSample((old) => ({
-                ...old,
-                adr: { status: e.target.value as typeof sample.adr.status, adrClass: null },
-              }))
-            }
-          >
-            {(["unknown", "non_hazardous", "known"] as const).map((v) => (
-              <option key={v} value={v}>
-                {t(v)}
-              </option>
-            ))}
-          </select>
-          {sample.adr.status === "known" && (
-            <>
-              <Label htmlFor={`adr-class-${level.id}`}>{t("sampleAdr")}</Label>
-              <select
-                className="input"
-                id={`adr-class-${level.id}`}
-                value={sample.adr.adrClass ?? ""}
-                onChange={(e) =>
-                  setSample((old) => ({
-                    ...old,
-                    adr: { status: "known", adrClass: (e.target.value || null) as AdrClass | null },
-                  }))
-                }
-              >
-                <option value="">{t("trips:unknown")}</option>
-                {adrClasses.map((value) => (
-                  <option key={value} value={value}>
-                    {t("catalogs:adrClass", { class: value })}
-                  </option>
-                ))}
-              </select>
-            </>
-          )}
-        </fieldset>
       </fieldset>
-      {!valid && <p role="alert">{t("invalid")}</p>}
-      <Button
-        type="button"
-        variant="outline"
-        disabled={
-          !valid ||
-          sampleMassValue === undefined ||
-          (sample.adr.status === "known" && !sample.adr.adrClass) ||
-          busy ||
-          previewCommand.seconds > 0
-        }
-        onClick={async () => {
-          const result = await previewCommand.run(
-            "/admin/qualification-rule-previews",
-            previewInput,
-            "EnvelopeQualificationPreview",
-          );
-          if (result) setPreview({ fingerprint, result: result.data.data });
-        }}
-      >
-        {t("preview")}
-      </Button>
-      <Failure error={previewCommand.failure} seconds={previewCommand.seconds} />
-      {fresh && preview ? (
-        <div role="status">
-          <h4>
-            {t("outcome")}: {t(preview.result.outcome)}
-          </h4>
-          {preview.result.ruleResults.map((r) => (
-            <p key={r.ruleType}>
-              {t(r.ruleType)} · {t(r.outcome)} · {t(r.reasonCode)}
-            </p>
-          ))}
-        </div>
-      ) : (
-        <p>{t("previewRequired")}</p>
-      )}
       <Confirm
         label={t("publish")}
         guard={guard}
         disabled={
-          !valid ||
-          !reason.trim() ||
-          ((!fresh || stale) && !publishReplay) ||
+          publishInvalid ||
+          ((stale || command.canRecover) && !publishReplay) ||
           busy ||
           command.seconds > 0
         }
@@ -418,11 +361,11 @@ export function LevelEditor({
           {t("effective")}: {schedule ? effectiveAt : t("immediate")}
         </p>
         <RulesView rules={draft} game={level.game} />
-        <p>
-          {t("thresholds")}: {input.requiredTrips ?? t("unset")} /{" "}
-          {input.requiredDistanceM ?? t("unset")} m
-        </p>
-        <p>{reason}</p>
+        <Thresholds
+          requiredTrips={input.requiredTrips}
+          requiredDistanceM={input.requiredDistanceM}
+        />
+        {input.reason && <p>{input.reason}</p>}
         <p>{t("effectiveHelp")}</p>
       </Confirm>
       <Failure error={command.failure} seconds={command.seconds} />
@@ -434,7 +377,120 @@ export function LevelEditor({
         }}
       />
       {success && <p role="status">{t("success")}</p>}
+      <fieldset className="stack" disabled={busy}>
+        <legend>{t("sample")}</legend>
+        <p>{t("sampleHelp")}</p>
+        <Label htmlFor={`sample-mass-${level.id}`}>{t("sampleMass")}</Label>
+        <Input
+          id={`sample-mass-${level.id}`}
+          inputMode="decimal"
+          value={sampleMass}
+          onChange={(e) => setSampleMass(e.target.value)}
+          aria-invalid={sampleMassValue === undefined}
+          aria-describedby={
+            sampleMassValue === undefined ? `error-sample-mass-${level.id}` : undefined
+          }
+        />
+        <FieldError id={`error-sample-mass-${level.id}`}>
+          {sampleMassValue === undefined ? t("sampleMassInvalid") : undefined}
+        </FieldError>
+        <h5>{t("chain")}</h5>
+        <SampleTrailers game={level.game} sample={sample} onChange={setSample} />
+        <Label htmlFor={`adr-status-${level.id}`}>{t("adrStatus")}</Label>
+        <select
+          className="input"
+          id={`adr-status-${level.id}`}
+          value={sample.adr.status}
+          onChange={(e) =>
+            setSample((old) => ({
+              ...old,
+              adr: { status: e.target.value as typeof sample.adr.status, adrClass: null },
+            }))
+          }
+        >
+          {(["unknown", "non_hazardous", "known"] as const).map((v) => (
+            <option key={v} value={v}>
+              {t(v)}
+            </option>
+          ))}
+        </select>
+        {sample.adr.status === "known" && (
+          <>
+            <RequiredLabel id={`adr-class-${level.id}`}>{t("sampleAdr")}</RequiredLabel>
+            <select
+              className="input"
+              id={`adr-class-${level.id}`}
+              required
+              aria-invalid={sampleAdrInvalid}
+              aria-describedby={sampleAdrInvalid ? `error-adr-class-${level.id}` : undefined}
+              value={sample.adr.adrClass ?? ""}
+              onChange={(e) =>
+                setSample((old) => ({
+                  ...old,
+                  adr: { status: "known", adrClass: (e.target.value || null) as AdrClass | null },
+                }))
+              }
+            >
+              <option value="">{t("sampleAdrSelect")}</option>
+              {adrClasses.map((value) => (
+                <option key={value} value={value}>
+                  {t("catalogs:adrClass", { class: value })}
+                </option>
+              ))}
+            </select>
+            <FieldError id={`error-adr-class-${level.id}`}>
+              {sampleAdrInvalid ? t("sampleAdrRequired") : undefined}
+            </FieldError>
+          </>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          disabled={
+            massInvalid ||
+            sampleMassValue === undefined ||
+            sampleAdrInvalid ||
+            busy ||
+            previewCommand.seconds > 0
+          }
+          onClick={async () => {
+            const result = await previewCommand.run(
+              "/admin/qualification-rule-previews",
+              previewInput,
+              "EnvelopeQualificationPreview",
+            );
+            if (result) setPreview({ fingerprint, result: result.data.data });
+          }}
+        >
+          {t("preview")}
+        </Button>
+        <Failure error={previewCommand.failure} seconds={previewCommand.seconds} />
+        {fresh && preview ? (
+          <div role="status">
+            <h4>
+              {t("outcome")}: {t(preview.result.outcome)}
+            </h4>
+            {preview.result.ruleResults.map((r) => (
+              <p key={r.ruleType}>
+                {t(r.ruleType)} · {t(r.outcome)} · {t(r.reasonCode)}
+              </p>
+            ))}
+          </div>
+        ) : preview ? (
+          <p>{t("previewStale")}</p>
+        ) : null}
+      </fieldset>
     </section>
+  );
+}
+
+function RequiredLabel({ id, children }: { id: string; children: string }) {
+  const { t } = useTranslation("qualifications");
+  return (
+    <Label htmlFor={id}>
+      {children}
+      <span aria-hidden="true"> ({t("required")})</span>
+    </Label>
   );
 }
 

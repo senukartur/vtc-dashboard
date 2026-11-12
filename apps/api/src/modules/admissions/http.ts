@@ -176,7 +176,7 @@ export async function registerAdmissionsRoutes(
             status: { type: "string", enum: ["submitted", "approved", "rejected"] },
           },
         },
-        response: { 200: ref("EnvelopeListApplication") },
+        response: { 200: ref("EnvelopeListAdminApplication") },
       },
     },
     async (request) =>

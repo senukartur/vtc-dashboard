@@ -149,12 +149,12 @@ function LevelRow({
         {label("colThreshold")}
         {threshold.kind === "terminal"
           ? t("topLevel")
-          : !configured || (threshold.trips === null && threshold.distanceM === null)
+          : !configured
             ? unset
             : thresholdText(
                 t("thresholdValue", {
-                  trips: threshold.trips ?? t("unset"),
-                  distance: distance ?? t("unset"),
+                  trips: threshold.trips ?? t("noMinimum"),
+                  distance: distance ?? t("noMinimum"),
                 }),
                 distance,
               )}

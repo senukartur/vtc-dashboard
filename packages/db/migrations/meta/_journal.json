@@ -169,6 +169,27 @@
       "when": 1794426510511,
       "tag": "0023_curly_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1794430521727,
+      "tag": "0024_bizarre_malcolm_colcord",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1794433441207,
+      "tag": "0025_fixed_wolverine",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1794433702755,
+      "tag": "0026_yielding_deathbird",
+      "breakpoints": true
     }
   ]
 }

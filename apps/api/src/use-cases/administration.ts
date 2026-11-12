@@ -1,8 +1,25 @@
-import { createAudit, type UnitOfWork } from "@vtc/db";
+import type { components } from "@vtc/contracts";
+import { createAudit, type TxContext, type UnitOfWork } from "@vtc/db";
+import type { SQL, SQLWrapper } from "drizzle-orm";
+import type { Admissions } from "../modules/admissions/service.js";
 import { type Actor, type Identity, identityError } from "../modules/identity/service.js";
 import { createQualificationInitialization } from "../modules/qualifications/initialization.js";
 import { pagination, type Page } from "../modules/qualifications/pagination.js";
 import { createTripActivity } from "../modules/trips/activity.js";
+
+const MEMBER_ACTIVITY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface MemberCounterSources {
+  tripActivity?: {
+    hasAcceptedReportingActivity(
+      tx: TxContext,
+      ownerRef: SQLWrapper,
+      fromInclusive: string,
+      throughInclusive: string,
+    ): SQL;
+  };
+  admissions?: Pick<Admissions, "usableInvitationCountInTransaction">;
+}
 
 export function createAdministration(
   unit: UnitOfWork,
@@ -17,7 +34,10 @@ export function createAdministration(
   },
   // Kept apart from `enabled`, which is returned as the SourceCapabilities contract.
   tripsEnabled = false,
+  counterSources: MemberCounterSources = {},
 ) {
+  const reportingActivity = tripsEnabled ? counterSources.tripActivity : undefined;
+  const admissions = enabled.admissions ? counterSources.admissions : undefined;
   const qualifications = createQualificationInitialization(unit),
     // The runtime database role can read trips only where the Trips module is configured.
     activity = tripsEnabled ? createTripActivity(unit) : undefined,
@@ -67,19 +87,46 @@ export function createAdministration(
         options,
       );
       return identity.transaction(async (tx) => {
-        const rows = await identity.administrationMembersInTransaction(
-          tx,
-          actor,
-          paging.after?.id ?? null,
-          id ? 1 : paging.limit + 1,
-          options.status,
-          id,
-          { role: options.role, search: options.search },
-        );
+        const { rows, counts } = await identity.administrationMembersInTransaction(tx, actor, {
+          after: paging.after?.id ?? null,
+          limit: id ? 1 : paging.limit + 1,
+          status: options.status,
+          targetId: id,
+          role: options.role,
+          search: options.search,
+          reportingActivity: reportingActivity
+            ? (ownerRef, countedAt) =>
+                reportingActivity.hasAcceptedReportingActivity(
+                  tx,
+                  ownerRef,
+                  new Date(Date.parse(countedAt) - MEMBER_ACTIVITY_WINDOW_MS).toISOString(),
+                  countedAt,
+                )
+            : undefined,
+        });
         if (id && !rows.length) throw identityError(404);
+        const statusCounts: components["schemas"]["AdminMemberStatusCounts"] | undefined = counts
+          ? { ...counts.statusCounts }
+          : undefined;
+        if (
+          counts &&
+          statusCounts &&
+          admissions &&
+          counts.currentCapabilities.includes("applications.manage")
+        ) {
+          statusCounts.invited =
+            options.role !== undefined
+              ? 0
+              : await admissions.usableInvitationCountInTransaction(
+                  tx,
+                  actor,
+                  counts.countedAt,
+                  options.search,
+                );
+        }
         const selected = rows.slice(0, paging.limit),
           ids = selected.map((row) => row.id);
-        // Lock order: company -> sorted members (share) -> qualifications -> plain trips read.
+        // Row projection locks follow company -> sorted members (share) -> qualifications.
         const assignments = await qualifications.administrationProjection(tx, ids);
         const lastAccepted = activity
           ? await activity.lastAcceptedInTransaction(tx, ids)
@@ -96,7 +143,7 @@ export function createAdministration(
           rows.map((row) => ({ id: row.id })),
           (row) => ({ id: row.id, time: null }),
         );
-        return { items, nextCursor: result.nextCursor };
+        return { items, nextCursor: result.nextCursor, ...(statusCounts ? { statusCounts } : {}) };
       });
     },
     async audit(actor: Actor, options: Page) {

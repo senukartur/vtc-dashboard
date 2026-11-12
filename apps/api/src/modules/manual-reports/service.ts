@@ -32,6 +32,7 @@ import {
   manualReviewGates,
   manualRevisions,
   or,
+  sql,
 } from "@vtc/db/manual-reports-schema";
 import {
   type BlobConfig,
@@ -58,6 +59,7 @@ import { parseManualSource } from "../sources/contracts/manual.js";
 import type { Trips } from "../trips/service.js";
 
 type S = components["schemas"];
+type Draft = typeof manualDrafts.$inferSelect;
 type Evidence = typeof manualEvidence.$inferSelect;
 type Report = typeof manualReports.$inferSelect;
 type Revision = typeof manualRevisions.$inferSelect;
@@ -107,6 +109,12 @@ function input<T>(name: string, value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 type Page = { limit?: number; cursor?: string };
+type DraftPage = Page & { state?: "editing" };
+const draftLabelFields = [
+  ["origin", "city"],
+  ["destination", "city"],
+  ["cargo", "cargo"],
+] as const;
 type Receipt =
   | {
       kind: "report";
@@ -118,6 +126,7 @@ type Receipt =
       legacyReviewReasons?: S["TripPrivate"]["reviewReasonCodes"];
     }
   | { kind: "draft"; id: string; version: number }
+  | { kind: "discard"; id: string; version: number }
   | { kind: "correction"; id: string; version: number };
 export function createManualReports(
   unit: UnitOfWork,
@@ -298,7 +307,8 @@ export function createManualReports(
       };
     });
   }
-  function draftDto(row: typeof manualDrafts.$inferSelect): S["ManualDraft"] {
+  function draftDto(row: Draft): S["ManualDraft"] {
+    if (row.state === "discarded") throw new Error("MANUAL_DRAFT_NOT_VISIBLE");
     return {
       id: row.id,
       version: row.version,
@@ -309,6 +319,39 @@ export function createManualReports(
       updatedAt: row.updatedAt,
       submittedReportId: row.submittedReportId,
     };
+  }
+  async function labeledDrafts(tx: TxContext, rows: Draft[], locale: "ru" | "en") {
+    const drafts = rows.map(draftDto);
+    const refs = drafts.flatMap(({ fields }) =>
+      draftLabelFields.flatMap(([field, kind]) => {
+        const selection = fields[field];
+        return selection?.status === "resolved" ? [{ id: selection.entityId, kind }] : [];
+      }),
+    );
+    // Catalog maps use IDs as keys, so query each kind separately.
+    async function forKind(kind: "city" | "cargo") {
+      const matching = refs.filter((ref) => ref.kind === kind);
+      if (!matching.length) return undefined;
+      return {
+        selections: await ports.catalogs.selectionsInTransaction(tx, matching),
+        labels: await ports.catalogs.labelsInTransaction(tx, matching, locale),
+      };
+    }
+    const cities = await forKind("city"),
+      cargoes = await forKind("cargo");
+    return drafts.map((draft): S["ManualDraft"] => {
+      const labels: S["ManualDraftLabels"] = { origin: null, destination: null, cargo: null };
+      for (const [field, kind] of draftLabelFields) {
+        const selection = draft.fields[field];
+        if (selection?.status !== "resolved") continue;
+        const lookup = kind === "city" ? cities : cargoes;
+        if (!lookup) continue;
+        const row = lookup.selections.get(selection.entityId);
+        if (row && (!draft.fields.game || row.game === draft.fields.game))
+          labels[field] = lookup.labels.get(selection.entityId) ?? null;
+      }
+      return { ...draft, labels };
+    });
   }
   async function privateTrip(tx: TxContext, actor: Actor, id: string) {
     const current = await authority(tx, actor);
@@ -326,17 +369,28 @@ export function createManualReports(
     await privateTrip(tx, actor, row.tripId);
     return row;
   }
-  async function ownerDraft(tx: TxContext, actor: Actor, id: string) {
-    await authority(tx, actor, true);
+  function editingDraftsFor(ownerId: string) {
+    return and(eq(manualDrafts.ownerId, ownerId), eq(manualDrafts.state, "editing"));
+  }
+  async function countEditingDrafts(tx: TxContext, ownerId: string) {
+    const [row] = await c(tx)
+      .select({ total: sql<number | string>`count(*)` })
+      .from(manualDrafts)
+      .where(editingDraftsFor(ownerId));
+    return Number(row?.total ?? 0);
+  }
+  async function ownerDraft(tx: TxContext, actor: Actor, id: string, includeDiscarded = false) {
+    const current = await authority(tx, actor, true);
     const [row] = await c(tx)
       .select()
       .from(manualDrafts)
       .where(eq(manualDrafts.id, applicationId(id)))
       .for("update");
-    if (!row || row.ownerId !== actor.userId) throw manualError(404);
-    return row;
+    if (!row || row.ownerId !== actor.userId || (row.state === "discarded" && !includeDiscarded))
+      throw manualError(404);
+    return { row, locale: current.locale };
   }
-  async function rememberDraft(tx: TxContext, row: typeof manualDrafts.$inferSelect) {
+  async function rememberDraft(tx: TxContext, row: Draft) {
     await c(tx)
       .insert(manualDraftHistory)
       .values({ draftId: row.id, version: row.version, snapshot: draftDto(row) });
@@ -405,7 +459,7 @@ export function createManualReports(
   }
   async function renderDraft(tx: TxContext, actor: Actor, receipt: Receipt) {
     if (receipt.kind !== "draft") throw new Error("MANUAL_RECEIPT_INVALID");
-    await ownerDraft(tx, actor, receipt.id);
+    await ownerDraft(tx, actor, receipt.id, true);
     const [row] = await c(tx)
       .select()
       .from(manualDraftHistory)
@@ -417,6 +471,15 @@ export function createManualReports(
       );
     if (!row) throw new Error("MANUAL_DRAFT_HISTORY_MISSING");
     return row.snapshot as S["ManualDraft"];
+  }
+  async function renderDiscard(
+    tx: TxContext,
+    actor: Actor,
+    receipt: Receipt,
+  ): Promise<S["CommandResult"]> {
+    if (receipt.kind !== "discard") throw new Error("MANUAL_RECEIPT_INVALID");
+    await ownerDraft(tx, actor, receipt.id, true);
+    return { id: receipt.id, version: receipt.version };
   }
   async function evidenceGate(tx: TxContext, ownerId: string, ids: string[], ready: boolean) {
     if (ids.length > config.maxFilesPerReport) throw manualError(422);
@@ -1140,7 +1203,7 @@ export function createManualReports(
         `draft/${applicationId(id)}/replace`,
         { expected, ...value, targetTrip: value.targetTrip ?? null },
         async (tx) => {
-          const row = await ownerDraft(tx, actor, id);
+          const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
           await draftReferences(tx, actor, id, value.fields);
@@ -1158,20 +1221,57 @@ export function createManualReports(
         (tx, r) => renderDraft(tx, actor, r),
       );
     },
-    getDraft(actor: Actor, id: string) {
-      return run(async (tx) => draftDto(await ownerDraft(tx, actor, id)));
+    deleteDraft(actor: Actor, id: string, key: string, expected: number) {
+      if (!Number.isSafeInteger(expected) || expected < 1) throw manualError(422);
+      return command(
+        actor,
+        key,
+        `draft/${applicationId(id)}/delete`,
+        { expected },
+        async (tx) => {
+          const { row } = await ownerDraft(tx, actor, id);
+          if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
+          if (row.state !== "editing") throw manualError(409);
+          const version = row.version + 1;
+          const marker = { id, version, state: "discarded" as const, updatedAt: at() };
+          await c(tx)
+            .update(manualDrafts)
+            .set({ version, state: marker.state, updatedAt: marker.updatedAt })
+            .where(eq(manualDrafts.id, id));
+          await c(tx).insert(manualDraftHistory).values({ draftId: id, version, snapshot: marker });
+          await c(tx).delete(manualDraftEvidence).where(eq(manualDraftEvidence.draftId, id));
+          return { kind: "discard", id, version };
+        },
+        (tx, r) => renderDiscard(tx, actor, r),
+      );
     },
-    listDrafts(actor: Actor, page: Page = {}) {
+    getDraft(actor: Actor, id: string) {
       return run(async (tx) => {
-        await authority(tx, actor, true);
-        const scope = "drafts",
+        const { row, locale } = await ownerDraft(tx, actor, id);
+        const [draft] = await labeledDrafts(tx, [row], locale);
+        if (!draft) throw new Error("MANUAL_DRAFT_PROJECTION_MISSING");
+        return draft;
+      });
+    },
+    listDrafts(actor: Actor, page: DraftPage = {}) {
+      return run(async (tx) => {
+        const { locale } = await authority(tx, actor, true);
+        const scope = page.state === "editing" ? "drafts/editing" : "drafts",
           { limit, after } = pageCursor(actor, scope, page);
+        const visibleDrafts =
+          page.state === "editing"
+            ? editingDraftsFor(actor.userId)
+            : and(
+                eq(manualDrafts.ownerId, actor.userId),
+                inArray(manualDrafts.state, ["editing", "submitted"]),
+              );
+        const editingCount = await countEditingDrafts(tx, actor.userId);
         const rows = await c(tx)
           .select()
           .from(manualDrafts)
           .where(
             and(
-              eq(manualDrafts.ownerId, actor.userId),
+              visibleDrafts,
               after
                 ? or(
                     lt(manualDrafts.createdAt, after.time),
@@ -1186,8 +1286,26 @@ export function createManualReports(
           id: row.id,
           time: row.createdAt,
         }));
-        return { ...result, items: result.items.map(draftDto) };
+        return {
+          ...result,
+          items: await labeledDrafts(tx, result.items, locale),
+          editingCount,
+        };
       });
+    },
+    /** The caller authorizes trips.submit_own for viewerId in this transaction. */
+    async workspaceEditingDraftsInTransaction(
+      tx: TxContext,
+      viewerId: string,
+    ): Promise<{ count: number; items: { draftId: string; updatedAt: string }[] }> {
+      const count = await countEditingDrafts(tx, viewerId);
+      const items = await c(tx)
+        .select({ draftId: manualDrafts.id, updatedAt: manualDrafts.updatedAt })
+        .from(manualDrafts)
+        .where(editingDraftsFor(viewerId))
+        .orderBy(desc(manualDrafts.createdAt), desc(manualDrafts.id))
+        .limit(5);
+      return { count, items };
     },
     submitDraft(
       actor: Actor,
@@ -1204,7 +1322,7 @@ export function createManualReports(
         `draft/${applicationId(id)}/submit`,
         { expected, fields },
         async (tx) => {
-          const row = await ownerDraft(tx, actor, id);
+          const { row } = await ownerDraft(tx, actor, id);
           if (row.version !== expected) throw manualError(409, "VERSION_CONFLICT");
           if (row.state !== "editing") throw manualError(409);
           const receipt = await submit(
@@ -1339,6 +1457,35 @@ export function createManualReports(
     },
     getReport(actor: Actor, id: string) {
       return run(async (tx) => reportDto(tx, await privateReport(tx, actor, id)));
+    },
+    // The caller authorizes trips.read_own_private for viewerId in this transaction.
+    workspaceCurrentAuthorRevisionsRelation(tx: TxContext, viewerId: string) {
+      // Drizzle emits references to these SQL aliases unqualified in caller queries.
+      return c(tx)
+        .select({
+          reportTripId: sql<string>`${manualReports.tripId}`
+            .mapWith(manualReports.tripId)
+            .as("author_report_trip_id"),
+          reportId: sql<string>`${manualReports.id}`
+            .mapWith(manualReports.id)
+            .as("author_report_id"),
+          revisionId: sql<string>`${manualRevisions.id}`
+            .mapWith(manualRevisions.id)
+            .as("author_revision_id"),
+          reportCreatedAt: sql<string>`${manualReports.createdAt}`
+            .mapWith(manualReports.createdAt)
+            .as("author_report_created_at"),
+        })
+        .from(manualReports)
+        .innerJoin(
+          manualRevisions,
+          and(
+            eq(manualRevisions.reportId, manualReports.id),
+            eq(manualRevisions.id, manualReports.currentRevisionId),
+          ),
+        )
+        .where(eq(manualReports.ownerId, viewerId))
+        .as("workspace_current_author_revisions");
     },
     listReports(actor: Actor, page: Page = {}, tripId?: string) {
       return run(async (tx) => {
@@ -1910,15 +2057,20 @@ export function createManualReports(
     },
     validateSourceInTransaction: validateSource,
     projectionInTransaction: projection,
-    // Queue reads need only the current revision number/time, never evidence: an evidence row
-    // being deleted must not fail a whole review page.
+    // Summary reads need current revision metadata without opening private evidence.
     async revisionSummariesInTransaction(tx: TxContext, tripIds: string[]) {
       if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
-      const result = new Map<string, { number: number; submittedAt: string }>();
+      const result = new Map<
+        string,
+        { number: number; submittedAt: string; eventId: string | null }
+      >();
       if (!tripIds.length) return result;
-      for (const [tripId, revision] of (await currentRevisions(tx, tripIds)).current)
-        if (revision)
-          result.set(tripId, { number: revision.number, submittedAt: revision.submittedAt });
+      const { current, eventIds } = await currentRevisions(tx, tripIds, true);
+      for (const [tripId, revision] of current)
+        if (revision) {
+          const { number, submittedAt } = revision;
+          result.set(tripId, { number, submittedAt, eventId: eventIds.get(tripId) ?? null });
+        }
       return result;
     },
     async reconciliationGuardInTransaction(tx: TxContext, tripIds: string[], actorId?: string) {
@@ -2081,8 +2233,10 @@ export function createManualReports(
     await evidenceGate(tx, ownerId, expected.evidenceIds, true);
   }
   // Current revision per requested trip across its canonical group, newest report first.
-  async function currentRevisions(tx: TxContext, tripIds: string[]) {
-    const members = await ports.trips.groups.members(tx, tripIds, "share");
+  async function currentRevisions(tx: TxContext, tripIds: string[], rootsOnly = false) {
+    const members = rootsOnly
+      ? await ports.trips.groups.membersOfRoots(tx, tripIds, "share")
+      : await ports.trips.groups.members(tx, tripIds, "share");
     const group = new Map(members.map((t) => [t.id, t.aliasOf ?? t.id]));
     const originalIds = members.map((t) => t.id);
     const reports = await c(tx)
@@ -2099,24 +2253,41 @@ export function createManualReports(
             .where(inArray(manualRevisions.id, ids))
             .for("share")
         : [];
-    const current = new Map<string, Revision | null>();
-    for (const tripId of tripIds) {
-      const report = reports.find((r) => group.get(r.tripId) === group.get(tripId));
-      current.set(
-        tripId,
-        (report && revisions.find((r) => r.id === report.currentRevisionId)) ?? null,
-      );
+    const byRevisionId = new Map(revisions.map((revision) => [revision.id, revision]));
+    const byRoot = new Map<string, Revision | null>();
+    const eventByRoot = new Map<string, string | null>();
+    for (const report of reports) {
+      const root = group.get(report.tripId);
+      if (!root) throw new Error("MANUAL_TRIP_GROUP_MISSING");
+      const revision = report.currentRevisionId
+        ? (byRevisionId.get(report.currentRevisionId) ?? null)
+        : null;
+      if (!byRoot.has(root)) byRoot.set(root, revision);
+      // Ambiguous manual references do not establish an association.
+      const eventId = revision ? (revision.fields as S["ManualReportFields"]).eventId : null;
+      if (eventId) {
+        const saved = eventByRoot.get(root);
+        eventByRoot.set(root, saved === undefined || saved === eventId ? eventId : null);
+      }
     }
-    return { group, originalIds, current };
+    const current = new Map(tripIds.map((id) => [id, byRoot.get(group.get(id) ?? id) ?? null]));
+    const eventIds = new Map(
+      tripIds.map((id) => [id, eventByRoot.get(group.get(id) ?? id) ?? null]),
+    );
+    return { group, originalIds, current, eventIds };
   }
   async function projection(tx: TxContext, tripIds: string[]) {
     if (tripIds.length > 100) throw Error("MANUAL_PROJECTION_BATCH_BOUND");
     const result = new Map<
       string,
-      { manualRevision: S["ManualRevisionRead"] | null; evidence: S["Evidence"][] }
+      {
+        manualRevision: S["ManualRevisionRead"] | null;
+        evidence: S["Evidence"][];
+        eventId: string | null;
+      }
     >();
     if (!tripIds.length) return result;
-    const { group, originalIds, current } = await currentRevisions(tx, tripIds);
+    const { group, originalIds, current, eventIds } = await currentRevisions(tx, tripIds);
     const refs = await c(tx)
       .select({ tripId: manualEvidenceReferences.tripId, evidence: manualEvidence })
       .from(manualEvidenceReferences)
@@ -2133,6 +2304,7 @@ export function createManualReports(
       result.set(tripId, {
         manualRevision: revision ? revisionDto(revision) : null,
         evidence: [...unique.values()].map(evidenceDto),
+        eventId: eventIds.get(tripId) ?? null,
       });
     }
     return result;

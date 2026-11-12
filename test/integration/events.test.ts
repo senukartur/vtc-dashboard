@@ -24,6 +24,7 @@ import {
   type Identity,
 } from "../../apps/api/src/modules/identity/service.ts";
 import { createEvents, type Events } from "../../apps/api/src/modules/events/service.ts";
+import { createEventWorkspace } from "../../apps/api/src/modules/events/workspace.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
 import {
   guardedSettings,
@@ -616,6 +617,93 @@ test("query ties, fixed boundaries, cross-scope cursors and public serializers r
   );
   expect(plan.length).toBeGreaterThan(0);
 });
+test("workspace counts current unanswered scheduled events before its stable five-row preview", async () => {
+  const computedAt = now().toISOString();
+  const firstStart = {
+    meetingAt: "2026-10-22T11:30:00.000Z",
+    startsAt: "2026-10-22T12:00:00.001Z",
+  };
+  const first = await create({ ...firstStart, title: "Fictional original title" });
+  const currentTitle = "Fictional revised title";
+  const renamed = await service.update(
+    director,
+    first.data.event.id,
+    newId(),
+    first.version,
+    input({ ...firstStart, title: currentTitle }),
+  );
+  const nextStart = { ...firstStart, startsAt: "2026-10-22T12:30:00.000Z" };
+  const cleared = await create({ ...nextStart, visibility: "public" });
+  const answeredByAnother = await create(nextStart);
+  const tied = [await create(), await create(), await create()];
+  const participating = await create();
+  const declined = await create();
+  const cancelled = await create();
+  await create({ ...firstStart, startsAt: computedAt });
+  await create({ ...firstStart, startsAt: "2026-10-22T11:59:59.999Z" });
+
+  const ownDecline = await service.respond(trainee, cleared.data.event.id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional private cleared reason",
+  });
+  await service.respond(trainee, cleared.data.event.id, newId(), ownDecline.version, {
+    response: "unanswered",
+  });
+  await service.respond(driver, answeredByAnother.data.event.id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional private reason from another member",
+  });
+  await service.respond(trainee, participating.data.event.id, newId(), 1, {
+    response: "participating",
+  });
+  await service.respond(trainee, declined.data.event.id, newId(), 1, {
+    response: "declined",
+    reason: "Fictional private reason",
+  });
+  await service.cancel(director, cancelled.data.event.id, newId(), 1, "Fictional cancellation");
+
+  const workspace = createEventWorkspace(unit);
+  const read = (at: string) =>
+    unit.run((tx) => workspace.workspaceUnansweredEventsInTransaction(tx, trainee.userId, at));
+  const eligible = [renamed, cleared, answeredByAnother, ...tied]
+    .map(({ data: { event } }) => ({
+      eventId: event.id,
+      title: event.title,
+      startsAt: event.startsAt,
+    }))
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.eventId.localeCompare(b.eventId));
+  const result = await read(computedAt);
+  expect(result).toEqual({ count: 6, items: eligible.slice(0, 5) });
+  expect(result.items[0]?.title).toBe(currentTitle);
+  expect(await read(input().startsAt)).toEqual({ count: 0, items: [] });
+
+  // As in the ordinary Events list, a missing selected definition fails the read.
+  await control.execute("UPDATE events SET current_revision_id=NULL WHERE id=?", [
+    first.data.event.id,
+  ]);
+  await expect(read(computedAt)).rejects.toThrow("EVENT_REVISION_MISSING");
+});
+
+test("workspace count and preview retain the caller snapshot across another connection's RSVP", async () => {
+  const {
+    data: { event },
+  } = await create();
+  const workspace = createEventWorkspace(unit);
+  const computedAt = now().toISOString();
+  const read = (tx: TxContext) =>
+    workspace.workspaceUnansweredEventsInTransaction(tx, trainee.userId, computedAt);
+  const unanswered = {
+    count: 1,
+    items: [{ eventId: event.id, title: event.title, startsAt: event.startsAt }],
+  };
+  await unit.run(async (tx) => {
+    expect(await read(tx)).toEqual(unanswered);
+    await service.respond(trainee, event.id, newId(), 1, { response: "participating" });
+    expect(await read(tx)).toEqual(unanswered);
+  });
+  expect(await unit.run(read)).toEqual({ count: 0, items: [] });
+});
+
 test("validation rejects blank reasons, invalid UTC/calendar/decimal and unavailable catalog identities", async () => {
   const e = await create(),
     id = e.data.event.id;

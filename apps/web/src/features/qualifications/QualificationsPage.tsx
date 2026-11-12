@@ -234,6 +234,26 @@ function MemberQualification({
       levels.length > 0 &&
       progress.error instanceof QualificationFailure &&
       progress.error.setupRequired;
+  // Progress and the level pointer can describe different instants.
+  const terminal = level?.code === "driver_i";
+  const hasEffectiveRuleAtProgress =
+    !!p && (p.requiredTrips !== null || p.requiredDistanceM !== null || p.eligibleForConfirmation);
+  const absentMinimum = t(
+    hasEffectiveRuleAtProgress || (terminal && level.ruleVersionId)
+      ? "noMinimum"
+      : level
+        ? "unset"
+        : "cellUnavailable",
+  );
+  const promotionStatus = terminal
+    ? "terminal"
+    : p?.eligibleForConfirmation
+      ? "eligible"
+      : hasEffectiveRuleAtProgress
+        ? "ineligible"
+        : level && !level.ruleVersionId
+          ? "progressUnconfigured"
+          : "progressUnavailable";
   const currentRules = useQualificationQuery(
     `/qualification-levels/${level?.id}/rule-versions/${level?.ruleVersionId}`,
     "EnvelopeQualificationRuleVersion",
@@ -266,7 +286,7 @@ function MemberQualification({
             )}
             <div className="qualification-progress-heading">
               <h3>{t("progress")}</h3>
-              {p.eligibleForConfirmation && level?.code !== "driver_i" && (
+              {p.eligibleForConfirmation && !terminal && (
                 <Badge size="xs" className="badge-accepted">
                   {t("ready")}
                 </Badge>
@@ -280,27 +300,19 @@ function MemberQualification({
                     p.requiredTrips === null ? null : String(p.requiredTrips),
                   )}
                 >
-                  {p.acceptedTrips} / {p.requiredTrips ?? t("unset")}
+                  {p.acceptedTrips} / {p.requiredTrips ?? absentMinimum}
                 </ProgressValue>
               </Fact>
               <Fact label={t("distance")}>
                 <ProgressValue percent={progressPercent(p.actualDistanceM, p.requiredDistanceM)}>
                   {formatQuantity(p.actualDistanceM, "km", locale)} /{" "}
                   {p.requiredDistanceM === null
-                    ? t("unset")
+                    ? absentMinimum
                     : formatQuantity(p.requiredDistanceM, "km", locale)}
                 </ProgressValue>
               </Fact>
             </dl>
-            <p>
-              {t(
-                level?.code === "driver_i"
-                  ? "terminal"
-                  : p.eligibleForConfirmation
-                    ? "eligible"
-                    : "ineligible",
-              )}
-            </p>
+            <p>{t(promotionStatus)}</p>
             <h3>{t("restrictions")}</h3>
             {level?.ruleVersionId ? (
               <>
@@ -310,7 +322,9 @@ function MemberQualification({
                 )}
               </>
             ) : (
-              <p>{t("noRules")}</p>
+              <p>
+                {t(hasEffectiveRuleAtProgress || !level ? "restrictionsUnavailable" : "noRules")}
+              </p>
             )}
           </>
         )}

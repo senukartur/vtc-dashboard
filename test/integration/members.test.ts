@@ -1,5 +1,6 @@
 import { createUnitOfWork, newId, runMigrations, type UnitOfWork } from "@vtc/db";
 import { membership } from "@vtc/db/identity-schema";
+import { trips } from "@vtc/db/trips-schema";
 import { eq } from "drizzle-orm";
 import type { Connection } from "mysql2/promise";
 import { expect, test, afterAll as vitestAfterAll, beforeAll as vitestBeforeAll } from "vitest";
@@ -7,6 +8,7 @@ import { createApp } from "../../apps/api/src/app.ts";
 import { createIdentity, type Identity } from "../../apps/api/src/modules/identity/service.ts";
 import { createQualificationInitialization } from "../../apps/api/src/modules/qualifications/initialization.ts";
 import { identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import {
   guardedSettings,
   reset,
@@ -29,6 +31,11 @@ let driver2Id: string;
 let formerDriverId: string;
 
 const password = "Fictional-members-password-42";
+const identityConfig = {
+  secret: "non-hex-integration-secret-phrase-32-chars-long!",
+  origin: "http://127.0.0.1:4173",
+  production: false,
+};
 
 async function registerMember(
   name: string,
@@ -60,18 +67,10 @@ beforeAll(async () => {
 
   const init = createQualificationInitialization(unit);
 
-  identity = createIdentity(
-    unit,
-    {
-      secret: "non-hex-integration-secret-phrase-32-chars-long!",
-      origin: "http://127.0.0.1:4173",
-      production: false,
-    },
-    {
-      qualificationsLifecycle: init,
-      accessEvents: identityAccessEvents(unit),
-    },
-  );
+  identity = createIdentity(unit, identityConfig, {
+    qualificationsLifecycle: init,
+    accessEvents: identityAccessEvents(unit),
+  });
 
   // Bootstrap director
   await identity.bootstrap({
@@ -264,4 +263,97 @@ test("GET /api/v1/members/:memberId returns profile for former member", async ()
   expect(body.member.id).toBe(formerDriverId);
   expect(body.member.formerMember).toBe(true);
   expect(body.qualifications).toEqual([]);
+  expect(body).not.toHaveProperty("lifetimeTotals");
+});
+
+test("composed profiles and own trip status expose exact accepted lifetime totals", async () => {
+  const rootId = newId();
+  type Trip = typeof trips.$inferInsert;
+  const entry = (
+    ownerId: string,
+    game: Trip["game"],
+    actualDistanceM: string | null,
+    options: Partial<Pick<Trip, "id" | "decision" | "aliasOf">> = {},
+  ): Trip => ({
+    id: newId(),
+    ownerId,
+    game,
+    outcome: "delivered",
+    recording: "complete",
+    decision: "accepted",
+    version: 1,
+    reviewReasons: [],
+    createdAt: "2026-10-01T10:00:00.000Z",
+    actualDistanceM,
+    ...options,
+  });
+  await unit.run(async (tx) => {
+    const db = unit.client(tx);
+    await db
+      .insert(trips)
+      .values(entry(driver1Id, "ets2", "99999999999999999999.123456789012345678", { id: rootId }));
+    await db
+      .insert(trips)
+      .values([
+        entry(driver1Id, "ets2", "0.876543210987654323"),
+        entry(driver1Id, "ets2", "8", { aliasOf: rootId }),
+        entry(driver1Id, "ats", null),
+        entry(driver1Id, "ats", "0"),
+        entry(driver1Id, "ats", "100", { decision: "rejected" }),
+        entry(formerDriverId, "ets2", "10.001"),
+        entry(formerDriverId, "ats", "0.000000000000000001"),
+        entry(formerDriverId, "ats", "100", { decision: "pending_review" }),
+      ]);
+  });
+  const composed = composeIdentity(unit, identityConfig, undefined, undefined, false, undefined, {
+    cursorKey: "a".repeat(64),
+  });
+  if (!composed.trips) throw new Error("SYNTHETIC_TRIPS_COMPOSITION_MISSING");
+  const enabled = await createApp({
+    checkReadiness: async () => true,
+    identity: composed.identity,
+    trips: composed.trips,
+  });
+  try {
+    const get = (url: string, cookie = driver1Cookie) =>
+      enabled.inject({ url, headers: { cookie } });
+    const status = async (game?: "ets2" | "ats") => {
+      const response = await get(`/api/v1/me/trip-status-summary${game ? `?game=${game}` : ""}`);
+      expect(response.statusCode).toBe(200);
+      return response.json().data;
+    };
+    const exactDistance = "100000000000000000000.000000000000000001";
+    expect((await status("ets2")).lifetimeTotals).toEqual({
+      acceptedTrips: 2,
+      actualDistanceM: exactDistance,
+    });
+    expect((await status("ats")).lifetimeTotals).toEqual({
+      acceptedTrips: 2,
+      actualDistanceM: "0",
+    });
+    expect((await status()).lifetimeTotals).toEqual({
+      acceptedTrips: 4,
+      actualDistanceM: exactDistance,
+    });
+    const profile = await get(`/api/v1/members/${driver1Id}`, directorCookie);
+    expect(profile.statusCode).toBe(200);
+    expect(profile.json().data.lifetimeTotals).toEqual({
+      acceptedTrips: 4,
+      actualDistanceM: exactDistance,
+    });
+    const former = await get(`/api/v1/members/${formerDriverId}`);
+    expect(former.statusCode).toBe(200);
+    expect(former.json().data).toMatchObject({
+      member: { formerMember: true },
+      lifetimeTotals: { acceptedTrips: 2, actualDistanceM: "10.001000000000000001" },
+    });
+    const empty = await get(`/api/v1/members/${driver2Id}`);
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json().data.lifetimeTotals).toEqual({ acceptedTrips: 0, actualDistanceM: "0" });
+    expect((await enabled.inject({ url: `/api/v1/members/${formerDriverId}` })).statusCode).toBe(
+      401,
+    );
+  } finally {
+    await enabled.close();
+  }
 });

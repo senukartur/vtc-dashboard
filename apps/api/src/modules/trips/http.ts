@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Identity } from "../identity/service.js";
-import { type ListOptions, type Trips, tripSources } from "./service.js";
+import { type ListOptions, tripDecisions, tripOrders, tripSources } from "./list-query.js";
+import type { Trips } from "./service.js";
 
 const object = (properties: Record<string, unknown>) => ({
   type: "object",
@@ -11,18 +12,20 @@ const ref = (name: string) => ({ $ref: `urn:vtc:browser:v1#/$defs/${name}` });
 const game = { type: "string", enum: ["ets2", "ats"] };
 // Wire schema of the listTrips query, exported for the OpenAPI parity contract test.
 export const listTripsQuerystring = object({
-  limit: { type: "integer", minimum: 1, maximum: 100 },
+  limit: { type: "integer", minimum: 1, maximum: 100, default: 25 },
   cursor: { type: "string", minLength: 1, maxLength: 2048 },
   scope: { type: "string", enum: ["company", "mine", "review"] },
   game,
-  decision: {
-    type: "string",
-    enum: ["unassessed", "pending_review", "accepted", "rejected"],
-  },
+  decision: { type: "string", enum: [...tripDecisions] },
   // TripSummary.sourceKinds vocabulary; applies to every scope.
   source: { type: "string", enum: [...tripSources] },
   hold: { type: "boolean" },
-  order: { type: "string", enum: ["asc", "desc"] },
+  order: { type: "string", enum: [...tripOrders], default: "desc" },
+  from: ref("Timestamp"),
+  toExclusive: ref("Timestamp"),
+  q: { type: "string", minLength: 1, maxLength: 128, pattern: "\\S" },
+  locale: { type: "string", enum: ["en", "ru"] },
+  ownerId: ref("Id"),
 });
 export async function registerTripRoutes(app: FastifyInstance, identity: Identity, trips: Trips) {
   const actor = (request: FastifyRequest) =>
