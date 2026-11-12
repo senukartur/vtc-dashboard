@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { CatalogNativeName } from "../../shared/catalog-selectors/CatalogNativeName.js";
@@ -78,6 +78,7 @@ export function EventListCard({
   const { t } = useTranslation("events");
   const locale = useEventListLocale();
   const copy = eventListCopy[locale];
+  const dlcLabel = useId();
   const { event } = row;
   const scope = useEventResponseScope();
   const started = useEventStarted(canRespond ? event.startsAt : null);
@@ -138,11 +139,20 @@ export function EventListCard({
             </dd>
           </div>
         </dl>
-        <p className="events-row-meta">
-          {event.requiredDlcs.length
-            ? `${copy.requiredDlc}: ${event.requiredDlcs.map(({ name }) => name).join(", ")}`
-            : copy.noDlc}
-        </p>
+        {event.requiredDlcs.length ? (
+          <div className="events-row-meta">
+            <span id={dlcLabel}>{copy.requiredDlc}</span>
+            <ul className="event-list-dlcs" aria-labelledby={dlcLabel}>
+              {event.requiredDlcs.map(({ id, name }) => (
+                <li key={id}>
+                  <Badge size="xs">{name}</Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="events-row-meta">{copy.noDlc}</p>
+        )}
       </div>
       <div className="event-list-responses">
         <div className="events-row-meta">

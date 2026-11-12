@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { useSession } from "../../app/Session.js";
@@ -12,15 +12,29 @@ import {
   useEventResponseView,
 } from "./event-quick-response.js";
 import { eventTime } from "./model.js";
+import { eventStage2SessionScope } from "./stage-2-queries.js";
 
 export function UpcomingEventChip() {
   const { t } = useTranslation("events");
   const session = useSession();
   const query = useUpcomingEventCard();
   const chip = useRef<HTMLDivElement>(null);
+  const refreshed = useRef<string | null>(null);
   const event = query.data?.event;
+  const canRead = session.self?.capabilities.includes("company.read") === true;
   const canRespond = session.self?.capabilities.includes("events.respond");
-  if (!session.self?.capabilities.includes("company.read")) return null;
+  const scope = eventStage2SessionScope(session);
+  const cutoff =
+    canRead && scope && event ? JSON.stringify([scope, event.id, event.startsAt]) : null;
+  const { refetch, started } = query;
+  // The overview observes the same query and closes its controls at the cutoff.
+  // Only the shell issues the cutoff refresh, even if the timers settle in separate renders.
+  useEffect(() => {
+    if (!started || !cutoff || refreshed.current === cutoff) return;
+    refreshed.current = cutoff;
+    void refetch({ cancelRefetch: false });
+  }, [cutoff, refetch, started]);
+  if (!canRead) return null;
 
   return (
     <div className="event-nearest" ref={chip} tabIndex={-1}>

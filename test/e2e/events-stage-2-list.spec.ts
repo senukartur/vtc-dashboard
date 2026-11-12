@@ -82,7 +82,10 @@ for (const locale of ["en", "ru"] as const) {
         `/account/events/${stage2EventId}`,
       );
       await expect(structured).toContainText("TruckersMP");
-      await expect(structured).toContainText("Fictional Northern Roads");
+      const dlcs = structured.getByRole("list", {
+        name: locale === "en" ? "Required DLC" : "Необходимые DLC",
+      });
+      await expect(dlcs.getByRole("listitem")).toHaveText(["Fictional Northern Roads"]);
       await expect(structured).toContainText("GMT+01:00");
       await expect(structured).toContainText(locale === "en" ? "Meeting time" : "Время сбора");
       await expect(structured.locator("img")).toHaveJSProperty("complete", true);

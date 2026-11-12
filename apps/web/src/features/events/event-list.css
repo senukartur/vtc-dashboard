@@ -61,6 +61,18 @@
 .event-list-facts dd {
   margin: 0;
 }
+.event-list-dlcs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.event-list-dlcs :is(li, .badge) {
+  max-width: 100%;
+}
 .event-list-responses {
   grid-area: responses;
   display: flex;
