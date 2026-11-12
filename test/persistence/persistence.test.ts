@@ -937,10 +937,26 @@ await describe("published-prefix migration upgrades", { concurrency: false }, ()
         );
         assert.equal(Number(saved[0]?.n), 1);
         const [tables] = await connection.query<RowDataPacket[]>(
-          "SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND (TABLE_NAME='events' OR TABLE_NAME LIKE 'event_%')",
+          "SELECT TABLE_NAME name FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND (TABLE_NAME='events' OR TABLE_NAME LIKE 'event_%')",
         );
-        // 0019 removed event_catalog_pins, leaving the retained event tables.
-        assert.equal(Number(tables[0]?.n), 7);
+        // 0019 removed event_catalog_pins. 0028 adds eight dormant event tables.
+        assert.deepEqual(tables.map((row) => String(row.name)).sort(), [
+          "event_attendance_revisions",
+          "event_attendances",
+          "event_commands",
+          "event_draft_dlcs",
+          "event_drafts",
+          "event_media",
+          "event_media_generations",
+          "event_metadata",
+          "event_response_revisions",
+          "event_responses",
+          "event_revision_details",
+          "event_revision_dlcs",
+          "event_revisions",
+          "event_workflow_commands",
+          "events",
+        ]);
         const [fks] = await connection.query<RowDataPacket[]>(
           "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME LIKE 'event_%'",
         );

@@ -119,7 +119,7 @@ CREATE TABLE `event_revision_dlcs` (
 	CONSTRAINT `event_revision_dlcs_revision_id_dlc_id_pk` PRIMARY KEY(`revision_id`,`dlc_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 --> statement-breakpoint
-CREATE TABLE `event_stage2_commands` (
+CREATE TABLE `event_workflow_commands` (
 	`actor_id` binary(36) NOT NULL,
 	`route` enum('draft_create','draft_update','draft_delete','publish','media_edit','media_delete') NOT NULL,
 	`target_id` binary(36) NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE `event_stage2_commands` (
 	`fingerprint` varbinary(32) NOT NULL,
 	`result` json NOT NULL,
 	`recorded_at` datetime(3) NOT NULL,
-	CONSTRAINT `event_stage2_commands_actor_id_route_target_id_key_pk` PRIMARY KEY(`actor_id`,`route`,`target_id`,`key`)
+	CONSTRAINT `event_workflow_commands_actor_id_route_target_id_key_pk` PRIMARY KEY(`actor_id`,`route`,`target_id`,`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 --> statement-breakpoint
 ALTER TABLE `event_revisions` MODIFY COLUMN `category` enum('created','updated','cancelled','published') NOT NULL;--> statement-breakpoint
@@ -152,7 +152,7 @@ ALTER TABLE `event_revision_details` ADD CONSTRAINT `event_revision_origin_depot
 ALTER TABLE `event_revision_details` ADD CONSTRAINT `event_revision_destination_depot_fk` FOREIGN KEY (`destination_depot_id`) REFERENCES `catalog_company_cities`(`id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `event_revision_dlcs` ADD CONSTRAINT `event_revision_dlc_revision_fk` FOREIGN KEY (`revision_id`) REFERENCES `event_revision_details`(`revision_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE `event_revision_dlcs` ADD CONSTRAINT `event_revision_dlc_catalog_fk` FOREIGN KEY (`dlc_id`,`game`) REFERENCES `catalog_dlcs`(`id`,`game`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE `event_stage2_commands` ADD CONSTRAINT `event_stage2_command_actor_fk` FOREIGN KEY (`actor_id`) REFERENCES `identity_memberships`(`user_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE `event_workflow_commands` ADD CONSTRAINT `event_workflow_command_actor_fk` FOREIGN KEY (`actor_id`) REFERENCES `identity_memberships`(`user_id`) ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX `event_draft_page` ON `event_drafts` (`discarded_at`,`updated_at`,`event_id`);--> statement-breakpoint
 CREATE INDEX `event_media_order` ON `event_media` (`event_id`,`state`,`position`,`id`);--> statement-breakpoint
 CREATE INDEX `event_media_due` ON `event_media` (`state`,`next_check_at`,`id`);--> statement-breakpoint

@@ -595,7 +595,7 @@ type EventStage2CommandResult = { schemaVersion: 1 } & (
 );
 
 export const eventStage2Commands = mysqlTable(
-  "event_stage2_commands",
+  "event_workflow_commands",
   {
     actorId: idColumn("actor_id").notNull(),
     route: mysqlEnum("route", [
@@ -614,6 +614,6 @@ export const eventStage2Commands = mysqlTable(
   },
   (t) => [
     primaryKey({ columns: [t.actorId, t.route, t.targetId, t.key] }),
-    fk("event_stage2_command_actor_fk", t.actorId, membership.userId),
+    fk("event_workflow_command_actor_fk", t.actorId, membership.userId),
   ],
 );

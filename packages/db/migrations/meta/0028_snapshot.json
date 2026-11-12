@@ -8572,8 +8572,8 @@
         }
       }
     },
-    "event_stage2_commands": {
-      "name": "event_stage2_commands",
+    "event_workflow_commands": {
+      "name": "event_workflow_commands",
       "columns": {
         "actor_id": {
           "name": "actor_id",
@@ -8627,9 +8627,9 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "event_stage2_command_actor_fk": {
-          "name": "event_stage2_command_actor_fk",
-          "tableFrom": "event_stage2_commands",
+        "event_workflow_command_actor_fk": {
+          "name": "event_workflow_command_actor_fk",
+          "tableFrom": "event_workflow_commands",
           "tableTo": "identity_memberships",
           "columnsFrom": ["actor_id"],
           "columnsTo": ["user_id"],
@@ -8638,8 +8638,8 @@
         }
       },
       "compositePrimaryKeys": {
-        "event_stage2_commands_actor_id_route_target_id_key_pk": {
-          "name": "event_stage2_commands_actor_id_route_target_id_key_pk",
+        "event_workflow_commands_actor_id_route_target_id_key_pk": {
+          "name": "event_workflow_commands_actor_id_route_target_id_key_pk",
           "columns": ["actor_id", "route", "target_id", "key"]
         }
       },

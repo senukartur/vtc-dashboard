@@ -126,7 +126,7 @@ export async function reset(connection: Connection) {
     "event_draft_dlcs",
     "event_drafts",
     "event_metadata",
-    "event_stage2_commands",
+    "event_workflow_commands",
     "event_commands",
     "event_catalog_pins",
     "event_responses",
