@@ -19,6 +19,7 @@ import { LandingMenu } from "../features/landing/LandingMenu.js";
 import { OptionalNotifications } from "../features/notifications/controller.js";
 import { NotificationBell, NotificationToasts } from "../features/notifications/components.js";
 import "../features/notifications/notifications.css";
+import { useWorkspaceSummary } from "./workspace-summary.js";
 
 function storedCollapse() {
   try {
@@ -49,6 +50,7 @@ export function AppLayout({
   const { t, i18n } = useTranslation("core");
   const session = useSession();
   const signOut = useSignOut();
+  const { data: attention } = useWorkspaceSummary({ refreshOnFocus: true });
   const [collapsed, setCollapsed] = useState(storedCollapse);
   const home = i18n.resolvedLanguage === "en" ? "/en" : "/";
   const preview = location.pathname.startsWith("/foundation");
@@ -126,6 +128,7 @@ export function AppLayout({
       {landing ? null : live ? (
         <MemberSidebar
           collapsed={collapsed}
+          attention={attention}
           onToggle={() => {
             const next = !collapsed;
             setCollapsed(next);
@@ -197,7 +200,11 @@ export function AppLayout({
                   {session.state === "authenticated" && <NearestEvent variant="chip" />}
                   {bell}
                   {userMenu && <UserMenu placement="topbar" />}
-                  <Navigation variant="mobile" onMobileNavigate={onMobileNavigate} />
+                  <Navigation
+                    variant="mobile"
+                    attention={attention}
+                    onMobileNavigate={onMobileNavigate}
+                  />
                   {languagePicker}
                 </div>
               </>
@@ -215,7 +222,7 @@ export function AppLayout({
           </header>
         </div>
       )}
-      {bar && <BottomNavigation onMobileNavigate={onMobileNavigate} />}
+      {bar && <BottomNavigation attention={attention} onMobileNavigate={onMobileNavigate} />}
       <main id="main-content" tabIndex={-1}>
         {signingOut ? <SignOutStatus /> : children}
       </main>

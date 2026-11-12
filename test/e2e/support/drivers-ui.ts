@@ -139,6 +139,8 @@ export async function mockDriverRoutes(
       return route.fulfill({ json: self });
     }
     if (path === "/api/v1/me/upcoming-event") return route.fulfill({ json: { data: null, meta } });
+    if (path === "/api/v1/me/workspace-summary")
+      return route.fulfill({ json: { data: { computedAt: "2026-11-12T08:00:00.000Z" }, meta } });
 
     const endpoint = endpointOf(url);
     const gate = endpoint ? gates.get(endpoint) : undefined;

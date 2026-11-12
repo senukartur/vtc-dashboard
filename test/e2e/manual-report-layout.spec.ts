@@ -12,6 +12,38 @@ import {
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { completeForm, evidenceId, example, id, mockTrips } from "./support/trip-ui.ts";
 
+test(
+  "editing drafts keep their filter across pagination and the default list starts fresh",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await mockTrips(page);
+    const requests: URLSearchParams[] = [];
+    await page.route("**/api/v1/me/manual-drafts?*", (route) => {
+      const { searchParams } = new URL(route.request().url());
+      requests.push(searchParams);
+      const filtered = searchParams.get("state") === "editing";
+      const body = example(
+        filtered ? "listMyManualDrafts:editing-only" : "listMyManualDrafts:success",
+      );
+      if (filtered)
+        body.data.nextCursor = searchParams.has("cursor") ? null : "NONFUNCTIONAL_DRAFT_CURSOR";
+      return route.fulfill({ json: body });
+    });
+    await page.goto("/account/reports?state=editing");
+    await expect(page.getByRole("heading", { name: "Editing drafts", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect.poll(() => requests.at(-1)?.get("cursor")).toBe("NONFUNCTIONAL_DRAFT_CURSOR");
+    expect(requests.at(-1)?.get("state")).toBe("editing");
+    await page
+      .getByRole("navigation", { name: "Main navigation", exact: true })
+      .getByRole("link", { name: "Drafts", exact: true })
+      .click();
+    await expect(page.getByRole("heading", { name: "Saved drafts", exact: true })).toBeVisible();
+    await expect.poll(() => requests.length).toBe(3);
+    expect(requests.at(-1)?.toString()).toBe("limit=25");
+  },
+);
+
 const text = {
   en: {
     title: "New report",

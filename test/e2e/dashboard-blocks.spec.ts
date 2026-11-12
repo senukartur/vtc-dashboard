@@ -83,6 +83,8 @@ const qualificationCard = (page: Page) =>
   page.getByRole("region", { name: /^(My Qualification|Моя квалификация)$/ });
 const reviewCard = (page: Page) =>
   page.getByRole("region", { name: /^(Review Queue|Очередь проверки)$/ });
+const attentionCard = (page: Page) =>
+  page.getByRole("region", { name: /^(Needs attention|Дела)$/ });
 const responseGroup = (page: Page) =>
   eventCard(page).getByRole("group", { name: /^(Your response|Ваш ответ)$/ });
 const going = (page: Page) => responseGroup(page).getByRole("button", { name: /^(Going|Поеду)$/ });
@@ -184,6 +186,199 @@ async function reload(page: Page, locale: Locale) {
 const isTouch = (info: TestInfo) => info.project.name === "mobile-chromium";
 const count = (state: DashboardMockState, pattern: RegExp) =>
   state.requests.filter((url) => pattern.test(url.pathname + url.search)).length;
+const summaryReads = (state: DashboardMockState) => count(state, /\/me\/workspace-summary$/);
+
+test(
+  "workspace actions survive analytics failure and show exact bounded destinations",
+  browserCase(["@layout"]),
+  async ({ page }, info) => {
+    await page.clock.setFixedTime(new Date(overviewNow));
+    const state = await mockDashboardRoutes(page, {
+      failures: { analytics: 503, summary: 503 },
+      capabilities: [
+        "company.read",
+        "trips.read_own_private",
+        "trips.submit_own",
+        "events.respond",
+        "trips.review",
+        "applications.manage",
+      ],
+    });
+    const tripId = "10000000-0000-4000-8000-000000000001";
+    const draftId = "10000000-0000-4000-8000-000000000002";
+    const reason = "Fictional reason <b>Keep as plain text</b>";
+    state.hold("summary");
+    await page.goto("/account/dashboard");
+    const actions = attentionCard(page);
+    try {
+      await expect(actions.getByRole("status")).toHaveText("Loading actions…");
+    } finally {
+      state.release("summary");
+    }
+    await expect(page.locator(".dashboard-error")).toBeVisible();
+    await expect(actions.getByRole("alert")).toHaveText("Could not load your actions.");
+    const retry = actions.getByRole("button", { name: "Retry", exact: true });
+    state.hold("summary");
+    await retry.focus();
+    try {
+      await page.keyboard.press("Enter");
+      await expect.poll(() => summaryReads(state)).toBe(2);
+      await expect(retry).toBeFocused();
+      await page.keyboard.press("Enter");
+    } finally {
+      state.release("summary");
+    }
+    await expect(retry).toBeFocused();
+    await expect(retry).toHaveAttribute("aria-disabled", "false");
+    expect(summaryReads(state)).toBe(2);
+    delete state.failures.summary;
+    state.summary = {
+      computedAt: overviewNow,
+      tripsNeedingFixes: { count: 8, items: [{ tripId, latestReturnReason: reason }] },
+      unfinishedManualDrafts: { count: 4, items: [{ draftId, updatedAt: overviewNow }] },
+      unansweredUpcomingEvents: {
+        count: 5,
+        items: [
+          {
+            eventId: upcomingEvent.id,
+            startsAt: upcomingEvent.startsAt,
+            title: upcomingEvent.title,
+          },
+        ],
+      },
+      reviewQueue: { count: 7, oldestAgeSeconds: 0 },
+      newApplicationsCount: 3,
+    };
+    await page.keyboard.press("Enter");
+    await expect(actions.getByRole("heading", { level: 2 })).toBeFocused();
+    await expect(actions.getByText(reason, { exact: true })).toBeVisible();
+    await expect(actions.locator("b")).toHaveCount(0);
+    await expect(
+      actions.getByRole("heading", { name: "Trips returned for fixes (8)" }),
+    ).toBeVisible();
+    await expect(actions.getByRole("link", { name: "Open trip" })).toHaveAttribute(
+      "href",
+      `/account/trips/${tripId}`,
+    );
+    await expect(actions.getByRole("link", { name: "Open trip" })).toHaveAccessibleDescription(
+      reason,
+    );
+    await expect(actions.getByRole("link", { name: "Editing drafts (4)" })).toHaveAttribute(
+      "href",
+      "/account/reports?state=editing",
+    );
+    await expect(actions.getByRole("link", { name: /^Continue draft/ })).toHaveAttribute(
+      "href",
+      `/account/reports/drafts/${draftId}`,
+    );
+    await expect(actions.getByRole("link", { name: upcomingEvent.title })).toHaveAttribute(
+      "href",
+      `/account/events/${upcomingEvent.id}`,
+    );
+    await expect(actions.getByRole("link", { name: "Awaiting decision (7)" })).toHaveAttribute(
+      "href",
+      "/account/review",
+    );
+    await expect(actions.getByRole("link", { name: "Submitted applications (3)" })).toHaveAttribute(
+      "href",
+      "/account/admin/applications?status=submitted",
+    );
+    await expect(actions.getByRole("listitem")).toHaveCount(3);
+    await capture(page, info, "workspace-actions-en");
+    await switchLanguage(page, "ru");
+    await expect(actions.getByRole("heading", { name: "Дела", exact: true })).toBeVisible();
+    await expect(actions.getByRole("link", { name: "Черновики в работе (4)" })).toBeVisible();
+    await expect(actions.getByRole("link", { name: "Заявки на рассмотрении (3)" })).toBeVisible();
+    await capture(page, info, "workspace-actions-ru");
+    expect(summaryReads(state)).toBe(3);
+    state.summary = { computedAt: overviewNow, unfinishedManualDrafts: { count: 0, items: [] } };
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      actions.getByText("Некоторые действия недоступны.", { exact: true }),
+    ).toBeVisible();
+    await expect(actions.getByText("Нет действий, требующих вашего внимания.")).toHaveCount(0);
+  },
+);
+
+test(
+  "confirmed RSVP supersedes a pending snapshot and action counts do not poll",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    await page.clock.install({ time: new Date(overviewNow) });
+    const state = await mockDashboardRoutes(page);
+    const available = state.summary;
+    state.summary = {
+      ...available,
+      unansweredUpcomingEvents: {
+        count: 1,
+        items: [
+          {
+            eventId: upcomingEvent.id,
+            startsAt: upcomingEvent.startsAt,
+            title: upcomingEvent.title,
+          },
+        ],
+      },
+    };
+    await page.goto("/account/dashboard");
+    const actions = attentionCard(page);
+    await expect(actions.getByRole("link", { name: upcomingEvent.title })).toBeVisible();
+    await expect(going(page)).toHaveAttribute("aria-pressed", "false");
+    expect(summaryReads(state)).toBe(1);
+    state.hold("summary");
+    try {
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(() => summaryReads(state)).toBe(2);
+      state.summary = available;
+      await going(page).click();
+      await expect.poll(() => state.commands.length).toBe(1);
+      await expect.poll(() => summaryReads(state)).toBe(3);
+    } finally {
+      state.release("summary");
+    }
+    await expect(eventCard(page).getByRole("status")).toHaveText("Response saved.");
+    await expect(actions.getByText("Nothing needs your attention.")).toBeVisible();
+    await expect(actions.getByRole("link", { name: upcomingEvent.title })).toHaveCount(0);
+    await page.clock.fastForward(60_000);
+    expect(summaryReads(state)).toBe(3);
+  },
+);
+
+test(
+  "returned trip previews have distinct localized links when reasons repeat or are absent",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    const state = await mockDashboardRoutes(page);
+    const ids = [
+      "10000000-0000-4000-8000-000000000021",
+      "10000000-0000-4000-8000-000000000022",
+      "10000000-0000-4000-8000-000000000023",
+    ];
+    state.summary = {
+      ...state.summary,
+      tripsNeedingFixes: {
+        count: 8,
+        items: ids.map((tripId, index) => ({
+          tripId,
+          latestReturnReason: index < 2 ? "Fictional duplicate return reason" : null,
+        })),
+      },
+    };
+    await page.goto("/account/dashboard");
+    const actions = attentionCard(page);
+    for (const [index, tripId] of ids.entries()) {
+      await expect(
+        actions.getByRole("link", { name: `Open trip (${index + 1} of 3)`, exact: true }),
+      ).toHaveAttribute("href", `/account/trips/${tripId}`);
+    }
+    await switchLanguage(page, "ru");
+    for (const [index, tripId] of ids.entries()) {
+      await expect(
+        actions.getByRole("link", { name: `Открыть рейс (${index + 1} из 3)`, exact: true }),
+      ).toHaveAttribute("href", `/account/trips/${tripId}`);
+    }
+  },
+);
 
 /** Fixed time (timers keep running): the convoy starts in 3 d 4 h 30 min. */
 async function open(

@@ -9,6 +9,25 @@ import {
   rejectedReason,
 } from "./support/applications.ts";
 
+test(
+  "application tabs show their own totals including an available zero",
+  browserCase(["@layout"]),
+  async ({ page }) => {
+    await open(page, { statusCounts: { submitted: 108, approved: 27, rejected: 0 } });
+    const tabs = page.getByRole("navigation", { name: "Status", exact: true });
+    await expect(
+      tabs.getByRole("link", { name: "Awaiting review (108)", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(tabs.getByRole("link", { name: "Approved (27)", exact: true })).toBeVisible();
+    await tabs.getByRole("link", { name: "Rejected (0)", exact: true }).click();
+    await expect(page).toHaveURL(/\?status=rejected$/);
+    await expect(tabs.getByRole("link", { name: "Rejected (0)", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  },
+);
+
 const text = {
   en: {
     title: "Applications",

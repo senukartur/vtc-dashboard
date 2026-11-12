@@ -77,6 +77,7 @@ export type ApplicationsOptions = {
   invitation?: Partial<S["Invitation"]>;
   delivery?: Partial<S["MailDelivery"]>;
   mailEnabled?: boolean;
+  statusCounts?: S["AdminApplicationStatusCounts"];
 };
 /**
  * Synthetic staff applications API: an applications.manage session, three statuses, an approved
@@ -180,6 +181,7 @@ export async function mockApplications(page: Page, options: ApplicationsOptions 
         json: envelope({
           items: state.listEmpty ? [] : state.apps.filter((app) => app.status === status),
           nextCursor: null,
+          ...(options.statusCounts ? { statusCounts: options.statusCounts } : {}),
         }),
       });
     }

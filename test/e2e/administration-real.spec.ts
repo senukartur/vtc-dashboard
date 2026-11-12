@@ -7,6 +7,7 @@ import {
   request,
   type TestInfo,
 } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { testConnection } from "../persistence/support.ts";
 import {
   origin,
@@ -28,6 +29,13 @@ import { chooseMember } from "./support/member-picker.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
 test.beforeEach(resetAccountLimits);
+type Schemas = components["schemas"];
+
+async function adminSnapshot<K extends keyof Schemas>(staff: APIRequestContext, path: string) {
+  const response = await staff.get(`/api/v1${path}`);
+  expect(response.status()).toBe(200);
+  return (await response.json()) as Schemas[K];
+}
 async function staffPage(page: Page, context: APIRequestContext, path: string, title: RegExp) {
   await page.context().addCookies((await context.storageState()).cookies);
   await page.goto(path);
@@ -80,6 +88,108 @@ async function steamAssertion(context: APIRequestContext, verificationUrl: strin
     (await context.get(`/api/v1/identity/steam/callback?${query}`, { maxRedirects: 0 })).status(),
   ).toBe(303);
 }
+
+test(
+  "real workspace and administration counts follow an application decision",
+  browserCase(["@real"]),
+  async ({ page, context }) => {
+    test.setTimeout(60000);
+    const staff = await staffContext();
+    try {
+      const readSummary = async () =>
+        (await adminSnapshot<"EnvelopeWorkspaceSummary">(staff, "/me/workspace-summary")).data
+          .newApplicationsCount;
+      const readApplications = async () =>
+        (
+          await adminSnapshot<"EnvelopeListAdminApplication">(
+            staff,
+            "/admin/applications?status=submitted&limit=25",
+          )
+        ).data.statusCounts;
+      const previous = await readSummary();
+      if (previous === undefined) throw new Error("SYNTHETIC_APPLICATIONS_SUMMARY_REQUIRED");
+      const nickname = `Fictional Attention ${randomUUID().slice(0, 8)}`;
+      expect(
+        (
+          await write(context.request, "/public/applications", {
+            nickname,
+            email: `${randomUUID()}@example.invalid`,
+            steamProfileUrl: "https://steamcommunity.com/id/fictional-attention",
+            games: ["ets2"],
+          })
+        ).status(),
+      ).toBe(201);
+      expect(await readSummary()).toBe(previous + 1);
+      const before = await readApplications();
+      if (!before) throw new Error("SYNTHETIC_APPLICATIONS_COUNTS_REQUIRED");
+      expect(before.submitted).toBe(previous + 1);
+      const number = new Intl.NumberFormat("en");
+      await staffPage(page, staff, "/account/dashboard", /^(Company Overview|Обзор компании)$/);
+      const nav = page.getByRole("navigation", { name: "Main navigation", exact: true });
+      await expect(
+        nav.getByRole("link", {
+          name: `Applications (${number.format(before.submitted)} awaiting review)`,
+          exact: true,
+        }),
+      ).toBeVisible();
+      await page
+        .getByRole("region", { name: "Needs attention", exact: true })
+        .getByRole("link", {
+          name: `Submitted applications (${number.format(before.submitted)})`,
+          exact: true,
+        })
+        .click();
+      await expect(page).toHaveURL(`${origin}/account/admin/applications?status=submitted`);
+      const tabs = page.getByRole("navigation", { name: "Status", exact: true });
+      const expectTabs = async (counts: Schemas["AdminApplicationStatusCounts"]) => {
+        for (const [label, count] of [
+          ["Awaiting review", counts.submitted],
+          ["Approved", counts.approved],
+          ["Rejected", counts.rejected],
+        ] as const)
+          await expect(
+            tabs.getByRole("link", { name: `${label} (${number.format(count)})`, exact: true }),
+          ).toBeVisible();
+      };
+      await expectTabs(before);
+      await page.getByRole("button", { name: nickname, exact: true }).click();
+      await confirm(page, "Approve application");
+      await expect(page.getByRole("heading", { name: "Invitation", exact: true })).toBeVisible();
+      const after = await readApplications();
+      expect(after).toEqual({
+        submitted: previous,
+        approved: before.approved + 1,
+        rejected: before.rejected,
+      });
+      if (!after) throw new Error("SYNTHETIC_APPLICATIONS_COUNTS_REQUIRED");
+      await expectTabs(after);
+      expect(await readSummary()).toBe(previous);
+      const navLabel = previous
+        ? `Applications (${number.format(previous)} awaiting review)`
+        : "Applications";
+      await expect(nav.getByRole("link", { name: navLabel, exact: true })).toBeVisible();
+
+      const memberQuery = `status=active&search=${encodeURIComponent(nickname)}`;
+      const members = (
+        await adminSnapshot<"EnvelopeListMemberAdmin">(staff, `/admin/members?${memberQuery}`)
+      ).data.statusCounts;
+      expect(members).toMatchObject({ inCompany: 0, left: 0, invited: 1 });
+      await page.goto(`/account/admin/members?${memberQuery}`);
+      await expect(tabs.getByRole("link", { name: "Active (0)", exact: true })).toBeVisible();
+      await expect(tabs.getByRole("link", { name: "Former (0)", exact: true })).toBeVisible();
+      await expect(tabs.getByRole("link")).toHaveCount(2);
+      await expect(page.getByText("Usable invitations: 1", { exact: true })).toBeVisible();
+      await tabs.getByRole("link", { name: "Former (0)", exact: true }).click();
+      await expect(page).toHaveURL(
+        `${origin}/account/admin/members?status=inactive&search=${encodeURIComponent(nickname).replaceAll("%20", "+")}`,
+      );
+      await expect(page.getByText("Usable invitations: 1", { exact: true })).toBeVisible();
+    } finally {
+      await staff.dispose();
+    }
+  },
+);
+
 test(
   "real application review, manual invitation copy and redemption with history",
   browserCase(["@real"]),

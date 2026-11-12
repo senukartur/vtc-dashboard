@@ -1137,6 +1137,25 @@ textarea {
 .nav-icon {
   flex: none;
 }
+.member-navigation a[data-attention] {
+  position: relative;
+  padding-inline-end: 44px;
+}
+.nav-attention-badge {
+  position: absolute;
+  inset-inline-end: 8px;
+  display: grid;
+  place-items: center;
+  min-inline-size: 19px;
+  padding: 2px 4px;
+  border-radius: var(--radius-badge);
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
 .sidebar-footer {
   margin-top: auto;
   padding-top: 8px;
@@ -1340,6 +1359,13 @@ textarea {
   .sidebar-collapsed .member-sidebar .user-menu-trigger {
     justify-content: center;
     padding: 4px;
+  }
+  .sidebar-collapsed .member-sidebar .nav-attention-badge {
+    inset-block-start: -1px;
+    inset-inline-end: -5px;
+    min-inline-size: 16px;
+    padding: 1px 3px;
+    font-size: 9px;
   }
   .sidebar-collapsed .member-sidebar .nav-group + .nav-group {
     padding-top: 4px;
@@ -1601,11 +1627,16 @@ textarea {
     outline-offset: -2px;
   }
   .bottom-nav-icon {
+    position: relative;
     display: grid;
     place-items: center;
     width: 44px;
     height: 26px;
     border-radius: 13px;
+  }
+  .bottom-nav-icon .nav-attention-badge {
+    inset-block-start: -2px;
+    inset-inline-end: -8px;
   }
   .bottom-nav-label {
     max-width: 100%;

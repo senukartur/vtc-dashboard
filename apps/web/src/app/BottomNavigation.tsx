@@ -13,6 +13,7 @@ import {
 } from "../shared/ui/dialog.js";
 import { SegmentedControl } from "../shared/ui/segmented-control.js";
 import { writeStoredLocale } from "../shared/i18n.js";
+import { navAttention } from "./attention-badge.js";
 import { MemberNavLinks } from "./MemberNavigation.js";
 import { isPlainSelfClick, type MobileNavigate } from "./Navigation.js";
 import { NavIcon } from "./nav-icons.js";
@@ -25,6 +26,7 @@ import {
   primaryRole,
 } from "./navigation-model.js";
 import { useSession } from "./Session.js";
+import type { WorkspaceSummary } from "./workspace-summary.js";
 
 const languages = [
   { value: "ru", label: "Русский", lang: "ru" },
@@ -35,7 +37,13 @@ const languages = [
  * Phone-only (below 768px) bottom bar with the main sections and a More sheet holding the
  * remaining permission-filtered sections and account items. CSS hides it from 768px.
  */
-export function BottomNavigation({ onMobileNavigate }: { onMobileNavigate: MobileNavigate }) {
+export function BottomNavigation({
+  onMobileNavigate,
+  attention,
+}: {
+  onMobileNavigate: MobileNavigate;
+  attention?: WorkspaceSummary | undefined;
+}) {
   const { t, i18n } = useTranslation("core");
   const session = useSession();
   const signOut = useSignOut();
@@ -70,16 +78,19 @@ export function BottomNavigation({ onMobileNavigate }: { onMobileNavigate: Mobil
       <ul>
         {bottomBarItems(capabilities).map((entry) => {
           const label = t(entry.labelKey);
+          const fullLabel = entry.nameKey ? t(entry.nameKey) : undefined;
+          const badge = navAttention(attention, entry.id, fullLabel ?? label, t, locale);
           return (
             <li key={entry.id}>
               <Link
                 to={paths[entry.route]}
                 className={entry.accent ? "bottom-nav-item bottom-nav-accent" : "bottom-nav-item"}
-                aria-label={entry.nameKey ? t(entry.nameKey) : undefined}
+                aria-label={badge.label ?? fullLabel}
                 aria-current={currentMarker(entry, meta)}
               >
                 <span className="bottom-nav-icon">
                   <NavIcon name={entry.id === "newReport" ? "plus" : entry.id} size={20} />
+                  {badge.badge}
                 </span>
                 <span className="bottom-nav-label">{label}</span>
               </Link>
@@ -122,7 +133,7 @@ export function BottomNavigation({ onMobileNavigate }: { onMobileNavigate: Mobil
               <DialogDescription className="visually-hidden">
                 {t("nav.moreDescription")}
               </DialogDescription>
-              <MemberNavLinks variant="sheet" onNavigate={choose} />
+              <MemberNavLinks variant="sheet" onNavigate={choose} attention={attention} />
               <div className="more-account">
                 <div className="more-identity">
                   <span className="user-avatar" aria-hidden="true">

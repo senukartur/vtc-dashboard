@@ -503,21 +503,23 @@ function ApplicationDetail({ id, back }: { id: string; back: () => void }) {
     </Card>
   );
 }
+const applicationStatuses = ["submitted", "approved", "rejected"] as const;
+
 function Applications() {
-  const { t } = useTranslation("administration"),
+  const { t, i18n } = useTranslation("administration"),
     dates = useDates(),
     [search, setSearch] = useSearchParams(),
     [selected, setSelected] = useState<string | null>(null);
   const value = search.get("status"),
-    status = ["submitted", "approved", "rejected"].includes(value ?? "")
-      ? (value as string)
-      : "submitted",
+    status = applicationStatuses.find((item) => item === value) ?? "submitted",
     cursor = search.get("cursor");
   const query = useWorkspaceQuery(
     `/admin/applications?status=${status}&limit=25${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
     "EnvelopeListAdminApplication",
   );
   const items = query.data?.data.data.items,
+    counts = query.data?.data.data.statusCounts,
+    number = new Intl.NumberFormat(i18n.resolvedLanguage),
     columns = [
       "colApplicant",
       "colGames",
@@ -536,7 +538,7 @@ function Applications() {
         <p className="muted">{t("applicationsUi.subtitle")}</p>
       </div>
       <nav className="admin-tabs" aria-label={t("status")}>
-        {["submitted", "approved", "rejected"].map((item) => (
+        {applicationStatuses.map((item) => (
           <a
             key={item}
             href={`?status=${item}`}
@@ -547,7 +549,9 @@ function Applications() {
               setSearch({ status: item });
             }}
           >
-            {t(item)}
+            {counts?.[item] === undefined
+              ? t(item)
+              : t("countedTab", { label: t(item), total: number.format(counts[item]) })}
           </a>
         ))}
       </nav>

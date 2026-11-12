@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { catalogItem, catalogLanguage, envelope } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import {
@@ -13,6 +14,46 @@ import {
   reviewIds,
 } from "./support/review-ui.ts";
 import { countInsertedAlerts } from "./support/trip-ui.ts";
+
+test(
+  "overall review totals stay independent of filters and distinguish zero age from an empty queue",
+  browserCase(["@functional"]),
+  async ({ page }) => {
+    const mock = await mockReview(page);
+    const computedAt = "2026-11-12T08:00:00.000Z";
+    let summary: components["schemas"]["WorkspaceSummary"] = {
+      computedAt,
+      reviewQueue: { count: 41, oldestAgeSeconds: 0 },
+    };
+    let reads = 0;
+    await page.route("**/api/v1/me/workspace-summary", (route) => {
+      reads += 1;
+      return route.fulfill({ json: envelope(summary) });
+    });
+    await page.goto("/account/review");
+    const header = page.locator(".review-queue-header");
+    await expect(header.getByText("Awaiting decision overall (41)", { exact: true })).toBeVisible();
+    await expect(
+      header.getByText("Oldest waiting trip added 0 seconds ago", { exact: true }),
+    ).toBeVisible();
+    await page.locator("#review-game").selectOption("ats");
+    await page.locator("#review-source").selectOption("manual");
+    await page.getByRole("button", { name: "Decided", exact: true }).click();
+    await expect.poll(() => mock.lists.at(-1)?.get("hold")).toBe("false");
+    await expect(header.getByText("Awaiting decision overall (41)", { exact: true })).toBeVisible();
+    expect(reads).toBe(1);
+    summary = { computedAt, reviewQueue: { count: 0, oldestAgeSeconds: null } };
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(header.getByText("Awaiting decision overall (0)", { exact: true })).toBeVisible();
+    await expect(header.getByText("No trips are waiting.", { exact: true })).toBeVisible();
+    summary = { computedAt };
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(
+      header.getByText("Overall queue totals are unavailable.", { exact: true }),
+    ).toBeVisible();
+    await expect(header.getByText("Awaiting decision overall (0)", { exact: true })).toHaveCount(0);
+  },
+);
 
 // Controlled synthetic review queue and decision panel (VTC-059); all data is fictional.
 const text = {

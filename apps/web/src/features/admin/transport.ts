@@ -1,12 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "../../app/Session.js";
+import { refreshWorkspaceSummary } from "../../app/workspace-summary.js";
 import { AccountFailure, read } from "../account/transport.js";
 import { csrfEnvelope } from "../admissions/schema.js";
 import { retryDelay } from "../admissions/transport.js";
 import { type DTO, qualificationRead, schema } from "../qualifications/transport.js";
 
 export type { DTO };
+const isAdmissionsPath = (path: string) =>
+  ["/admin/applications", "/admin/invitations", "/mail-deliveries"].some((prefix) =>
+    path.startsWith(prefix),
+  );
+const isApplicationDecision = (path: string) =>
+  /^\/admin\/applications\/[^/]+\/decisions$/.test(path);
+
 export class AdministrationFailure extends AccountFailure {
   constructor(
     kind: AccountFailure["kind"],
@@ -96,14 +104,13 @@ export function useWorkspaceCommand() {
         return path.startsWith("/admin/members") || path.startsWith("/admin/audit");
       if (changedPath.startsWith("/admin/company-settings"))
         return path.startsWith("/admin/company-settings") || path.startsWith("/admin/audit");
-      if (
-        ["/admin/applications", "/admin/invitations", "/mail-deliveries"].some((prefix) =>
-          changedPath.startsWith(prefix),
-        )
-      )
-        return ["/admin/applications", "/admin/invitations", "/mail-deliveries"].some((prefix) =>
-          path.startsWith(prefix),
+      if (isAdmissionsPath(changedPath)) {
+        const invitationCountChanged =
+          isApplicationDecision(changedPath) || changedPath.endsWith("/reissue");
+        return (
+          isAdmissionsPath(path) || (invitationCountChanged && path.startsWith("/admin/members?"))
         );
+      }
       return true;
     };
     await client.cancelQueries({ queryKey: ["administration"], predicate });
@@ -176,6 +183,8 @@ export function useWorkspaceCommand() {
       setHeld(false);
       setCommitted(true);
       if (refreshReads) void refresh(request.path).catch(() => undefined);
+      if (isApplicationDecision(request.path))
+        void refreshWorkspaceSummary(client, session).catch(() => undefined);
       if (request.path.startsWith(`/admin/members/${session.self?.member.id}/`))
         void session.refresh().catch(() => undefined);
       return parsed.data;

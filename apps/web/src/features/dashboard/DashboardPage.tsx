@@ -31,6 +31,7 @@ import {
   useUpcomingEvent,
 } from "./queries.js";
 import { untilAnchored } from "./view-model.js";
+import { WorkspaceActions } from "./WorkspaceActions.js";
 import "./dashboard.css";
 
 /** Gate: without company.read no dashboard query hook mounts, so nothing is requested. */
@@ -196,21 +197,7 @@ function DashboardContent() {
         </div>
       </header>
 
-      {analyticsFailed ? (
-        <Card className="dashboard-error" role="alert">
-          <p>{t("states.error")}</p>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => {
-              titleRef.current?.focus();
-              void retryPeriodData();
-            }}
-          >
-            {t("states.retry")}
-          </Button>
-        </Card>
-      ) : (
+      {!analyticsFailed && (
         <>
           {isCompanyEmpty && (
             <div className="dashboard-notice">
@@ -227,8 +214,26 @@ function DashboardContent() {
             leaderboardFailed={anchored && leaderboardQuery.isError && !leaderboard}
             locale={locale}
           />
+        </>
+      )}
 
-          <div className="dashboard-grid" aria-busy={pending}>
+      <div className="dashboard-grid">
+        {analyticsFailed ? (
+          <Card className="dashboard-error" role="alert">
+            <p>{t("states.error")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                titleRef.current?.focus();
+                void retryPeriodData();
+              }}
+            >
+              {t("states.retry")}
+            </Button>
+          </Card>
+        ) : (
+          <>
             <ActualDistanceChart
               analytics={analytics}
               pending={analyticsPending}
@@ -243,7 +248,12 @@ function DashboardContent() {
               available={capabilities.includes("trips.submit_own")}
             />
             <LeaderboardWidget query={untilAnchored(leaderboardQuery, anchored)} locale={locale} />
-            <div className="dashboard-side">
+          </>
+        )}
+        <div className="dashboard-side">
+          <WorkspaceActions locale={locale} timezone={displayTimezone} />
+          {!analyticsFailed && (
+            <>
               {canReview && (
                 <ReviewerQueueWidget
                   query={untilAnchored(reviewTripsQuery, anchored)}
@@ -256,18 +266,19 @@ function DashboardContent() {
                 displayTimezone={displayTimezone}
                 canRespond={capabilities.includes("events.respond")}
               />
-            </div>
-            {/* Full-width third row, below the first desktop screen. */}
-            <RecentTripsWidget
-              query={untilAnchored(recentTripsQuery, anchored)}
-              locale={locale}
-              displayTimezone={displayTimezone}
-            />
-          </div>
+            </>
+          )}
+        </div>
+        {!analyticsFailed && (
+          <RecentTripsWidget
+            query={untilAnchored(recentTripsQuery, anchored)}
+            locale={locale}
+            displayTimezone={displayTimezone}
+          />
+        )}
+      </div>
 
-          <MetricDefinitionsCard />
-        </>
-      )}
+      {!analyticsFailed && <MetricDefinitionsCard />}
     </div>
   );
 }

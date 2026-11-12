@@ -23,6 +23,7 @@ export const tripTranslations = {
     reconciliation: "Reconciliation",
     newReport: "New report",
     drafts: "Saved drafts",
+    editingDrafts: "Editing drafts",
     game: "Game",
     decision: "Company decision",
     all: "All",
@@ -285,6 +286,10 @@ export const tripTranslations = {
     newestFirst: "Newest first",
     queueIntro:
       "Manual reports, corrections of accepted trips and disputed telemetry. A decision applies to the revision you reviewed.",
+    queueOverall: "Awaiting decision overall ({{total}})",
+    queueOldest: "Oldest waiting trip added {{age}}",
+    queueNoneWaiting: "No trips are waiting.",
+    queueTotalsUnavailable: "Overall queue totals are unavailable.",
     queueNote:
       "Own reports stay in the queue, but nobody can decide on their own report, including the director.",
     queueType: "Type",
@@ -428,6 +433,7 @@ export const tripTranslations = {
     reconciliation: "Сверка дубликатов",
     newReport: "Новый отчёт",
     drafts: "Сохранённые черновики",
+    editingDrafts: "Черновики в работе",
     game: "Игра",
     decision: "Решение компании",
     all: "Все",
@@ -691,6 +697,10 @@ export const tripTranslations = {
     newestFirst: "Сначала новые",
     queueIntro:
       "Ручные отчёты, исправления принятых рейсов и спорная телеметрия. Решение относится к редакции, которую вы проверили.",
+    queueOverall: "Всего ждут решения ({{total}})",
+    queueOldest: "Самый ранний рейс поступил {{age}}",
+    queueNoneWaiting: "Нет рейсов, ожидающих решения.",
+    queueTotalsUnavailable: "Общие данные очереди недоступны.",
     queueNote:
       "Свои отчёты остаются в очереди, но решение по ним недоступно никому, включая директора.",
     queueType: "Тип",

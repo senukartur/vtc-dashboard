@@ -14,6 +14,7 @@ import { Button } from "../shared/ui/primitives.js";
 import { MemberNavLinks } from "./MemberNavigation.js";
 import { landingPath } from "./navigation-model.js";
 import { useSession } from "./Session.js";
+import type { WorkspaceSummary } from "./workspace-summary.js";
 
 export type MobileNavigate = (href: string, trigger: HTMLButtonElement | null) => void;
 /** An unmodified primary click that the router handles in this tab; only these record focus intent. */
@@ -31,9 +32,11 @@ export function isPlainSelfClick(event: MouseEvent<HTMLAnchorElement>) {
 export function Navigation({
   variant = "public",
   onMobileNavigate,
+  attention,
 }: {
   variant?: "public" | "sidebar" | "mobile";
   onMobileNavigate?: MobileNavigate;
+  attention?: WorkspaceSummary | undefined;
 }) {
   const { t, i18n } = useTranslation("core");
   const location = useLocation();
@@ -97,7 +100,7 @@ export function Navigation({
               <DialogTitle>{t("navigation")}</DialogTitle>
               <DialogDescription>Yukon Union</DialogDescription>
               {workspace ? (
-                <MemberNavLinks onNavigate={close} />
+                <MemberNavLinks onNavigate={close} attention={attention} />
               ) : (
                 <nav className="dialog-navigation" aria-label={t("navigation")}>
                   {links(close)}
