@@ -840,11 +840,8 @@ test(
       await expect(
         page.getByText("Lifetime accepted trips · 1 · 123.4 km", { exact: true }),
       ).toBeVisible();
-      // The fixture records an unknown mode. The list can expose this value to its author.
-      if (trip.gameMode !== undefined) {
-        expect(trip.gameMode).toBe("unknown");
-        await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
-      }
+      expect(trip.gameMode).toBe("unknown");
+      await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
 
       const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
       for (const term of [`#${trip.number}`, String(trip.number)]) {
