@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Page, Request, Response } from "@playwright/test";
+import type { components } from "@vtc/contracts";
 import { and, eq, isNull, trips as tripRows } from "@vtc/db/trips-schema";
 import { pngBytes } from "../fixtures/manual-images.ts";
-import { resetAccountLimits, staffContext, write } from "./support/account.ts";
+import { origin, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
@@ -13,6 +14,47 @@ import {
 } from "./support/trip-read-diagnostics.ts";
 
 test.use({ trace: "off", screenshot: "off", video: "off", actionTimeout: 15000 });
+
+type Schemas = components["schemas"];
+const tripsPath = "/api/v1/trips";
+
+async function nextTripList(page: Page) {
+  const response = await page.waitForResponse(
+    (result) => result.request().method() === "GET" && new URL(result.url()).pathname === tripsPath,
+  );
+  expect(response.status()).toBe(200);
+  return {
+    query: new URL(response.url()).searchParams,
+    data: ((await response.json()) as Schemas["EnvelopeListTripSummary"]).data,
+  };
+}
+
+function expectOnlyAcceptedCompanyTrip(
+  list: Schemas["ListTripSummary"],
+  tripId: string,
+  ownerId: string,
+) {
+  expect(list.total).toBe(1);
+  expect(list.items).toHaveLength(1);
+  const [trip] = list.items;
+  expect(trip).toMatchObject({
+    id: tripId,
+    owner: { id: ownerId },
+    view: "summary",
+    decision: "accepted",
+  });
+  for (const field of [
+    "event",
+    "gameMode",
+    "review",
+    "manualRevision",
+    "effectiveFacts",
+    "decisions",
+    "evidence",
+  ])
+    expect(trip).not.toHaveProperty(field);
+}
+
 function observeTripPage(page: Page) {
   const ledger = new TripReadLedger();
   const request = (request: Request) => {
@@ -763,6 +805,159 @@ test(
 );
 
 test(
+  "real trip list finds both number spellings and another driver's history shows accepted trips only",
+  browserCase(["@real"]),
+  async ({ page, browser }) => {
+    test.setTimeout(90000);
+    await resetAccountLimits();
+    const fixture = await tripBrowserFixture();
+    try {
+      const completed = await fixture.telemetry();
+      const active = await fixture.telemetry(undefined, "started");
+      const login = await write(page.request, "/auth/login", {
+        email: fixture.email,
+        password: fixture.password,
+      });
+      expect(login.status()).toBe(200);
+      await page.goto("/account/preferences");
+      await catalogLanguage(page);
+
+      const [initial] = await Promise.all([nextTripList(page), page.goto("/account/trips")]);
+      expect(initial.query.get("scope")).toBe("mine");
+      expect(initial.query.get("order")).toBe("completion_desc");
+      expect(initial.data.total).toBe(2);
+      expect(initial.data.items.map((item) => [item.id, item.decision])).toEqual([
+        [completed.tripId, "accepted"],
+        [active.tripId, "unassessed"],
+      ]);
+      const trip = initial.data.items[0];
+      if (!trip?.number || !trip.reportingAt) throw new Error("SYNTHETIC_TRIP_LIST_FACT_MISSING");
+      expect(trip.reportingBasis).toBe("actual_completion");
+      const rowLink = page.locator(`#trip-link-${completed.tripId}`);
+      const row = page.getByRole("row").filter({ has: rowLink });
+      await expect(rowLink).toContainText(`#${trip.number}`);
+      await expect(page.getByText("Found 2", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Lifetime accepted trips · 1 · 123.4 km", { exact: true }),
+      ).toBeVisible();
+      // The fixture records an unknown mode. The list can expose this value to its author.
+      if (trip.gameMode !== undefined) {
+        expect(trip.gameMode).toBe("unknown");
+        await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
+      }
+
+      const search = page.getByRole("searchbox", { name: "City, cargo, trip number" });
+      for (const term of [`#${trip.number}`, String(trip.number)]) {
+        const [matched] = await Promise.all([nextTripList(page), search.fill(term)]);
+        expect(matched.query.get("q")).toBe(term);
+        expect(matched.query.get("locale")).toBe("en");
+        expect(matched.data.total).toBe(1);
+        expect(matched.data.items.map((item) => item.id)).toEqual([completed.tripId]);
+        await expect(rowLink).toBeVisible();
+        await expect(page.getByText("Found 1", { exact: true })).toBeVisible();
+      }
+      const sort = page.getByRole("button", { name: "Completion", exact: true });
+      await expect(sort.locator("..")).toHaveAttribute("aria-sort", "descending");
+      const [sorted] = await Promise.all([nextTripList(page), sort.click()]);
+      expect(sorted.query.get("order")).toBe("completion_asc");
+      await expect(sort.locator("..")).toHaveAttribute("aria-sort", "ascending");
+
+      // New synthetic identities default to UTC. Freeze the browser clock to the fixture's
+      // reporting date so the period assertions are independent of wall-clock rollover.
+      const at = new Date(trip.reportingAt);
+      await page.clock.setFixedTime(at);
+      const month = (offset: number) =>
+        new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + offset, 1)).toISOString();
+      const period = page.getByRole("combobox", { name: "Period", exact: true });
+      for (const [preset, from, toExclusive, total] of [
+        ["thisMonth", month(0), month(1), 1],
+        ["lastMonth", month(-1), month(0), 0],
+      ] as const) {
+        const [filtered] = await Promise.all([nextTripList(page), period.selectOption(preset)]);
+        expect(filtered.query.get("from")).toBe(from);
+        expect(filtered.query.get("toExclusive")).toBe(toExclusive);
+        expect(filtered.query.get("q")).toBe(String(trip.number));
+        expect(filtered.query.get("order")).toBe("completion_asc");
+        expect(filtered.data.total).toBe(total);
+        await expect(page.getByText(`Found ${total}`, { exact: true })).toBeVisible();
+      }
+      await expect(
+        page.getByText("Lifetime accepted trips · 1 · 123.4 km", { exact: true }),
+      ).toBeVisible();
+
+      const another = await fixture.newMember();
+      const company = await browser.newContext({
+        baseURL: origin,
+        viewport: page.viewportSize(),
+        serviceWorkers: "block",
+      });
+      try {
+        const visitor = await company.newPage();
+        const visitorLogin = await write(visitor.request, "/auth/login", {
+          email: another.email,
+          password: another.password,
+        });
+        expect(visitorLogin.status()).toBe(200);
+        // Set the locale before observing the profile so a locale change cannot refetch history.
+        await visitor.goto("/account/preferences");
+        await catalogLanguage(visitor);
+        let profileTripReads = 0;
+        const trackProfileTrips = (request: Request) => {
+          if (request.method() === "GET" && new URL(request.url()).pathname === tripsPath)
+            profileTripReads += 1;
+        };
+        visitor.on("request", trackProfileTrips);
+        const [profileResponse, recent] = await Promise.all([
+          visitor.waitForResponse(
+            (response) =>
+              response.request().method() === "GET" &&
+              new URL(response.url()).pathname === `/api/v1/members/${fixture.userId}`,
+          ),
+          nextTripList(visitor),
+          visitor.goto(`/account/drivers/${fixture.userId}`),
+        ]);
+        expect(profileResponse.status()).toBe(200);
+        const profile = ((await profileResponse.json()) as Schemas["EnvelopeMemberProfile"]).data;
+        expect(profile.lifetimeTotals).toEqual({ acceptedTrips: 1, actualDistanceM: "123400" });
+        expect(Object.fromEntries(recent.query)).toEqual({
+          scope: "company",
+          ownerId: fixture.userId,
+          limit: "10",
+          order: "completion_desc",
+        });
+        expectOnlyAcceptedCompanyTrip(recent.data, completed.tripId, fixture.userId);
+        const history = visitor.getByRole("region", { name: "Accepted trips", exact: true });
+        await expect(
+          history.getByText("Lifetime · 1 accepted · 123.4 km", { exact: true }),
+        ).toBeVisible();
+        await expect(history.getByRole("row")).toHaveCount(2);
+        expect(profileTripReads).toBe(1);
+        visitor.off("request", trackProfileTrips);
+
+        const allTrips = history.getByRole("link", {
+          name: `All trips by ${profile.member.nickname}`,
+          exact: true,
+        });
+        const [selected] = await Promise.all([nextTripList(visitor), allTrips.click()]);
+        await expect(visitor).toHaveURL(`/account/trips?scope=company&ownerId=${fixture.userId}`);
+        expect(selected.query.get("ownerId")).toBe(fixture.userId);
+        expect(selected.query.get("scope")).toBe("company");
+        expectOnlyAcceptedCompanyTrip(selected.data, completed.tripId, fixture.userId);
+        await expect(visitor.getByText("Found 1", { exact: true })).toBeVisible();
+        await expect(visitor.locator(`#trip-link-${completed.tripId}`)).toContainText(
+          `#${trip.number}`,
+        );
+        await expect(visitor.locator(`#trip-link-${active.tripId}`)).toHaveCount(0);
+      } finally {
+        await company.close();
+      }
+    } finally {
+      await fixture.close();
+    }
+  },
+);
+
+test(
   "real owner event association requires confirmed attendance and late telemetry preserves the confirmed result until staff review",
   browserCase(["@real"]),
   async ({ page, browser }) => {
@@ -847,6 +1042,14 @@ test(
       current = (await (await page.request.get(`/api/v1/trips/${report.tripId}`)).json()).data;
       expect(current.summary.decision).toBe("accepted");
       expect(current.decisions[0].basis.attendanceRevisionId).not.toBeNull();
+      phase = "P2_EVENT_SUMMARY";
+      await page.goto("/account/trips");
+      const ownRow = page.getByRole("row").filter({
+        has: page.locator(`#trip-link-${report.tripId}`),
+      });
+      await expect(
+        ownRow.getByRole("link", { name: event.data.event.title, exact: true }),
+      ).toHaveAttribute("href", `/account/events/${event.data.event.id}`);
       const frozen = current.summary.reportingAt;
       await resetAccountLimits();
       phase = "LATE_TELEMETRY";
