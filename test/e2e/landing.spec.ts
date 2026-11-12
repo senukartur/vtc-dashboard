@@ -831,7 +831,7 @@ for (const failure of ["http", "decode"] as const) {
         release.resolve();
         const coverResponse = await response;
         expect(coverResponse.status()).toBe(failure === "http" ? 404 : 200);
-        await coverResponse.finished();
+        // The transport cancels unread HTTP error bodies. A revoked URL signals failed decoding.
         if (failure === "decode") await released.promise;
         await expect(card.getByRole("img")).toHaveCount(0);
         await expect(card).toContainText("UTC");
