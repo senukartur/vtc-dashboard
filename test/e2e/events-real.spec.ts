@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import type {
   Browser,
   BrowserContextOptions,
@@ -10,8 +10,10 @@ import type {
 import type { components } from "@vtc/contracts";
 import type { RowDataPacket } from "mysql2/promise";
 import { testConnection } from "../persistence/support.ts";
-import { resetAccountLimits, staffContext, write } from "./support/account.ts";
+import { guardedAllocation } from "../support/environment.ts";
+import { csrf, resetAccountLimits, staffContext, write } from "./support/account.ts";
 import { catalogLanguage, chooseCatalogRow } from "./support/catalogs.ts";
+import { startStage2EventsServer } from "./support/events-stage-2-real.ts";
 import { selectPastReportEvent } from "./support/events.ts";
 import { browserCase, expect, test } from "./support/fixtures.ts";
 import { tripBrowserFixture } from "./support/trips.ts";
@@ -638,6 +640,228 @@ test(
       await expect(page.getByText(/An RSVP alone grants no exception/)).toBeVisible();
     } finally {
       await s.close();
+    }
+  },
+);
+
+test(
+  "real Stage 2 cards persist quick RSVP and open the saved draft on Continue and reload",
+  browserCase(["@real"]),
+  async ({ browser, page }, info) => {
+    test.setTimeout(60000);
+    type DTO = components["schemas"];
+    const server = await startStage2EventsServer();
+    const contexts: Awaited<ReturnType<Browser["newContext"]>>[] = [];
+    let legacy: Awaited<ReturnType<typeof staffContext>> | undefined;
+    let blocked = 0;
+
+    async function post(request: Page["request"], path: string, data: unknown) {
+      return request.post(`/api/v1${path}`, {
+        headers: {
+          Origin: server.origin,
+          "X-CSRF-Token": await csrf(request),
+          "Idempotency-Key": randomUUID(),
+        },
+        data,
+        maxRedirects: 0,
+      });
+    }
+
+    async function actor(email: string, credentialKey: string) {
+      const context = await browser.newContext({
+        baseURL: server.origin,
+        locale: "en-GB",
+        timezoneId: "UTC",
+        serviceWorkers: "block",
+      });
+      contexts.push(context);
+      await context.route("**/*", (route) => {
+        const url = new URL(route.request().url());
+        if (url.origin === server.origin && !url.username && !url.password) return route.continue();
+        blocked++;
+        return route.abort("blockedbyclient");
+      });
+      const password = createHmac("sha256", guardedAllocation().token)
+        .update(credentialKey)
+        .digest("base64url");
+      const login = await post(context.request, "/auth/login", { email, password });
+      expect(login.status()).toBe(200);
+      return context.newPage();
+    }
+
+    try {
+      const manager = await actor("browser@example.invalid", "browser-identity-password");
+      const project = info.project.name.split("-")[0];
+      const member = await actor(
+        `browser-steam-${project}@example.invalid`,
+        `browser-steam-${project}`,
+      );
+      const [managerSelf, memberSelf] = await Promise.all([
+        manager.request.get("/api/v1/me"),
+        member.request.get("/api/v1/me"),
+      ]);
+      for (const response of [managerSelf, memberSelf]) {
+        expect(response.status()).toBe(200);
+        expect(response.headers()["x-vtc-events-stage2"]).toBe("1");
+      }
+      const organizer = ((await managerSelf.json()) as DTO["EnvelopeSelf"]).data.member.id;
+      const suffix = randomUUID().slice(0, 8);
+      const title = `Fictional Stage 2 convoy ${suffix}`;
+      const start = Date.now() + 1800000;
+      const published = await post(manager.request, "/admin/events?locale=en", {
+        title,
+        description: "Synthetic Stage 2 event",
+        game: "ets2",
+        platform: "truckersmp",
+        server: "Fictional Simulation",
+        organizerMemberId: organizer,
+        route: "Fictional North to Fictional South",
+        meetingLocation: "Fictional harbour",
+        meetingAt: new Date(start - 60000).toISOString(),
+        startsAt: new Date(start).toISOString(),
+        endsAt: null,
+        visibility: "members",
+        originCityId: null,
+        destinationCityId: null,
+        prescribedCargoId: null,
+        prescribedMassKg: null,
+        prescribedTrailerTypeId: null,
+        requiredDlcIds: [],
+      } satisfies DTO["EventStage2PublishedCreationInput"]);
+      expect(published.status()).toBe(201);
+      const created = ((await published.json()) as DTO["EventStage2EnvelopeCreation"]).data;
+      if (!("event" in created)) throw new Error("STAGE_2_PUBLISHED_EVENT_MISSING");
+      const eventId = created.event.id;
+
+      const draftTitle = `Fictional saved draft ${suffix}`;
+      const draftDescription = "Synthetic saved description for direct draft entry.";
+      const saved = await post(manager.request, "/admin/events?locale=en", {
+        draft: true,
+        title: draftTitle,
+        description: draftDescription,
+      } satisfies DTO["EventStage2DraftCreationInput"]);
+      expect(saved.status()).toBe(201);
+      const draft = ((await saved.json()) as DTO["EventStage2EnvelopeCreation"]).data;
+      if (!("lifecycle" in draft) || draft.lifecycle !== "draft")
+        throw new Error("STAGE_2_SAVED_DRAFT_MISSING");
+      const draftPath = `/api/v1/admin/events/drafts/${draft.id}`;
+
+      legacy = await staffContext();
+      const legacySelf = await legacy.get("/api/v1/me");
+      expect(legacySelf.status()).toBe(200);
+      expect(legacySelf.headers()["x-vtc-events-stage2"]).toBeUndefined();
+      await page.context().addCookies((await legacy.storageState()).cookies);
+      const legacyRead = page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/v1/events",
+      );
+      await page.goto("/account/events");
+      await catalogLanguage(page);
+      const legacyList = await legacyRead;
+      expect(legacyList.status()).toBe(200);
+      expect(new URL(legacyList.url()).searchParams.has("locale")).toBe(false);
+      await expect(
+        page.getByRole("main").getByRole("link", { name: title, exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(0);
+
+      let ownReads = 0;
+      const responsePath = `/api/v1/events/${eventId}/my-response`;
+      member.on("request", (request) => {
+        if (request.method() === "GET" && new URL(request.url()).pathname === responsePath)
+          ownReads++;
+      });
+      const firstList = member.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === "GET" &&
+          url.pathname === "/api/v1/events" &&
+          url.searchParams.get("locale") === "en"
+        );
+      });
+      await member.goto("/account/events");
+      await catalogLanguage(member);
+      expect((await firstList).status()).toBe(200);
+      const memberMain = member.getByRole("main");
+      const card = memberMain.getByRole("listitem").filter({
+        has: member.getByRole("link", { name: title, exact: true }),
+      });
+      await expect(card).toContainText("TruckersMP");
+      await expect(card).toContainText("No DLC required");
+      await expect(card).toContainText("Participating: 0");
+      await expect(memberMain.getByRole("button", { name: "Drafts", exact: true })).toHaveCount(0);
+      expect((await member.request.get(draftPath)).status()).toBe(403);
+
+      const responseWritten = () =>
+        member.waitForResponse(
+          (response) =>
+            response.request().method() === "PUT" &&
+            new URL(response.url()).pathname === responsePath,
+        );
+      const going = responseWritten();
+      await card.getByRole("button", { name: "Going", exact: true }).click();
+      const goingResult = await going;
+      expect(goingResult.status()).toBe(200);
+      expect(goingResult.request().headers()["if-match"]).toBe('"v1"');
+      const goingEtag = goingResult.headers().etag;
+      expect(goingEtag).toMatch(/^"v[1-9][0-9]*"$/);
+      await expect(card.getByText("Response saved.", { exact: true })).toBeVisible();
+      await expect(card).toContainText("Participating: 1");
+
+      await card.getByRole("button", { name: "Can't go", exact: true }).click();
+      await card
+        .getByLabel("Private decline reason", { exact: true })
+        .fill("Fictional schedule conflict");
+      const decline = responseWritten();
+      await card.getByRole("button", { name: "Save response", exact: true }).click();
+      const declineResult = await decline;
+      expect(declineResult.status()).toBe(200);
+      expect(declineResult.request().headers()["if-match"]).toBe(goingEtag);
+      await expect(card.getByText("Response saved.", { exact: true })).toBeVisible();
+      await member.reload();
+      await expect(card).toContainText("Participating: 0");
+      await expect(card).toContainText("Can't attend: 1");
+      await expect(card).toContainText("Your response: Can't attend");
+      expect(ownReads).toBe(0);
+
+      await manager.goto("/account/events");
+      await catalogLanguage(manager);
+      await manager.getByRole("button", { name: "Drafts", exact: true }).click();
+      const draftRow = manager.getByRole("listitem").filter({
+        has: manager.getByRole("heading", { name: draftTitle, exact: true }),
+      });
+      const draftRead = () =>
+        manager.waitForResponse(
+          (response) =>
+            response.request().method() === "GET" && new URL(response.url()).pathname === draftPath,
+        );
+      const resumedUrl = `${server.origin}/account/events/new?draftId=${draft.id}`;
+      const continued = draftRead();
+      await draftRow.getByRole("link", { name: "Continue", exact: true }).click();
+      const reloaded = async () => {
+        await expect(manager).toHaveURL(resumedUrl);
+        await expect(
+          manager.getByRole("heading", { name: "Edit event draft", exact: true }),
+        ).toBeVisible();
+        await expect(manager.getByLabel("Event title", { exact: true })).toHaveValue(draftTitle);
+        await expect(manager.getByLabel("Description", { exact: true })).toHaveValue(
+          draftDescription,
+        );
+      };
+      expect((await continued).status()).toBe(200);
+      await reloaded();
+      const reopened = draftRead();
+      await manager.reload();
+      expect((await reopened).status()).toBe(200);
+      await reloaded();
+      expect(blocked).toBe(0);
+    } finally {
+      try {
+        await Promise.all([...contexts.map((context) => context.close()), legacy?.dispose()]);
+      } finally {
+        await server.close();
+      }
     }
   },
 );
