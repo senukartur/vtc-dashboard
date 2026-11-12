@@ -437,6 +437,7 @@ function EventEditorForm({
           }
           eventId={eventId}
           cover={gallery.cover}
+          coverState={gallery.loading ? "loading" : gallery.readError ? "unavailable" : "empty"}
         />
       </div>
     </div>

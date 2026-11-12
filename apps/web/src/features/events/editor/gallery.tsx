@@ -38,7 +38,6 @@ export function useEditorGallery(
   const writes = useEditorCommands<GalleryEnvelope>();
   const [committed, setCommitted] = useState<Snapshot | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [fileError, setFileError] = useState<ReturnType<typeof eventScreenshotError>>();
   const [fileVersion, setFileVersion] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -59,6 +58,7 @@ export function useEditorGallery(
       ? fetched
       : received;
   const items = snapshot?.gallery.items ?? [];
+  const fileError = file ? eventScreenshotError(file, items.length, maxBytes) : undefined;
   const ready = items
     .flatMap(({ state, media }) => (state === "ready" && media ? [media] : []))
     .sort((first, second) => first.position - second.position);
@@ -87,14 +87,11 @@ export function useEditorGallery(
     setStatus(false);
     setPrepareError(null);
     writes.clearFailure();
-    setFileError(value ? eventScreenshotError(value, items.length, maxBytes) : undefined);
   }
 
   async function upload() {
     if (!file || locked || firstRead.current || policyPending || (eventId && !snapshot)) return;
-    const invalid = eventScreenshotError(file, items.length, maxBytes);
-    setFileError(invalid);
-    if (invalid) return;
+    if (fileError) return;
     setStatus(false);
     setPrepareError(null);
     setPreparing(true);
@@ -117,7 +114,7 @@ export function useEditorGallery(
       if (!result) throw new AccountFailure("conflict");
       const afterSave = eventScreenshotError(file, result.gallery.items.length, maxBytes);
       if (afterSave) {
-        setFileError(afterSave);
+        setCommitted(result);
         return;
       }
       setUploading(true);
@@ -274,6 +271,18 @@ function ReadyScreenshot({
   const [draftCaption, setDraftCaption] = useState<string | null>(null);
   const caption = draftCaption ?? media.caption ?? "";
   const changed = caption.trim() !== (media.caption ?? "");
+  const captionInput = useRef<HTMLInputElement>(null);
+
+  function saveCaption() {
+    if (changed)
+      void update(media.id, { caption: caption.trim() || null }, () => setDraftCaption(null));
+  }
+
+  function move(position: number) {
+    void update(media.id, { position }, () =>
+      requestAnimationFrame(() => captionInput.current?.focus()),
+    );
+  }
   return (
     <li className="event-editor-media-row">
       <div className="event-editor-gallery-thumb">
@@ -293,8 +302,19 @@ function ReadyScreenshot({
             </Label>
             <Input
               id={id}
+              ref={captionInput}
               maxLength={2048}
               value={caption}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.nativeEvent.isComposing &&
+                  event.nativeEvent.keyCode !== 229
+                ) {
+                  event.preventDefault();
+                  saveCaption();
+                }
+              }}
               onChange={(event) => setDraftCaption(event.target.value)}
             />
           </div>
@@ -303,11 +323,7 @@ function ReadyScreenshot({
             size="sm"
             variant="outline"
             disabled={!changed}
-            onClick={() =>
-              void update(media.id, { caption: caption.trim() || null }, () =>
-                setDraftCaption(null),
-              )
-            }
+            onClick={saveCaption}
           >
             {text.saveCaption}
           </Button>
@@ -322,22 +338,12 @@ function ReadyScreenshot({
             {media.isCover ? text.clearCover : text.setCover}
           </Button>
           {earlier !== undefined && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => void update(media.id, { position: earlier })}
-            >
+            <Button type="button" size="sm" variant="ghost" onClick={() => move(earlier)}>
               {text.moveEarlier}
             </Button>
           )}
           {later !== undefined && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => void update(media.id, { position: later })}
-            >
+            <Button type="button" size="sm" variant="ghost" onClick={() => move(later)}>
               {text.moveLater}
             </Button>
           )}

@@ -15,6 +15,7 @@ export function EditorPreview({
   trailer,
   eventId,
   cover,
+  coverState,
 }: {
   form: EditorForm;
   cityNames: (string | undefined)[];
@@ -24,6 +25,7 @@ export function EditorPreview({
   trailer: string | undefined;
   eventId: string | null;
   cover: DTO["EventStage2Media"] | null;
+  coverState: "loading" | "unavailable" | "empty";
 }) {
   const id = useId();
   const { text, locale } = useEditorText();
@@ -38,7 +40,11 @@ export function EditorPreview({
       year: "numeric",
       timeZone: timezone,
     }).format(new Date(start));
-  const hasRoute = cityNames.some(Boolean) || depotNames.some(Boolean);
+  const hasRoute =
+    form.origin.cityId ||
+    form.destination.cityId ||
+    form.origin.depotId ||
+    form.destination.depotId;
   const platform =
     form.platform === "truckersmp" ? "TruckersMP" : form.platform === "haulmp" ? "HaulMP" : "";
   return (
@@ -49,7 +55,17 @@ export function EditorPreview({
           {eventId && cover ? (
             <GalleryImage eventId={eventId} media={cover} />
           ) : (
-            <span>{text.noCover}</span>
+            <span>
+              {
+                text[
+                  coverState === "loading"
+                    ? "galleryLoading"
+                    : coverState === "unavailable"
+                      ? "imageUnavailable"
+                      : "noCover"
+                ]
+              }
+            </span>
           )}
         </div>
         <div className="event-editor-preview-body">
@@ -104,8 +120,10 @@ export function EditorPreview({
                   <div key={end}>
                     <dt>{text[end]}</dt>
                     <dd>
-                      {cityNames[index] ?? text.noValue}
-                      {depotNames[index] && <small>{depotNames[index]}</small>}
+                      {cityNames[index] ?? (form[end].cityId ? text.retainedCatalog : text.noValue)}
+                      {form[end].depotId && (
+                        <small>{depotNames[index] ?? text.retainedDepot}</small>
+                      )}
                     </dd>
                   </div>
                 ))}
@@ -141,12 +159,14 @@ export function EditorPreview({
           </section>
           <section className="event-editor-preview-section">
             <h4>{text.load}</h4>
-            {cargo || trailer || form.prescribedMassKg.trim() ? (
+            {form.prescribedCargoId ||
+            form.prescribedTrailerTypeId ||
+            form.prescribedMassKg.trim() ? (
               <dl className="event-editor-facts">
-                {cargo && (
+                {form.prescribedCargoId && (
                   <div>
                     <dt>{text.prescribedCargoId}</dt>
-                    <dd>{cargo}</dd>
+                    <dd>{cargo ?? text.retainedCatalog}</dd>
                   </div>
                 )}
                 {form.prescribedMassKg.trim() && (
@@ -155,10 +175,10 @@ export function EditorPreview({
                     <dd>{form.prescribedMassKg.trim()}</dd>
                   </div>
                 )}
-                {trailer && (
+                {form.prescribedTrailerTypeId && (
                   <div>
                     <dt>{text.prescribedTrailerTypeId}</dt>
-                    <dd>{trailer}</dd>
+                    <dd>{trailer ?? text.retainedCatalog}</dd>
                   </div>
                 )}
               </dl>

@@ -374,6 +374,14 @@ export function DlcField({
               type="search"
               maxLength={128}
               value={search}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.nativeEvent.isComposing &&
+                  event.nativeEvent.keyCode !== 229
+                )
+                  event.preventDefault();
+              }}
               onChange={(event) => {
                 setSearch(event.target.value);
                 setPicked("");
