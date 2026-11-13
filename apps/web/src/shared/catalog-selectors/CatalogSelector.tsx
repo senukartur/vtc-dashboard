@@ -38,6 +38,7 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
  */
 export function CatalogSelector({
   label,
+  caption,
   game,
   kind,
   regionId,
@@ -45,8 +46,10 @@ export function CatalogSelector({
   onChange,
   extraRow,
   labelHidden = false,
+  required = false,
 }: {
   label: string;
+  caption?: string | undefined;
   game: Game;
   kind: Kind;
   regionId?: string | undefined;
@@ -55,6 +58,7 @@ export function CatalogSelector({
   extraRow?: CatalogExtraRow | undefined;
   /** Compact filters: the label stays the accessible name but shows only as the placeholder. */
   labelHidden?: boolean | undefined;
+  required?: boolean;
 }) {
   const { t, i18n } = useTranslation("catalogs"),
     id = useId();
@@ -207,17 +211,25 @@ export function CatalogSelector({
   return (
     <div className="stack catalog-selector">
       <Label htmlFor={id} className={labelHidden ? "visually-hidden" : undefined}>
-        {label}
+        {caption ?? label}
+        {required && (
+          <span className="catalog-required" aria-hidden="true">
+            {" "}
+            *
+          </span>
+        )}
       </Label>
       <div className="catalog-combobox">
         <Input
           ref={inputRef}
           id={id}
           role="combobox"
+          aria-label={caption ? label : undefined}
           className="catalog-input"
           autoComplete="off"
           maxLength={128}
           aria-autocomplete="list"
+          aria-required={required || undefined}
           aria-expanded={open}
           aria-controls={listRendered ? `${id}-list` : undefined}
           aria-activedescendant={activeId}

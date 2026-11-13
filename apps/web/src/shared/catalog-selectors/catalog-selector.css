@@ -162,3 +162,16 @@
   font-size: var(--font-small);
   line-height: 1.5;
 }
+
+.catalog-selected-prefix {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 10px;
+  inset-block: 0;
+  display: grid;
+  align-items: center;
+  pointer-events: none;
+}
+.catalog-input[data-prefix="true"] {
+  padding-inline-start: 74px;
+}

@@ -27,6 +27,9 @@ import {
   EditorField,
   focusEditorField,
   OrganizerField,
+  Required,
+  RouteBasics,
+  shiftMass,
   TimeFields,
 } from "./fields.js";
 import { EditorGallery, useEditorGallery } from "./gallery.js";
@@ -101,14 +104,14 @@ function DraftEditor({ id, ...props }: EditorCallbacks & { id: string }) {
 
 const fieldOrder: readonly FieldName[] = [
   "title",
-  "server",
   "game",
-  "platform",
   "visibility",
   "description",
   "meetingAt",
   "startsAt",
   "endsAt",
+  "platform",
+  "server",
   "originCityId",
   "originDepotId",
   "destinationCityId",
@@ -165,6 +168,9 @@ function EventEditorForm({
   const [blockedDepots, setBlockedDepots] = useState(clearDepots);
   const [organizer, setOrganizer] = useState<DTO["MemberSummary"] | null>(null);
   const [formVersion, setFormVersion] = useState(0);
+  const [showLoad, setShowLoad] = useState(
+    () => !!(form.prescribedCargoId || form.prescribedTrailerTypeId || form.prescribedMassKg),
+  );
   const actions = useDefinitionActions(source, onPublished, onDraftPublication);
   const { definition, eventId } = actions;
   const member = definition.kind === "published" ? definition.member : null;
@@ -355,6 +361,9 @@ function EventEditorForm({
     if (!actions.latest || !latestForm || !rebase) return;
     const next = keepEdits ? rebase.form : latestForm;
     setForm(next);
+    setShowLoad(
+      !!(next.prescribedCargoId || next.prescribedTrailerTypeId || next.prescribedMassKg),
+    );
     if (organizer?.id !== next.organizerMemberId) setOrganizer(null);
     setAttempt(keepEdits ? (actions.latest.kind === "published" ? "publish" : "draft") : null);
     setBlockedDepots(clearDepots);
@@ -427,6 +436,7 @@ function EventEditorForm({
   function overlapLabel(field: FieldName, value: string | null, side: "local" | "saved") {
     if (value === null) return text.noValue;
     if (incompleteOverlapTime(field, value)) return text.conflictIncompleteTime;
+    if (field === "prescribedMassKg") return `${shiftMass(value, -3)} ${text.tonnes}`;
     if (field === "requiredDlcIds") {
       const entries = side === "local" ? dlcs : savedDlcs;
       return value
@@ -466,9 +476,19 @@ function EventEditorForm({
               onChange={change}
               onGame={changeGame}
             />
-            <TimeFields base={id} form={form} errors={errors} onChange={change} />
+            <TimeFields
+              key={formVersion}
+              base={id}
+              form={form}
+              errors={errors}
+              onScheduleChange={(fields) => {
+                setForm((previous) => ({ ...previous, ...fields }));
+                actions.clearStatus();
+              }}
+            />
             <fieldset className="event-editor-section">
               <legend>{text.route}</legend>
+              <RouteBasics base={id} form={form} errors={errors} onChange={change} />
               <div className="event-editor-grid event-editor-route">
                 {ends.map((end, index) => {
                   const city = index === 0 ? origin : destination;
@@ -483,6 +503,8 @@ function EventEditorForm({
                         {() => (
                           <EditorCatalogSelector
                             label={text[cityField]}
+                            caption={text.city}
+                            required
                             game={form.game}
                             kind="city"
                             value={form[end].cityId}
@@ -497,6 +519,7 @@ function EventEditorForm({
                             key={JSON.stringify([formVersion, form.game, form[end].cityId])}
                             id={fieldId}
                             label={text[depotField]}
+                            caption={text.depot}
                             game={form.game}
                             endpoint={form[end]}
                             resolved={depot}
@@ -533,36 +556,65 @@ function EventEditorForm({
                 )}
               </EditorField>
             </fieldset>
-            <fieldset className="event-editor-section">
-              <legend>{text.load}</legend>
-              <div className="event-editor-grid">
-                {(
-                  [
-                    ["prescribedCargoId", "cargo", cargo],
-                    ["prescribedTrailerTypeId", "trailer", trailer],
-                  ] as const
-                ).map(([key, kind, item]) => (
-                  <EditorField base={id} key={key} name={key} error={errors[key]}>
-                    {() => (
-                      <EditorCatalogSelector
-                        label={text[key]}
-                        game={form.game}
-                        kind={kind}
-                        value={form[key]}
-                        item={item}
-                        onChange={(value) => change(key, value)}
-                      />
-                    )}
-                  </EditorField>
-                ))}
-                <EditorDecimal
-                  base={id}
-                  name="prescribedMassKg"
-                  value={form.prescribedMassKg}
-                  error={errors.prescribedMassKg}
-                  onChange={(value) => change("prescribedMassKg", value)}
-                />
-              </div>
+            <fieldset className="event-editor-section event-editor-load-section">
+              <legend>
+                {text.load} <span className="muted">{text.optional}</span>
+              </legend>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="event-editor-disclosure event-editor-load-toggle"
+                aria-expanded={showLoad}
+                onClick={() => {
+                  setShowLoad(!showLoad);
+                  if (showLoad) {
+                    setForm((previous) => ({
+                      ...previous,
+                      prescribedCargoId: null,
+                      prescribedTrailerTypeId: null,
+                      prescribedMassKg: "",
+                    }));
+                    actions.clearStatus();
+                  }
+                }}
+              >
+                {showLoad ? text.removeLoad : `+ ${text.addLoad}`}
+              </Button>
+              {showLoad && (
+                <>
+                  <div className="event-editor-grid event-editor-load">
+                    {(
+                      [
+                        ["prescribedCargoId", "cargo", cargo],
+                        ["prescribedTrailerTypeId", "trailer", trailer],
+                      ] as const
+                    ).map(([key, kind, item]) => (
+                      <EditorField base={id} key={key} name={key} error={errors[key]}>
+                        {() => (
+                          <EditorCatalogSelector
+                            label={text[key]}
+                            game={form.game}
+                            kind={kind}
+                            value={form[key]}
+                            item={item}
+                            onChange={(value) => change(key, value)}
+                          />
+                        )}
+                      </EditorField>
+                    ))}
+                    <EditorDecimal
+                      key={`${formVersion}-${form.game}`}
+                      base={id}
+                      name="prescribedMassKg"
+                      value={form.prescribedMassKg}
+                      error={errors.prescribedMassKg}
+                      onChange={(value) => change("prescribedMassKg", value)}
+                    />
+                  </div>
+                  <p className="muted">{text.loadHelp}</p>
+                </>
+              )}
             </fieldset>
           </fieldset>
           {galleryEnabled && (
@@ -601,6 +653,9 @@ function EventEditorForm({
               <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>
                 {text.cancel}
               </Button>
+              <small className="event-editor-required-note muted">
+                <Required /> {text.requiredNote}
+              </small>
             </div>
           </div>
         </form>

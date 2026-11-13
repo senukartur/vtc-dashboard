@@ -12,6 +12,7 @@ import {
   eq,
   inArray,
   isNull,
+  ne,
   sourceMessages,
   sourcePayloads,
   sourceTrips,
@@ -132,18 +133,48 @@ function lifetimeTotals(
   return { acceptedTrips: tripCount(accepted), actualDistanceM };
 }
 
-function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidence): string[] {
+function provenTrailers(chain: NormalizedTripEvidence["trailers"]) {
+  return chain.complete && chain.items.every((item) => item.status === "known");
+}
+const identityFields = [
+  "origin",
+  "destination",
+  "cargo",
+  "cargoMassKg",
+  "plannedDistanceM",
+  "adrCategory",
+] as const;
+const terminalMetrics = ["actualDistanceM", "deliveredDistanceM"] as const;
+const verifiedTimes = ["start", "end"] as const;
+// Every code that ingestion adds when it holds a source revision instead of making it current.
+// Adapter codes such as `distance_conflict` are not ingestion holds and are deliberately absent.
+export const ingestionConflictCodes: ReadonlySet<string> = new Set([
+  "attempted_reopen",
+  "terminal_outcome_conflict",
+  "trailer_context_conflict",
+  ...[...identityFields, ...terminalMetrics].flatMap((field) => [
+    `${field}_became_unknown`,
+    `${field}_conflict`,
+  ]),
+  ...verifiedTimes.flatMap((field) => [
+    `${field}_time_became_unverified`,
+    `${field}_time_conflict`,
+  ]),
+  "quality_supported_conflict",
+  "quality_incomparable_snapshots",
+  "quality_cannot_replace_supported_snapshot",
+]);
+function differing(
+  previous: NormalizedTripEvidence,
+  next: NormalizedTripEvidence,
+  // Within one source lineage: every distinct proven trailer chain of that source trip's lower
+  // revisions, including held ones.
+  progression?: { proven: NormalizedTripEvidence["trailers"][] },
+): string[] {
   const reasons: string[] = [];
   if (previous.outcome !== "open" && previous.outcome !== next.outcome)
     reasons.push(next.outcome === "open" ? "attempted_reopen" : "terminal_outcome_conflict");
-  for (const field of [
-    "origin",
-    "destination",
-    "cargo",
-    "cargoMassKg",
-    "plannedDistanceM",
-    "adrCategory",
-  ] as const) {
+  for (const field of identityFields) {
     const a = previous[field],
       b = next[field];
     if (a.status === "known" && b.status === "unknown") reasons.push(`${field}_became_unknown`);
@@ -154,7 +185,7 @@ function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidenc
     }
   }
   if (previous.outcome !== "open") {
-    for (const field of ["actualDistanceM", "deliveredDistanceM"] as const) {
+    for (const field of terminalMetrics) {
       const a = previous[field],
         b = next[field];
       if (a.status === "known" && b.status === "unknown") reasons.push(`${field}_became_unknown`);
@@ -162,20 +193,35 @@ function differing(previous: NormalizedTripEvidence, next: NormalizedTripEvidenc
         reasons.push(`${field}_conflict`);
     }
   }
-  for (const field of ["start", "end"] as const) {
+  for (const field of verifiedTimes) {
     if (!previous[field].verifiedActual) continue;
     if (!next[field].verifiedActual) reasons.push(`${field}_time_became_unverified`);
     else if (previous[field].utc !== next[field].utc) reasons.push(`${field}_time_conflict`);
   }
-  const trailerIds = (f: NormalizedTripEvidence) =>
-    f.trailers.items.map((item) => (item.status === "known" ? item.value.entityId : null));
-  if (
-    previous.trailers.complete &&
-    previous.trailers.items.every((f) => f.status === "known") &&
-    (!next.trailers.complete ||
-      canonicalJson(trailerIds(previous)) !== canonicalJson(trailerIds(next)))
-  )
-    reasons.push("trailer_context_conflict");
+  const trailerIds = (chain: NormalizedTripEvidence["trailers"]) =>
+    chain.items.map((item) => (item.status === "known" ? item.value.entityId : null));
+  const after = trailerIds(next.trailers);
+  if (progression) {
+    // An incomplete or unknown chain is unproven, not changed. Composition is checked against
+    // every proven lower chain, so neither an unproven revision in between nor a held changed
+    // chain can become the reference that hides a change; the hold stays until review.
+    if (
+      progression.proven.some((chain) => {
+        const before = trailerIds(chain);
+        return (
+          after.some((id, index) => id !== null && id !== before[index]) ||
+          (next.trailers.complete && after.length !== before.length)
+        );
+      })
+    )
+      reasons.push("trailer_context_conflict");
+  } else if (provenTrailers(previous.trailers)) {
+    if (
+      !next.trailers.complete ||
+      canonicalJson(trailerIds(previous.trailers)) !== canonicalJson(after)
+    )
+      reasons.push("trailer_context_conflict");
+  }
   return reasons;
 }
 export function createTrips(
@@ -267,6 +313,42 @@ export function createTrips(
       causationId: null,
       data: { tripId, sourceRecordId: fact.sourceRecordId, factRevisionId: fact.factRevisionId },
     });
+  }
+  // Distinct complete all-known trailer chains among all of this source trip's lower revisions.
+  async function provenChains(tx: TxContext, sourceTripId: string, revision: number) {
+    const rows = await c(tx)
+      .select({ id: tripFacts.id })
+      .from(sourceMessages)
+      .innerJoin(tripFacts, eq(tripFacts.messageId, sourceMessages.id))
+      .where(
+        and(
+          eq(sourceMessages.sourceTripId, sourceTripId),
+          eq(tripFacts.trailersComplete, true),
+          sql`CAST(${sourceMessages.revision} AS UNSIGNED) < ${revision}`,
+        ),
+      )
+      .orderBy(sql`CAST(${sourceMessages.revision} AS UNSIGNED) DESC`)
+      .for("share");
+    const chains = new Map<string, NormalizedTripEvidence["trailers"]>();
+    // Revisions per source trip are few; read them in repository-sized batches, newest first.
+    for (let start = 0; start < rows.length; start += 100) {
+      const batch = rows.slice(start, start + 100),
+        facts = await factsRepository.read(
+          tx,
+          batch.map((row) => row.id),
+          true,
+        );
+      for (const row of batch) {
+        const chain = facts.get(row.id)?.evidence.trailers;
+        if (!chain) throw new Error("SOURCE_FACT_MISSING");
+        if (!provenTrailers(chain)) continue;
+        const ids = canonicalJson(
+          chain.items.map((item) => (item.status === "known" ? item.value.entityId : null)),
+        );
+        if (!chains.has(ids)) chains.set(ids, chain);
+      }
+    }
+    return [...chains.values()];
   }
   async function store(
     tx: TxContext,
@@ -465,7 +547,11 @@ export function createTrips(
       throw new Error("TRIP_FACT_POINTER_INVALID");
     const previous = current?.evidence;
     const newer = !existing || key.revision > Number(existing.latestRevision);
-    const [lineage] =
+    // Any older revision of this exact source trip is a progression base, so one held
+    // revision cannot freeze later ones. Revisions are decimal text and compare numerically.
+    // Only the composition that stores sources for assessment grants lineage; without it the
+    // strict rules apply.
+    const [base] =
       ports.sourceStored &&
       previous &&
       existing &&
@@ -473,17 +559,44 @@ export function createTrips(
       previous.outcome === "open" &&
       newer
         ? await c(tx)
-            .select({ id: sourceMessages.id })
+            .select({ revision: sourceMessages.revision })
             .from(sourceMessages)
             .where(
               and(
                 eq(sourceMessages.id, previous.sourceRecordId),
                 eq(sourceMessages.sourceTripId, existing.id),
-                eq(sourceMessages.revision, existing.latestRevision),
               ),
             )
             .for("share")
         : [];
+    const baseRevision = base ? Number(base.revision) : null;
+    // A stored terminal revision newer than the open base (held, so never current) ends the
+    // lineage: its outcome, reopen and terminal-metric guards apply to every later revision.
+    const [heldTerminal] =
+      existing && baseRevision !== null && baseRevision < key.revision
+        ? await c(tx)
+            .select({ id: tripFacts.id })
+            .from(sourceMessages)
+            .innerJoin(tripFacts, eq(tripFacts.messageId, sourceMessages.id))
+            .where(
+              and(
+                eq(sourceMessages.sourceTripId, existing.id),
+                ne(tripFacts.outcome, "open"),
+                sql`CAST(${sourceMessages.revision} AS UNSIGNED) > ${baseRevision}`,
+              ),
+            )
+            .orderBy(sql`CAST(${sourceMessages.revision} AS UNSIGNED) DESC`)
+            .limit(1)
+            .for("share")
+        : [];
+    const terminal = heldTerminal
+      ? (await factsRepository.read(tx, [heldTerminal.id], true)).get(heldTerminal.id)?.evidence
+      : undefined;
+    if (heldTerminal && !terminal) throw new Error("SOURCE_FACT_MISSING");
+    const lineage =
+      existing && baseRevision !== null && baseRevision < key.revision && !terminal
+        ? { proven: await provenChains(tx, existing.id, key.revision) }
+        : undefined;
     const quality =
       previous && !supersede
         ? selectQuality(
@@ -497,7 +610,8 @@ export function createTrips(
     const conflicts =
       previous && !supersede && (newer || fact.outcome !== "open")
         ? [
-            ...differing(previous, fact),
+            ...differing(previous, fact, lineage),
+            ...(terminal ? differing(terminal, fact) : []),
             ...(ports.sourceStored ? (quality?.reasons ?? []) : []),
             ...(ports.sourceStored && quality?.selected?.factRevisionId !== fact.factRevisionId
               ? ["quality_cannot_replace_supported_snapshot"]
