@@ -6,6 +6,7 @@ import {
   dispatchListQuery,
   dispatchParams,
   dispatchSearch,
+  reviewReasons,
   stagedDecisionInput,
   stagedReview,
 } from "../../apps/web/src/features/review/dispatch-model.ts";
@@ -517,6 +518,10 @@ test("review examples parse with the generated runtime envelopes", () => {
 
 test("review copy is bilingual, inside the font subsets and never shows the mockup slogan", () => {
   expect(Object.keys(tripTranslations.en).sort()).toEqual(Object.keys(tripTranslations.ru).sort());
+  for (const code of reviewReasons) {
+    expect(tripTranslations.en).toHaveProperty(`code_${code}`);
+    expect(tripTranslations.ru).toHaveProperty(`code_${code}`);
+  }
   // Symbols the Huninn subsets render plus the documented system fallbacks (✓, ✕, …).
   const allowed = new Set([..."←↑→↓—№∅◇●×•«»·–✓✕…"]);
   const directory = fileURLToPath(new URL("../../apps/web/src/features/review/", import.meta.url));

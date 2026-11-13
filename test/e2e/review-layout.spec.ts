@@ -118,8 +118,17 @@ test(
   browserCase(["@functional"]),
   async ({ page }) => {
     const mock = await mockReview(page, { staged: true, paged: true, expiredMemberCursor: true });
-    await page.goto("/account/review");
+    await page.goto("/account/review?order=desc");
     await expect(page.getByText("Waiting (4)", { exact: true })).toBeVisible();
+    await expect(rowOf(page, reviewIds.resubmission)).toBeVisible();
+    await expect(rowOf(page, reviewIds.telemetry)).toHaveCount(0);
+    const offPageReason = page.getByRole("combobox", { name: "Reason", exact: true });
+    await offPageReason.selectOption({ label: "Actual completion is unknown" });
+    await expect.poll(() => mock.lists.at(-1)?.get("reasonCode")).toBe("actual_completion_unknown");
+    await expect(rowOf(page, reviewIds.telemetry)).toBeVisible();
+    await offPageReason.selectOption("");
+    await page.getByRole("combobox", { name: "Sort order" }).selectOption("asc");
+    await expect(rowOf(page, reviewIds.late)).toBeVisible();
     await expect(page.getByRole("button", { name: "Next page" })).toBeEnabled();
     mock.expire();
     await page.getByRole("button", { name: "Next page" }).click();
@@ -364,13 +373,23 @@ for (const staged of [false, true])
     async ({ page }) => {
       await mockReview(page, { staged });
       const computedAt = "2026-11-12T08:00:00.000Z";
-      let response: "default" | "temporary" | "network" | "malformed" | "omitted" | "forbidden" =
-        "default";
+      let response:
+        | "default"
+        | "temporary"
+        | "network"
+        | "malformed"
+        | "conflict"
+        | "omitted"
+        | "forbidden" = "default";
       await page.route("**/api/v1/me/workspace-summary?view=stage3", (route) => {
         if (response === "default") return route.fallback();
         if (response === "network") return route.abort("failed");
-        if (response === "malformed")
-          return route.fulfill({ body: "not JSON", contentType: "application/json" });
+        if (response === "malformed" || response === "conflict")
+          return route.fulfill({
+            status: response === "conflict" ? 409 : 200,
+            body: "not JSON",
+            contentType: "application/json",
+          });
         if (response === "omitted") return route.fulfill({ json: envelope({ computedAt }) });
         return route.fulfill({
           status: response === "temporary" ? 503 : 403,
@@ -414,6 +433,22 @@ for (const staged of [false, true])
       await refresh("default");
       await expect(reason).toBeVisible();
       await expect(reason).toHaveValue("");
+      if (staged) {
+        await reason.fill("Fictional draft before conflict");
+        await refresh("conflict");
+        await expect(page.getByRole("main").getByRole("alert")).toContainText(
+          "The record changed.",
+        );
+        await expect(panel(page)).toHaveCount(0);
+        await expect(page).toHaveURL(new RegExp(`/account/review/${reviewIds.resubmission}$`));
+        await refresh("temporary");
+        await expect(page.getByRole("main").getByRole("alert")).toContainText(
+          "The service is unavailable.",
+        );
+        await expect(panel(page)).toHaveCount(0);
+        await refresh("default");
+        await expect(reason).toHaveValue("");
+      }
       await refresh("omitted");
       await expect(
         page.getByRole("main").getByText("Overall queue totals are unavailable."),

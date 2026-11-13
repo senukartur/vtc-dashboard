@@ -419,7 +419,7 @@ function build(key: ReviewTrip, locale: "en" | "ru"): ReviewState {
           : key === "late"
             ? ["confirmed_facts_require_review", "rule_adr_category_unknown"]
             : key === "telemetry"
-              ? ["qualification_history_unknown", "clock_anomaly"]
+              ? ["qualification_history_unknown", "clock_anomaly", "actual_completion_unknown"]
               : [],
       createdAt: current?.submittedAt ?? "2026-10-28T16:00:00.000Z",
       manualRevision: current ? { number: current.number, submittedAt: current.submittedAt } : null,
