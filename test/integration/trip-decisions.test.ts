@@ -4308,8 +4308,93 @@ test("Stage 3 review keeps both independent sources and gates retained manual re
       (fact) => fact.evidenceRecordId === incoming.sourceRecordId,
     ),
   ).toBe(true);
-  expect(detail.data.acceptance.mode).toBe("unavailable");
-  expect((await credit(submitted.tripId))?.factId).toBe(accepted.data.basis.factRevisionId);
+  expect(detail.data.acceptance).toMatchObject({
+    mode: "unavailable",
+    blockedReasonCodes: expect.arrayContaining(["telemetry_source_present"]),
+  });
+  const retainedCredit = await credit(submitted.tripId);
+  expect(retainedCredit?.factId).toBe(accepted.data.basis.factRevisionId);
+
+  const id = submitted.tripId;
+  const proposal = await on.tripDecisions.propose(dispatcher, id, newId(), detail.version, {
+    reason: "Fictional supported manual distance change",
+    evidenceIds: submitted.currentRevision.fields.evidenceIds,
+    actualDistanceM: "125000",
+  });
+  const saved = await on.tripDecisions.getProposal(dispatcher, id, proposal.data.id);
+  const [before, auditBefore] = await Promise.all([state(id), audits(id)]);
+  const login = await on.identity.login(`${dispatcher.userId}@example.invalid`, password);
+  const cookie = login.cookies.map((entry) => entry.split(";", 1)[0]).join("; ");
+  const headers = {
+    cookie,
+    origin,
+    "content-type": "application/json",
+    "x-csrf-token": csrfProtection(on.identity.config).issue(
+      { cookie },
+      await on.identity.authenticate(new Headers({ cookie })),
+    ).token,
+    "if-match": `"v${saved.version}"`,
+  };
+
+  const app = await createApp({ ...on, checkReadiness: async () => true });
+  try {
+    const direct = {
+      decision: "accept",
+      proposalId: null,
+      factRevisionId: detail.data.factRevisionId,
+      reviewedRevisionId: submitted.currentRevision.id,
+      reason: "Fictional review",
+    };
+    for (const [url, body, code, match] of [
+      [`/api/v1/trips/${id}/decisions?view=stage3`, direct, "STATE_CONFLICT", headers["if-match"]],
+      [`/api/v1/trips/${id}/decisions`, direct, "STATE_CONFLICT", headers["if-match"]],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        {
+          decision: "approve",
+          reviewedRevisionId: saved.data.revisionId,
+          reason: "Fictional staff review",
+        },
+        "VERSION_CONFLICT",
+        `"v${saved.version - 1}"`,
+      ],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        { decision: "approve", reviewedRevisionId: newId(), reason: "Fictional staff review" },
+        "VERSION_CONFLICT",
+        headers["if-match"],
+      ],
+      [
+        `/api/v1/trips/${id}/proposals/${saved.data.id}/decisions`,
+        {
+          decision: "approve",
+          reviewedRevisionId: saved.data.revisionId,
+          reason: "Fictional staff review",
+        },
+        "STATE_CONFLICT",
+        headers["if-match"],
+      ],
+    ] as const) {
+      const response = await app.inject({
+        method: "POST",
+        url,
+        headers: { ...headers, "if-match": match, "idempotency-key": newId() },
+        payload: body,
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code, url).toBe(code);
+    }
+  } finally {
+    await app.close();
+  }
+  expect(await state(id)).toEqual(before);
+  expect(await credit(id)).toEqual(retainedCredit);
+  expect(await audits(id)).toEqual(auditBefore);
+  expect((await on.tripDecisions.getProposal(dispatcher, id, saved.data.id)).data.state).toBe(
+    "pending",
+  );
+  const finalDetail = await on.tripDecisions.reviewStage3(dispatcher, id);
+  expect(finalDetail.data.decisions.map((decision) => decision.id)).toEqual([accepted.data.id]);
 });
 test("Disabled queue tracks exact transitions and paged repair restores proven historical re-entry and stale reason rows", async () => {
   const author = await member();

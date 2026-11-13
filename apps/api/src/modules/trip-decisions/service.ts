@@ -153,6 +153,14 @@ export function createTripDecisions(
   const reviewQueue = createReviewQueue(unit, ports, page, now);
   const run = <T>(fn: (tx: TxContext) => Promise<T>) => retryTransaction(unit, fn);
   const prepare = tripDecisionCoordinator(ports).prepare;
+  async function prepareReviewerCommand(tx: TxContext, id: string, actor: Actor) {
+    if (config.dispatchReviewStage3Enabled)
+      await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
+    const prepared = await prepare(tx, id, actor);
+    if (config.dispatchReviewStage3Enabled && prepared.row.ownerId === actor.userId)
+      throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+    return prepared;
+  }
   async function confirmation(
     tx: TxContext,
     row: TripState,
@@ -323,7 +331,7 @@ export function createTripDecisions(
     actor: Actor | null,
     reviewedRevisionId: string | null,
     confirmOverLimits = false,
-    stage3 = false,
+    proposalBaseFactId?: string,
   ) {
     const { row } = prepared,
       decidedAt = at(),
@@ -347,9 +355,14 @@ export function createTripDecisions(
         (allowed.mode === "over_limits") !== (confirmOverLimits && actor !== null))
     )
       throw identityError(409, "RESOLUTION_REQUIRED");
-    if (allowed && stage3) {
+    if (allowed && actor && config.dispatchReviewStage3Enabled) {
       const telemetry = selectTelemetry(s.evidence, row.currentFactId);
-      if (telemetry && telemetry.factRevisionId !== e.factRevisionId) {
+      // A reviewed resolution may repair the governing telemetry fact itself.
+      // Other proposals must also pass the untouched governing telemetry basis.
+      const governingFactId = telemetry?.factRevisionId;
+      const resolvesTelemetry =
+        e.provider === "ets2telemetry" && proposalBaseFactId === governingFactId;
+      if (telemetry && governingFactId !== e.factRevisionId && !resolvesTelemetry) {
         const historical = await ports.qualifications.lookupInTransaction(tx, telemetry);
         const telemetryAcceptance = acceptance(
           telemetry,
@@ -961,7 +974,6 @@ export function createTripDecisions(
     actor: Actor,
     p: Proposal,
     value: S["ProposalDecisionInput"],
-    stage3 = false,
   ) {
     const { row, members } = prepared;
     if (
@@ -1068,7 +1080,7 @@ export function createTripDecisions(
         actor,
         p.revisionId,
         false,
-        stage3,
+        p.baseFactId,
       );
     } else {
       const effective =
@@ -1439,10 +1451,7 @@ export function createTripDecisions(
       const normalized = stage3 ? { ...body, reason: explanation } : body;
       const fingerprint = confirmed ? { ...normalized, confirmOverLimits: true } : normalized;
       return run(async (tx) => {
-        if (stage3) await ports.identity.authorizeInTransaction(tx, actor, "trips.review");
-        const prepared = await prepare(tx, id, actor);
-        if (stage3 && prepared.row.ownerId === actor.userId)
-          throw identityError(403, "SELF_REVIEW_FORBIDDEN");
+        const prepared = await prepareReviewerCommand(tx, id, actor);
         return once(
           tx,
           actor,
@@ -1460,18 +1469,11 @@ export function createTripDecisions(
               if (!p) throw identityError(404);
               if (stage3 && value.factRevisionId !== (p.derivedFactId ?? p.baseFactId))
                 throw identityError(409, "VERSION_CONFLICT");
-              const reviewed = await reviewProposal(
-                tx,
-                prepared,
-                actor,
-                p,
-                {
-                  decision: value.decision === "accept" ? "approve" : "reject",
-                  reviewedRevisionId: value.reviewedRevisionId,
-                  reason: explanation as string,
-                },
-                stage3,
-              );
+              const reviewed = await reviewProposal(tx, prepared, actor, p, {
+                decision: value.decision === "accept" ? "approve" : "reject",
+                reviewedRevisionId: value.reviewedRevisionId,
+                reason: explanation as string,
+              });
               if (!("outcome" in reviewed.data)) throw identityError(409, "VERSION_CONFLICT");
               return { data: reviewed.data, version: reviewed.version };
             }
@@ -1510,7 +1512,6 @@ export function createTripDecisions(
               actor,
               value.reviewedRevisionId,
               confirmed,
-              stage3,
             );
           },
         );
@@ -1529,7 +1530,7 @@ export function createTripDecisions(
       });
       reason(value.reason);
       return run(async (tx) => {
-        const prepared = await prepare(tx, id, actor);
+        const prepared = await prepareReviewerCommand(tx, id, actor);
         return once(tx, actor, "propose", key, { id, version, value }, async () => {
           expected(prepared.row, version);
           const result = await proposal(tx, prepared, actor, value, null);
@@ -1548,7 +1549,7 @@ export function createTripDecisions(
       const value = input("ProposalDecisionInput", raw);
       reason(value.reason);
       return run(async (tx) => {
-        const prepared = await prepare(tx, id, actor);
+        const prepared = await prepareReviewerCommand(tx, id, actor);
         return once(tx, actor, "review", key, { id, proposalId, version, value }, async () => {
           expected(prepared.row, version);
           const [p] = await c(tx)
