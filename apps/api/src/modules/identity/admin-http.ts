@@ -26,6 +26,7 @@ const page = {
   },
   additionalProperties: false,
 };
+const stage3AuditResponse = ref("AuditStage3ListEnvelope");
 export async function registerAdministrationRoutes(
   app: FastifyInstance,
   identity: Identity,
@@ -259,10 +260,40 @@ export async function registerAdministrationRoutes(
       return envelope(data, r);
     },
   );
-  app.get<{ Querystring: { limit?: number; cursor?: string } }>(
+  app.get<{
+    Querystring: { limit?: number; cursor?: string } & (
+      | { view?: never; action?: never }
+      | { view: "stage3"; action?: string }
+    );
+  }>(
     "/api/v1/admin/audit",
-    { schema: { querystring: page, response: { 200: ref("EnvelopeListAuditEntry") } } },
-    async (r) => envelope(await administration.audit(await actor(r), r.query), r),
+    {
+      schema: {
+        querystring: {
+          oneOf: [
+            page,
+            {
+              ...page,
+              required: ["view"],
+              properties: {
+                ...page.properties,
+                view: { type: "string", const: "stage3" },
+                action: { type: "string", minLength: 1, maxLength: 48 },
+              },
+            },
+          ],
+        },
+        response: { 200: ref("EnvelopeListAuditEntry") },
+      },
+    },
+    async (r, reply) => {
+      const current = await actor(r);
+      if (r.query.view !== "stage3")
+        return envelope(await administration.audit(current, r.query), r);
+      const data = await administration.auditStage3(current, r.query);
+      const body = reply.serializeInput(envelope(data, r), stage3AuditResponse);
+      return reply.type("application/json; charset=utf-8").send(body);
+    },
   );
   app.get(
     "/api/v1/admin/source-capabilities",
