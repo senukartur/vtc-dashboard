@@ -211,7 +211,13 @@ test(
       await panel.getByRole("button", { name: "ATS", exact: true }).click();
       await expect(recover).toBeVisible();
       await expect(editor.locator(`#level-name-${original.id}`)).toHaveValue(name);
+      const replay = page.waitForResponse(
+        (response) =>
+          response.request().method() === "PATCH" &&
+          new URL(response.url()).pathname === `/api/v1${editPath}`,
+      );
       await recover.click();
+      expect((await replay).status()).toBe(200);
       await expect(recover).toHaveCount(0);
       await expect(editor.getByRole("heading", { name, exact: true })).toBeVisible();
       expect(writes).toHaveLength(2);
@@ -333,7 +339,13 @@ test(
         "true",
       );
       await expect(recovered).toBeVisible();
+      const replay = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === `${api}/levels`,
+      );
       await recovered.click();
+      expect((await replay).status()).toBe(201);
       await expect(recovered).toHaveCount(0);
       await expect(rows()).toHaveCount(1);
       expect(writes).toHaveLength(2);
