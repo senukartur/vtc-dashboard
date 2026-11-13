@@ -47,6 +47,7 @@ import { createTrips, type Trips } from "../../apps/api/src/modules/trips/servic
 import { createQueue } from "../../apps/api/src/platform/jobs/queue.ts";
 import { runPass } from "../../apps/api/src/platform/jobs/runner.ts";
 import { createOutbox, identityAccessEvents } from "../../apps/api/src/platform/outbox/events.ts";
+import { composeIdentity } from "../../apps/api/src/use-cases/identity-messaging.ts";
 import { catalogConfig, seedCatalog } from "../fixtures/catalogs/synthetic.ts";
 import {
   guardedSettings,
@@ -709,6 +710,73 @@ test("tracking clears old checkpoints on assignment replacement and lifecycle wr
     await enabled.close(tx, deputy.userId, iso());
   });
   expect(await eligibilityState(deputy.userId)).toMatchObject({ assignmentId: null, ...cleared });
+});
+
+test("composed identity lifecycle clears qualification checkpoints and the staged workspace counts active assignments", async () => {
+  const composed = composeIdentity(
+    unit,
+    identityConfig,
+    undefined,
+    undefined,
+    false,
+    undefined,
+    tripService.config,
+    undefined,
+    undefined,
+    { ...config, eligibilityTrackingSince: new Date().toISOString() },
+  );
+  const { identity: authority, qualifications } = composed;
+  if (!qualifications) throw new Error("SYNTHETIC_QUALIFICATIONS_MISSING");
+  const login = await authority.login("qualification-director@example.invalid", password);
+  const cookie = login.cookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const actor = await authority.authenticate(new Headers({ cookie }));
+  const levelId = structuralLevels.ets2[0];
+  await qualifications.publish(actor, levelId, newId(), 1, {
+    rules: [],
+    requiredTrips: 0,
+    requiredDistanceM: null,
+  });
+  expect(await eligibilityState()).toMatchObject({
+    eligibleSince: expect.any(String),
+    eligibilityEvaluatedAt: expect.any(String),
+  });
+  const app = await createApp({ ...composed, checkReadiness: async () => true });
+  const workspace = (stage3: boolean) =>
+    app.inject({
+      url: `/api/v1/me/workspace-summary${stage3 ? "?view=stage3" : ""}`,
+      headers: { cookie },
+    });
+  try {
+    const staged = await workspace(true);
+    expect(staged.statusCode).toBe(200);
+    expect(staged.json().data.promotionsReady).toEqual({ ets2: 3, ats: 0 });
+    const legacy = await workspace(false);
+    expect(legacy.statusCode).toBe(200);
+    expect(legacy.json().data).toEqual({
+      computedAt: expect.any(String),
+      reviewQueue: { count: 0, oldestAgeSeconds: null },
+    });
+
+    const [target] = await unit.run((tx) =>
+      unit
+        .client(tx)
+        .select({ version: membership.version })
+        .from(membership)
+        .where(eq(membership.userId, owner.userId)),
+    );
+    if (!target) throw new Error("SYNTHETIC_MEMBER_MISSING");
+    await authority.administer(actor, owner.userId, newId(), target.version, {
+      kind: "deactivate",
+    });
+    expect(await eligibilityState()).toMatchObject({
+      assignmentId: null,
+      eligibleSince: null,
+      eligibilityEvaluatedAt: null,
+    });
+    expect((await workspace(true)).json().data.promotionsReady).toEqual({ ets2: 2, ats: 0 });
+  } finally {
+    await app.close();
+  }
 });
 
 test("default-off writers preserve the old checkpoint and a fresh cutoff makes prior onset unknown", async () => {
