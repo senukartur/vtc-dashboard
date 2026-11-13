@@ -1302,7 +1302,9 @@ test.describe("Stage 2 draft entry", () => {
       const end = schedule.getByRole("group", { name: "End time", exact: true });
       await end.getByRole("textbox", { name: "Date", exact: true }).fill("2099-10-26");
       await end.getByRole("textbox", { name: "End time", exact: true }).fill("00:15");
-      await expect(page.locator(".event-editor-preview")).toContainText("Europe/Warsaw");
+      const preview = page.locator(".event-editor-preview");
+      await expect(preview).toContainText("Europe/Warsaw");
+      await expect(preview).toContainText(/meeting time Oct 24, 2099/);
       await page.getByRole("button", { name: "+ Add load", exact: true }).click();
       await page.getByRole("textbox", { name: "Mass (t)", exact: true }).fill("18,025");
 
@@ -1334,11 +1336,31 @@ test.describe("Stage 2 draft entry", () => {
       const city = catalogItem("e1320000-0000-4000-8000-000000000038", "Fictional harbour", "en", {
         dlcId: dlc.id,
       });
+      const hiddenDlc = catalogItem(
+        "e1320000-0000-4000-8000-000000000039",
+        "Fictional older roads",
+        "en",
+        {
+          hidden: true,
+          steamAppId: 2,
+        },
+      );
+      const otherCity = catalogItem(
+        "e1320000-0000-4000-8000-000000000040",
+        "Fictional old quay",
+        "en",
+        {
+          dlcId: hiddenDlc.id,
+        },
+      );
       await page.route("**/api/v1/catalogs/cities?*", (route) =>
-        route.fulfill({ json: catalogList([city]) }),
+        route.fulfill({ json: catalogList([city, otherCity]) }),
       );
       await page.route(`**/api/v1/catalogs/cities/${city.id}?*`, (route) =>
         route.fulfill({ json: envelope(city) }),
+      );
+      await page.route(`**/api/v1/catalogs/cities/${otherCity.id}?*`, (route) =>
+        route.fulfill({ json: envelope(otherCity) }),
       );
       await page.route("**/api/v1/catalogs/dlcs?*", (route) =>
         route.fulfill({
@@ -1350,6 +1372,9 @@ test.describe("Stage 2 draft entry", () => {
       await page.route(`**/api/v1/catalogs/dlcs/${dlc.id}?*`, (route) =>
         route.fulfill({ json: envelope(dlc) }),
       );
+      await page.route(`**/api/v1/catalogs/dlcs/${hiddenDlc.id}?*`, (route) =>
+        route.fulfill({ json: envelope(hiddenDlc) }),
+      );
       await page.goto("/account/events/new");
       const picker = page.getByRole("button", { name: "Required DLC", exact: true });
       await picker.click();
@@ -1357,11 +1382,18 @@ test.describe("Stage 2 draft entry", () => {
       await page.getByRole("checkbox", { name: `${dlc.nameEn} · ${dlc.code}` }).check();
       await page.getByRole("button", { name: "Done", exact: true }).click();
       await chooseCatalogRow(page, "Origin city", city.display.label);
+      await chooseCatalogRow(page, "Destination city", otherCity.display.label);
       await picker.click();
       const manual = page.getByRole("checkbox", { name: `${dlc.nameEn} · ${dlc.code} · Manual` });
+      const hiddenManual = page.getByRole("checkbox", {
+        name: `${hiddenDlc.nameEn} · ${hiddenDlc.code} · Manual`,
+      });
+      await expect(hiddenManual).toBeDisabled();
       await expect(manual).toBeChecked();
       await manual.uncheck();
-      await expect(page.getByText("Manual · Required by the route", { exact: true })).toBeVisible();
+      await expect(page.getByText("Manual · Required by the route", { exact: true })).toHaveCount(
+        2,
+      );
       await page.getByRole("button", { name: "Done", exact: true }).click();
       await expect(picker).toContainText(dlc.nameEn);
       const saved = page.waitForRequest(
@@ -1371,6 +1403,7 @@ test.describe("Stage 2 draft entry", () => {
       await page.getByRole("button", { name: "Save draft", exact: true }).click();
       expect((await saved).postDataJSON()).toMatchObject({
         originCityId: city.id,
+        destinationCityId: otherCity.id,
         requiredDlcIds: [],
       });
     },

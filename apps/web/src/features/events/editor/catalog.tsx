@@ -287,6 +287,7 @@ export function useEditorDlcs(
       label: item?.nameEn ?? saved?.name,
       code: item?.code ?? saved?.code,
       game: item?.game,
+      hidden: item?.hidden,
     };
   });
 }
@@ -334,6 +335,7 @@ export function DlcField({
         label: entry.label ?? text.retainedCatalog,
         code: entry.code,
         derived: entry.sources.includes("from_city"),
+        canAdd: entry.game === game && entry.hidden === false,
         matchesSearch:
           [entry.label, entry.code].some((value) => value?.toLowerCase().includes(searchText)) ||
           !term,
@@ -348,6 +350,7 @@ export function DlcField({
             label: item.nameEn,
             code: item.code,
             derived: choices.get(item.id)?.derived ?? false,
+            canAdd: true,
             matchesSearch: true,
           });
         }
@@ -440,6 +443,7 @@ export function DlcField({
                       : undefined
                   }
                   checked={manualIds.includes(id)}
+                  disabled={!choice.canAdd && !manualIds.includes(id)}
                   onChange={(event) =>
                     onChange(
                       event.target.checked

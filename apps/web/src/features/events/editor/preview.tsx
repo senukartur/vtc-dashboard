@@ -40,6 +40,14 @@ export function EditorPreview({
     minute: "2-digit",
     timeZone: timezone,
   });
+  const calendarDay = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: timezone });
+  const meetingDate = meeting && calendarDay.format(new Date(meeting));
+  const startDate = start && calendarDay.format(new Date(start));
+  const meetingTime = meeting
+    ? [meetingDate !== startDate && meetingDate, clock.format(new Date(meeting))]
+        .filter(Boolean)
+        .join(", ")
+    : "";
   const weekday =
     start &&
     new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: timezone }).format(
@@ -48,7 +56,7 @@ export function EditorPreview({
   const platform =
     form.platform === "truckersmp" ? "TruckersMP" : form.platform === "haulmp" ? "HaulMP" : "";
   const timing = [
-    meeting && `${text.meetingAt.toLowerCase()} ${clock.format(new Date(meeting))}`,
+    meetingTime && `${text.meetingAt.toLowerCase()} ${meetingTime}`,
     start && `${text.startsAt.toLowerCase()} ${clock.format(new Date(start))}`,
   ]
     .filter(Boolean)
